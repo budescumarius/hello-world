@@ -11,6 +11,38 @@ Aplicație web simplă pentru firme mici de construcții (max 2 șantiere, echip
 - Dosar centralizat de date în browser (localStorage).
 - Generator ofertă rapidă în franceză + print către PDF.
 
+
+## Cum descarci fișierele
+
+### Dacă ai repo Git
+
+```bash
+git clone <URL_REPO>
+cd <NUME_REPO>
+```
+
+Apoi deschizi folderul în VS Code (sau alt editor) și rulezi:
+
+```bash
+npm run start
+```
+
+### Dacă ai doar fișierele local (ZIP)
+
+1. Pune toate fișierele (`index.html`, `app.js`, `styles.css`, `package.json`, `tests/`) într-un folder, de exemplu `madibu-control`.
+2. Deschide terminalul în acel folder.
+3. Rulează:
+
+```bash
+npm run start
+```
+
+4. Intră în browser la `http://localhost:4173`.
+
+### Deschidere ultra-rapidă (fără terminal)
+
+- Dublu-click pe `index.html` → se deschide direct în browser.
+
 ## Cum o lansezi local
 
 ### Varianta recomandată (server local)
