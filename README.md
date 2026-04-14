@@ -1,97 +1,37 @@
-# MADIBU Control (MVP)
+# MADIBU Control (React model)
 
-Aplicație web simplă pentru firme mici de construcții (max 2 șantiere, echipă mică), orientată pe controlul marjei și al costurilor reale.
+Am migrat proiectul la un model React (Vite), inspirat din structura pe care ai trimis-o.
 
-## Ce include MVP-ul
+## Ce ai acum
 
-- Calculator profit pe proiect (cost real, profit, marjă %).
-- Alertă automată când marja scade sub prag.
-- Pontaj echipă (check-in / check-out, ore reale).
-- Raport zilnic (ce s-a făcut, probleme, link poză).
-- Dosar centralizat de date în browser (localStorage).
-- Generator ofertă rapidă în franceză + print către PDF.
+- App React în `src/App.jsx` cu:
+  - proiecte,
+  - pontaj,
+  - costuri,
+  - calcul profit + marjă.
+- Entry point React în `src/main.jsx`.
+- Stiluri de bază în `src/app.css`.
+- Versiunea statică anterioară a fost păstrată în folderul `legacy/`.
 
-
-## Cum descarci fișierele
-
-### Dacă ai repo Git
-
-```bash
-git clone <URL_REPO>
-cd <NUME_REPO>
-```
-
-Apoi deschizi folderul în VS Code (sau alt editor) și rulezi:
+## Cum pornești aplicația
 
 ```bash
-npm run start
+npm install
+npm run dev
 ```
 
-### Dacă ai doar fișierele local (ZIP)
+Apoi deschizi:
 
-1. Pune toate fișierele (`index.html`, `app.js`, `styles.css`, `package.json`, `tests/`) într-un folder, de exemplu `madibu-control`.
-2. Deschide terminalul în acel folder.
-3. Rulează:
+- `http://localhost:5173`
+
+## Build producție
 
 ```bash
-npm run start
+npm run build
+npm run preview
 ```
-
-4. Intră în browser la `http://localhost:4173`.
-
-### Deschidere ultra-rapidă (fără terminal)
-
-- Dublu-click pe `index.html` → se deschide direct în browser.
-
-## Cum o lansezi local
-
-### Varianta recomandată (server local)
-
-1. Verifică să ai instalat **Node.js** și **Python 3**.
-2. Rulează:
-
-```bash
-npm run start
-```
-
-3. Deschide în browser:
-
-- `http://localhost:4173`
-
-### Variantă rapidă (fără server)
-
-- Poți deschide direct fișierul `index.html` în browser.
-
-## Cum o testezi
-
-### 1) Verificare sintaxă JavaScript
-
-```bash
-npm run check
-```
-
-### 2) Smoke tests (fără dependențe externe)
-
-```bash
-npm test
-```
-
-Testele verifică:
-
-- existența formularelor cheie în UI,
-- prezența logicii de bază în `app.js`,
-- stilurile de alertă în CSS.
-
-### 3) Test manual (5 minute)
-
-1. Creezi un proiect nou.
-2. Adaugi costuri + ore estimate.
-3. Adaugi un pontaj cu ore mai mari decât estimatele.
-4. Verifici că apare alertă de depășire.
-5. Generezi o ofertă FR și apeși **Printează PDF**.
 
 ## Observații
 
-- Datele sunt salvate local în browser (`localStorage`, key: `madibu-control-v1`).
-- Este un MVP demo front-end (fără autentificare, backend, multi-user).
-- Pentru producție recomandat: React + Firebase (Auth, Firestore, Storage, Functions).
+- Modelul actual este React local-first (fără Firebase activ).
+- Dacă vrei, următorul pas este integrarea completă cu Firebase Auth + Firestore exact pe structura codului tău.
