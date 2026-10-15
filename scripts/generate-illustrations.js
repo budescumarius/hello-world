@@ -104,6 +104,15 @@ const SCENES = {
     <rect x="0" y="0" width="${W}" height="40" fill="${r.wall2}"/>
     <g transform="translate(240 900)" fill="${WOOD.walnut}"><rect x="-120" y="-200" width="240" height="20" rx="6"/><rect x="-100" y="-180" width="14" height="180"/><rect x="86" y="-180" width="14" height="180"/><rect x="-60" y="-230" width="80" height="30" rx="6" fill="#f4f1ec"/></g>
     ${plant(1360, 900, 1.1)}`,
+  // House with a timber-clad extension and large glazing
+  exterior: r => `<rect width="${W}" height="${H}" fill="url(#sky)"/>
+    <rect y="900" width="${W}" height="${H - 900}" fill="#8fa874"/>
+    <rect x="160" y="420" width="560" height="480" fill="#efe9df"/><path d="M130 430 L440 210 L750 430 Z" fill="#8a4b38"/>
+    <rect x="250" y="520" width="120" height="150" fill="url(#mirror)" stroke="#5a5550" stroke-width="10"/>
+    <rect x="720" y="480" width="740" height="420" fill="url(#slats)"/><rect x="705" y="462" width="770" height="26" fill="#2f2a26"/>
+    <rect x="850" y="560" width="500" height="320" fill="url(#mirror)"/><path d="M1016 560 V880 M1183 560 V880" stroke="#5a5550" stroke-width="10"/><rect x="850" y="560" width="500" height="320" fill="none" stroke="#5a5550" stroke-width="12"/>
+    <rect x="700" y="900" width="800" height="40" fill="#d9d4cc"/>
+    <rect width="${W}" height="${H}" fill="${r.light}" opacity=".4"/>`,
   // Workbench with a chair being restored, tools on the wall
   restoration: r => `<rect width="${W}" height="${H}" fill="${r.wall2}"/>
     <rect y="${FLOOR}" width="${W}" height="${H - FLOOR}" fill="#b7aa98"/>

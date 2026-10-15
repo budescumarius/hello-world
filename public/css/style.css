@@ -33,6 +33,7 @@ p { margin: 0 0 1em; }
 .section { padding: 64px 0; }
 .section-alt { background: var(--sand-100); }
 .section-dark { background: var(--wood-900); color: var(--sand-100); }
+.section-photo { position: relative; background: linear-gradient(rgba(27,18,11,.86), rgba(27,18,11,.92)), var(--bg) center / cover; }
 .kicker { display: inline-block; font-size: .78rem; letter-spacing: .14em; text-transform: uppercase; color: var(--wood-600); font-weight: 600; margin-bottom: .6rem; }
 .section-dark .kicker { color: var(--wood-300); }
 .section-head { max-width: 680px; margin-bottom: 36px; }

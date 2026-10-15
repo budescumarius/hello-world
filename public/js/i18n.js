@@ -16,6 +16,7 @@ window.I18N = {
     'svc.bathroom.t': 'Salles de bain', 'svc.bathroom.d': 'Meubles et rangements de salle de bain sur mesure, jusqu\'aux formes courbes.',
     'svc.stairs.t': 'Aménagements & escaliers', 'svc.stairs.d': 'Agencements sur mesure et escaliers en bois, alliant esthétique et fonctionnalité.',
     'svc.parquet.t': 'Parquet & revêtements bois', 'svc.parquet.d': 'Pose et finition de parquets massifs, stratifiés ou contrecollés, en harmonie avec l\'espace.',
+    'svc.exterior.t': 'Bardage & extérieur', 'svc.exterior.d': 'Bardages bois, habillages de façade et finitions extérieures pour extensions et rénovations.',
     'svc.restoration.t': 'Restauration du bois', 'svc.restoration.d': 'Remise en état de mobilier et d\'éléments en bois, dans le respect du caractère original.',
     'why.kicker': 'Notre engagement', 'why.title': 'La perfection dans chaque détail',
     'why.1.t': 'Qualité premium', 'why.1.d': 'Sélection des matériaux, finitions soignées, exigence constante.',
@@ -41,7 +42,7 @@ window.I18N = {
     'form.name': 'Nom', 'form.email': 'E-mail', 'form.phone': 'Téléphone', 'form.service': 'Type de projet', 'form.choose': 'Choisir…', 'form.other': 'Autre', 'form.message': 'Votre projet', 'form.send': 'Envoyer la demande', 'form.ok': 'Merci ! Nous vous répondons sous 24–48h.', 'form.err': 'Une erreur s\'est produite. Réessayez ou appelez-nous.', 'form.missing': 'Indiquez votre nom, e-mail ou téléphone et message.',
     'contact.phone': 'GSM', 'contact.email': 'E-mail', 'contact.address': 'Adresse', 'contact.hours': 'Horaires',
     'footer.rights': 'Tous droits réservés.', 'footer.vat': 'TVA', 'footer.admin': 'Gestion',
-    'cat.kitchen': 'Cuisine', 'cat.furniture': 'Mobilier', 'cat.bathroom': 'Salle de bain', 'cat.stairs': 'Escalier & aménagement', 'cat.parquet': 'Parquet', 'cat.restoration': 'Restauration'
+    'cat.kitchen': 'Cuisine', 'cat.furniture': 'Mobilier', 'cat.bathroom': 'Salle de bain', 'cat.stairs': 'Escalier & aménagement', 'cat.parquet': 'Parquet', 'cat.exterior': 'Bardage & extérieur', 'cat.restoration': 'Restauration'
   },
   nl: {
     'nav.services': 'Diensten', 'nav.projects': 'Realisaties', 'nav.process': 'Werkwijze', 'nav.about': 'Over ons', 'nav.faq': 'FAQ', 'nav.contact': 'Contact',
@@ -58,6 +59,7 @@ window.I18N = {
     'svc.bathroom.t': 'Badkamers', 'svc.bathroom.d': 'Badkamermeubelen en opbergruimte op maat, tot en met gebogen vormen.',
     'svc.stairs.t': 'Inrichting & trappen', 'svc.stairs.d': 'Interieurinrichting op maat en houten trappen, mooi én functioneel.',
     'svc.parquet.t': 'Parket & houtbekleding', 'svc.parquet.d': 'Plaatsing en afwerking van massief, laminaat- of meerlagenparket, in harmonie met de ruimte.',
+    'svc.exterior.t': 'Gevelbekleding & buiten', 'svc.exterior.d': 'Houten gevelbekleding en buitenafwerking voor uitbreidingen en renovaties.',
     'svc.restoration.t': 'Houtrestauratie', 'svc.restoration.d': 'Herstel van meubelen en houten elementen, met respect voor het originele karakter.',
     'why.kicker': 'Ons engagement', 'why.title': 'Perfectie in elk detail',
     'why.1.t': 'Premium kwaliteit', 'why.1.d': 'Zorgvuldig gekozen materialen, verzorgde afwerking, constante zorg.',
@@ -83,7 +85,7 @@ window.I18N = {
     'form.name': 'Naam', 'form.email': 'E-mail', 'form.phone': 'Telefoon', 'form.service': 'Type project', 'form.choose': 'Kies…', 'form.other': 'Andere', 'form.message': 'Uw project', 'form.send': 'Verstuur aanvraag', 'form.ok': 'Bedankt! We antwoorden binnen 24–48u.', 'form.err': 'Er ging iets mis. Probeer opnieuw of bel ons.', 'form.missing': 'Vul uw naam, e-mail of telefoon en bericht in.',
     'contact.phone': 'GSM', 'contact.email': 'E-mail', 'contact.address': 'Adres', 'contact.hours': 'Openingsuren',
     'footer.rights': 'Alle rechten voorbehouden.', 'footer.vat': 'BTW', 'footer.admin': 'Beheer',
-    'cat.kitchen': 'Keuken', 'cat.furniture': 'Meubelen', 'cat.bathroom': 'Badkamer', 'cat.stairs': 'Trap & inrichting', 'cat.parquet': 'Parket', 'cat.restoration': 'Restauratie'
+    'cat.kitchen': 'Keuken', 'cat.furniture': 'Meubelen', 'cat.bathroom': 'Badkamer', 'cat.stairs': 'Trap & inrichting', 'cat.parquet': 'Parket', 'cat.exterior': 'Gevelbekleding', 'cat.restoration': 'Restauratie'
   },
   en: {
     'nav.services': 'Services', 'nav.projects': 'Projects', 'nav.process': 'Process', 'nav.about': 'About', 'nav.faq': 'FAQ', 'nav.contact': 'Contact',
@@ -100,6 +102,7 @@ window.I18N = {
     'svc.bathroom.t': 'Bathrooms', 'svc.bathroom.d': 'Made-to-measure bathroom furniture and storage, curved shapes included.',
     'svc.stairs.t': 'Interiors & staircases', 'svc.stairs.d': 'Bespoke fit-outs and wooden staircases that are both beautiful and practical.',
     'svc.parquet.t': 'Parquet & wood finishes', 'svc.parquet.d': 'Laying and finishing solid, laminate or engineered parquet, in harmony with the space.',
+    'svc.exterior.t': 'Cladding & exterior', 'svc.exterior.d': 'Timber cladding and exterior finishes for extensions and renovations.',
     'svc.restoration.t': 'Wood restoration', 'svc.restoration.d': 'Restoring furniture and wooden elements while respecting their original character.',
     'why.kicker': 'Our commitment', 'why.title': 'Perfection in every detail',
     'why.1.t': 'Premium quality', 'why.1.d': 'Carefully selected materials, refined finishes, constant attention.',
@@ -125,6 +128,6 @@ window.I18N = {
     'form.name': 'Name', 'form.email': 'Email', 'form.phone': 'Phone', 'form.service': 'Project type', 'form.choose': 'Choose…', 'form.other': 'Other', 'form.message': 'Your project', 'form.send': 'Send request', 'form.ok': 'Thank you! We\'ll reply within 24–48h.', 'form.err': 'Something went wrong. Please try again or call us.', 'form.missing': 'Please fill in your name, email or phone, and message.',
     'contact.phone': 'Mobile', 'contact.email': 'Email', 'contact.address': 'Address', 'contact.hours': 'Opening hours',
     'footer.rights': 'All rights reserved.', 'footer.vat': 'VAT', 'footer.admin': 'Admin',
-    'cat.kitchen': 'Kitchen', 'cat.furniture': 'Furniture', 'cat.bathroom': 'Bathroom', 'cat.stairs': 'Stairs & fit-out', 'cat.parquet': 'Parquet', 'cat.restoration': 'Restoration'
+    'cat.kitchen': 'Kitchen', 'cat.furniture': 'Furniture', 'cat.bathroom': 'Bathroom', 'cat.stairs': 'Stairs & fit-out', 'cat.parquet': 'Parquet', 'cat.exterior': 'Cladding & exterior', 'cat.restoration': 'Restoration'
   }
 };

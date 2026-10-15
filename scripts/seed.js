@@ -36,6 +36,30 @@ const PROJECTS = [
     captions: [t('Meuble mural bleu et chêne sur parquet en chevron.', 'Blauw en eiken wandmeubel op visgraatparket.', 'Blue and oak wall unit over herringbone parquet.')]
   },
   {
+    slug: 'meuble-tv-noyer-led', category: 'furniture', featured: true,
+    title: t('Meuble TV en noyer avec éclairage LED', 'Notelaren tv-meubel met ledverlichting', 'Walnut TV wall with LED lighting'),
+    description: t(
+      'Meuble mural en noyer à côté d\'une cheminée en pierre : niches ouvertes rétroéclairées, lames décoratives et rangements fermés.',
+      'Notelaren wandmeubel naast een stenen haard: verlichte open nissen, decoratieve lamellen en gesloten opbergruimte.',
+      'A walnut wall unit next to a stone fireplace, with backlit open niches, decorative slats and closed storage.'),
+    captions: [
+      t('Meuble TV en noyer et cheminée en pierre.', 'Notelaren tv-meubel en stenen haard.', 'Walnut TV unit and stone fireplace.'),
+      t('L\'ambiance du soir avec l\'éclairage LED intégré.', 'Avondsfeer met de ingebouwde ledverlichting.', 'Evening mood with the built-in LED lighting.')
+    ]
+  },
+  {
+    slug: 'extension-bardage-bois', category: 'exterior', featured: true, cover: 0,
+    title: t('Extension avec bardage bois', 'Uitbreiding met houten gevelbekleding', 'Extension with timber cladding'),
+    description: t(
+      'Bardage à claire-voie en bois naturel sur une extension contemporaine à grandes baies vitrées.',
+      'Open houten gevelbekleding op een hedendaagse uitbreiding met grote glaspartijen.',
+      'Open-joint natural timber cladding on a contemporary extension with large glazing.'),
+    captions: [
+      t('L\'extension et ses grandes baies vitrées.', 'De uitbreiding met grote glaspartijen.', 'The extension and its large glazing.'),
+      t('Détail du bardage horizontal en bois.', 'Detail van de horizontale houten bekleding.', 'Detail of the horizontal timber cladding.')
+    ]
+  },
+  {
     slug: 'escalier-rangement-chene', category: 'stairs', featured: true,
     title: t('Escalier-rangement en chêne', 'Eiken trap met opbergruimte', 'Oak staircase with storage'),
     description: t(
@@ -142,6 +166,72 @@ const PROJECTS = [
       'Kleine, geoptimaliseerde keuken: kasten tot aan het plafond en ingebouwde toestellen.',
       'A small, optimised kitchen with floor-to-ceiling storage and built-in appliances.'),
     captions: [t('Kitchenette blanche sur mesure.', 'Witte kitchenette op maat.', 'White bespoke kitchenette.')]
+  },
+  {
+    slug: 'dressing-noyer', category: 'furniture',
+    title: t('Dressing en noyer', 'Notelaren dressing', 'Walnut walk-in wardrobe'),
+    description: t(
+      'Dressing sur mesure en noyer : penderie, tiroirs à façades affleurantes et étagères.',
+      'Notelaren dressing op maat: hangruimte, lades met vlakke fronten en legplanken.',
+      'Bespoke walnut wardrobe with hanging space, flush-front drawers and shelves.'),
+    captions: [t('Penderie et tiroirs en noyer.', 'Hangruimte en lades in notelaar.', 'Walnut hanging space and drawers.')]
+  },
+  {
+    slug: 'chambre-optimisee', category: 'furniture',
+    title: t('Chambre optimisée sur mesure', 'Geoptimaliseerde kamer op maat', 'Space-saving bespoke bedroom'),
+    description: t(
+      'Petite chambre entièrement aménagée : lit sur tiroirs, rangements hauts, bibliothèque et bureau aux bords arrondis.',
+      'Kleine kamer volledig ingericht: bed op lades, hoge kasten, boekenrek en bureau met afgeronde hoek.',
+      'A small bedroom fully fitted out: bed over drawers, high cupboards, bookshelf and a desk with a rounded end.'),
+    captions: [
+      t('Lit sur tiroirs et rangements hauts.', 'Bed op lades en hoge kasten.', 'Bed over drawers and high cupboards.'),
+      t('Bureau suspendu au bord arrondi.', 'Zwevend bureau met afgeronde hoek.', 'Floating desk with a rounded end.')
+    ]
+  },
+  {
+    slug: 'pont-de-lit', category: 'furniture',
+    title: t('Pont de lit avec armoires', 'Bedbrug met kasten', 'Bed surround with wardrobes'),
+    description: t(
+      'Ensemble armoires et pont de lit, avec niches de chevet intégrées.',
+      'Kasten en bedbrug in één geheel, met ingebouwde nachtnissen.',
+      'Wardrobes and an over-bed unit in one piece, with built-in bedside niches.'),
+    captions: [t('Armoires et niches de chevet autour du lit.', 'Kasten en nachtnissen rond het bed.', 'Wardrobes and bedside niches around the bed.')]
+  },
+  {
+    slug: 'armoire-niches-chene', category: 'furniture',
+    title: t('Armoire avec niches en chêne', 'Kast met eiken nissen', 'Wardrobe with oak niches'),
+    description: t(
+      'Armoire murale aux façades sans poignées, rythmée par des casiers ouverts en chêne.',
+      'Wandkast met greeploze fronten en open eiken vakken.',
+      'A handleless wall wardrobe punctuated by open oak cubbies.'),
+    captions: [t('Façades crème et casiers en chêne.', 'Crèmekleurige fronten en eiken vakken.', 'Cream fronts and oak cubbies.')]
+  },
+  {
+    slug: 'armoire-portes-coulissantes', category: 'furniture',
+    title: t('Armoire à portes coulissantes', 'Kast met schuifdeuren', 'Sliding-door wardrobe'),
+    description: t(
+      'Grande armoire à portes coulissantes, avec étagères et penderie latérales ouvertes.',
+      'Grote kast met schuifdeuren en open zijvakken met legplanken en hangruimte.',
+      'A large sliding-door wardrobe with open side shelving and hanging space.'),
+    captions: [t('Armoire blanche à portes coulissantes.', 'Witte kast met schuifdeuren.', 'White sliding-door wardrobe.')]
+  },
+  {
+    slug: 'meuble-vasque-chene', category: 'bathroom',
+    title: t('Meuble vasque en chêne', 'Eiken wastafelmeubel', 'Oak washbasin unit'),
+    description: t(
+      'Meuble de toilette en chêne avec vasque à poser, ajusté à la niche.',
+      'Eiken wastafelmeubel met opzetkom, op maat van de nis.',
+      'An oak washbasin unit with a countertop basin, made to fit the alcove.'),
+    captions: [t('Meuble en chêne et vasque à poser.', 'Eiken meubel met opzetkom.', 'Oak unit with countertop basin.')]
+  },
+  {
+    slug: 'parquet-chene-grandes-lames', category: 'parquet',
+    title: t('Parquet en chêne à grandes lames', 'Eiken parket met brede planken', 'Wide-plank oak parquet'),
+    description: t(
+      'Pose d\'un parquet en chêne à grandes lames dans une chambre sous combles.',
+      'Plaatsing van eiken parket met brede planken in een zolderkamer.',
+      'Wide-plank oak parquet laid in an attic bedroom.'),
+    captions: [t('Parquet en chêne fraîchement posé.', 'Pas gelegd eiken parket.', 'Freshly laid oak parquet.')]
   },
   {
     slug: 'ixelles', category: 'kitchen', location: 'Ixelles', year: '2025',

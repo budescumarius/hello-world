@@ -3,7 +3,7 @@
   const $$ = s => Array.from(document.querySelectorAll(s));
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const pick = o => (o && (o.fr || o.nl || o.en)) || '(fără titlu)';
-  const CAT = { kitchen: 'Bucătărie', furniture: 'Mobilier', bathroom: 'Baie', stairs: 'Scări / amenajări', parquet: 'Parchet', restoration: 'Restaurare' };
+  const CAT = { kitchen: 'Bucătărie', furniture: 'Mobilier', bathroom: 'Baie', stairs: 'Scări / amenajări', parquet: 'Parchet', exterior: 'Placaj / exterior', restoration: 'Restaurare' };
   const ERR = { invalid_credentials: 'Utilizator sau parolă greșită.', too_many: 'Prea multe încercări. Încearcă mai târziu.', title_required: 'Completează titlul în cel puțin o limbă.', wrong_password: 'Parola actuală e greșită.', too_short: 'Parola nouă trebuie să aibă minim 10 caractere.' };
 
   let albums = [];

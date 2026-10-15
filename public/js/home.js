@@ -1,11 +1,12 @@
 (function () {
-  const CATS = ['kitchen', 'furniture', 'bathroom', 'stairs', 'parquet', 'restoration'];
+  const CATS = ['kitchen', 'furniture', 'bathroom', 'stairs', 'parquet', 'exterior', 'restoration'];
   const ICONS = {
     'kitchen': '<rect x="3" y="11" width="18" height="9" rx="1"/><path d="M3 15h18M9 11v9M15 11v9"/><path d="M6 7h4M14 4v4M12 4h4"/>',
     'furniture': '<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M12 3v18M10 11v2M14 11v2M4 17h16"/>',
     'bathroom': '<path d="M4 12h16v2a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M7 12V6a2 2 0 0 1 4 0M8 19l-1 2M16 19l1 2"/>',
     'stairs': '<path d="M3 21h5v-5h5v-5h5V6h3"/><path d="M3 21V9"/>',
     'parquet': '<path d="M3 3l6 6-6 6M9 3l6 6-6 6M15 3l6 6-6 6M3 15l6 6M9 15l6 6M15 15l6 6"/>',
+    'exterior': '<path d="M3 21V10l9-6 9 6v11"/><path d="M7 21v-7M10 21v-7M13 21v-7M16 21v-7M19 21v-7"/>',
     'restoration': '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-.5-.5-2.5z"/>'
   };
 
@@ -57,12 +58,10 @@
   }
 
   function useProjectPhotos() {
-    // Featured projects give the hero and about section a real photo; illustrations fill in until there are some.
+    // The first featured project gives the hero its photo; an illustration fills in until there is one.
     const withCover = projects.filter(p => p.cover);
     const hero = withCover[0] ? withCover[0].cover : '/img/illustrations/kitchen-1.svg';
-    const about = (withCover[1] || withCover[0] || {}).cover || '/img/illustrations/furniture-1.svg';
     document.getElementById('hero-bg').style.setProperty('--hero-img', `url("${hero}")`);
-    document.getElementById('about-visual').innerHTML = `<img src="${App.esc(about)}" alt="" loading="lazy">`;
   }
 
   function renderAll() {

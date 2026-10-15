@@ -8,7 +8,7 @@ const store = require('./lib/db');
 const PORT = process.env.PORT || 3000;
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
 const LANGS = ['nl', 'fr', 'en'];
-const CATEGORIES = ['kitchen', 'furniture', 'bathroom', 'stairs', 'parquet', 'restoration'];
+const CATEGORIES = ['kitchen', 'furniture', 'bathroom', 'stairs', 'parquet', 'exterior', 'restoration'];
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
