@@ -595,37 +595,107 @@
     } catch (err) { setStatus($('#texts-status'), err.message, false); }
   });
 
-  // ---------- price grid ----------
-  const PRICE_LABELS = {
-    general: { margin: ['Marjă interval (±)', '%'], installPct: ['Montaj', '% din total'] },
-    types: {
-      kitchen: ['Bucătărie', '€ / metru liniar'], wardrobe: ['Dressing / dulap', '€ / m² față'], bookcase: ['Bibliotecă / mobilă TV', '€ / m² față'],
-      vanity: ['Mobilier baie', '€ / metru liniar'], stairs: ['Scară', '€ / treaptă'], parquet: ['Parchet (montaj)', '€ / m²']
-    },
-    materials: {
-      melamine: ['Melaminat alb', '× coeficient'], lacquer: ['MDF vopsit', '× coeficient'], oak_veneer: ['Furnir stejar', '× coeficient'],
-      walnut_veneer: ['Furnir nuc', '× coeficient'], solid_oak: ['Stejar masiv (mobilă)', '× coeficient'], beech: ['Fag (scări)', '× coeficient'],
-      stairs_oak: ['Stejar masiv (scări)', '× coeficient'], laminate: ['Parchet laminat', '× coeficient'], engineered_oak: ['Parchet stratificat stejar', '× coeficient'],
-      solid_oak_floor: ['Parchet stejar masiv', '× coeficient']
-    },
-    options: {
-      led: ['Iluminare LED', '€ / metru'], drawer: ['Sertar', '€ / buc.'], glass: ['Ușă din sticlă', '€ / buc.'], island: ['Insulă bucătărie', '€ fix'],
-      worktop_laminate: ['Blat laminat', '€ / metru'], worktop_wood: ['Blat lemn masiv', '€ / metru'], worktop_quartz: ['Blat cuarț', '€ / metru'],
-      handrail: ['Balustradă scară', '€ fix'], removal: ['Scoatere pardoseală veche', '€ / m²'], sanding: ['Șlefuire și finisaj parchet', '€ / m²']
-    }
-  };
-  const PRICE_TITLES = { general: 'General', types: 'Preț de bază pe tip de proiect', materials: 'Coeficient material (1 = preț de bază)', options: 'Opțiuni și accesorii' };
+  // ---------- price grid & catalogue ----------
+  const PT = { kitchen: 'Bucătărie', wardrobe: 'Dressing', bookcase: 'Bibliotecă/TV', vanity: 'Baie', stairs: 'Scară', parquet: 'Parchet' };
+  const PT_UNIT = { kitchen: '€ / metru liniar', wardrobe: '€ / m² față', bookcase: '€ / m² față', vanity: '€ / metru liniar', stairs: '€ / treaptă', parquet: '€ / m² (montaj)' };
+  const UNIT_LABEL = { fixed: '€ fix', per_m: '€ / metru', per_m2: '€ / m²', per_step: '€ / treaptă' };
+  const EFFECT_LABEL = { '': 'Niciun efect (doar preț)', led: 'LED (bandă luminoasă)', drawer: 'Sertare', glass: 'Uși din sticlă', island: 'Insulă bucătărie', handrail: 'Balustradă scară' };
+  const PRICE_ERR = { no_worktop: 'Păstrează cel puțin un blat de bucătărie.' };
   let pricingDefaults = null;
+  let catalog = null;
+
+  const newId = prefix => `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  const nameInputs = n => ['fr', 'nl', 'en'].map(l => `<label>Nume ${l.toUpperCase()}<input data-f="name.${l}" value="${esc((n || {})[l] || '')}" ${l === 'fr' ? 'required' : ''}></label>`).join('');
+  const typeChecks = types => `<div class="type-checks">${Object.entries(PT).map(([k, v]) => `<label class="check"><input type="checkbox" data-type="${k}" ${types.includes(k) ? 'checked' : ''}> ${v}</label>`).join('')}</div>`;
+
+  function materialCard(m) {
+    return `<div class="cat-item" data-kind="materials" data-id="${esc(m.id)}">
+      <div class="cat-head"><span class="swatch-mini" style="background:${esc(m.color)}"></span><strong>${esc(m.name.fr || 'Material nou')}</strong><button type="button" class="btn small-btn danger" data-remove>Șterge</button></div>
+      <div class="grid3">${nameInputs(m.name)}</div>
+      <div class="grid3">
+        <label>Culoare (3D și PDF)<input type="color" data-f="color" value="${esc(m.color)}"></label>
+        <label>Coeficient preț<input type="number" step="0.05" min="0" data-f="mult" value="${m.mult}"></label>
+        <label class="check" style="align-self:end"><input type="checkbox" data-f="grain" ${m.grain ? 'checked' : ''}> Aspect de lemn (fibră)</label>
+      </div>
+      <p class="hint">Apare la:</p>${typeChecks(m.types)}
+    </div>`;
+  }
+  function worktopCard(w) {
+    return `<div class="cat-item" data-kind="worktops" data-id="${esc(w.id)}">
+      <div class="cat-head"><span class="swatch-mini" style="background:${esc(w.color)}"></span><strong>${esc(w.name.fr || 'Blat nou')}</strong><button type="button" class="btn small-btn danger" data-remove>Șterge</button></div>
+      <div class="grid3">${nameInputs(w.name)}</div>
+      <div class="grid3">
+        <label>Culoare<input type="color" data-f="color" value="${esc(w.color)}"></label>
+        <label>Preț (€ / metru)<input type="number" min="0" step="1" data-f="price" value="${w.price}"></label>
+      </div>
+    </div>`;
+  }
+  function optionCard(o) {
+    return `<div class="cat-item" data-kind="options" data-id="${esc(o.id)}">
+      <div class="cat-head"><strong>${esc(o.name.fr || 'Accesoriu nou')}</strong>${o.effect ? `<span class="tag">${esc(EFFECT_LABEL[o.effect])}</span>` : ''}<button type="button" class="btn small-btn danger" data-remove>Șterge</button></div>
+      <div class="grid3">${nameInputs(o.name)}</div>
+      <div class="grid3">
+        <label>Tip<select data-f="kind"><option value="check" ${o.kind === 'check' ? 'selected' : ''}>Bifă (da / nu)</option><option value="count" ${o.kind === 'count' ? 'selected' : ''}>Cantitate (clientul alege nr. de bucăți)</option></select></label>
+        <label>Preț<span class="price-input"><input type="number" min="0" step="1" data-f="price" value="${o.price}">
+          <select data-f="unit" ${o.kind === 'count' ? 'hidden' : ''}>${Object.entries(UNIT_LABEL).map(([k, v]) => `<option value="${k}" ${o.unit === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+          <small ${o.kind === 'count' ? '' : 'hidden'}>€ / buc.</small></span></label>
+        <label>Efect în 3D și PDF<select data-f="effect">${Object.entries(EFFECT_LABEL).map(([k, v]) => `<option value="${k}" ${o.effect === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+      </div>
+      <div class="grid3">
+        <label class="check" ${o.kind === 'count' ? 'hidden' : ''}><input type="checkbox" data-f="on" ${o.on ? 'checked' : ''}> Bifat implicit</label>
+        <label ${o.kind === 'count' ? '' : 'hidden'}>Cantitate implicită<input type="number" min="0" max="99" data-f="def" value="${o.def}"></label>
+        <label ${o.kind === 'count' ? '' : 'hidden'}>Cantitate maximă<input type="number" min="1" max="99" data-f="max" value="${o.max}"></label>
+      </div>
+      <p class="hint">Apare la:</p>${typeChecks(o.types)}
+    </div>`;
+  }
 
   function renderPricing(current) {
-    $('#pricing-fields').innerHTML = Object.entries(PRICE_LABELS).map(([group, items]) => `
-      <h3>${PRICE_TITLES[group]}</h3>
+    catalog = JSON.parse(JSON.stringify(current));
+    const c = catalog;
+    $('#pricing-fields').innerHTML = `
+      <h3>General</h3>
       <div class="price-grid">
-        ${Object.entries(items).map(([k, [label, unit]]) => {
-          const value = group === 'general' ? current[k] : current[group][k];
-          return `<label>${esc(label)}<span class="price-input"><input type="number" inputmode="decimal" min="0" step="${group === 'materials' ? '0.05' : '1'}" data-group="${group}" data-key="${k}" value="${value}"><small>${esc(unit)}</small></span></label>`;
-        }).join('')}
-      </div>`).join('');
+        <label>Marjă interval (±)<span class="price-input"><input type="number" min="0" max="90" data-g="margin" value="${c.margin}"><small>%</small></span></label>
+        <label>Montaj<span class="price-input"><input type="number" min="0" max="100" data-g="installPct" value="${c.installPct}"><small>% din total</small></span></label>
+      </div>
+      <h3>Preț de bază pe tip de proiect</h3>
+      <div class="price-grid">${Object.entries(PT).map(([k, v]) => `<label>${v}<span class="price-input"><input type="number" min="0" data-t="${k}" value="${c.types[k]}"><small>${PT_UNIT[k]}</small></span></label>`).join('')}</div>
+
+      <details class="cat-section" open><summary>Materiale <span class="muted">(${c.materials.length})</span></summary>
+        <p class="hint">Coeficientul înmulțește prețul de bază (1 = preț de bază, 1,5 = cu 50% mai scump). Culoarea se vede în 3D și în PDF.</p>
+        <div id="cat-materials">${c.materials.map(materialCard).join('')}</div>
+        <button type="button" class="btn" data-add="materials">+ Adaugă material</button>
+      </details>
+      <details class="cat-section"><summary>Blaturi bucătărie <span class="muted">(${c.worktops.length})</span></summary>
+        <div id="cat-worktops">${c.worktops.map(worktopCard).join('')}</div>
+        <button type="button" class="btn" data-add="worktops">+ Adaugă blat</button>
+      </details>
+      <details class="cat-section" open><summary>Accesorii și opțiuni <span class="muted">(${c.options.length})</span></summary>
+        <p class="hint">„Efect” decide ce se desenează: un accesoriu cu efect LED apare ca bandă luminoasă în 3D și în PDF, la orice tip de proiect bifat mai jos.</p>
+        <div id="cat-options">${c.options.map(optionCard).join('')}</div>
+        <button type="button" class="btn" data-add="options">+ Adaugă accesoriu</button>
+      </details>`;
+  }
+
+  // Read the whole form back into a catalogue object.
+  function readCatalog() {
+    const out = { types: {}, materials: [], worktops: [], options: [] };
+    $$('#pricing-fields [data-g]').forEach(i => { out[i.dataset.g] = Number(i.value); });
+    $$('#pricing-fields [data-t]').forEach(i => { out.types[i.dataset.t] = Number(i.value); });
+    $$('#pricing-fields .cat-item').forEach(card => {
+      const item = { id: card.dataset.id, name: {} };
+      card.querySelectorAll('[data-f]').forEach(i => {
+        const f = i.dataset.f;
+        if (f.startsWith('name.')) item.name[f.slice(5)] = i.value;
+        else if (i.type === 'checkbox') item[f] = i.checked;
+        else if (i.type === 'number') item[f] = Number(i.value);
+        else item[f] = i.value;
+      });
+      if (card.dataset.kind !== 'worktops') item.types = Array.from(card.querySelectorAll('[data-type]:checked')).map(i => i.dataset.type);
+      out[card.dataset.kind].push(item);
+    });
+    return out;
   }
 
   async function loadPricing() {
@@ -634,20 +704,53 @@
     renderPricing(r.current);
   }
 
+  $('#pricing-fields').addEventListener('click', e => {
+    const add = e.target.closest('[data-add]');
+    const remove = e.target.closest('[data-remove]');
+    if (add) {
+      const kind = add.dataset.add;
+      const blank = {
+        materials: () => materialCard({ id: newId('mat'), name: {}, color: '#c79c66', grain: true, mult: 1, types: [] }),
+        worktops: () => worktopCard({ id: newId('worktop'), name: {}, color: '#8a8580', price: 0 }),
+        options: () => optionCard({ id: newId('opt'), name: {}, kind: 'check', unit: 'fixed', price: 0, types: [], effect: '', on: false, def: 0, max: 10 })
+      }[kind]();
+      $(`#cat-${kind}`).insertAdjacentHTML('beforeend', blank);
+      const card = $(`#cat-${kind}`).lastElementChild;
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.querySelector('input').focus();
+    }
+    if (remove && confirm('Ștergi acest element din calculator? (apasă apoi „Salvează prețurile”)')) remove.closest('.cat-item').remove();
+  });
+  // Live feedback in the card header and show the right fields for "check" vs "count".
+  $('#pricing-fields').addEventListener('input', e => {
+    const card = e.target.closest('.cat-item');
+    if (!card) return;
+    if (e.target.dataset.f === 'name.fr') card.querySelector('.cat-head strong').textContent = e.target.value || '…';
+    if (e.target.dataset.f === 'color') { const sw = card.querySelector('.swatch-mini'); if (sw) sw.style.background = e.target.value; }
+    if (e.target.dataset.f === 'kind') {
+      const count = e.target.value === 'count';
+      card.querySelector('[data-f=unit]').hidden = count;
+      card.querySelector('.price-input small').hidden = !count;
+      card.querySelector('[data-f=on]').closest('label').hidden = count;
+      card.querySelector('[data-f=def]').closest('label').hidden = !count;
+      card.querySelector('[data-f=max]').closest('label').hidden = !count;
+    }
+  });
+
   $('#pricing-form').addEventListener('submit', async e => {
     e.preventDefault();
-    const out = { types: {}, materials: {}, options: {} };
-    $$('#pricing-fields input').forEach(i => {
-      if (i.dataset.group === 'general') out[i.dataset.key] = Number(i.value);
-      else out[i.dataset.group][i.dataset.key] = Number(i.value);
-    });
     try {
-      renderPricing(await api('/api/admin/pricing', { method: 'PUT', json: out }));
+      renderPricing(await api('/api/admin/pricing', { method: 'PUT', json: readCatalog() }));
       setStatus($('#pricing-status'), 'Prețuri salvate ✓');
-    } catch (err) { setStatus($('#pricing-status'), err.message, false); }
+    } catch (err) {
+      const m = err.message.startsWith('type_without_material:')
+        ? `Fiecare tip de proiect are nevoie de cel puțin un material. Lipsește la: ${err.message.split(':')[1].split(',').map(k => PT[k]).join(', ')}.`
+        : PRICE_ERR[err.message] || err.message;
+      setStatus($('#pricing-status'), m, false);
+    }
   });
   $('#pricing-reset').addEventListener('click', () => {
-    if (pricingDefaults && confirm('Revii la prețurile implicite? (apasă apoi „Salvează prețurile”)')) renderPricing(pricingDefaults);
+    if (pricingDefaults && confirm('Revii la catalogul și prețurile implicite? (apasă apoi „Salvează prețurile”)')) renderPricing(pricingDefaults);
   });
 
   // ---------- boot ----------

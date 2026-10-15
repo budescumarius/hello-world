@@ -104,3 +104,13 @@ input[type=color] { height: 48px; padding: 4px; }
 .price-input input { max-width: 140px; }
 .price-input small { color: var(--muted); font-weight: 400; }
 @media (min-width: 700px) { .price-grid { grid-template-columns: 1fr 1fr; } }
+.cat-section { border: 1px solid var(--line); border-radius: 12px; padding: 4px 14px 14px; margin: 16px 0; background: #fff; }
+.cat-section summary { cursor: pointer; font-weight: 700; padding: 10px 0; }
+.cat-item { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 10px; background: #fcfaf7; }
+.cat-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.cat-head strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swatch-mini { width: 24px; height: 24px; border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); flex: none; }
+.type-checks { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.type-checks .check { margin-bottom: 4px; }
+.cat-item .hint { margin: 2px 0 4px; }
+.price-input select { width: auto; }

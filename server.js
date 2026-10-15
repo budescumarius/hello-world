@@ -245,10 +245,11 @@ app.post('/api/contact', (req, res) => {
   };
   if (b.estimate && typeof b.estimate === 'object' && b.estimate.config) {
     // Never trust prices sent by the browser: recompute from the configuration.
-    const config = EstimateModel.sanitize(b.estimate.config);
-    const r = EstimateModel.compute(config, pricing.withDefaults(db.pricing));
+    const grid = pricing.withDefaults(db.pricing);
+    const config = EstimateModel.sanitize(b.estimate.config, grid);
+    const r = EstimateModel.compute(config, grid);
     const tr = siteTranslator(msg.lang);
-    msg.estimate = { ref: estimateRef(), config, summary: EstimateModel.summary(config, tr.t, tr.num), min: r.min, max: r.max };
+    msg.estimate = { ref: estimateRef(), config, summary: EstimateModel.summary(config, grid, tr.t, tr.num, tr.lang), min: r.min, max: r.max };
   }
   if (!msg.name || (!msg.email && !msg.phone) || !msg.message) return res.status(400).json({ error: 'missing_fields' });
   db.messages.unshift(msg);
@@ -442,7 +443,10 @@ admin.put('/settings', (req, res) => {
 
 admin.get('/pricing', (req, res) => res.json({ current: pricing.withDefaults(db.pricing), defaults: pricing.DEFAULT_PRICING }));
 admin.put('/pricing', (req, res) => {
-  db.pricing = pricing.cleanPricing(req.body || {}, pricing.withDefaults(db.pricing));
+  const next = pricing.cleanPricing(req.body || {}, pricing.withDefaults(db.pricing));
+  const problem = pricing.validate(next);
+  if (problem) return res.status(400).json({ error: problem });
+  db.pricing = next;
   store.save();
   res.json(db.pricing);
 });

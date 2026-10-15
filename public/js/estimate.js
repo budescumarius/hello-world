@@ -2,7 +2,7 @@
 // see a live CSS-3D model and an instant price range from the admin's price grid.
 (function () {
   const M = window.EstimateModel;
-  const { TYPES, COUNTS, WORKTOPS, WOOD } = M;
+  const { TYPES } = M;
   const ICONS = {
     kitchen: '<rect x="3" y="11" width="18" height="9" rx="1"/><path d="M3 15h18M9 11v9M15 11v9"/><path d="M6 7h4M14 4v4M12 4h4"/>',
     wardrobe: '<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M12 3v18M10 11v2M14 11v2"/>',
@@ -12,10 +12,10 @@
     parquet: '<path d="M3 3l6 6-6 6M9 3l6 6-6 6M15 3l6 6-6 6M3 15l6 6M9 15l6 6M15 15l6 6"/>'
   };
   let pricing = null;
-  let state = M.defaults('kitchen');
+  let state = null;
 
   function resetFor(type) {
-    state = M.defaults(type, state.mat);
+    state = M.defaults(type, pricing, state && state.mat);
   }
 
   // ---------- price ----------
@@ -25,7 +25,7 @@
   const num = (n, digits = 2) => new Intl.NumberFormat({ fr: 'fr-BE', nl: 'nl-BE', en: 'en-IE' }[App.lang], { maximumFractionDigits: digits }).format(n);
   const unit = k => (k === 'steps' ? '' : k === 'area' ? ' m²' : ' m');
 
-  const summary = () => M.summary(state, App.t, n => num(n));
+  const summary = () => M.summary(state, pricing, App.t, n => num(n), App.lang);
 
   // ---------- controls ----------
   function renderControls() {
@@ -42,22 +42,24 @@
         <input type="range" data-dim="${k}" min="${min}" max="${max}" step="${step}" value="${state.dims[k]}">
       </label>`).join('');
 
-    document.getElementById('materials').innerHTML = t.mats.map(m => `
-      <button type="button" class="swatch" data-mat="${m}" aria-pressed="${m === state.mat}">
-        <span class="chip-color" style="background:${surface(m)}"></span><span>${App.esc(App.t('est.mat.' + m))}</span>
+    document.getElementById('materials').innerHTML = M.materialsFor(state.type, pricing).map(m => `
+      <button type="button" class="swatch" data-mat="${App.esc(m.id)}" aria-pressed="${m.id === state.mat}">
+        <span class="chip-color" style="background:${surface(m)}"></span><span>${App.esc(M.pick(m.name, App.lang))}</span>
       </button>`).join('');
 
-    document.getElementById('options').innerHTML = t.opts.map(k => {
-      if (k === 'worktop') {
-        return `<div class="opt-row"><span>${App.esc(App.t('est.opt.worktop'))}</span>
-          <select data-opt="worktop">${Object.keys(WORKTOPS).map(w => `<option value="${w}" ${state.opts.worktop === w ? 'selected' : ''}>${App.esc(App.t('est.opt.' + w))}</option>`).join('')}</select></div>`;
-      }
-      if (COUNTS[k]) {
-        return `<div class="opt-row"><span>${App.esc(App.t('est.opt.' + k))}</span>
-          <span class="stepper"><button type="button" data-step="${k}" data-delta="-1" aria-label="−">−</button><output>${state.opts[k]}</output><button type="button" data-step="${k}" data-delta="1" aria-label="+">+</button></span></div>`;
-      }
-      return `<label class="opt-row check-row"><span>${App.esc(App.t('est.opt.' + k))}</span><input type="checkbox" data-opt="${k}" ${state.opts[k] ? 'checked' : ''}></label>`;
-    }).join('');
+    const rows = [];
+    if (state.type === 'kitchen' && pricing.worktops.length) {
+      rows.push(`<div class="opt-row"><span>${App.esc(App.t('est.opt.worktop'))}</span>
+        <select data-opt="worktop">${pricing.worktops.map(w => `<option value="${App.esc(w.id)}" ${state.opts.worktop === w.id ? 'selected' : ''}>${App.esc(M.pick(w.name, App.lang))}</option>`).join('')}</select></div>`);
+    }
+    for (const o of M.optionsFor(state.type, pricing)) {
+      const name = App.esc(M.pick(o.name, App.lang));
+      rows.push(o.kind === 'count'
+        ? `<div class="opt-row"><span>${name}</span>
+          <span class="stepper"><button type="button" data-step="${App.esc(o.id)}" data-delta="-1" aria-label="−">−</button><output>${state.opts[o.id]}</output><button type="button" data-step="${App.esc(o.id)}" data-delta="1" aria-label="+">+</button></span></div>`
+        : `<label class="opt-row check-row"><span>${name}</span><input type="checkbox" data-opt="${App.esc(o.id)}" ${state.opts[o.id] ? 'checked' : ''}></label>`);
+    }
+    document.getElementById('options').innerHTML = rows.join('');
   }
 
   function update() {
@@ -81,8 +83,8 @@
       if (matBtn) { state.mat = matBtn.dataset.mat; renderControls(); update(); }
       if (stepBtn) {
         const k = stepBtn.dataset.step;
-        const [min, max] = COUNTS[k];
-        state.opts[k] = Math.min(max, Math.max(min, state.opts[k] + Number(stepBtn.dataset.delta)));
+        const opt = pricing.options.find(o => o.id === k);
+        state.opts[k] = Math.min(opt ? opt.max : 20, Math.max(0, (state.opts[k] || 0) + Number(stepBtn.dataset.delta)));
         stepBtn.parentElement.querySelector('output').textContent = state.opts[k];
         update();
       }
@@ -135,9 +137,10 @@
   const scene = () => document.getElementById('scene');
   let S = 100; // pixels per metre
 
-  function surface(mat, angle = 90) {
-    const [color, grain] = WOOD[mat] || [mat, false];
-    return grain
+  // Wood grain (or a flat colour) for a catalogue material.
+  function surface(m, angle = 90) {
+    const color = (m && m.color) || '#d4b083';
+    return m && m.grain
       ? `repeating-linear-gradient(${angle}deg, rgba(0,0,0,.05) 0 2px, transparent 2px 9px, rgba(255,255,255,.06) 9px 11px, transparent 11px 17px), ${color}`
       : color;
   }
@@ -182,8 +185,11 @@
     el.innerHTML = '';
     const t = state.type;
     const d = state.dims;
-    const o = state.opts;
-    const bg = surface(state.mat);
+    const o = M.effects(state, pricing);
+    const mat = M.material(state, pricing);
+    const top = M.worktop(state, pricing);
+    const worktopColor = top ? top.color : '#8a8580';
+    const bg = surface(mat);
     const led = o.led ? '<span class="led"></span>' : '';
     let size = 2;
     let label = '';
@@ -195,11 +201,11 @@
       const z0 = o.island ? -0.5 : 0;
       box({ w: L + 0.4, h: 2.4, d: 0.03, z: z0 - 0.32, bg: '#efe9df' });
       box({ w: L, h: 0.86, d: 0.6, z: z0, bg, front: fronts({ width: L, doors: Math.round(L / 0.6), drawers: o.drawer }) });
-      box({ w: L + 0.02, h: 0.04, d: 0.64, y: 0.86, z: z0, bg: WORKTOPS[o.worktop] });
+      box({ w: L + 0.02, h: 0.04, d: 0.64, y: 0.86, z: z0, bg: worktopColor });
       box({ w: L, h: 0.7, d: 0.35, y: 1.45, z: z0 - 0.125, bg, front: fronts({ width: L, doors: Math.round(L / 0.6), glass: o.glass }) + led });
       if (o.island) {
         box({ w: Math.min(2, L * 0.6), h: 0.86, d: 0.9, z: 0.9, bg, front: fronts({ width: 1.8, doors: 3 }) });
-        box({ w: Math.min(2, L * 0.6) + 0.04, h: 0.04, d: 0.94, y: 0.86, z: 0.9, bg: WORKTOPS[o.worktop] });
+        box({ w: Math.min(2, L * 0.6) + 0.04, h: 0.04, d: 0.94, y: 0.86, z: 0.9, bg: worktopColor });
       }
       label = `${num(L)} m`;
     } else if (t === 'wardrobe' || t === 'bookcase') {
@@ -221,7 +227,7 @@
       size = Math.max(n * rise, n * run) * 1.1;
       S = 260 / size;
       for (let i = 0; i < n; i++) {
-        box({ w: W, h: rise * (i + 1), d: run, z: (n / 2 - i - 0.5) * run, bg: 'linear-gradient(#e9e4dc,#e9e4dc)', top: bg });
+        box({ w: W, h: rise * (i + 1), d: run, z: (n / 2 - i - 0.5) * run, bg: 'linear-gradient(#e9e4dc,#e9e4dc)', top: bg, front: o.led ? '<span class="led led-step"></span>' : '' });
       }
       if (o.handrail) {
         // Rail runs from the bottom post to the top post, 0.9 m above the treads.
@@ -236,8 +242,8 @@
       const side = Math.sqrt(d.area);
       size = 2.6;
       S = 260 / size;
-      const floor = WOOD[state.mat][0];
-      const pattern = state.mat === 'laminate'
+      const floor = mat.color;
+      const pattern = mat.id === 'laminate'
         ? `repeating-linear-gradient(90deg, rgba(0,0,0,.12) 0 1px, transparent 1px 22px), repeating-linear-gradient(0deg, rgba(0,0,0,.08) 0 1px, transparent 1px 90px), ${floor}`
         : `repeating-linear-gradient(45deg, rgba(0,0,0,.10) 0 1px, transparent 1px 16px), repeating-linear-gradient(-45deg, rgba(0,0,0,.10) 0 1px, transparent 1px 48px), ${floor}`;
       box({ w: 2.2, h: 0.03, d: 2.2, bg: floor, top: pattern });
@@ -286,9 +292,9 @@
   });
 
   document.addEventListener('DOMContentLoaded', async () => {
+    pricing = await fetch('/api/pricing').then(r => r.json());
     const wanted = new URLSearchParams(location.search).get('type');
     resetFor(TYPES[wanted] ? wanted : 'kitchen');
-    pricing = await fetch('/api/pricing').then(r => r.json());
     renderControls();
     bindControls();
     bindRotation();
