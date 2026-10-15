@@ -55,7 +55,7 @@
     view(b.dataset.tab);
     if (b.dataset.tab === 'albums') loadAlbums();
     if (b.dataset.tab === 'messages') loadMessages();
-    if (b.dataset.tab === 'settings') loadSettings();
+    if (b.dataset.tab === 'settings') { loadSettings(); loadAutoReply(); }
     if (b.dataset.tab === 'posts') loadPosts();
     if (b.dataset.tab === 'subscribers') loadSubscribers();
     if (b.dataset.tab === 'content') loadContent();
@@ -333,6 +333,47 @@
       await api('/api/admin/test-email', { json: {} });
       setStatus(st, 'Trimis ✓ — verifică inboxul (și Spam).');
     } catch (err) { setStatus(st, ERR_MAIL[err.message] || err.message, false); }
+  });
+
+  // ---------- thank-you e-mail ----------
+  async function loadAutoReply() {
+    const s = await api('/api/admin/settings');
+    const a = s.autoReply || { enabled: false, subject: {}, body: {} };
+    const f = $('#autoreply-form');
+    f.elements.enabled.checked = Boolean(a.enabled);
+    for (const l of ['fr', 'nl', 'en']) {
+      f.elements[`subject.${l}`].value = (a.subject || {})[l] || '';
+      f.elements[`body.${l}`].value = (a.body || {})[l] || '';
+    }
+    setLangTab('fr', f);
+  }
+  function readAutoReply() {
+    const f = $('#autoreply-form');
+    const out = { enabled: f.elements.enabled.checked, subject: {}, body: {} };
+    for (const l of ['fr', 'nl', 'en']) {
+      out.subject[l] = f.elements[`subject.${l}`].value;
+      out.body[l] = f.elements[`body.${l}`].value;
+    }
+    return out;
+  }
+  $('#autoreply-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    try {
+      await api('/api/admin/settings', { method: 'PUT', json: { autoReply: readAutoReply() } });
+      setStatus($('#autoreply-status'), 'Mesaj salvat ✓');
+    } catch (err) { setStatus($('#autoreply-status'), err.message, false); }
+  });
+  $('#autoreply-test').addEventListener('click', async () => {
+    const st = $('#autoreply-status');
+    const lang = $('#autoreply-form .lang-tabs button.active').dataset.l;
+    try {
+      // save first so the example shows exactly what is on screen
+      await api('/api/admin/settings', { method: 'PUT', json: { autoReply: readAutoReply() } });
+      await api('/api/admin/test-thank-you', { json: { lang } });
+      setStatus(st, `Exemplu ${lang.toUpperCase()} trimis la adresa de notificări ✓`);
+    } catch (err) {
+      setStatus(st, { no_notify_email: 'Completează întâi adresa la „Notificări” (mai sus) și salvează.', sendmail_unavailable: 'Serverul nu poate trimite e-mailuri.' }[err.message] || err.message, false);
+    }
   });
 
   $('#password-form').addEventListener('submit', async e => {

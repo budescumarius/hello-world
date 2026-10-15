@@ -256,6 +256,7 @@ app.post('/api/contact', (req, res) => {
   store.save();
   res.json({ ok: true });
   notifyNewMessage(msg).catch(err => console.error('Notification e-mail failed:', err.message));
+  sendThankYou(msg).catch(err => console.error('Thank-you e-mail failed:', err.message));
 });
 
 function siteTranslator(lang) {
@@ -276,6 +277,41 @@ function estimatePdf(msg) {
     ref: msg.estimate.ref,
     date: msg.createdAt
   }).buffer;
+}
+
+// Fill the admin's thank-you template for a message (also used for the admin preview).
+function thankYouMail(msg) {
+  const a = db.settings.autoReply || {};
+  const tr = siteTranslator(msg.lang);
+  const pickLang = obj => (obj && (obj[tr.lang] || obj.fr)) || '';
+  const s = db.settings;
+  const estimate = msg.estimate
+    ? tr.t('mail.estimate').replace('{ref}', msg.estimate.ref).replace('{min}', tr.money(msg.estimate.min)).replace('{max}', tr.money(msg.estimate.max))
+    : '';
+  const vars = { name: msg.name, company: s.companyName, phone: s.phone, email: s.email, ref: msg.estimate ? msg.estimate.ref : '', estimate };
+  const fill = text => String(text).replace(/\{(name|company|phone|email|ref|estimate)\}/g, (m, k) => vars[k] || '');
+  return {
+    subject: fill(pickLang(a.subject)),
+    text: fill(pickLang(a.body)).replace(/\n{3,}/g, '\n\n').trim()
+  };
+}
+
+// Thank the visitor by e-mail, in their language, with their estimate PDF when they used the calculator.
+function sendThankYou(msg) {
+  const a = db.settings.autoReply || {};
+  if (!a.enabled || !mailer.isEmail(msg.email) || !mailer.available()) return Promise.resolve();
+  const { subject, text } = thankYouMail(msg);
+  return mailer.send({
+    to: msg.email,
+    subject,
+    text,
+    fromName: db.settings.companyName,
+    fromAddress: process.env.MAIL_FROM || db.settings.email,
+    replyTo: db.settings.email,
+    attachments: msg.estimate && msg.estimate.config
+      ? [{ filename: `Timberway-${msg.estimate.ref}.pdf`, contentType: 'application/pdf', content: estimatePdf(msg) }]
+      : []
+  });
 }
 
 // E-mail the owner about a new quote request (address set in admin → Setări).
@@ -423,6 +459,13 @@ admin.put('/settings', (req, res) => {
   }
   if (b.tagline) s.tagline = i18nField(b.tagline, 200);
   if (b.hours) s.hours = i18nField(b.hours, 200);
+  if (b.autoReply && typeof b.autoReply === 'object') {
+    s.autoReply = {
+      enabled: Boolean(b.autoReply.enabled),
+      subject: i18nField(b.autoReply.subject, 200),
+      body: i18nField(b.autoReply.body, 5000)
+    };
+  }
   if (b.colors) {
     s.colors = {};
     for (const k of ['primary', 'dark']) s.colors[k] = HEX.test(b.colors[k]) ? b.colors[k] : '';
@@ -449,6 +492,21 @@ admin.put('/pricing', (req, res) => {
   db.pricing = next;
   store.save();
   res.json(db.pricing);
+});
+
+admin.post('/test-thank-you', async (req, res) => {
+  const to = db.settings.notifyEmail || process.env.NOTIFY_EMAIL;
+  if (!to) return res.status(400).json({ error: 'no_notify_email' });
+  if (!mailer.available()) return res.status(400).json({ error: 'sendmail_unavailable' });
+  const lang = LANGS.includes(req.body && req.body.lang) ? req.body.lang : 'fr';
+  const sample = { name: 'Marie Dupont', lang, estimate: { ref: 'EST-EXEMPLE', min: 6450, max: 7900 } };
+  const { subject, text } = thankYouMail(sample);
+  try {
+    await mailer.send({ to, subject: `[Exemplu ${lang.toUpperCase()}] ${subject}`, text, fromName: db.settings.companyName, fromAddress: process.env.MAIL_FROM || db.settings.email });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 admin.post('/test-email', async (req, res) => {

@@ -114,3 +114,5 @@ input[type=color] { height: 48px; padding: 4px; }
 .type-checks .check { margin-bottom: 4px; }
 .cat-item .hint { margin: 2px 0 4px; }
 .price-input select { width: auto; }
+.placeholders { line-height: 1.9; }
+.placeholders code { background: #eee5d8; border-radius: 4px; padding: 1px 6px; font-size: .85em; }

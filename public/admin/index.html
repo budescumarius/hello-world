@@ -248,6 +248,32 @@
           <p class="status" id="settings-status"></p>
         </form>
 
+        <form id="autoreply-form" class="panel">
+          <h2>E-mail de mulțumire către client</h2>
+          <p class="hint">Se trimite automat clientului după ce trimite formularul, în limba lui. Dacă a folosit calculatorul de buget, primește și PDF-ul cu estimarea.</p>
+          <label class="check"><input type="checkbox" name="enabled"> Trimite e-mailul de mulțumire</label>
+          <div class="lang-tabs" role="tablist">
+            <button type="button" data-l="fr" class="active">FR</button>
+            <button type="button" data-l="nl">NL</button>
+            <button type="button" data-l="en">EN</button>
+          </div>
+          <div class="lang-fields">
+            <div data-lf="fr"><label>Subiect (FR)<input name="subject.fr"></label><label>Mesaj (FR)<textarea name="body.fr" rows="12"></textarea></label></div>
+            <div data-lf="nl" hidden><label>Subiect (NL)<input name="subject.nl"></label><label>Mesaj (NL)<textarea name="body.nl" rows="12"></textarea></label></div>
+            <div data-lf="en" hidden><label>Subiect (EN)<input name="subject.en"></label><label>Mesaj (EN)<textarea name="body.en" rows="12"></textarea></label></div>
+          </div>
+          <div class="hint placeholders">
+            Poți folosi aceste coduri, înlocuite automat:
+            <code>{name}</code> numele clientului · <code>{company}</code> numele firmei · <code>{phone}</code> telefonul · <code>{email}</code> e-mailul firmei ·
+            <code>{estimate}</code> fraza cu estimarea și PDF-ul (dispare dacă clientul n-a folosit calculatorul) · <code>{ref}</code> referința estimării
+          </div>
+          <div class="row-between">
+            <button type="button" class="btn" id="autoreply-test">Trimite-mi un exemplu</button>
+            <button type="submit" class="btn primary">Salvează mesajul</button>
+          </div>
+          <p class="status" id="autoreply-status"></p>
+        </form>
+
         <form id="password-form" class="panel">
           <h2>Schimbă parola</h2>
           <div class="grid2">
