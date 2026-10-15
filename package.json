@@ -1,0 +1,16 @@
+{
+  "name": "timber-site",
+  "version": "1.0.0",
+  "description": "Trilingual (NL/FR/EN) website for a timber construction company, with admin panel for projects and photos",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "create-admin": "node scripts/create-admin.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^2.0.2"
+  }
+}

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Project</title>
+  <meta name="theme-color" content="#2b1d12">
+  <link rel="icon" href="/img/logo.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-page="project">
+  <header class="header">
+    <div class="container">
+      <a class="brand" href="/" data-keep-lang><img class="brand-mark" src="/img/logo.svg" alt=""><span class="brand-name" data-setting="companyName"></span></a>
+      <div class="header-actions">
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button type="button" data-lang="nl">NL</button><button type="button" data-lang="fr">FR</button><button type="button" data-lang="en">EN</button>
+        </div>
+        <a class="btn btn-primary header-quote" href="/#contact" data-keep-lang data-i18n="cta.quote"></a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container" id="main">
+    <section class="project-hero">
+      <a class="back-link" href="/#projects" data-keep-lang>← <span data-i18n="projects.back"></span></a>
+      <div id="project"></div>
+    </section>
+    <div class="gallery" id="gallery"></div>
+    <section class="section" style="text-align:center">
+      <h2 data-i18n="projects.more"></h2>
+      <a class="btn btn-primary" href="/#contact" data-keep-lang data-i18n="cta.quote"></a>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-bottom" style="border:0;margin:0;padding:0">
+      <span>© <span data-year></span> <span data-setting="companyName"></span></span>
+      <span><a data-tel href="#" data-setting="phone"></a> · <a data-mailto href="#" data-setting="email"></a></span>
+    </div>
+  </footer>
+
+  <nav class="action-bar" aria-label="Quick actions">
+    <a class="btn btn-ghost" data-tel href="#" data-i18n="cta.call"></a>
+    <a class="btn btn-wa" data-wa hidden href="#" target="_blank" rel="noopener" data-i18n="cta.whatsapp"></a>
+    <a class="btn btn-primary" href="/#contact" data-keep-lang data-i18n="cta.quote"></a>
+  </nav>
+
+  <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Photo">
+    <button class="close" type="button" aria-label="Close">×</button>
+    <div class="lightbox-img"><img alt=""></div>
+    <div class="lightbox-bar">
+      <button class="prev" type="button" aria-label="Previous">‹</button>
+      <div class="lightbox-caption"></div>
+      <button class="next" type="button" aria-label="Next">›</button>
+    </div>
+  </div>
+
+  <script src="/js/i18n.js"></script>
+  <script src="/js/common.js"></script>
+  <script src="/js/project.js"></script>
+</body>
+</html>

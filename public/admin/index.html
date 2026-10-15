@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Admin</title>
+  <link rel="icon" href="/img/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+  <!-- Login -->
+  <section id="login-view" class="login" hidden>
+    <form id="login-form" class="panel">
+      <img src="/img/logo.svg" alt="" width="48" height="48">
+      <h1>Autentificare admin</h1>
+      <label>Utilizator<input name="username" autocomplete="username" required autocapitalize="off"></label>
+      <label>Parolă<input name="password" type="password" autocomplete="current-password" required></label>
+      <button class="btn primary" type="submit">Intră</button>
+      <p class="error" id="login-error"></p>
+      <a href="/" class="small">← Înapoi la site</a>
+    </form>
+  </section>
+
+  <!-- App -->
+  <div id="app-view" hidden>
+    <header class="topbar">
+      <strong>Admin</strong>
+      <nav class="tabs">
+        <button data-tab="albums" class="active">Proiecte</button>
+        <button data-tab="messages">Mesaje <span id="unread" class="pill" hidden></span></button>
+        <button data-tab="settings">Setări</button>
+      </nav>
+      <div class="topbar-right">
+        <a href="/" target="_blank" class="small">Vezi site ↗</a>
+        <button id="logout" class="btn small-btn">Ieșire</button>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <!-- Album list -->
+      <section data-view="albums">
+        <div class="row-between">
+          <h2>Proiecte / albume</h2>
+          <button class="btn primary" id="new-album">+ Proiect nou</button>
+        </div>
+        <div id="album-list" class="album-list"></div>
+      </section>
+
+      <!-- Album editor -->
+      <section data-view="album-edit" hidden>
+        <button class="link" id="back-to-list">← Toate proiectele</button>
+        <form id="album-form" class="panel">
+          <h2 id="album-form-title">Proiect nou</h2>
+          <div class="lang-tabs" role="tablist">
+            <button type="button" data-l="nl" class="active">NL</button>
+            <button type="button" data-l="fr">FR</button>
+            <button type="button" data-l="en">EN</button>
+          </div>
+          <div class="lang-fields">
+            <div data-lf="nl"><label>Titlu (NL)<input name="title.nl"></label><label>Descriere (NL)<textarea name="description.nl" rows="5"></textarea></label></div>
+            <div data-lf="fr" hidden><label>Titlu (FR)<input name="title.fr"></label><label>Descriere (FR)<textarea name="description.fr" rows="5"></textarea></label></div>
+            <div data-lf="en" hidden><label>Titlu (EN)<input name="title.en"></label><label>Descriere (EN)<textarea name="description.en" rows="5"></textarea></label></div>
+          </div>
+          <p class="hint">Dacă lași o limbă goală, site-ul afișează automat textul din altă limbă.</p>
+          <div class="grid3">
+            <label>Categorie<select name="category">
+              <option value="timber-frame">Casă structură lemn</option>
+              <option value="extension">Extindere / etaj</option>
+              <option value="roof-carport">Acoperiș / carport</option>
+              <option value="terrace-cladding">Terasă / placare fațadă</option>
+              <option value="interior">Interior / tâmplărie</option>
+              <option value="renovation">Renovare / izolație</option>
+            </select></label>
+            <label>Localitate<input name="location" placeholder="ex. Gent"></label>
+            <label>An<input name="year" inputmode="numeric" maxlength="4" placeholder="2026"></label>
+          </div>
+          <div class="checks">
+            <label class="check"><input type="checkbox" name="published" checked> Publicat pe site</label>
+            <label class="check"><input type="checkbox" name="featured"> Evidențiat (apare primul)</label>
+          </div>
+          <div class="row-between">
+            <button type="button" class="btn danger" id="delete-album" hidden>Șterge proiect</button>
+            <button type="submit" class="btn primary">Salvează</button>
+          </div>
+          <p class="status" id="album-status"></p>
+        </form>
+
+        <div class="panel" id="photos-panel" hidden>
+          <div class="row-between">
+            <h2>Poze <span class="muted" id="photo-count"></span></h2>
+          </div>
+          <label class="dropzone" id="dropzone">
+            <input type="file" id="photo-input" accept="image/*" multiple>
+            <strong>Adaugă poze</strong>
+            <span>Atinge pentru a alege din galerie / cameră, sau trage pozele aici</span>
+          </label>
+          <div class="progress" id="upload-progress" hidden><div></div><span></span></div>
+          <div class="photo-grid" id="photo-grid"></div>
+        </div>
+      </section>
+
+      <!-- Messages -->
+      <section data-view="messages" hidden>
+        <h2>Mesaje din formularul de contact</h2>
+        <div id="message-list"></div>
+      </section>
+
+      <!-- Settings -->
+      <section data-view="settings" hidden>
+        <form id="settings-form" class="panel">
+          <h2>Datele firmei</h2>
+          <div class="grid2">
+            <label>Numele firmei<input name="companyName" required></label>
+            <label>Telefon<input name="phone" type="tel"></label>
+            <label>WhatsApp (număr, opțional)<input name="whatsapp" type="tel" placeholder="+32470000000"></label>
+            <label>E-mail<input name="email" type="email"></label>
+            <label>Adresă<input name="address"></label>
+            <label>TVA / BTW<input name="vat"></label>
+            <label>Facebook URL<input name="facebook" type="url"></label>
+            <label>Instagram URL<input name="instagram" type="url"></label>
+          </div>
+          <h3>Slogan</h3>
+          <div class="grid3">
+            <label>NL<input name="tagline.nl"></label><label>FR<input name="tagline.fr"></label><label>EN<input name="tagline.en"></label>
+          </div>
+          <h3>Zonă de activitate</h3>
+          <div class="grid3">
+            <label>NL<input name="region.nl"></label><label>FR<input name="region.fr"></label><label>EN<input name="region.en"></label>
+          </div>
+          <h3>Cifre pe prima pagină</h3>
+          <div class="grid3">
+            <label>Ani de experiență<input name="statYears" inputmode="numeric"></label>
+            <label>Nr. proiecte<input name="statProjects" inputmode="numeric"></label>
+            <label>Săptămâni șantier (medie)<input name="statWeeks" inputmode="numeric"></label>
+          </div>
+          <button class="btn primary" type="submit">Salvează setările</button>
+          <p class="status" id="settings-status"></p>
+        </form>
+
+        <form id="password-form" class="panel">
+          <h2>Schimbă parola</h2>
+          <div class="grid2">
+            <label>Parola actuală<input name="current" type="password" autocomplete="current-password" required></label>
+            <label>Parola nouă (min. 10 caractere)<input name="next" type="password" autocomplete="new-password" minlength="10" required></label>
+          </div>
+          <button class="btn primary" type="submit">Schimbă parola</button>
+          <p class="status" id="password-status"></p>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <script src="/admin/admin.js"></script>
+</body>
+</html>
