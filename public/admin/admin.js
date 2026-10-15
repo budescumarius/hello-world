@@ -47,7 +47,7 @@
   // ---------- navigation ----------
   function view(name) {
     $$('[data-view]').forEach(s => { s.hidden = s.dataset.view !== name; });
-    const tab = name === 'album-edit' ? 'albums' : name;
+    const tab = { 'album-edit': 'albums', 'post-edit': 'posts' }[name] || name;
     $$('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
     window.scrollTo(0, 0);
   }
@@ -56,6 +56,9 @@
     if (b.dataset.tab === 'albums') loadAlbums();
     if (b.dataset.tab === 'messages') loadMessages();
     if (b.dataset.tab === 'settings') loadSettings();
+    if (b.dataset.tab === 'posts') loadPosts();
+    if (b.dataset.tab === 'subscribers') loadSubscribers();
+    if (b.dataset.tab === 'content') loadContent();
   }));
 
   // ---------- albums ----------
@@ -75,11 +78,12 @@
     $$('.album-item').forEach(b => b.addEventListener('click', () => editAlbum(b.dataset.id)));
   }
 
-  function setLangTab(l) {
-    $$('.lang-tabs button').forEach(b => b.classList.toggle('active', b.dataset.l === l));
-    $$('[data-lf]').forEach(d => { d.hidden = d.dataset.lf !== l; });
+  // Language tabs switch only the fields of the form they belong to.
+  function setLangTab(l, root = $('#album-form')) {
+    root.querySelectorAll('.lang-tabs button').forEach(b => b.classList.toggle('active', b.dataset.l === l));
+    root.querySelectorAll('[data-lf]').forEach(d => { d.hidden = d.dataset.lf !== l; });
   }
-  $$('.lang-tabs button').forEach(b => b.addEventListener('click', () => setLangTab(b.dataset.l)));
+  $$('.lang-tabs button').forEach(b => b.addEventListener('click', () => setLangTab(b.dataset.l, b.closest('form'))));
 
   function fillAlbumForm(a) {
     const f = $('#album-form');
@@ -328,6 +332,256 @@
       e.target.reset();
       setStatus($('#password-status'), 'Parola a fost schimbată ✓');
     } catch (err) { setStatus($('#password-status'), err.message, false); }
+  });
+
+  // ---------- journal ----------
+  const POST_CAT = { tips: 'Sfaturi', worksite: 'Pe șantier', news: 'Noutăți' };
+  let posts = [];
+  let currentPost = null;
+
+  async function loadPosts() {
+    posts = await api('/api/admin/posts');
+    const list = $('#post-list');
+    if (!posts.length) { list.innerHTML = '<p class="muted">Niciun articol încă. Apasă „+ Articol nou”.</p>'; return; }
+    list.innerHTML = posts.map(p => `
+      <button class="album-item" data-id="${p.id}">
+        ${p.cover ? `<img src="${esc(p.cover)}" alt="" loading="lazy">` : '<div class="noimg"></div>'}
+        <div class="info">
+          <strong>${esc(pick(p.title))}</strong>
+          <span class="tag">${esc(POST_CAT[p.category] || p.category)}</span><span class="tag">${new Date(p.date).toLocaleDateString('ro-RO')}</span>
+          ${p.published ? '' : '<span class="tag draft">ciornă</span>'}
+        </div>
+      </button>`).join('');
+    $$('#post-list .album-item').forEach(b => b.addEventListener('click', () => editPost(b.dataset.id)));
+  }
+
+  function fillPostForm(p) {
+    const f = $('#post-form');
+    for (const l of ['fr', 'nl', 'en']) {
+      for (const k of ['title', 'excerpt', 'body']) f.elements[`${k}.${l}`].value = (p && p[k][l]) || '';
+    }
+    f.elements.category.value = (p && p.category) || 'tips';
+    f.elements.published.checked = p ? p.published : true;
+    $('#post-form-title').textContent = p ? 'Editează articol' : 'Articol nou';
+    $('#delete-post').hidden = !p;
+    $('#post-photos-panel').hidden = !p;
+    $('#post-status').textContent = '';
+    setLangTab('fr', f);
+    renderPostPhotos();
+  }
+
+  function readPostForm() {
+    const f = $('#post-form');
+    const out = { title: {}, excerpt: {}, body: {}, category: f.elements.category.value, published: f.elements.published.checked };
+    for (const l of ['fr', 'nl', 'en']) for (const k of ['title', 'excerpt', 'body']) out[k][l] = f.elements[`${k}.${l}`].value;
+    return out;
+  }
+
+  function editPost(id) {
+    currentPost = posts.find(p => p.id === id) || null;
+    fillPostForm(currentPost);
+    view('post-edit');
+  }
+  $('#new-post').addEventListener('click', () => { currentPost = null; fillPostForm(null); view('post-edit'); });
+  $('#back-to-posts').addEventListener('click', () => { view('posts'); loadPosts(); });
+
+  $('#post-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const status = $('#post-status');
+    try {
+      if (currentPost) {
+        currentPost = await api(`/api/admin/posts/${currentPost.id}`, { method: 'PUT', json: readPostForm() });
+        setStatus(status, 'Salvat ✓');
+      } else {
+        currentPost = await api('/api/admin/posts', { json: readPostForm() });
+        fillPostForm(currentPost);
+        setStatus(status, 'Articol creat ✓ — acum adaugă poze mai jos.');
+        $('#post-photos-panel').scrollIntoView({ behavior: 'smooth' });
+      }
+    } catch (err) { setStatus(status, err.message, false); }
+  });
+
+  $('#delete-post').addEventListener('click', async () => {
+    if (!currentPost || !confirm('Ștergi acest articol și pozele lui?')) return;
+    await api(`/api/admin/posts/${currentPost.id}`, { method: 'DELETE' });
+    currentPost = null;
+    view('posts');
+    loadPosts();
+  });
+
+  function renderPostPhotos() {
+    const photos = (currentPost && currentPost.photos) || [];
+    $('#post-photo-count').textContent = `(${photos.length})`;
+    $('#post-photo-grid').innerHTML = photos.map(p => `
+      <div class="photo ${p.id === currentPost.coverId ? 'cover' : ''}" data-id="${p.id}">
+        ${p.id === currentPost.coverId ? '<div class="badge">Copertă</div>' : ''}
+        <img src="${esc(p.url)}" alt="" loading="lazy">
+        <div class="actions">
+          <button type="button" data-act="cover" ${p.id === currentPost.coverId ? 'disabled' : ''}>★ Copertă</button>
+          <button type="button" data-act="delete">🗑</button>
+        </div>
+      </div>`).join('');
+  }
+
+  async function refreshPost() {
+    posts = await api('/api/admin/posts');
+    currentPost = posts.find(p => p.id === currentPost.id) || null;
+    renderPostPhotos();
+  }
+
+  $('#post-photo-grid').addEventListener('click', async e => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const id = btn.closest('.photo').dataset.id;
+    if (btn.dataset.act === 'delete') {
+      if (!confirm('Ștergi poza?')) return;
+      await api(`/api/admin/posts/${currentPost.id}/photos/${id}`, { method: 'DELETE' });
+    } else {
+      await api(`/api/admin/posts/${currentPost.id}/photos/${id}`, { method: 'PUT', json: {} });
+    }
+    refreshPost();
+  });
+
+  async function uploadPostFiles(files) {
+    files = Array.from(files).filter(f => f.type.startsWith('image/'));
+    if (!files.length || !currentPost) return;
+    const bar = $('#post-upload-progress');
+    const fill = bar.querySelector('div');
+    const label = bar.querySelector('span');
+    bar.hidden = false;
+    let failed = 0;
+    for (let i = 0; i < files.length; i++) {
+      label.textContent = `Se încarcă ${i + 1} din ${files.length}…`;
+      fill.style.width = `${(i / files.length) * 100}%`;
+      const fd = new FormData();
+      fd.append('photos', await resize(files[i]));
+      try { await api(`/api/admin/posts/${currentPost.id}/photos`, { method: 'POST', body: fd }); } catch (err) { failed++; }
+    }
+    fill.style.width = '100%';
+    label.textContent = failed ? `Gata — ${failed} poze nu s-au putut încărca.` : 'Gata ✓';
+    setTimeout(() => { bar.hidden = true; fill.style.width = '0'; }, 2500);
+    $('#post-photo-input').value = '';
+    refreshPost();
+  }
+  $('#post-photo-input').addEventListener('change', e => uploadPostFiles(e.target.files));
+  const pdz = $('#post-dropzone');
+  ['dragenter', 'dragover'].forEach(ev => pdz.addEventListener(ev, e => { e.preventDefault(); pdz.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => pdz.addEventListener(ev, () => pdz.classList.remove('over')));
+  pdz.addEventListener('drop', e => { e.preventDefault(); uploadPostFiles(e.dataTransfer.files); });
+
+  // ---------- subscribers ----------
+  async function loadSubscribers() {
+    const subs = await api('/api/admin/subscribers');
+    $('#sub-count').textContent = `(${subs.length})`;
+    $('#sub-list').innerHTML = subs.length ? subs.map(s => `
+      <div class="sub-row" data-email="${esc(s.email)}">
+        <strong>${esc(s.email)}</strong>
+        <span>${esc(s.lang.toUpperCase())} · ${new Date(s.createdAt).toLocaleDateString('ro-RO')}</span>
+        <button class="btn small-btn danger" data-act="delete">Șterge</button>
+      </div>`).join('') : '<p class="muted">Niciun abonat încă.</p>';
+  }
+  $('#sub-list').addEventListener('click', async e => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn || !confirm('Ștergi acest abonat?')) return;
+    await api(`/api/admin/subscribers/${encodeURIComponent(btn.closest('.sub-row').dataset.email)}`, { method: 'DELETE' });
+    loadSubscribers();
+  });
+
+  // ---------- look: logo, colours, texts ----------
+  const DEFAULT_COLORS = { primary: '#8a5a33', dark: '#2b1d12' };
+  const GROUPS = {
+    nav: 'Meniu', cta: 'Butoane', hero: 'Prima imagine (sus)', facts: 'Cifre sub titlu', services: 'Servicii — titlu', svc: 'Servicii — carduri',
+    why: 'Angajament', projects: 'Realizări', process: 'Metodă', about: 'Despre noi', faq: 'Întrebări frecvente', contact: 'Contact',
+    form: 'Formular de contact', journal: 'Jurnal', news: 'Newsletter', like: 'Aprecieri', footer: 'Subsol', cat: 'Categorii'
+  };
+  let settingsCache = null;
+
+  async function loadContent() {
+    settingsCache = await api('/api/admin/settings');
+    const s = settingsCache;
+    $('#logo-preview').src = s.logo ? `/uploads/${s.logo}` : '/img/logo.svg';
+    const cf = $('#colors-form');
+    cf.elements.primary.value = (s.colors && s.colors.primary) || DEFAULT_COLORS.primary;
+    cf.elements.dark.value = (s.colors && s.colors.dark) || DEFAULT_COLORS.dark;
+    renderTexts();
+  }
+
+  $('#logo-input').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('logo', file);
+    try {
+      const r = await api('/api/admin/logo', { method: 'POST', body: fd });
+      $('#logo-preview').src = r.logo;
+      setStatus($('#logo-status'), 'Logo salvat ✓');
+    } catch (err) { setStatus($('#logo-status'), err.message, false); }
+    e.target.value = '';
+  });
+  $('#logo-reset').addEventListener('click', async () => {
+    await api('/api/admin/logo', { method: 'DELETE' });
+    $('#logo-preview').src = '/img/logo.svg';
+    setStatus($('#logo-status'), 'Logo implicit ✓');
+  });
+
+  async function saveColors(colors) {
+    try {
+      await api('/api/admin/settings', { method: 'PUT', json: { colors } });
+      setStatus($('#colors-status'), 'Culori salvate ✓');
+    } catch (err) { setStatus($('#colors-status'), err.message, false); }
+  }
+  $('#colors-form').addEventListener('submit', e => {
+    e.preventDefault();
+    saveColors({ primary: e.target.elements.primary.value, dark: e.target.elements.dark.value });
+  });
+  $('#colors-reset').addEventListener('click', () => {
+    const cf = $('#colors-form');
+    cf.elements.primary.value = DEFAULT_COLORS.primary;
+    cf.elements.dark.value = DEFAULT_COLORS.dark;
+    saveColors({ primary: '', dark: '' });
+  });
+
+  function renderTexts() {
+    const custom = (settingsCache && settingsCache.texts) || {};
+    const keys = Object.keys(window.I18N.fr);
+    const byGroup = {};
+    keys.forEach(k => { const g = k.split('.')[0]; (byGroup[g] = byGroup[g] || []).push(k); });
+    $('#texts-list').innerHTML = Object.entries(byGroup).map(([g, ks]) => `
+      <details class="text-group" data-group="${g}">
+        <summary>${esc(GROUPS[g] || g)} <span class="muted">(${ks.length})</span></summary>
+        ${ks.map(k => `
+          <div class="text-row" data-key="${esc(k)}">
+            <div class="key">${esc(k)}</div>
+            ${['fr', 'nl', 'en'].map(l => `
+              <label>${l.toUpperCase()}<textarea rows="1" data-lang="${l}" placeholder="${esc(window.I18N[l][k] || '')}">${esc((custom[l] || {})[k] || '')}</textarea></label>`).join('')}
+          </div>`).join('')}
+      </details>`).join('');
+  }
+
+  $('#texts-search').addEventListener('input', e => {
+    const q = e.target.value.trim().toLowerCase();
+    $$('.text-row').forEach(row => {
+      const hay = row.dataset.key + ' ' + Array.from(row.querySelectorAll('textarea')).map(t => t.placeholder + ' ' + t.value).join(' ');
+      row.hidden = q && !hay.toLowerCase().includes(q);
+    });
+    $$('.text-group').forEach(g => {
+      const visible = g.querySelectorAll('.text-row:not([hidden])').length;
+      g.hidden = !visible;
+      g.open = Boolean(q) && visible > 0;
+    });
+  });
+
+  $('#texts-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const texts = { fr: {}, nl: {}, en: {} };
+    $$('.text-row textarea').forEach(t => {
+      const v = t.value.trim();
+      if (v && v !== t.placeholder) texts[t.dataset.lang][t.closest('.text-row').dataset.key] = v;
+    });
+    try {
+      settingsCache = await api('/api/admin/settings', { method: 'PUT', json: { texts } });
+      setStatus($('#texts-status'), 'Texte salvate ✓');
+    } catch (err) { setStatus($('#texts-status'), err.message, false); }
   });
 
   // ---------- boot ----------

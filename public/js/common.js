@@ -16,7 +16,10 @@
     lang: detectLang(),
     settings: null,
     listeners: [],
-    t(key) { return (I18N[App.lang] && I18N[App.lang][key]) || I18N.fr[key] || key; },
+    t(key) {
+      const custom = App.settings && App.settings.texts && App.settings.texts[App.lang];
+      return (custom && custom[key]) || (I18N[App.lang] && I18N[App.lang][key]) || I18N.fr[key] || key;
+    },
     // Pick the current language from an {nl, fr, en} object, falling back to any filled-in language.
     pick(obj) {
       if (!obj) return '';
@@ -71,6 +74,11 @@
         a.hidden = !s[k];
         if (s[k]) a.href = s[k];
       }));
+      // Admin-chosen colours and logo
+      const root = document.documentElement.style;
+      if (s.colors && s.colors.primary) root.setProperty('--wood-600', s.colors.primary);
+      if (s.colors && s.colors.dark) { root.setProperty('--wood-900', s.colors.dark); root.setProperty('--wood-800', s.colors.dark); }
+      if (s.logo) document.querySelectorAll('.brand-mark').forEach(img => { img.src = '/uploads/' + s.logo; });
       document.querySelectorAll('[data-if]').forEach(el => { el.hidden = !s[el.dataset.if]; });
       document.querySelectorAll('[data-year]').forEach(el => { el.textContent = new Date().getFullYear(); });
       if (document.body.dataset.page === 'home') document.title = `${s.companyName} — ${App.pick(s.tagline)}`;
@@ -93,7 +101,7 @@
       try {
         App.settings = await fetch('/api/settings').then(r => r.json());
       } catch (e) { App.settings = null; }
-      App.renderSettings();
+      App.apply(); // again, now with the admin's text overrides
 
       if ('IntersectionObserver' in window) {
         const io = new IntersectionObserver(entries => entries.forEach(e => {

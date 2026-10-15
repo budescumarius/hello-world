@@ -43,9 +43,24 @@
       <a class="project-card" href="/project?id=${encodeURIComponent(p.id)}&lang=${App.lang}">
         <img src="${App.esc(p.cover || `/img/illustrations/${p.category}-1.svg`)}" alt="${App.esc(App.pick(p.title))}" loading="lazy">
         <span class="badge">${App.esc(App.t(`cat.${p.category}`))}</span>
+        ${isNew(p) ? `<span class="badge badge-new">${App.esc(App.t('projects.new'))}</span>` : ''}
+        ${p.likes ? `<span class="likes" aria-label="${App.esc(App.t('like.label'))}">♥ ${p.likes}</span>` : ''}
         <div class="overlay"><h3>${App.esc(App.pick(p.title))}</h3><div class="meta">${App.esc(meta)}</div></div>
       </a>`;
     }).join('');
+  }
+
+  // Projects added in the last 45 days get a "new" badge, so returning visitors spot them.
+  function isNew(p) {
+    return Date.now() - new Date(p.createdAt).getTime() < 45 * 24 * 60 * 60 * 1000;
+  }
+
+  let posts = [];
+  function renderPosts() {
+    const grid = document.getElementById('journal-grid');
+    grid.innerHTML = posts.length
+      ? posts.map(Journal.card).join('')
+      : `<div class="empty" style="grid-column:1/-1">${App.esc(App.t('journal.empty'))}</div>`;
   }
 
   function renderServiceOptions() {
@@ -69,12 +84,16 @@
     renderFilters();
     renderProjects();
     renderServiceOptions();
+    renderPosts();
   }
 
   App.onLang(renderAll);
 
   document.addEventListener('DOMContentLoaded', async () => {
-    try { projects = await fetch('/api/albums').then(r => r.json()); } catch (e) { projects = []; }
+    [projects, posts] = await Promise.all([
+      fetch('/api/albums').then(r => r.json()).catch(() => []),
+      fetch('/api/posts?limit=3').then(r => r.json()).catch(() => [])
+    ]);
     renderAll();
     useProjectPhotos();
 

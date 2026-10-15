@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Journal — Timberway</title>
+  <meta name="theme-color" content="#2b1d12">
+  <link rel="icon" href="/img/logo.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-page="journal">
+  <header class="header">
+    <div class="container">
+      <a class="brand" href="/" data-keep-lang><img class="brand-mark" src="/img/logo.svg" alt=""><span class="brand-name" data-setting="companyName"></span></a>
+      <div class="header-actions">
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button type="button" data-lang="fr">FR</button><button type="button" data-lang="nl">NL</button><button type="button" data-lang="en">EN</button>
+        </div>
+        <a class="btn btn-primary header-quote" href="/#contact" data-keep-lang data-i18n="cta.quote.short"></a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container" id="main">
+    <section class="project-hero">
+      <span class="kicker" data-i18n="journal.kicker"></span>
+      <h1 data-i18n="journal.title"></h1>
+      <p class="muted" style="max-width:640px" data-i18n="journal.text"></p>
+    </section>
+    <div class="filters" id="filters" role="group"></div>
+    <div class="grid grid-2 grid-3" id="posts"></div>
+    <section class="section">
+    <div class="newsletter">
+      <div>
+        <h3 data-i18n="news.title"></h3>
+        <p data-i18n="news.text"></p>
+      </div>
+      <form class="newsletter-form" data-newsletter novalidate>
+        <input type="email" name="email" autocomplete="email" inputmode="email" required data-i18n-ph="news.placeholder" aria-label="E-mail">
+        <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+        <button class="btn btn-primary" type="submit" data-i18n="news.send"></button>
+        <div class="form-status" role="status"></div>
+      </form>
+    </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-bottom" style="border:0;margin:0;padding:0">
+        <span>© <span data-year></span> <span data-setting="companyName"></span></span>
+        <span><a data-tel href="#" data-setting="phone"></a> · <a data-mailto href="#" data-setting="email"></a></span>
+      </div>
+    </div>
+  </footer>
+
+  <nav class="action-bar" aria-label="Quick actions">
+    <a class="btn btn-ghost" data-tel href="#" data-i18n="cta.call"></a>
+    <a class="btn btn-wa" data-wa hidden href="#" target="_blank" rel="noopener" data-i18n="cta.whatsapp"></a>
+    <a class="btn btn-primary" href="/#contact" data-keep-lang data-i18n="cta.quote.short"></a>
+  </nav>
+
+  <script src="/js/i18n.js"></script>
+  <script src="/js/common.js"></script>
+  <script src="/js/journal.js"></script>
+  <script src="/js/journal-page.js"></script>
+</body>
+</html>

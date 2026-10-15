@@ -98,9 +98,37 @@ function publicAlbum(a) {
     cover: cover ? `/uploads/${cover.file}` : null,
     photoCount: a.photos.length,
     photos: a.photos.map(p => ({ id: p.id, url: `/uploads/${p.file}`, caption: p.caption })),
+    likes: a.likes || 0,
     createdAt: a.createdAt
   };
 }
+const POST_CATEGORIES = ['tips', 'worksite', 'news'];
+function cleanPost(input, existing = {}) {
+  return {
+    ...existing,
+    title: i18nField(input.title, 200),
+    excerpt: i18nField(input.excerpt, 400),
+    body: i18nField(input.body, 20000),
+    category: POST_CATEGORIES.includes(input.category) ? input.category : POST_CATEGORIES[0],
+    published: Boolean(input.published)
+  };
+}
+function publicPost(p, full = false) {
+  const cover = p.photos.find(x => x.id === p.coverId) || p.photos[0] || null;
+  const out = {
+    id: p.id, title: p.title, excerpt: p.excerpt, category: p.category,
+    cover: cover ? `/uploads/${cover.file}` : null, date: p.publishedAt || p.createdAt
+  };
+  if (full) {
+    out.body = p.body;
+    out.photos = p.photos.map(x => ({ id: x.id, url: `/uploads/${x.file}` }));
+  }
+  return out;
+}
+const byDateDesc = (a, b) => (b.publishedAt || b.createdAt).localeCompare(a.publishedAt || a.createdAt);
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const HEX = /^#[0-9a-f]{6}$/i;
+
 function findAlbum(req, res) {
   const album = db.albums.find(a => a.id === req.params.id);
   if (!album) res.status(404).json({ error: 'not_found' });
@@ -151,6 +179,41 @@ app.get('/api/albums/:id', (req, res) => {
   const album = db.albums.find(a => a.id === req.params.id && a.published);
   if (!album) return res.status(404).json({ error: 'not_found' });
   res.json(publicAlbum(album));
+});
+
+app.post('/api/albums/:id/like', (req, res) => {
+  const album = db.albums.find(a => a.id === req.params.id && a.published);
+  if (!album) return res.status(404).json({ error: 'not_found' });
+  // One like per visitor (IP) per project per day; the browser also remembers it.
+  if (rateLimit(`like:${req.ip}:${album.id}`, 1, 24 * 60 * 60 * 1000)) {
+    album.likes = (album.likes || 0) + 1;
+    store.save();
+  }
+  res.json({ likes: album.likes || 0 });
+});
+
+app.get('/api/posts', (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 100, 100);
+  res.json(db.posts.filter(p => p.published).sort(byDateDesc).slice(0, limit).map(p => publicPost(p)));
+});
+
+app.get('/api/posts/:id', (req, res) => {
+  const post = db.posts.find(p => p.id === req.params.id && p.published);
+  if (!post) return res.status(404).json({ error: 'not_found' });
+  res.json(publicPost(post, true));
+});
+
+app.post('/api/subscribe', (req, res) => {
+  if (!rateLimit(`sub:${req.ip}`, 5, 60 * 60 * 1000)) return res.status(429).json({ error: 'too_many' });
+  const b = req.body || {};
+  if (str(b.website)) return res.json({ ok: true }); // honeypot
+  const email = str(b.email, 200).toLowerCase();
+  if (!EMAIL.test(email)) return res.status(400).json({ error: 'invalid_email' });
+  if (!db.subscribers.some(s => s.email === email)) {
+    db.subscribers.unshift({ email, lang: LANGS.includes(b.lang) ? b.lang : 'fr', createdAt: new Date().toISOString() });
+    store.save();
+  }
+  res.json({ ok: true });
 });
 
 app.post('/api/contact', (req, res) => {
@@ -277,8 +340,112 @@ admin.put('/settings', (req, res) => {
   }
   if (b.tagline) s.tagline = i18nField(b.tagline, 200);
   if (b.hours) s.hours = i18nField(b.hours, 200);
+  if (b.colors) {
+    s.colors = {};
+    for (const k of ['primary', 'dark']) s.colors[k] = HEX.test(b.colors[k]) ? b.colors[k] : '';
+  }
+  if (b.texts) {
+    // Only keep non-empty overrides with sane keys; an empty value means "use the default text".
+    s.texts = {};
+    for (const l of LANGS) {
+      s.texts[l] = {};
+      for (const [k, v] of Object.entries((b.texts && b.texts[l]) || {})) {
+        if (/^[a-z0-9.\-]{1,60}$/i.test(k) && typeof v === 'string' && v.trim()) s.texts[l][k] = v.trim().slice(0, 2000);
+      }
+    }
+  }
   store.save();
   res.json(s);
+});
+
+admin.post('/logo', upload.single('logo'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'invalid_file' });
+  if (db.settings.logo) removeFile(db.settings.logo);
+  db.settings.logo = req.file.filename;
+  store.save();
+  res.json({ logo: `/uploads/${req.file.filename}` });
+});
+admin.delete('/logo', (req, res) => {
+  if (db.settings.logo) removeFile(db.settings.logo);
+  db.settings.logo = '';
+  store.save();
+  res.json({ ok: true });
+});
+
+// Journal (blog) posts
+function findPost(req, res) {
+  const post = db.posts.find(p => p.id === req.params.id);
+  if (!post) res.status(404).json({ error: 'not_found' });
+  return post;
+}
+const adminPost = p => ({ ...publicPost(p, true), published: p.published, coverId: p.coverId, createdAt: p.createdAt });
+admin.get('/posts', (req, res) => res.json(db.posts.slice().sort(byDateDesc).map(adminPost)));
+admin.post('/posts', (req, res) => {
+  const post = { id: store.id(), ...cleanPost(req.body || {}), photos: [], coverId: null, createdAt: new Date().toISOString() };
+  if (!post.title.fr && !post.title.nl && !post.title.en) return res.status(400).json({ error: 'title_required' });
+  if (post.published) post.publishedAt = post.createdAt;
+  db.posts.push(post);
+  store.save();
+  res.status(201).json(adminPost(post));
+});
+admin.put('/posts/:id', (req, res) => {
+  const post = findPost(req, res);
+  if (!post) return;
+  Object.assign(post, cleanPost(req.body || {}, post));
+  if (post.published && !post.publishedAt) post.publishedAt = new Date().toISOString();
+  store.save();
+  res.json(adminPost(post));
+});
+admin.delete('/posts/:id', (req, res) => {
+  const post = findPost(req, res);
+  if (!post) return;
+  post.photos.forEach(x => removeFile(x.file));
+  db.posts = db.posts.filter(x => x.id !== post.id);
+  store.save();
+  res.json({ ok: true });
+});
+admin.post('/posts/:id/photos', upload.array('photos', 40), (req, res) => {
+  const post = db.posts.find(p => p.id === req.params.id);
+  if (!post) {
+    (req.files || []).forEach(f => removeFile(f.filename));
+    return res.status(404).json({ error: 'not_found' });
+  }
+  const added = (req.files || []).map(f => ({ id: store.id(), file: f.filename }));
+  post.photos.push(...added);
+  if (!post.coverId && post.photos.length) post.coverId = post.photos[0].id;
+  store.save();
+  res.json({ added: added.length });
+});
+admin.put('/posts/:id/photos/:photoId', (req, res) => {
+  const post = findPost(req, res);
+  if (!post) return;
+  if (post.photos.some(x => x.id === req.params.photoId)) post.coverId = req.params.photoId;
+  store.save();
+  res.json({ ok: true });
+});
+admin.delete('/posts/:id/photos/:photoId', (req, res) => {
+  const post = findPost(req, res);
+  if (!post) return;
+  const photo = post.photos.find(x => x.id === req.params.photoId);
+  if (photo) removeFile(photo.file);
+  post.photos = post.photos.filter(x => x.id !== req.params.photoId);
+  if (post.coverId === req.params.photoId) post.coverId = post.photos[0] ? post.photos[0].id : null;
+  store.save();
+  res.json({ ok: true });
+});
+
+// Newsletter subscribers
+admin.get('/subscribers', (req, res) => res.json(db.subscribers));
+admin.get('/subscribers.csv', (req, res) => {
+  const rows = [['email', 'lang', 'date'], ...db.subscribers.map(s => [s.email, s.lang, s.createdAt])];
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="abonati.csv"');
+  res.send(rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n'));
+});
+admin.delete('/subscribers/:email', (req, res) => {
+  db.subscribers = db.subscribers.filter(s => s.email !== req.params.email);
+  store.save();
+  res.json({ ok: true });
 });
 
 admin.get('/messages', (req, res) => res.json(db.messages));
@@ -321,6 +488,11 @@ if (!db.users.length && process.env.ADMIN_PASSWORD) {
 if (!db.seededAt && !db.albums.length) {
   require('./scripts/seed').seed({ log: () => {} });
   console.log(`Imported ${db.albums.length} projects.`);
+}
+// Sites set up before the journal existed get the starter articles once.
+if (!db.journalSeededAt && !db.posts.length) {
+  require('./scripts/seed').seedPosts({ log: () => {} });
+  console.log(`Imported ${db.posts.length} journal articles.`);
 }
 if (!db.users.length) {
   console.warn('\n⚠  No admin account yet. Set ADMIN_PASSWORD, or run:  npm run create-admin -- <username> <password>\n');

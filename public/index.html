@@ -26,7 +26,7 @@
         <a href="#projects" data-i18n="nav.projects">Realisaties</a>
         <a href="#process" data-i18n="nav.process">Werkwijze</a>
         <a href="#about" data-i18n="nav.about">Over ons</a>
-        <a href="#faq" data-i18n="nav.faq">FAQ</a>
+        <a href="/journal" data-keep-lang data-i18n="nav.journal">Journal</a>
         <a href="#contact" data-i18n="nav.contact">Contact</a>
       </nav>
       <div class="header-actions">
@@ -44,6 +44,7 @@
     <a class="link" href="#projects" data-i18n="nav.projects">Realisaties</a>
     <a class="link" href="#process" data-i18n="nav.process">Werkwijze</a>
     <a class="link" href="#about" data-i18n="nav.about">Over ons</a>
+    <a class="link" href="/journal" data-keep-lang data-i18n="nav.journal">Journal</a>
     <a class="link" href="#faq" data-i18n="nav.faq">FAQ</a>
     <a class="link" href="#contact" data-i18n="nav.contact">Contact</a>
     <a class="btn btn-primary" href="#contact" data-i18n="cta.quote"></a>
@@ -135,6 +136,31 @@
       </div>
     </section>
 
+    <section class="section" id="journal">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="kicker" data-i18n="journal.kicker"></span>
+          <h2 data-i18n="journal.title"></h2>
+          <p class="muted" data-i18n="journal.text"></p>
+        </div>
+        <div class="grid grid-2 grid-3" id="journal-grid"></div>
+        <p style="margin-top:24px"><a class="btn btn-ghost" href="/journal" data-keep-lang data-i18n="journal.all"></a></p>
+
+        <div class="newsletter reveal">
+          <div>
+            <h3 data-i18n="news.title"></h3>
+            <p data-i18n="news.text"></p>
+          </div>
+          <form class="newsletter-form" data-newsletter novalidate>
+            <input type="email" name="email" autocomplete="email" inputmode="email" required data-i18n-ph="news.placeholder" aria-label="E-mail">
+            <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+            <button class="btn btn-primary" type="submit" data-i18n="news.send"></button>
+            <div class="form-status" role="status"></div>
+          </form>
+        </div>
+      </div>
+    </section>
+
     <section class="section section-alt" id="faq">
       <div class="container" style="max-width:820px">
         <div class="section-head reveal">
@@ -193,7 +219,7 @@
           </div>
         </div>
         <div>
-          <p><a href="#services" data-i18n="nav.services"></a><br><a href="#projects" data-i18n="nav.projects"></a><br><a href="#process" data-i18n="nav.process"></a><br><a href="#about" data-i18n="nav.about"></a></p>
+          <p><a href="#services" data-i18n="nav.services"></a><br><a href="#projects" data-i18n="nav.projects"></a><br><a href="#process" data-i18n="nav.process"></a><br><a href="#about" data-i18n="nav.about"></a><br><a href="/journal" data-keep-lang data-i18n="nav.journal"></a></p>
         </div>
         <div>
           <p><a data-tel href="#" data-setting="phone"></a><br><a data-mailto href="#" data-setting="email"></a><br><span data-setting="address"></span><br><span data-setting="hours"></span></p>
@@ -214,6 +240,7 @@
 
   <script src="/js/i18n.js"></script>
   <script src="/js/common.js"></script>
+  <script src="/js/journal.js"></script>
   <script src="/js/home.js"></script>
 </body>
 </html>

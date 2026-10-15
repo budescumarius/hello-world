@@ -273,6 +273,60 @@ const PROJECTS = [
   }
 ];
 
+// Starter journal articles; photos are paths relative to the project root.
+const POSTS = [
+  {
+    slug: 'atelier-vilvorde', category: 'news',
+    photos: ['public/img/atelier-1.jpg', 'public/img/atelier-2.jpg'],
+    title: t('Bienvenue dans notre atelier à Vilvorde', 'Welkom in ons atelier in Vilvoorde', 'Welcome to our workshop in Vilvoorde'),
+    excerpt: t(
+      'Un coup d\'œil dans l\'atelier où naissent nos cuisines, dressings et escaliers sur mesure.',
+      'Een kijkje in het atelier waar onze keukens, dressings en trappen op maat ontstaan.',
+      'A look inside the workshop where our bespoke kitchens, wardrobes and staircases are made.'),
+    body: t(
+      'Chaque projet Timberway passe par notre atelier de Vilvorde. C\'est là que les panneaux sont découpés, usinés et assemblés avant la pose chez vous.\n\nNotre centre d\'usinage CNC permet des découpes et des perçages d\'une grande précision, même pour des formes courbes. La scie à format garantit des chants nets et des dimensions exactes.\n\nRésultat : moins d\'ajustements sur place, une pose plus rapide et des finitions plus propres. Vous avez un projet ? Venez nous en parler.',
+      'Elk Timberway-project passeert door ons atelier in Vilvoorde. Daar worden de panelen gezaagd, bewerkt en geassembleerd vóór de plaatsing bij u thuis.\n\nOns CNC-bewerkingscentrum zorgt voor uiterst nauwkeurig zagen en boren, zelfs voor gebogen vormen. De formaatzaag garandeert strakke kanten en exacte maten.\n\nHet resultaat: minder aanpassingen ter plaatse, een snellere plaatsing en een nettere afwerking. Een project in gedachten? Kom erover praten.',
+      'Every Timberway project goes through our workshop in Vilvoorde. That is where panels are cut, machined and assembled before being installed in your home.\n\nOur CNC machining centre delivers very precise cutting and drilling, even for curved shapes. The panel saw guarantees clean edges and exact dimensions.\n\nThe result: less adjusting on site, faster installation and cleaner finishes. Have a project in mind? Come and talk to us.')
+  },
+  {
+    slug: 'entretien-parquet-chene', category: 'tips',
+    photos: ['seed/photos/parquet-chevron-loft/01.jpg'],
+    title: t('5 conseils pour entretenir un parquet en chêne', '5 tips om een eiken parket te onderhouden', '5 tips to care for an oak parquet floor'),
+    excerpt: t(
+      'Quelques gestes simples pour garder votre parquet beau pendant des années.',
+      'Enkele eenvoudige gewoontes om uw parket jarenlang mooi te houden.',
+      'A few simple habits to keep your parquet beautiful for years.'),
+    body: t(
+      '1. Dépoussiérez souvent avec un aspirateur à brosse douce : le sable agit comme du papier de verre.\n\n2. Nettoyez avec une serpillière bien essorée et un savon adapté au parquet huilé ou vitrifié. Jamais de grandes quantités d\'eau.\n\n3. Placez des patins en feutre sous les pieds des chaises et des tables.\n\n4. Gardez une humidité intérieure entre 40 et 60 % : le bois travaille avec l\'air ambiant.\n\n5. Pour un parquet huilé, prévoyez un entretien à l\'huile environ une fois par an dans les pièces de passage.\n\nUn doute sur votre type de finition ? Contactez-nous, nous vous conseillons volontiers.',
+      '1. Stofzuig regelmatig met een zachte borstel: zand werkt als schuurpapier.\n\n2. Reinig met een goed uitgewrongen dweil en een zeep voor geolied of gevernist parket. Nooit veel water.\n\n3. Plaats viltjes onder de poten van stoelen en tafels.\n\n4. Houd de luchtvochtigheid binnen tussen 40 en 60 %: hout werkt mee met de lucht in huis.\n\n5. Geef geolied parket in drukke ruimtes ongeveer één keer per jaar een onderhoudsolie.\n\nTwijfelt u over uw afwerking? Neem contact op, we adviseren u graag.',
+      '1. Vacuum often with a soft brush: grit acts like sandpaper.\n\n2. Clean with a well-wrung mop and a soap suited to oiled or lacquered parquet. Never use lots of water.\n\n3. Put felt pads under chair and table legs.\n\n4. Keep indoor humidity between 40 and 60%: wood moves with the air in your home.\n\n5. For oiled parquet, plan a maintenance oil about once a year in busy rooms.\n\nNot sure which finish you have? Get in touch, we are happy to advise.')
+  }
+];
+
+// Adds the starter journal articles (replacing earlier copies).
+function seedPosts({ log = console.log, save = true } = {}) {
+  const db = store.load();
+  const seeded = a => typeof a.seed === 'string';
+  for (const p of db.posts.filter(seeded)) {
+    for (const x of p.photos) fs.rmSync(path.join(UPLOAD_DIR, x.file), { force: true });
+  }
+  db.posts = db.posts.filter(p => !seeded(p));
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  POSTS.forEach((post, i) => {
+    const { slug, photos: sources, ...fields } = post;
+    const photos = sources.filter(src => fs.existsSync(path.join(__dirname, '..', src))).map(src => {
+      const file = `seed-post-${slug}-${path.basename(src)}`;
+      fs.copyFileSync(path.join(__dirname, '..', src), path.join(UPLOAD_DIR, file));
+      return { id: store.id(), file };
+    });
+    const date = new Date(Date.now() - i * 86400000).toISOString();
+    db.posts.push({ id: store.id(), seed: slug, ...fields, published: true, photos, coverId: photos[0] ? photos[0].id : null, createdAt: date, publishedAt: date });
+    log(`  Journal: ${fields.title.fr}`);
+  });
+  db.journalSeededAt = new Date().toISOString();
+  if (save) store.save();
+}
+
 // Adds the projects (or with { remove: true } removes them). Safe to run twice: earlier copies are replaced.
 function seed({ remove = false, log = console.log } = {}) {
   const db = store.load();
@@ -282,6 +336,10 @@ function seed({ remove = false, log = console.log } = {}) {
     for (const p of a.photos) fs.rmSync(path.join(UPLOAD_DIR, p.file), { force: true });
   }
   db.albums = db.albums.filter(a => !seeded(a));
+  for (const p of db.posts.filter(seeded)) {
+    for (const x of p.photos) fs.rmSync(path.join(UPLOAD_DIR, x.file), { force: true });
+  }
+  db.posts = db.posts.filter(p => !seeded(p));
 
   if (remove) {
     store.save();
@@ -308,11 +366,12 @@ function seed({ remove = false, log = console.log } = {}) {
     });
     log(`  ${fields.title.fr}: ${photos.length} photo(s)`);
   });
+  seedPosts({ log, save: false });
   db.seededAt = new Date().toISOString();
   store.save();
 }
 
-module.exports = { seed };
+module.exports = { seed, seedPosts };
 
 if (require.main === module) {
   const remove = process.argv.includes('--remove');
