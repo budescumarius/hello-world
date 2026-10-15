@@ -15,6 +15,7 @@
       <h1>${App.esc(title)}</h1>
       <div class="project-meta">${meta.map(m => `<span>${App.esc(m)}</span>`).join('')}</div>
       <p class="project-desc">${App.esc(App.pick(project.description))}</p>`;
+    if (!project.photos.length) project.photos = [{ url: `/img/illustrations/${project.category}-1.svg`, caption: {} }];
     document.getElementById('gallery').innerHTML = project.photos.map((p, i) => `
       <button type="button" data-i="${i}" aria-label="${App.esc(App.pick(p.caption) || title)}">
         <img src="${App.esc(p.url)}" alt="${App.esc(App.pick(p.caption) || title)}" loading="${i < 4 ? 'eager' : 'lazy'}">

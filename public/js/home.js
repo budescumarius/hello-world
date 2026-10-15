@@ -40,7 +40,7 @@
       const meta = [p.location, p.year, `${p.photoCount} ${App.t('projects.photos')}`].filter(Boolean).join(' · ');
       return `
       <a class="project-card" href="/project?id=${encodeURIComponent(p.id)}&lang=${App.lang}">
-        ${p.cover ? `<img src="${App.esc(p.cover)}" alt="${App.esc(App.pick(p.title))}" loading="lazy">` : ''}
+        <img src="${App.esc(p.cover || `/img/illustrations/${p.category}-1.svg`)}" alt="${App.esc(App.pick(p.title))}" loading="lazy">
         <span class="badge">${App.esc(App.t(`cat.${p.category}`))}</span>
         <div class="overlay"><h3>${App.esc(App.pick(p.title))}</h3><div class="meta">${App.esc(meta)}</div></div>
       </a>`;
@@ -57,11 +57,12 @@
   }
 
   function useProjectPhotos() {
-    // Featured projects give the hero and about section a real photo.
+    // Featured projects give the hero and about section a real photo; illustrations fill in until there are some.
     const withCover = projects.filter(p => p.cover);
-    if (withCover[0]) document.getElementById('hero-bg').style.setProperty('--hero-img', `url("${withCover[0].cover}")`);
-    const about = withCover[1] || withCover[0];
-    if (about) document.getElementById('about-visual').innerHTML = `<img src="${App.esc(about.cover)}" alt="" loading="lazy">`;
+    const hero = withCover[0] ? withCover[0].cover : '/img/illustrations/extension-2.svg';
+    const about = (withCover[1] || withCover[0] || {}).cover || '/img/illustrations/interior-1.svg';
+    document.getElementById('hero-bg').style.setProperty('--hero-img', `url("${hero}")`);
+    document.getElementById('about-visual').innerHTML = `<img src="${App.esc(about)}" alt="" loading="lazy">`;
   }
 
   function renderAll() {

@@ -26,6 +26,13 @@ npm run create-admin -- admin ParolaTaSigura123   # creează contul de admin
 npm start                                         # http://localhost:3000
 ```
 
+Pentru a vedea site-ul plin înainte să ai poze proprii, adaugă 6 proiecte demo cu ilustrații:
+
+```bash
+npm run demo               # adaugă proiectele demo
+npm run demo -- --remove   # le șterge când pui proiectele reale
+```
+
 Fără parolă (`npm run create-admin -- admin`) se generează una aleatorie și se afișează o singură dată.
 
 Variabile opționale: `PORT`, `DATA_DIR` (implicit `./data`), `UPLOAD_DIR` (implicit `./uploads`), `SESSION_SECRET`.
@@ -42,3 +49,5 @@ Fă backup periodic la `data/db.json` și la folderul `uploads/`.
 - Calculator orientativ de preț pentru terase sau carporturi
 - Notificare pe e-mail la fiecare cerere de ofertă nouă (SMTP)
 - Logo-ul și pozele reale ale firmei (logo-ul e în `public/img/logo.svg`)
+
+Cât timp un proiect nu are poze, site-ul afișează automat o ilustrație potrivită categoriei (din `public/img/illustrations/`, generate cu `node scripts/generate-illustrations.js`).

@@ -19,6 +19,7 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { scroll-behavior: smooth; scroll-padding-top: var(--header-h); -webkit-text-size-adjust: 100%; }
 body { margin: 0; font-family: var(--font-body); color: var(--ink); background: var(--sand-50); line-height: 1.6; font-size: 16px; }
 img { max-width: 100%; display: block; }
@@ -219,6 +220,10 @@ textarea { min-height: 120px; resize: vertical; }
   .split { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; }
   .split > * + * { margin-top: 0; }
   .hero { align-items: center; }
+  .hero-bg { background:
+    linear-gradient(90deg, rgba(43,29,18,.88) 0%, rgba(43,29,18,.6) 45%, rgba(43,29,18,.15) 100%),
+    var(--hero-img, repeating-linear-gradient(100deg, #6b4423 0 14px, #7a4f2a 14px 22px, #5e3b1e 22px 40px, #835a33 40px 48px));
+    background-size: cover; background-position: center; }
   .hero .container { padding-bottom: 64px; }
   .stats { max-width: 560px; }
   .action-bar { display: none; }
