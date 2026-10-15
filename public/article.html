@@ -14,15 +14,44 @@
 <body data-page="article">
   <header class="header">
     <div class="container">
-      <a class="brand" href="/" data-keep-lang><img class="brand-mark" src="/img/logo-mark.svg" alt=""><span class="brand-name" data-setting="companyName"></span></a>
+      <a class="brand" href="/" data-keep-lang><img class="brand-mark" src="/img/logo-mark.svg" alt=""><span class="brand-name" data-setting="companyName">Timberway</span></a>
+      <nav class="nav" aria-label="Main">
+        <a href="/#services" data-keep-lang data-i18n="nav.services">Diensten</a>
+        <a href="/#projects" data-keep-lang data-i18n="nav.projects">Realisaties</a>
+        <a href="/estimate" data-keep-lang data-i18n="nav.estimate">Estimation</a>
+        <a href="/#about" data-keep-lang data-i18n="nav.about">Over ons</a>
+        <a href="/journal" data-keep-lang aria-current="page" data-i18n="nav.journal">Journal</a>
+        <a href="/#contact" data-keep-lang data-i18n="nav.contact">Contact</a>
+      </nav>
       <div class="header-actions">
+        <div class="socials header-socials">
+          <a data-social="instagram" hidden href="#" aria-label="Instagram" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor"/></svg></a>
+          <a data-social="facebook" hidden href="#" aria-label="Facebook" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 8h3V4h-3a4 4 0 0 0-4 4v2H8v4h2v8h4v-8h3l1-4h-4V8z"/></svg></a>
+        </div>
         <div class="lang-switch" role="group" aria-label="Language">
           <button type="button" data-lang="fr">FR</button><button type="button" data-lang="nl">NL</button><button type="button" data-lang="en">EN</button>
         </div>
-        <a class="btn btn-primary header-quote" href="/#contact" data-keep-lang data-i18n="cta.quote.short"></a>
+        <a class="btn btn-primary header-quote" href="/#contact" data-keep-lang data-i18n="cta.quote.short">Gratis offerte</a>
+        <button class="menu-btn" type="button" aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu"><span></span></button>
       </div>
     </div>
   </header>
+  <div class="mobile-menu" id="mobile-menu">
+    <a class="link" href="/#services" data-keep-lang data-i18n="nav.services">Diensten</a>
+    <a class="link" href="/#projects" data-keep-lang data-i18n="nav.projects">Realisaties</a>
+    <a class="link" href="/#process" data-keep-lang data-i18n="nav.process">Werkwijze</a>
+    <a class="link" href="/#about" data-keep-lang data-i18n="nav.about">Over ons</a>
+    <a class="link" href="/estimate" data-keep-lang data-i18n="nav.estimate">Estimation</a>
+    <a class="link" href="/journal" data-keep-lang aria-current="page" data-i18n="nav.journal">Journal</a>
+    <a class="link" href="/#faq" data-keep-lang data-i18n="nav.faq">FAQ</a>
+    <a class="link" href="/#contact" data-keep-lang data-i18n="nav.contact">Contact</a>
+    <a class="btn btn-primary" href="/#contact" data-keep-lang data-i18n="cta.quote"></a>
+    <a class="btn btn-ghost" data-tel href="#"><span data-i18n="cta.call"></span>&nbsp;·&nbsp;<span data-setting="phone"></span></a>
+    <div class="socials menu-socials">
+      <a data-social="instagram" hidden href="#" aria-label="Instagram" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor"/></svg></a>
+      <a data-social="facebook" hidden href="#" aria-label="Facebook" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 8h3V4h-3a4 4 0 0 0-4 4v2H8v4h2v8h4v-8h3l1-4h-4V8z"/></svg></a>
+    </div>
+  </div>
 
   <main class="container" id="main">
     <article class="article">

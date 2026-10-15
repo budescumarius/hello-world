@@ -32,8 +32,9 @@
   document.addEventListener('DOMContentLoaded', async () => {
     const id = new URLSearchParams(location.search).get('id');
     try {
-      const res = await fetch(`/api/posts/${encodeURIComponent(id || '')}`);
-      post = res.ok ? await res.json() : false;
+      const res = id ? await fetch(`/api/posts/${encodeURIComponent(id)}`) : null;
+      const data = res && res.ok ? await res.json() : null;
+      post = data && data.id ? data : false;
     } catch (e) { post = false; }
     render();
   });

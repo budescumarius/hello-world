@@ -47,8 +47,9 @@
   document.addEventListener('DOMContentLoaded', async () => {
     const id = new URLSearchParams(location.search).get('id');
     try {
-      const res = await fetch(`/api/albums/${encodeURIComponent(id || '')}`);
-      project = res.ok ? await res.json() : false;
+      const res = id ? await fetch(`/api/albums/${encodeURIComponent(id)}`) : null;
+      const data = res && res.ok ? await res.json() : null;
+      project = data && data.id ? data : false;
     } catch (e) { project = false; }
     render();
   });
