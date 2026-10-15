@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "create-admin": "node scripts/create-admin.js",
-    "demo": "node scripts/seed-demo.js"
+    "seed": "node scripts/seed.js"
   },
   "engines": { "node": ">=18" },
   "dependencies": {

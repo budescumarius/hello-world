@@ -1,11 +1,11 @@
-# Site firmă construcții din lemn (NL / FR / EN)
+# Timberway — site nou (FR / NL / EN)
 
-Site modern, adaptat pentru mobil, în **trei limbi (neerlandeză, franceză, engleză)**, cu **panou de administrare** din care adaugi proiecte (albume) și poze.
+Site modern pentru Timberway (mobilier la comandă, tâmplărie, restaurare), adaptat pentru mobil, în **trei limbi (franceză, neerlandeză, engleză)**, cu **panou de administrare** din care adaugi proiecte (albume) și poze.
 
 ## Ce conține
 
 **Site public**
-- Prima pagină: hero, servicii, „De ce lemn?”, realizări (proiecte cu filtre pe categorii), procesul în 4 pași, despre noi, întrebări frecvente, formular de ofertă gratuită
+- Prima pagină: hero cu sloganul „Your Space. Our Work. Your Way.”, servicii (bucătării, mobilier, băi, scări, parchet, restaurare), angajamentul Timberway, realizări cu filtre pe categorii, procesul în 3 pași, despre noi (atelierul din Vilvoorde, fondatorul), întrebări frecvente, formular de contact
 - Pagină pentru fiecare proiect, cu galerie foto și lightbox (swipe pe telefon, săgeți pe desktop)
 - Comutator de limbă NL / FR / EN; limba se alege automat după browser și se ține minte
 - Pe mobil: meniu tip hamburger și o bară fixă jos cu **Sună**, **WhatsApp** și **Ofertă gratuită**
@@ -16,7 +16,7 @@ Site modern, adaptat pentru mobil, în **trei limbi (neerlandeză, franceză, en
 - **Proiecte**: creezi, editezi sau ștergi un proiect, cu titlu și descriere în NL/FR/EN, categorie, localitate, an, publicat sau ciornă, evidențiat
 - **Poze**: încărcare multiplă direct din telefon (galerie sau cameră) ori prin drag & drop. Pozele sunt micșorate automat în browser înainte de upload. Poți alege coperta, reordona, adăuga descrieri și șterge
 - **Mesaje**: cererile de ofertă trimise din formularul de pe site
-- **Setări**: numele firmei, telefon, WhatsApp, e-mail, adresă, TVA, Facebook/Instagram, slogan, zonă de activitate, cifrele de pe prima pagină și schimbarea parolei
+- **Setări**: numele firmei, telefon, WhatsApp, e-mail, adresă, TVA, fondator, program, Facebook/Instagram, slogan și schimbarea parolei
 
 ## Pornire
 
@@ -26,12 +26,14 @@ npm run create-admin -- admin ParolaTaSigura123   # creează contul de admin
 npm start                                         # http://localhost:3000
 ```
 
-Pentru a vedea site-ul plin înainte să ai poze proprii, adaugă 6 proiecte demo cu ilustrații:
+Pentru a importa proiectele Timberway (texte de pe site-ul vechi, traduse în NL/EN):
 
 ```bash
-npm run demo               # adaugă proiectele demo
-npm run demo -- --remove   # le șterge când pui proiectele reale
+npm run seed               # adaugă proiectele (Ixelles, Bruxelles)
+npm run seed -- --remove   # le șterge
 ```
+
+Pozele proiectelor se pun în `seed/photos/<proiect>/` (ex. `seed/photos/ixelles/01.webp`, `02.webp`…). Se iau în ordinea numelui, iar ultima poză devine copertă.
 
 Fără parolă (`npm run create-admin -- admin`) se generează una aleatorie și se afișează o singură dată.
 

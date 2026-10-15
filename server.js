@@ -8,7 +8,7 @@ const store = require('./lib/db');
 const PORT = process.env.PORT || 3000;
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
 const LANGS = ['nl', 'fr', 'en'];
-const CATEGORIES = ['timber-frame', 'extension', 'roof-carport', 'terrace-cladding', 'interior', 'renovation'];
+const CATEGORIES = ['kitchen', 'furniture', 'bathroom', 'stairs', 'parquet', 'restoration'];
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -272,11 +272,11 @@ admin.get('/settings', (req, res) => res.json(db.settings));
 admin.put('/settings', (req, res) => {
   const b = req.body || {};
   const s = db.settings;
-  for (const k of ['companyName', 'phone', 'whatsapp', 'email', 'address', 'vat', 'facebook', 'instagram', 'statYears', 'statProjects', 'statWeeks']) {
+  for (const k of ['companyName', 'phone', 'whatsapp', 'email', 'address', 'vat', 'founder', 'facebook', 'instagram']) {
     if (k in b) s[k] = str(b[k], 300);
   }
   if (b.tagline) s.tagline = i18nField(b.tagline, 200);
-  if (b.region) s.region = i18nField(b.region, 200);
+  if (b.hours) s.hours = i18nField(b.hours, 200);
   store.save();
   res.json(s);
 });

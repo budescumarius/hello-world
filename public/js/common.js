@@ -1,5 +1,5 @@
 (function () {
-  const LANGS = ['nl', 'fr', 'en'];
+  const LANGS = ['fr', 'nl', 'en'];
 
   function detectLang() {
     const fromUrl = new URLSearchParams(location.search).get('lang');
@@ -9,18 +9,18 @@
       if (LANGS.includes(saved)) return saved;
     } catch (e) { /* storage blocked */ }
     const nav = (navigator.languages || [navigator.language || 'nl']).map(l => l.slice(0, 2).toLowerCase());
-    return nav.find(l => LANGS.includes(l)) || 'nl';
+    return nav.find(l => LANGS.includes(l)) || 'fr';
   }
 
   const App = {
     lang: detectLang(),
     settings: null,
     listeners: [],
-    t(key) { return (I18N[App.lang] && I18N[App.lang][key]) || I18N.nl[key] || key; },
+    t(key) { return (I18N[App.lang] && I18N[App.lang][key]) || I18N.fr[key] || key; },
     // Pick the current language from an {nl, fr, en} object, falling back to any filled-in language.
     pick(obj) {
       if (!obj) return '';
-      return obj[App.lang] || obj.nl || obj.fr || obj.en || '';
+      return obj[App.lang] || obj.fr || obj.nl || obj.en || '';
     },
     esc(s) {
       return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -71,6 +71,7 @@
         a.hidden = !s[k];
         if (s[k]) a.href = s[k];
       }));
+      document.querySelectorAll('[data-if]').forEach(el => { el.hidden = !s[el.dataset.if]; });
       document.querySelectorAll('[data-year]').forEach(el => { el.textContent = new Date().getFullYear(); });
       if (document.body.dataset.page === 'home') document.title = `${s.companyName} — ${App.pick(s.tagline)}`;
     },

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1200" width="1600" height="1200"><defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a9bccd"/><stop offset="1" stop-color="#e2e6e2"/></linearGradient>
+    <linearGradient id="floor" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a7733f"/><stop offset="1" stop-color="#c99862"/></linearGradient>
+    <linearGradient id="stone" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f7f5f2"/><stop offset="1" stop-color="#dcd8d2"/></linearGradient>
+    <linearGradient id="mirror" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e4eef2"/><stop offset="1" stop-color="#9fb4bd"/></linearGradient>
+    <pattern id="slats" width="34" height="40" patternUnits="userSpaceOnUse"><rect width="34" height="40" fill="#c99862"/><rect width="26" height="40" fill="#e3bf8f"/></pattern>
+    <pattern id="veneer" width="120" height="60" patternUnits="userSpaceOnUse"><rect width="120" height="60" fill="#e3bf8f"/><path d="M0 20 Q30 12 60 20 T120 20 M0 44 Q30 36 60 44 T120 44" stroke="#c99862" stroke-width="2" fill="none" opacity=".5"/></pattern>
+    <pattern id="herring" width="80" height="80" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="80" height="80" fill="#c99862"/><rect width="38" height="78" fill="#e3bf8f"/><rect x="40" y="0" width="38" height="38" fill="#a7733f"/><rect x="40" y="40" width="38" height="38" fill="#c99862"/></pattern>
+  </defs><rect width="1600" height="1200" fill="#dfe3df"/>
+    <rect y="900" width="1600" height="300" fill="#d8d2c8"/><path d="M0 1000 H1600 M0 1120 H1600 M400 900 V1200 M800 900 V1200 M1200 900 V1200" stroke="#c6beb2" stroke-width="3"/>
+    <rect x="0" y="0" width="300" height="900" fill="url(#slats)"/>
+    <circle cx="820" cy="320" r="190" fill="url(#mirror)" stroke="#a7733f" stroke-width="14"/>
+    <path d="M700 230 q60 -40 120 -30" stroke="#fff" stroke-width="10" opacity=".5" fill="none"/>
+    <path d="M460 600 H1180 Q1240 600 1240 660 V760 Q1240 820 1180 820 H460 Q400 820 400 760 V660 Q400 600 460 600 Z" fill="url(#veneer)" stroke="#a7733f" stroke-width="8"/>
+    <path d="M820 610 V810" stroke="#a7733f" stroke-width="5"/>
+    <rect x="390" y="580" width="860" height="26" rx="10" fill="url(#stone)"/>
+    <ellipse cx="820" cy="580" rx="150" ry="34" fill="#fff"/><path d="M820 480 v60 q0 20 30 20" stroke="#2f2a26" stroke-width="12" fill="none" stroke-linecap="round"/>
+    <path d="M1320 300 h160 a40 40 0 0 1 0 80 h-160 z M1320 460 h200 a40 40 0 0 1 0 80 h-200 z" fill="#c99862"/>
+    <g fill="#f4f1ec"><rect x="1350" y="240" width="40" height="60" rx="8"/><rect x="1400" y="410" width="60" height="50" rx="8"/></g>
+    <g transform="translate(1450 900) scale(0.9)"><rect x="-45" y="-80" width="90" height="80" rx="10" fill="#d9cfc2"/><g fill="#5f8a55"><ellipse cx="-26" cy="-150" rx="26" ry="78" transform="rotate(-20 -26 -150)"/><ellipse cx="26" cy="-160" rx="24" ry="86" transform="rotate(18 26 -160)"/><ellipse cy="-176" rx="22" ry="94"/></g></g>
+    <rect width="1600" height="1200" fill="rgba(235,240,255,.25)" opacity=".4"/></svg>

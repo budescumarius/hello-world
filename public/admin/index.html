@@ -53,26 +53,26 @@
         <form id="album-form" class="panel">
           <h2 id="album-form-title">Proiect nou</h2>
           <div class="lang-tabs" role="tablist">
-            <button type="button" data-l="nl" class="active">NL</button>
-            <button type="button" data-l="fr">FR</button>
+            <button type="button" data-l="fr" class="active">FR</button>
+            <button type="button" data-l="nl">NL</button>
             <button type="button" data-l="en">EN</button>
           </div>
           <div class="lang-fields">
-            <div data-lf="nl"><label>Titlu (NL)<input name="title.nl"></label><label>Descriere (NL)<textarea name="description.nl" rows="5"></textarea></label></div>
-            <div data-lf="fr" hidden><label>Titlu (FR)<input name="title.fr"></label><label>Descriere (FR)<textarea name="description.fr" rows="5"></textarea></label></div>
+            <div data-lf="fr"><label>Titlu (FR)<input name="title.fr"></label><label>Descriere (FR)<textarea name="description.fr" rows="5"></textarea></label></div>
+            <div data-lf="nl" hidden><label>Titlu (NL)<input name="title.nl"></label><label>Descriere (NL)<textarea name="description.nl" rows="5"></textarea></label></div>
             <div data-lf="en" hidden><label>Titlu (EN)<input name="title.en"></label><label>Descriere (EN)<textarea name="description.en" rows="5"></textarea></label></div>
           </div>
           <p class="hint">Dacă lași o limbă goală, site-ul afișează automat textul din altă limbă.</p>
           <div class="grid3">
             <label>Categorie<select name="category">
-              <option value="timber-frame">Casă structură lemn</option>
-              <option value="extension">Extindere / etaj</option>
-              <option value="roof-carport">Acoperiș / carport</option>
-              <option value="terrace-cladding">Terasă / placare fațadă</option>
-              <option value="interior">Interior / tâmplărie</option>
-              <option value="renovation">Renovare / izolație</option>
+              <option value="kitchen">Bucătărie</option>
+              <option value="furniture">Mobilier (dressing, biblioteci…)</option>
+              <option value="bathroom">Baie</option>
+              <option value="stairs">Scări / amenajări</option>
+              <option value="parquet">Parchet</option>
+              <option value="restoration">Restaurare</option>
             </select></label>
-            <label>Localitate<input name="location" placeholder="ex. Gent"></label>
+            <label>Localitate<input name="location" placeholder="ex. Bruxelles"></label>
             <label>An<input name="year" inputmode="numeric" maxlength="4" placeholder="2026"></label>
           </div>
           <div class="checks">
@@ -117,22 +117,17 @@
             <label>E-mail<input name="email" type="email"></label>
             <label>Adresă<input name="address"></label>
             <label>TVA / BTW<input name="vat"></label>
+            <label>Fondator (apare la „Despre noi”)<input name="founder"></label>
             <label>Facebook URL<input name="facebook" type="url"></label>
             <label>Instagram URL<input name="instagram" type="url"></label>
           </div>
           <h3>Slogan</h3>
           <div class="grid3">
-            <label>NL<input name="tagline.nl"></label><label>FR<input name="tagline.fr"></label><label>EN<input name="tagline.en"></label>
+            <label>FR<input name="tagline.fr"></label><label>NL<input name="tagline.nl"></label><label>EN<input name="tagline.en"></label>
           </div>
-          <h3>Zonă de activitate</h3>
+          <h3>Program</h3>
           <div class="grid3">
-            <label>NL<input name="region.nl"></label><label>FR<input name="region.fr"></label><label>EN<input name="region.en"></label>
-          </div>
-          <h3>Cifre pe prima pagină</h3>
-          <div class="grid3">
-            <label>Ani de experiență<input name="statYears" inputmode="numeric"></label>
-            <label>Nr. proiecte<input name="statProjects" inputmode="numeric"></label>
-            <label>Săptămâni șantier (medie)<input name="statWeeks" inputmode="numeric"></label>
+            <label>FR<input name="hours.fr"></label><label>NL<input name="hours.nl"></label><label>EN<input name="hours.en"></label>
           </div>
           <button class="btn primary" type="submit">Salvează setările</button>
           <p class="status" id="settings-status"></p>

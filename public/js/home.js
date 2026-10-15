@@ -1,12 +1,12 @@
 (function () {
-  const CATS = ['timber-frame', 'extension', 'roof-carport', 'terrace-cladding', 'interior', 'renovation'];
+  const CATS = ['kitchen', 'furniture', 'bathroom', 'stairs', 'parquet', 'restoration'];
   const ICONS = {
-    'timber-frame': '<path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6M5 14h14M12 10v4"/>',
-    'extension': '<rect x="2" y="9" width="11" height="11"/><path d="M2 9l5.5-5L13 9"/><rect x="13" y="13" width="9" height="7" stroke-dasharray="2 2"/>',
-    'roof-carport': '<path d="M2 9h20L12 4z"/><path d="M5 9v11M19 9v11"/><rect x="8" y="14" width="8" height="4" rx="1"/>',
-    'terrace-cladding': '<path d="M3 6h18M3 10h18M3 14h18M3 18h18"/><path d="M7 6v4M14 10v4M9 14v4M17 6v4"/>',
-    'interior': '<path d="M4 21V9h4V5h4v4h4V5h4v16"/><path d="M4 15h16"/>',
-    'renovation': '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-.5-.5-2.5z"/>'
+    'kitchen': '<rect x="3" y="11" width="18" height="9" rx="1"/><path d="M3 15h18M9 11v9M15 11v9"/><path d="M6 7h4M14 4v4M12 4h4"/>',
+    'furniture': '<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M12 3v18M10 11v2M14 11v2M4 17h16"/>',
+    'bathroom': '<path d="M4 12h16v2a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M7 12V6a2 2 0 0 1 4 0M8 19l-1 2M16 19l1 2"/>',
+    'stairs': '<path d="M3 21h5v-5h5v-5h5V6h3"/><path d="M3 21V9"/>',
+    'parquet': '<path d="M3 3l6 6-6 6M9 3l6 6-6 6M15 3l6 6-6 6M3 15l6 6M9 15l6 6M15 15l6 6"/>',
+    'restoration': '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-.5-.5-2.5z"/>'
   };
 
   let projects = [];
@@ -59,8 +59,8 @@
   function useProjectPhotos() {
     // Featured projects give the hero and about section a real photo; illustrations fill in until there are some.
     const withCover = projects.filter(p => p.cover);
-    const hero = withCover[0] ? withCover[0].cover : '/img/illustrations/extension-2.svg';
-    const about = (withCover[1] || withCover[0] || {}).cover || '/img/illustrations/interior-1.svg';
+    const hero = withCover[0] ? withCover[0].cover : '/img/illustrations/kitchen-1.svg';
+    const about = (withCover[1] || withCover[0] || {}).cover || '/img/illustrations/furniture-1.svg';
     document.getElementById('hero-bg').style.setProperty('--hero-img', `url("${hero}")`);
     document.getElementById('about-visual').innerHTML = `<img src="${App.esc(about)}" alt="" loading="lazy">`;
   }

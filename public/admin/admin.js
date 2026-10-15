@@ -2,8 +2,8 @@
   const $ = s => document.querySelector(s);
   const $$ = s => Array.from(document.querySelectorAll(s));
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const pick = o => (o && (o.nl || o.fr || o.en)) || '(fără titlu)';
-  const CAT = { 'timber-frame': 'Casă lemn', 'extension': 'Extindere', 'roof-carport': 'Acoperiș/carport', 'terrace-cladding': 'Terasă/fațadă', 'interior': 'Interior', 'renovation': 'Renovare' };
+  const pick = o => (o && (o.fr || o.nl || o.en)) || '(fără titlu)';
+  const CAT = { kitchen: 'Bucătărie', furniture: 'Mobilier', bathroom: 'Baie', stairs: 'Scări / amenajări', parquet: 'Parchet', restoration: 'Restaurare' };
   const ERR = { invalid_credentials: 'Utilizator sau parolă greșită.', too_many: 'Prea multe încercări. Încearcă mai târziu.', title_required: 'Completează titlul în cel puțin o limbă.', wrong_password: 'Parola actuală e greșită.', too_short: 'Parola nouă trebuie să aibă minim 10 caractere.' };
 
   let albums = [];
@@ -87,7 +87,7 @@
       f.elements[`title.${l}`].value = (a && a.title[l]) || '';
       f.elements[`description.${l}`].value = (a && a.description[l]) || '';
     }
-    f.elements.category.value = (a && a.category) || 'timber-frame';
+    f.elements.category.value = (a && a.category) || 'kitchen';
     f.elements.location.value = (a && a.location) || '';
     f.elements.year.value = (a && a.year) || String(new Date().getFullYear());
     f.elements.published.checked = a ? a.published : true;
@@ -96,7 +96,7 @@
     $('#delete-album').hidden = !a;
     $('#photos-panel').hidden = !a;
     $('#album-status').textContent = '';
-    setLangTab('nl');
+    setLangTab('fr');
   }
 
   function readAlbumForm() {
@@ -311,7 +311,7 @@
   }
   $('#settings-form').addEventListener('submit', async e => {
     e.preventDefault();
-    const data = { tagline: {}, region: {} };
+    const data = { tagline: {}, hours: {} };
     for (const el of e.target.elements) {
       if (!el.name) continue;
       const [k, l] = el.name.split('.');

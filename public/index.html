@@ -1,13 +1,13 @@
 <!doctype html>
-<html lang="nl">
+<html lang="fr">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Timberway</title>
-  <meta name="description" content="Houtskeletbouw, aanbouw, carports, terrassen en renovatie in hout. Construction ossature bois. Timber frame construction in Belgium.">
+  <title>Timberway — Mobilier sur mesure & menuiserie</title>
+  <meta name="description" content="Timberway : mobilier sur mesure, cuisines, escaliers, parquet et restauration du bois. Maatmeubelen en schrijnwerk. Bespoke furniture and joinery — Asse / Vilvoorde, Belgique.">
   <meta name="theme-color" content="#2b1d12">
-  <link rel="alternate" hreflang="nl" href="/?lang=nl">
   <link rel="alternate" hreflang="fr" href="/?lang=fr">
+  <link rel="alternate" hreflang="nl" href="/?lang=nl">
   <link rel="alternate" hreflang="en" href="/?lang=en">
   <link rel="icon" href="/img/logo.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -31,9 +31,9 @@
       </nav>
       <div class="header-actions">
         <div class="lang-switch" role="group" aria-label="Language">
-          <button type="button" data-lang="nl">NL</button><button type="button" data-lang="fr">FR</button><button type="button" data-lang="en">EN</button>
+          <button type="button" data-lang="fr">FR</button><button type="button" data-lang="nl">NL</button><button type="button" data-lang="en">EN</button>
         </div>
-        <a class="btn btn-primary header-quote" href="#contact" data-i18n="cta.quote">Gratis offerte</a>
+        <a class="btn btn-primary header-quote" href="#contact" data-i18n="cta.quote.short">Gratis offerte</a>
         <button class="menu-btn" type="button" aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu"><span></span></button>
       </div>
     </div>
@@ -46,8 +46,8 @@
     <a class="link" href="#about" data-i18n="nav.about">Over ons</a>
     <a class="link" href="#faq" data-i18n="nav.faq">FAQ</a>
     <a class="link" href="#contact" data-i18n="nav.contact">Contact</a>
-    <a class="btn btn-primary" href="#contact" data-i18n="cta.quote">Gratis offerte</a>
-    <a class="btn btn-ghost" data-tel href="#"><span data-i18n="cta.call">Bel ons</span>&nbsp;·&nbsp;<span data-setting="phone"></span></a>
+    <a class="btn btn-primary" href="#contact" data-i18n="cta.quote"></a>
+    <a class="btn btn-ghost" data-tel href="#"><span data-i18n="cta.call"></span>&nbsp;·&nbsp;<span data-setting="phone"></span></a>
   </div>
 
   <main id="main">
@@ -62,11 +62,10 @@
           <a class="btn btn-ghost" href="#projects" data-i18n="cta.projects"></a>
         </div>
         <div class="stats">
-          <div class="stat"><strong><span data-setting="statYears"></span>+</strong><span data-i18n="stats.years"></span></div>
-          <div class="stat"><strong><span data-setting="statProjects"></span>+</strong><span data-i18n="stats.projects"></span></div>
-          <div class="stat"><strong>±<span data-setting="statWeeks"></span></strong><span data-i18n="stats.weeks"></span></div>
+          <div class="stat"><strong data-i18n="facts.1.t"></strong><span data-i18n="facts.1.d"></span></div>
+          <div class="stat"><strong data-i18n="facts.2.t"></strong><span data-i18n="facts.2.d"></span></div>
+          <div class="stat"><strong data-i18n="facts.3.t"></strong><span data-i18n="facts.3.d"></span></div>
         </div>
-        <div class="stats-note" data-i18n="stats.note"></div>
       </div>
     </section>
 
@@ -112,11 +111,10 @@
           <span class="kicker" data-i18n="process.kicker"></span>
           <h2 data-i18n="process.title"></h2>
         </div>
-        <div class="grid grid-2 grid-4 steps">
+        <div class="grid grid-3 steps">
           <div class="step reveal"><h3 data-i18n="process.1.t"></h3><p data-i18n="process.1.d"></p></div>
           <div class="step reveal"><h3 data-i18n="process.2.t"></h3><p data-i18n="process.2.d"></p></div>
           <div class="step reveal"><h3 data-i18n="process.3.t"></h3><p data-i18n="process.3.d"></p></div>
-          <div class="step reveal"><h3 data-i18n="process.4.t"></h3><p data-i18n="process.4.d"></p></div>
         </div>
       </div>
     </section>
@@ -132,6 +130,7 @@
           <ul class="checklist">
             <li data-i18n="about.p1"></li><li data-i18n="about.p2"></li><li data-i18n="about.p3"></li><li data-i18n="about.p4"></li>
           </ul>
+          <div class="founder" data-if="founder"><strong data-setting="founder"></strong><span data-i18n="about.role"></span></div>
         </div>
       </div>
     </section>
@@ -161,7 +160,7 @@
             <a data-tel href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><span><small data-i18n="contact.phone"></small><span data-setting="phone"></span></span></a>
             <a data-mailto href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg><span><small data-i18n="contact.email"></small><span data-setting="email"></span></span></a>
             <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg><span><small data-i18n="contact.address"></small><span data-setting="address"></span></span></div>
-            <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg><span><small data-i18n="contact.region"></small><span data-setting="region"></span></span></div>
+            <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span><small data-i18n="contact.hours"></small><span data-setting="hours"></span></span></div>
           </div>
         </div>
         <div class="contact-card reveal">
@@ -197,12 +196,12 @@
           <p><a href="#services" data-i18n="nav.services"></a><br><a href="#projects" data-i18n="nav.projects"></a><br><a href="#process" data-i18n="nav.process"></a><br><a href="#about" data-i18n="nav.about"></a></p>
         </div>
         <div>
-          <p><a data-tel href="#" data-setting="phone"></a><br><a data-mailto href="#" data-setting="email"></a><br><span data-setting="address"></span></p>
+          <p><a data-tel href="#" data-setting="phone"></a><br><a data-mailto href="#" data-setting="email"></a><br><span data-setting="address"></span><br><span data-setting="hours"></span></p>
         </div>
       </div>
       <div class="footer-bottom">
         <span>© <span data-year></span> <span data-setting="companyName"></span> · <span data-i18n="footer.rights"></span></span>
-        <span><span data-i18n="footer.vat"></span> <span data-setting="vat"></span> · <a href="/admin" data-i18n="footer.admin"></a></span>
+        <span><span data-if="vat"><span data-i18n="footer.vat"></span> <span data-setting="vat"></span> · </span><a href="/admin" data-i18n="footer.admin"></a></span>
       </div>
     </div>
   </footer>
@@ -210,7 +209,7 @@
   <nav class="action-bar" aria-label="Quick actions">
     <a class="btn btn-ghost" data-tel href="#" data-i18n="cta.call"></a>
     <a class="btn btn-wa" data-wa hidden href="#" target="_blank" rel="noopener" data-i18n="cta.whatsapp"></a>
-    <a class="btn btn-primary" href="#contact" data-i18n="cta.quote"></a>
+    <a class="btn btn-primary" href="#contact" data-i18n="cta.quote.short"></a>
   </nav>
 
   <script src="/js/i18n.js"></script>

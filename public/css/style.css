@@ -90,7 +90,7 @@ body.menu-open .mobile-menu { transform: none; opacity: 1; visibility: visible; 
 .hero .kicker { color: var(--wood-300); }
 .hero-ctas { display: flex; flex-direction: column; gap: 10px; margin-top: 24px; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 32px; border-top: 1px solid rgba(255,255,255,.2); padding-top: 20px; }
-.stat strong { display: block; font-family: var(--font-head); font-size: 1.9rem; line-height: 1.1; font-variant-numeric: lining-nums; }
+.stat strong { display: block; font-family: var(--font-head); font-size: clamp(1.35rem, 6vw, 1.9rem); line-height: 1.1; white-space: nowrap; font-variant-numeric: lining-nums; }
 .stat > span { font-size: .78rem; opacity: .85; }
 .stats-note { font-size: .7rem; opacity: .6; margin-top: 8px; }
 
@@ -131,6 +131,10 @@ body.menu-open .mobile-menu { transform: none; opacity: 1; visibility: visible; 
 .checklist { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 10px; }
 .checklist li { display: flex; gap: 10px; align-items: flex-start; }
 .checklist li::before { content: ''; flex: none; width: 22px; height: 22px; margin-top: 2px; border-radius: 50%; background: var(--forest) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E") center/14px no-repeat; }
+
+.founder { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); }
+.founder strong { display: block; font-family: var(--font-head); font-size: 1.2rem; }
+.founder span { color: var(--muted); font-size: .9rem; }
 
 /* FAQ */
 .faq details { border-bottom: 1px solid var(--line); }
