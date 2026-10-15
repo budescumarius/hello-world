@@ -26,10 +26,10 @@ npm run create-admin -- admin ParolaTaSigura123   # creează contul de admin
 npm start                                         # http://localhost:3000
 ```
 
-Pentru a importa proiectele Timberway (texte de pe site-ul vechi, traduse în NL/EN):
+Pentru a importa proiectele Timberway, cu poze (14 proiecte; cele fără poze rămân ascunse):
 
 ```bash
-npm run seed               # adaugă proiectele (Ixelles, Bruxelles)
+npm run seed               # adaugă proiectele cu poze
 npm run seed -- --remove   # le șterge
 ```
 

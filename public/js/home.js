@@ -37,7 +37,7 @@
       return;
     }
     grid.innerHTML = list.map(p => {
-      const meta = [p.location, p.year, `${p.photoCount} ${App.t('projects.photos')}`].filter(Boolean).join(' · ');
+      const meta = [p.location, p.year, `${p.photoCount} ${App.t(p.photoCount === 1 ? 'projects.photo' : 'projects.photos')}`].filter(Boolean).join(' · ');
       return `
       <a class="project-card" href="/project?id=${encodeURIComponent(p.id)}&lang=${App.lang}">
         <img src="${App.esc(p.cover || `/img/illustrations/${p.category}-1.svg`)}" alt="${App.esc(App.pick(p.title))}" loading="lazy">
