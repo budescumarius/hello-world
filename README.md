@@ -39,11 +39,22 @@ Fără parolă (`npm run create-admin -- admin`) se generează una aleatorie și
 
 Variabile opționale: `PORT`, `DATA_DIR` (implicit `./data`), `UPLOAD_DIR` (implicit `./uploads`), `SESSION_SECRET`.
 
-## Găzduire
+## Punere online (Render)
 
-Ai nevoie de un server cu Node.js 18+ (de exemplu un VPS, Render, Railway sau Fly.io) cu **disc persistent** pentru `data/` și `uploads/`. Pune site-ul în spatele HTTPS, ca cookie-ul de login să fie marcat `Secure`.
+Fișierul `render.yaml` configurează totul: serverul, un disc permanent pentru baza de date și poze, și parola de admin.
 
-Fă backup periodic la `data/db.json` și la folderul `uploads/`.
+1. Intră pe https://render.com și fă-ți cont cu **GitHub**. Când ți se cere, dă-i acces la repository-ul `hello-world`.
+2. **New → Blueprint**, alege `hello-world` și branch-ul `claude/timberway-clone-mobile-27pjd8`.
+3. La `ADMIN_PASSWORD` scrie parola de admin (minim 10 caractere), apoi **Apply**.
+4. După 3–5 minute site-ul e live la `https://timberway-xxxx.onrender.com`, iar adminul la `/admin` (utilizator `admin`).
+
+La prima pornire se creează contul de admin și se importă automat proiectele cu poze. La pornirile următoare nu se mai importă nimic, ca să nu se piardă modificările făcute din admin.
+
+**Cost:** planul Starter (~7 $/lună) plus discul (~0,25 $/GB/lună). Planul gratuit nu are disc permanent, așa că pozele încărcate din admin s-ar pierde la fiecare repornire.
+
+**Domeniul timberway.be:** în Render → Settings → Custom Domains adaugi `www.timberway.be` și `timberway.be`, apoi pui la firma de unde ai domeniul înregistrările DNS pe care ți le arată Render. HTTPS-ul se configurează automat.
+
+Fă backup periodic la discul `/var/data` (baza de date și pozele).
 
 ## Idei pentru mai departe
 - Recenzii Google reale (în loc de testimoniale inventate)

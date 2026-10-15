@@ -273,39 +273,49 @@ const PROJECTS = [
   }
 ];
 
-const db = store.load();
-const seeded = a => typeof a.seed === 'string';
+// Adds the projects (or with { remove: true } removes them). Safe to run twice: earlier copies are replaced.
+function seed({ remove = false, log = console.log } = {}) {
+  const db = store.load();
+  const seeded = a => typeof a.seed === 'string';
 
-// Refresh: drop earlier seeded copies (and their files) so running twice doesn't duplicate.
-for (const a of db.albums.filter(seeded)) {
-  for (const p of a.photos) fs.rmSync(path.join(UPLOAD_DIR, p.file), { force: true });
-}
-db.albums = db.albums.filter(a => !seeded(a));
+  for (const a of db.albums.filter(seeded)) {
+    for (const p of a.photos) fs.rmSync(path.join(UPLOAD_DIR, p.file), { force: true });
+  }
+  db.albums = db.albums.filter(a => !seeded(a));
 
-if (process.argv.includes('--remove')) {
+  if (remove) {
+    store.save();
+    log('Seeded projects removed.');
+    return;
+  }
+
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  PROJECTS.forEach((proj, i) => {
+    const { slug, captions, cover: coverIndex, ...fields } = proj;
+    const dir = path.join(PHOTOS, slug);
+    const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => IMAGE.test(f)).sort() : [];
+    const photos = files.map((f, n) => {
+      const file = `seed-${slug}-${f}`;
+      fs.copyFileSync(path.join(dir, f), path.join(UPLOAD_DIR, file));
+      return { id: store.id(), file, caption: captions[n] || { fr: '', nl: '', en: '' } };
+    });
+    // Cover: the last photo (usually the finished result, not a "before" shot) unless set explicitly.
+    const cover = photos[coverIndex ?? photos.length - 1];
+    // Projects without photos stay hidden until photos are added in the admin.
+    db.albums.push({
+      id: store.id(), seed: slug, location: '', year: '', featured: false, ...fields, published: photos.length > 0, photos, coverId: cover ? cover.id : null,
+      createdAt: new Date(Date.now() - i * 60000).toISOString()
+    });
+    log(`  ${fields.title.fr}: ${photos.length} photo(s)`);
+  });
+  db.seededAt = new Date().toISOString();
   store.save();
-  console.log('Seeded projects removed.');
-  process.exit(0);
 }
 
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-PROJECTS.forEach((proj, i) => {
-  const { slug, captions, cover: coverIndex, ...fields } = proj;
-  const dir = path.join(PHOTOS, slug);
-  const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => IMAGE.test(f)).sort() : [];
-  const photos = files.map((f, n) => {
-    const file = `seed-${slug}-${f}`;
-    fs.copyFileSync(path.join(dir, f), path.join(UPLOAD_DIR, file));
-    return { id: store.id(), file, caption: captions[n] || { fr: '', nl: '', en: '' } };
-  });
-  // Cover: the last photo (usually the finished result, not a "before" shot) unless set explicitly.
-  const cover = photos[coverIndex ?? photos.length - 1];
-  // Projects without photos stay hidden until photos are added in the admin.
-  db.albums.push({
-    id: store.id(), seed: slug, location: '', year: '', featured: false, ...fields, published: photos.length > 0, photos, coverId: cover ? cover.id : null,
-    createdAt: new Date(Date.now() - i * 60000).toISOString()
-  });
-  console.log(`  ${fields.title.fr}: ${photos.length} photo(s)`);
-});
-store.save();
-console.log('Done. Remove with: npm run seed -- --remove');
+module.exports = { seed };
+
+if (require.main === module) {
+  const remove = process.argv.includes('--remove');
+  seed({ remove });
+  if (!remove) console.log('Done. Remove with: npm run seed -- --remove');
+}

@@ -310,8 +310,22 @@ app.use((err, req, res, next) => {
   res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 500).json({ error: err.code || 'server_error' });
 });
 
-if (!db.users.length) {
-  console.warn('\n⚠  No admin account yet. Create one with:  npm run create-admin -- <username> <password>\n');
+// First start on a fresh server: create the admin from env vars and import the projects once.
+if (!db.users.length && process.env.ADMIN_PASSWORD) {
+  if (process.env.ADMIN_PASSWORD.length < 10) console.warn('ADMIN_PASSWORD must be at least 10 characters; admin not created.');
+  else {
+    store.upsertUser(process.env.ADMIN_USER || 'admin', process.env.ADMIN_PASSWORD);
+    console.log(`Admin account "${process.env.ADMIN_USER || 'admin'}" created from environment.`);
+  }
 }
+if (!db.seededAt && !db.albums.length) {
+  require('./scripts/seed').seed({ log: () => {} });
+  console.log(`Imported ${db.albums.length} projects.`);
+}
+if (!db.users.length) {
+  console.warn('\n⚠  No admin account yet. Set ADMIN_PASSWORD, or run:  npm run create-admin -- <username> <password>\n');
+}
+
+app.get('/healthz', (req, res) => res.send('ok'));
 
 app.listen(PORT, () => console.log(`Site running on http://localhost:${PORT}  (admin: /admin)`));
