@@ -12,7 +12,7 @@
   <!-- Login -->
   <section id="login-view" class="login" hidden>
     <form id="login-form" class="panel">
-      <img src="/img/logo.svg" alt="" width="48" height="48">
+      <img src="/img/logo-full.png" alt="Timberway" width="180" height="134">
       <h1>Autentificare admin</h1>
       <label>Utilizator<input name="username" autocomplete="username" required autocapitalize="off"></label>
       <label>Parolă<input name="password" type="password" autocomplete="current-password" required></label>
@@ -31,6 +31,7 @@
         <button data-tab="posts">Jurnal</button>
         <button data-tab="messages">Mesaje <span id="unread" class="pill" hidden></span></button>
         <button data-tab="subscribers">Abonați</button>
+        <button data-tab="pricing">Prețuri</button>
         <button data-tab="content">Aspect</button>
         <button data-tab="settings">Setări</button>
       </nav>
@@ -163,6 +164,19 @@
         <div id="sub-list"></div>
       </section>
 
+      <!-- Price grid for the online estimator -->
+      <section data-view="pricing" hidden>
+        <form id="pricing-form" class="panel">
+          <div class="row-between">
+            <h2>Grila de prețuri a calculatorului</h2>
+            <a class="btn small-btn" href="/estimate" target="_blank">Vezi calculatorul ↗</a>
+          </div>
+          <p class="hint">Prețuri în euro, fără TVA. Clientul vede un interval (de la − la + marjă). Formula: cantitate × preț de bază × coeficient material + opțiuni + montaj.</p>
+          <div id="pricing-fields"></div>
+          <div class="sticky-save"><button type="button" class="btn" id="pricing-reset">Valori implicite</button><button type="submit" class="btn primary">Salvează prețurile</button><span class="status" id="pricing-status"></span></div>
+        </form>
+      </section>
+
       <!-- Look & texts -->
       <section data-view="content" hidden>
         <div class="panel">
@@ -221,6 +235,11 @@
           <div class="grid3">
             <label>FR<input name="tagline.fr"></label><label>NL<input name="tagline.nl"></label><label>EN<input name="tagline.en"></label>
           </div>
+          <h3>Notificări</h3>
+          <label>Trimite fiecare cerere de ofertă și pe e-mail la<input name="notifyEmail" type="email" placeholder="adresa.ta@gmail.com"></label>
+          <p class="hint">Adresa rămâne privată (nu apare pe site). După ce salvezi, apasă „Trimite e-mail de test”; dacă nu-l vezi, uită-te și în Spam și marchează-l „Nu e spam”.</p>
+          <button type="button" class="btn" id="test-email">Trimite e-mail de test</button>
+          <p class="status" id="test-email-status"></p>
           <h3>Program</h3>
           <div class="grid3">
             <label>FR<input name="hours.fr"></label><label>NL<input name="hours.nl"></label><label>EN<input name="hours.en"></label>

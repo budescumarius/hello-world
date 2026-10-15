@@ -97,3 +97,10 @@ input[type=color] { height: 48px; padding: 4px; }
 .sticky-save { position: sticky; bottom: 0; background: #fff; padding: 12px 0 4px; display: flex; gap: 12px; align-items: center; border-top: 1px solid var(--line); margin-top: 12px; }
 .sub-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 6px; flex-wrap: wrap; }
 .sub-row span { color: var(--muted); font-size: .85rem; }
+.estimate-box { background: #f6efe5; border-radius: 8px; padding: 10px 12px; margin: 8px 0; font-size: .9rem; }
+.estimate-box p { margin: 4px 0 0; }
+.price-grid { display: grid; gap: 0 14px; }
+.price-input { display: flex; align-items: center; gap: 8px; }
+.price-input input { max-width: 140px; }
+.price-input small { color: var(--muted); font-weight: 400; }
+@media (min-width: 700px) { .price-grid { grid-template-columns: 1fr 1fr; } }

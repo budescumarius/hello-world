@@ -4,6 +4,8 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const store = require('./lib/db');
+const mailer = require('./lib/mailer');
+const pricing = require('./lib/pricing');
 
 const PORT = process.env.PORT || 3000;
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
@@ -168,6 +170,8 @@ app.get('/api/settings', (req, res) => {
   res.json({ ...db.settings, categories: CATEGORIES });
 });
 
+app.get('/api/pricing', (req, res) => res.json(pricing.withDefaults(db.pricing)));
+
 app.get('/api/albums', (req, res) => {
   const list = db.albums.filter(a => a.published)
     .sort((a, b) => (b.featured - a.featured) || b.createdAt.localeCompare(a.createdAt))
@@ -225,11 +229,50 @@ app.post('/api/contact', (req, res) => {
     service: str(b.service, 60), message: str(b.message, 4000), lang: LANGS.includes(b.lang) ? b.lang : 'nl',
     createdAt: new Date().toISOString(), read: false
   };
+  if (b.estimate && typeof b.estimate === 'object') {
+    msg.estimate = {
+      summary: str(b.estimate.summary, 2000),
+      min: Math.max(0, Math.round(Number(b.estimate.min) || 0)),
+      max: Math.max(0, Math.round(Number(b.estimate.max) || 0))
+    };
+  }
   if (!msg.name || (!msg.email && !msg.phone) || !msg.message) return res.status(400).json({ error: 'missing_fields' });
   db.messages.unshift(msg);
   store.save();
   res.json({ ok: true });
+  notifyNewMessage(msg).catch(err => console.error('Notification e-mail failed:', err.message));
 });
+
+// E-mail the owner about a new quote request (address set in admin → Setări).
+function notifyNewMessage(msg) {
+  const to = db.settings.notifyEmail || process.env.NOTIFY_EMAIL;
+  if (!to || !mailer.available()) return Promise.resolve();
+  const lines = [
+    `Cerere nouă de pe site-ul ${db.settings.companyName}`,
+    '',
+    `Nume:     ${msg.name}`,
+    `E-mail:   ${msg.email || '-'}`,
+    `Telefon:  ${msg.phone || '-'}`,
+    `Proiect:  ${msg.service || '-'}`,
+    `Limba:    ${msg.lang.toUpperCase()}`,
+    '',
+    'Mesaj:',
+    msg.message
+  ];
+  if (msg.estimate) {
+    lines.push('', '— Configurație din calculatorul de buget —', msg.estimate.summary,
+      `Estimare: ${msg.estimate.min.toLocaleString('fr-BE')} – ${msg.estimate.max.toLocaleString('fr-BE')} €`);
+  }
+  lines.push('', 'Toate mesajele: /admin → Mesaje');
+  return mailer.send({
+    to,
+    subject: `Cerere de ofertă: ${msg.name}${msg.estimate ? ` (~${msg.estimate.min.toLocaleString('fr-BE')} €)` : ''}`,
+    text: lines.join('\n'),
+    fromName: `${db.settings.companyName} – site`,
+    fromAddress: process.env.MAIL_FROM || db.settings.email,
+    replyTo: msg.email
+  });
+}
 
 // Auth
 app.post('/api/login', (req, res) => {
@@ -335,7 +378,7 @@ admin.get('/settings', (req, res) => res.json(db.settings));
 admin.put('/settings', (req, res) => {
   const b = req.body || {};
   const s = db.settings;
-  for (const k of ['companyName', 'phone', 'whatsapp', 'email', 'address', 'vat', 'founder', 'facebook', 'instagram']) {
+  for (const k of ['companyName', 'phone', 'whatsapp', 'email', 'address', 'vat', 'founder', 'facebook', 'instagram', 'notifyEmail']) {
     if (k in b) s[k] = str(b[k], 300);
   }
   if (b.tagline) s.tagline = i18nField(b.tagline, 200);
@@ -356,6 +399,29 @@ admin.put('/settings', (req, res) => {
   }
   store.save();
   res.json(s);
+});
+
+admin.get('/pricing', (req, res) => res.json({ current: pricing.withDefaults(db.pricing), defaults: pricing.DEFAULT_PRICING }));
+admin.put('/pricing', (req, res) => {
+  db.pricing = pricing.cleanPricing(req.body || {}, pricing.withDefaults(db.pricing));
+  store.save();
+  res.json(db.pricing);
+});
+
+admin.post('/test-email', async (req, res) => {
+  const to = db.settings.notifyEmail || process.env.NOTIFY_EMAIL;
+  if (!to) return res.status(400).json({ error: 'no_notify_email' });
+  if (!mailer.available()) return res.status(400).json({ error: 'sendmail_unavailable' });
+  try {
+    await mailer.send({
+      to, subject: `Test e-mail ${db.settings.companyName}`,
+      text: 'Notificările funcționează: vei primi un e-mail ca acesta la fiecare cerere de ofertă de pe site.',
+      fromName: `${db.settings.companyName} – site`, fromAddress: process.env.MAIL_FROM || db.settings.email
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 admin.post('/logo', upload.single('logo'), (req, res) => {

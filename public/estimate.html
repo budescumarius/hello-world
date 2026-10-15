@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Estimation — Timberway</title>
+  <meta name="theme-color" content="#2b1d12">
+  <link rel="icon" href="/img/logo.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,500&family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-page="estimate">
+  <header class="header">
+    <div class="container">
+      <a class="brand" href="/" data-keep-lang><img class="brand-mark" src="/img/logo-mark.svg" alt=""><span class="brand-name" data-setting="companyName"></span></a>
+      <div class="header-actions">
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button type="button" data-lang="fr">FR</button><button type="button" data-lang="nl">NL</button><button type="button" data-lang="en">EN</button>
+        </div>
+        <a class="btn btn-primary header-quote" href="/#contact" data-keep-lang data-i18n="cta.quote.short"></a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="container project-hero">
+      <span class="kicker" data-i18n="est.kicker"></span>
+      <h1 data-i18n="est.title"></h1>
+      <p class="muted" style="max-width:640px" data-i18n="est.text"></p>
+    </section>
+
+    <section class="container estimator">
+      <div class="viewer-wrap">
+        <div class="viewer" id="viewer" aria-hidden="true">
+          <div class="scene" id="scene"></div>
+        </div>
+        <div class="viewer-info"><span id="dim-label"></span><span class="drag-hint">↔ <span data-i18n="est.drag"></span></span></div>
+      </div>
+
+      <div class="est-panel">
+        <div class="est-step">
+          <h2><span>1</span> <span data-i18n="est.step1"></span></h2>
+          <div class="type-grid" id="types"></div>
+        </div>
+        <div class="est-step">
+          <h2><span>2</span> <span data-i18n="est.step2"></span></h2>
+          <div id="dims"></div>
+        </div>
+        <div class="est-step">
+          <h2><span>3</span> <span data-i18n="est.step3"></span></h2>
+          <div class="swatches" id="materials"></div>
+        </div>
+        <div class="est-step">
+          <h2><span>4</span> <span data-i18n="est.step4"></span></h2>
+          <div id="options"></div>
+        </div>
+
+        <div class="result" id="result" aria-live="polite">
+          <span class="kicker" data-i18n="est.result"></span>
+          <div class="price" id="price"></div>
+          <dl class="breakdown" id="breakdown"></dl>
+          <p class="vat" data-i18n="est.vat"></p>
+          <a class="btn btn-primary" href="#quote" id="to-quote" data-i18n="est.cta"></a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-dark" id="quote">
+      <div class="container split">
+        <div>
+          <span class="kicker" data-i18n="contact.kicker"></span>
+          <h2 data-i18n="est.form.title"></h2>
+          <p style="opacity:.85" data-i18n="est.form.text"></p>
+          <div class="summary-box"><strong data-i18n="est.summary"></strong><p id="summary"></p><p class="price-small" id="price-small"></p></div>
+        </div>
+        <div class="contact-card">
+          <form data-contact novalidate>
+            <div class="field"><label for="q-name" data-i18n="form.name"></label><input id="q-name" name="name" autocomplete="name" required></div>
+            <div class="grid grid-2" style="gap:0 12px">
+              <div class="field"><label for="q-email" data-i18n="form.email"></label><input id="q-email" name="email" type="email" autocomplete="email" inputmode="email"></div>
+              <div class="field"><label for="q-phone" data-i18n="form.phone"></label><input id="q-phone" name="phone" type="tel" autocomplete="tel" inputmode="tel"></div>
+            </div>
+            <input type="hidden" name="service" id="q-service">
+            <div class="field"><label for="q-msg" data-i18n="form.message"></label><textarea id="q-msg" name="message" required></textarea></div>
+            <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+            <button class="btn btn-primary" style="width:100%" type="submit" data-i18n="form.send"></button>
+            <div class="form-status" role="status"></div>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-bottom" style="border:0;margin:0;padding:0">
+        <span>© <span data-year></span> <span data-setting="companyName"></span></span>
+        <span><a data-tel href="#" data-setting="phone"></a> · <a data-mailto href="#" data-setting="email"></a></span>
+      </div>
+    </div>
+  </footer>
+
+  <nav class="action-bar" aria-label="Quick actions">
+    <a class="btn btn-ghost" data-tel href="#" data-i18n="cta.call"></a>
+    <a class="btn btn-wa" data-wa hidden href="#" target="_blank" rel="noopener" data-i18n="cta.whatsapp"></a>
+    <a class="btn btn-primary" href="/#contact" data-keep-lang data-i18n="cta.quote.short"></a>
+  </nav>
+
+  <script src="/js/i18n.js"></script>
+  <script src="/js/common.js"></script>
+  <script src="/js/estimate.js"></script>
+  <script src="/js/contact.js"></script>
+</body>
+</html>

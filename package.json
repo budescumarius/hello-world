@@ -9,7 +9,9 @@
     "create-admin": "node scripts/create-admin.js",
     "seed": "node scripts/seed.js"
   },
-  "engines": { "node": ">=16" },
+  "engines": {
+    "node": ">=16"
+  },
   "dependencies": {
     "express": "^4.21.2",
     "multer": "^2.0.2"

@@ -18,6 +18,11 @@ Site modern pentru Timberway (mobilier la comandă, tâmplărie, restaurare), ad
 - **Mesaje**: cererile de ofertă trimise din formularul de pe site
 - **Setări**: numele firmei, telefon, WhatsApp, e-mail, adresă, TVA, fondator, program, Facebook/Instagram, slogan și schimbarea parolei
 
+## Calculator de buget și notificări
+
+- **/estimate**: clientul alege tipul de mobilă, dimensiunile, materialul și opțiunile, vede modelul în 3D și primește un interval de preț. Grila de prețuri se modifică din admin → **Prețuri**.
+- **Notificări pe e-mail**: în admin → Setări → „Notificări” pui adresa la care vrei să primești cererile de ofertă. E-mailurile pleacă prin `sendmail`-ul serverului (există pe găzduirea cPanel), deci nu e nevoie de parolă SMTP. Butonul „Trimite e-mail de test” verifică dacă merge.
+
 ## Pornire
 
 ```bash

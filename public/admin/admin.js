@@ -59,6 +59,7 @@
     if (b.dataset.tab === 'posts') loadPosts();
     if (b.dataset.tab === 'subscribers') loadSubscribers();
     if (b.dataset.tab === 'content') loadContent();
+    if (b.dataset.tab === 'pricing') loadPricing();
   }));
 
   // ---------- albums ----------
@@ -279,6 +280,7 @@
         <header><strong>${esc(m.name)}</strong><span>${new Date(m.createdAt).toLocaleString('ro-RO')} · ${m.lang.toUpperCase()}${m.service ? ' · ' + esc(CAT[m.service] || m.service) : ''}</span></header>
         <div class="contact">${m.email ? `<a href="mailto:${esc(m.email)}">${esc(m.email)}</a>` : ''}${m.phone ? `<a href="tel:${esc(m.phone)}">${esc(m.phone)}</a>` : ''}</div>
         <p>${esc(m.message)}</p>
+        ${m.estimate ? `<div class="estimate-box"><strong>Calculator buget: ${m.estimate.min.toLocaleString('fr-BE')} – ${m.estimate.max.toLocaleString('fr-BE')} €</strong><p>${esc(m.estimate.summary)}</p></div>` : ''}
         <div class="row-between" style="margin:0">
           ${m.read ? '<span></span>' : '<button class="btn small-btn" data-act="read">Marchează citit</button>'}
           <button class="btn small-btn danger" data-act="delete">Șterge</button>
@@ -324,6 +326,15 @@
     try { await api('/api/admin/settings', { method: 'PUT', json: data }); setStatus($('#settings-status'), 'Salvat ✓'); }
     catch (err) { setStatus($('#settings-status'), err.message, false); }
   });
+  $('#test-email').addEventListener('click', async () => {
+    const st = $('#test-email-status');
+    const ERR_MAIL = { no_notify_email: 'Completează și salvează întâi adresa.', sendmail_unavailable: 'Serverul nu poate trimite e-mailuri (sendmail lipsește).' };
+    try {
+      await api('/api/admin/test-email', { json: {} });
+      setStatus(st, 'Trimis ✓ — verifică inboxul (și Spam).');
+    } catch (err) { setStatus(st, ERR_MAIL[err.message] || err.message, false); }
+  });
+
   $('#password-form').addEventListener('submit', async e => {
     e.preventDefault();
     const f = new FormData(e.target);
@@ -582,6 +593,61 @@
       settingsCache = await api('/api/admin/settings', { method: 'PUT', json: { texts } });
       setStatus($('#texts-status'), 'Texte salvate ✓');
     } catch (err) { setStatus($('#texts-status'), err.message, false); }
+  });
+
+  // ---------- price grid ----------
+  const PRICE_LABELS = {
+    general: { margin: ['Marjă interval (±)', '%'], installPct: ['Montaj', '% din total'] },
+    types: {
+      kitchen: ['Bucătărie', '€ / metru liniar'], wardrobe: ['Dressing / dulap', '€ / m² față'], bookcase: ['Bibliotecă / mobilă TV', '€ / m² față'],
+      vanity: ['Mobilier baie', '€ / metru liniar'], stairs: ['Scară', '€ / treaptă'], parquet: ['Parchet (montaj)', '€ / m²']
+    },
+    materials: {
+      melamine: ['Melaminat alb', '× coeficient'], lacquer: ['MDF vopsit', '× coeficient'], oak_veneer: ['Furnir stejar', '× coeficient'],
+      walnut_veneer: ['Furnir nuc', '× coeficient'], solid_oak: ['Stejar masiv (mobilă)', '× coeficient'], beech: ['Fag (scări)', '× coeficient'],
+      stairs_oak: ['Stejar masiv (scări)', '× coeficient'], laminate: ['Parchet laminat', '× coeficient'], engineered_oak: ['Parchet stratificat stejar', '× coeficient'],
+      solid_oak_floor: ['Parchet stejar masiv', '× coeficient']
+    },
+    options: {
+      led: ['Iluminare LED', '€ / metru'], drawer: ['Sertar', '€ / buc.'], glass: ['Ușă din sticlă', '€ / buc.'], island: ['Insulă bucătărie', '€ fix'],
+      worktop_laminate: ['Blat laminat', '€ / metru'], worktop_wood: ['Blat lemn masiv', '€ / metru'], worktop_quartz: ['Blat cuarț', '€ / metru'],
+      handrail: ['Balustradă scară', '€ fix'], removal: ['Scoatere pardoseală veche', '€ / m²'], sanding: ['Șlefuire și finisaj parchet', '€ / m²']
+    }
+  };
+  const PRICE_TITLES = { general: 'General', types: 'Preț de bază pe tip de proiect', materials: 'Coeficient material (1 = preț de bază)', options: 'Opțiuni și accesorii' };
+  let pricingDefaults = null;
+
+  function renderPricing(current) {
+    $('#pricing-fields').innerHTML = Object.entries(PRICE_LABELS).map(([group, items]) => `
+      <h3>${PRICE_TITLES[group]}</h3>
+      <div class="price-grid">
+        ${Object.entries(items).map(([k, [label, unit]]) => {
+          const value = group === 'general' ? current[k] : current[group][k];
+          return `<label>${esc(label)}<span class="price-input"><input type="number" inputmode="decimal" min="0" step="${group === 'materials' ? '0.05' : '1'}" data-group="${group}" data-key="${k}" value="${value}"><small>${esc(unit)}</small></span></label>`;
+        }).join('')}
+      </div>`).join('');
+  }
+
+  async function loadPricing() {
+    const r = await api('/api/admin/pricing');
+    pricingDefaults = r.defaults;
+    renderPricing(r.current);
+  }
+
+  $('#pricing-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const out = { types: {}, materials: {}, options: {} };
+    $$('#pricing-fields input').forEach(i => {
+      if (i.dataset.group === 'general') out[i.dataset.key] = Number(i.value);
+      else out[i.dataset.group][i.dataset.key] = Number(i.value);
+    });
+    try {
+      renderPricing(await api('/api/admin/pricing', { method: 'PUT', json: out }));
+      setStatus($('#pricing-status'), 'Prețuri salvate ✓');
+    } catch (err) { setStatus($('#pricing-status'), err.message, false); }
+  });
+  $('#pricing-reset').addEventListener('click', () => {
+    if (pricingDefaults && confirm('Revii la prețurile implicite? (apasă apoi „Salvează prețurile”)')) renderPricing(pricingDefaults);
   });
 
   // ---------- boot ----------
