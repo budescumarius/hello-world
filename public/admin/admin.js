@@ -280,7 +280,7 @@
         <header><strong>${esc(m.name)}</strong><span>${new Date(m.createdAt).toLocaleString('ro-RO')} · ${m.lang.toUpperCase()}${m.service ? ' · ' + esc(CAT[m.service] || m.service) : ''}</span></header>
         <div class="contact">${m.email ? `<a href="mailto:${esc(m.email)}">${esc(m.email)}</a>` : ''}${m.phone ? `<a href="tel:${esc(m.phone)}">${esc(m.phone)}</a>` : ''}</div>
         <p>${esc(m.message)}</p>
-        ${m.estimate ? `<div class="estimate-box"><strong>Calculator buget: ${m.estimate.min.toLocaleString('fr-BE')} – ${m.estimate.max.toLocaleString('fr-BE')} €</strong><p>${esc(m.estimate.summary)}</p></div>` : ''}
+        ${m.estimate ? `<div class="estimate-box"><strong>Calculator buget: ${m.estimate.min.toLocaleString('fr-BE')} – ${m.estimate.max.toLocaleString('fr-BE')} €</strong><p>${esc(m.estimate.summary)}</p>${m.estimate.config ? `<a class="btn small-btn" href="/api/admin/messages/${m.id}/pdf" target="_blank">📄 Descarcă PDF (${esc(m.estimate.ref)})</a>` : ''}</div>` : ''}
         <div class="row-between" style="margin:0">
           ${m.read ? '<span></span>' : '<button class="btn small-btn" data-act="read">Marchează citit</button>'}
           <button class="btn small-btn danger" data-act="delete">Șterge</button>

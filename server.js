@@ -6,6 +6,9 @@ const fs = require('fs');
 const store = require('./lib/db');
 const mailer = require('./lib/mailer');
 const pricing = require('./lib/pricing');
+const { translator } = require('./lib/i18n');
+const { buildEstimatePdf } = require('./lib/estimate-pdf');
+const EstimateModel = require('./public/js/estimate-model');
 
 const PORT = process.env.PORT || 3000;
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
@@ -207,6 +210,17 @@ app.get('/api/posts/:id', (req, res) => {
   res.json(publicPost(post, true));
 });
 
+app.post('/api/estimate/pdf', (req, res) => {
+  if (!rateLimit(`pdf:${req.ip}`, 30, 60 * 60 * 1000)) return res.status(429).json({ error: 'too_many' });
+  const b = req.body || {};
+  const lang = LANGS.includes(b.lang) ? b.lang : 'fr';
+  const ref = estimateRef();
+  const { buffer } = buildEstimatePdf({ config: b.config, pricing: pricing.withDefaults(db.pricing), settings: db.settings, tr: siteTranslator(lang), ref });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="Timberway-${ref}.pdf"`);
+  res.send(buffer);
+});
+
 app.post('/api/subscribe', (req, res) => {
   if (!rateLimit(`sub:${req.ip}`, 5, 60 * 60 * 1000)) return res.status(429).json({ error: 'too_many' });
   const b = req.body || {};
@@ -229,12 +243,12 @@ app.post('/api/contact', (req, res) => {
     service: str(b.service, 60), message: str(b.message, 4000), lang: LANGS.includes(b.lang) ? b.lang : 'nl',
     createdAt: new Date().toISOString(), read: false
   };
-  if (b.estimate && typeof b.estimate === 'object') {
-    msg.estimate = {
-      summary: str(b.estimate.summary, 2000),
-      min: Math.max(0, Math.round(Number(b.estimate.min) || 0)),
-      max: Math.max(0, Math.round(Number(b.estimate.max) || 0))
-    };
+  if (b.estimate && typeof b.estimate === 'object' && b.estimate.config) {
+    // Never trust prices sent by the browser: recompute from the configuration.
+    const config = EstimateModel.sanitize(b.estimate.config);
+    const r = EstimateModel.compute(config, pricing.withDefaults(db.pricing));
+    const tr = siteTranslator(msg.lang);
+    msg.estimate = { ref: estimateRef(), config, summary: EstimateModel.summary(config, tr.t, tr.num), min: r.min, max: r.max };
   }
   if (!msg.name || (!msg.email && !msg.phone) || !msg.message) return res.status(400).json({ error: 'missing_fields' });
   db.messages.unshift(msg);
@@ -242,6 +256,26 @@ app.post('/api/contact', (req, res) => {
   res.json({ ok: true });
   notifyNewMessage(msg).catch(err => console.error('Notification e-mail failed:', err.message));
 });
+
+function siteTranslator(lang) {
+  return translator(lang, db.settings.texts || {});
+}
+function estimateRef() {
+  const d = new Date();
+  const ymd = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  return `EST-${ymd}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+}
+function estimatePdf(msg) {
+  return buildEstimatePdf({
+    config: msg.estimate.config,
+    pricing: pricing.withDefaults(db.pricing),
+    settings: db.settings,
+    tr: siteTranslator(msg.lang),
+    client: { name: msg.name, email: msg.email, phone: msg.phone },
+    ref: msg.estimate.ref,
+    date: msg.createdAt
+  }).buffer;
+}
 
 // E-mail the owner about a new quote request (address set in admin → Setări).
 function notifyNewMessage(msg) {
@@ -261,10 +295,15 @@ function notifyNewMessage(msg) {
   ];
   if (msg.estimate) {
     lines.push('', '— Configurație din calculatorul de buget —', msg.estimate.summary,
-      `Estimare: ${msg.estimate.min.toLocaleString('fr-BE')} – ${msg.estimate.max.toLocaleString('fr-BE')} €`);
+      `Estimare: ${msg.estimate.min.toLocaleString('fr-BE')} – ${msg.estimate.max.toLocaleString('fr-BE')} € (ref. ${msg.estimate.ref || '-'})`);
   }
   lines.push('', 'Toate mesajele: /admin → Mesaje');
+  const attachments = msg.estimate && msg.estimate.config
+    ? [{ filename: `Timberway-${msg.estimate.ref}.pdf`, contentType: 'application/pdf', content: estimatePdf(msg) }]
+    : [];
+  if (attachments.length) lines.splice(lines.length - 1, 0, 'Schița și detaliile sunt în PDF-ul atașat.');
   return mailer.send({
+    attachments,
     to,
     subject: `Cerere de ofertă: ${msg.name}${msg.estimate ? ` (~${msg.estimate.min.toLocaleString('fr-BE')} €)` : ''}`,
     text: lines.join('\n'),
@@ -515,6 +554,13 @@ admin.delete('/subscribers/:email', (req, res) => {
 });
 
 admin.get('/messages', (req, res) => res.json(db.messages));
+admin.get('/messages/:id/pdf', (req, res) => {
+  const m = db.messages.find(x => x.id === req.params.id);
+  if (!m || !m.estimate || !m.estimate.config) return res.status(404).json({ error: 'not_found' });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="Timberway-${m.estimate.ref}.pdf"`);
+  res.send(estimatePdf(m));
+});
 admin.put('/messages/:id/read', (req, res) => {
   const m = db.messages.find(x => x.id === req.params.id);
   if (m) { m.read = true; store.save(); }

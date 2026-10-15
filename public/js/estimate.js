@@ -1,16 +1,8 @@
 // Online budget estimator: pick a project type, dimensions, material and options,
 // see a live CSS-3D model and an instant price range from the admin's price grid.
 (function () {
-  const FURNITURE_MATS = ['melamine', 'lacquer', 'oak_veneer', 'walnut_veneer', 'solid_oak'];
-  // dims: [min, max, default, step]
-  const TYPES = {
-    kitchen: { mats: FURNITURE_MATS, dims: { length: [1.5, 8, 3.6, 0.1] }, opts: ['worktop', 'island', 'drawer', 'glass', 'led'] },
-    wardrobe: { mats: FURNITURE_MATS, dims: { width: [0.6, 6, 2.4, 0.1], height: [1.8, 3, 2.5, 0.05] }, opts: ['drawer', 'glass', 'led'] },
-    bookcase: { mats: FURNITURE_MATS, dims: { width: [0.8, 6, 3, 0.1], height: [1, 3, 2.2, 0.05] }, opts: ['drawer', 'glass', 'led'] },
-    vanity: { mats: FURNITURE_MATS, dims: { width: [0.6, 2.4, 1.2, 0.05] }, opts: ['drawer', 'led'] },
-    stairs: { mats: ['beech', 'stairs_oak'], dims: { steps: [6, 20, 14, 1] }, opts: ['handrail'] },
-    parquet: { mats: ['laminate', 'engineered_oak', 'solid_oak_floor'], dims: { area: [5, 200, 30, 1] }, opts: ['removal', 'sanding'] }
-  };
+  const M = window.EstimateModel;
+  const { TYPES, COUNTS, WORKTOPS, WOOD } = M;
   const ICONS = {
     kitchen: '<rect x="3" y="11" width="18" height="9" rx="1"/><path d="M3 15h18M9 11v9M15 11v9"/><path d="M6 7h4M14 4v4M12 4h4"/>',
     wardrobe: '<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M12 3v18M10 11v2M14 11v2"/>',
@@ -19,68 +11,21 @@
     stairs: '<path d="M3 21h5v-5h5v-5h5V6h3"/><path d="M3 21V9"/>',
     parquet: '<path d="M3 3l6 6-6 6M9 3l6 6-6 6M15 3l6 6-6 6M3 15l6 6M9 15l6 6M15 15l6 6"/>'
   };
-  const WOOD = {
-    melamine: ['#f3f1ec', false], lacquer: ['#e7e2da', false], oak_veneer: ['#d4b083', true], walnut_veneer: ['#7b5236', true],
-    solid_oak: ['#c79c66', true], beech: ['#e2c49c', true], stairs_oak: ['#c79c66', true],
-    laminate: ['#cdb595', true], engineered_oak: ['#d2ab7b', true], solid_oak_floor: ['#c49862', true]
-  };
-  const WORKTOPS = { worktop_laminate: '#8a8580', worktop_wood: '#b98552', worktop_quartz: '#f1efeb' };
-  const COUNTS = { drawer: [0, 20], glass: [0, 12] };
-
   let pricing = null;
-  const state = { type: 'kitchen', dims: {}, mat: 'oak_veneer', opts: {} };
+  let state = M.defaults('kitchen');
 
   function resetFor(type) {
-    const t = TYPES[type];
-    state.type = type;
-    state.dims = {};
-    for (const [k, v] of Object.entries(t.dims)) state.dims[k] = v[2];
-    if (!t.mats.includes(state.mat)) state.mat = t.mats[Math.min(2, t.mats.length - 1)];
-    state.opts = { worktop: 'worktop_laminate', island: false, drawer: type === 'kitchen' ? 4 : 2, glass: 0, led: false, handrail: true, removal: false, sanding: true };
+    state = M.defaults(type, state.mat);
   }
 
   // ---------- price ----------
-  function compute() {
-    const p = pricing;
-    const t = state.type;
-    const d = state.dims;
-    const o = state.opts;
-    const qty = { kitchen: d.length, wardrobe: d.width * d.height, bookcase: d.width * d.height, vanity: d.width, stairs: d.steps, parquet: d.area }[t];
-    const base = qty * p.types[t] * p.materials[state.mat];
-    const run = { kitchen: d.length, wardrobe: d.width, bookcase: d.width, vanity: d.width }[t] || 0;
-    const has = k => TYPES[t].opts.includes(k);
-    let options = 0;
-    if (has('led') && o.led) options += run * p.options.led;
-    if (has('drawer')) options += o.drawer * p.options.drawer;
-    if (has('glass')) options += o.glass * p.options.glass;
-    if (has('island') && o.island) options += p.options.island;
-    if (has('worktop')) options += d.length * p.options[o.worktop];
-    if (has('handrail') && o.handrail) options += p.options.handrail;
-    if (has('removal') && o.removal) options += d.area * p.options.removal;
-    if (has('sanding') && o.sanding) options += d.area * p.options.sanding;
-    const install = (base + options) * p.installPct / 100;
-    const total = base + options + install;
-    const r50 = n => Math.round(n / 50) * 50;
-    return { base, options, install, min: r50(total * (1 - p.margin / 100)), max: r50(total * (1 + p.margin / 100)) };
-  }
+  const compute = () => M.compute(state, pricing);
 
   const money = n => new Intl.NumberFormat({ fr: 'fr-BE', nl: 'nl-BE', en: 'en-IE' }[App.lang], { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n);
   const num = (n, digits = 2) => new Intl.NumberFormat({ fr: 'fr-BE', nl: 'nl-BE', en: 'en-IE' }[App.lang], { maximumFractionDigits: digits }).format(n);
   const unit = k => (k === 'steps' ? '' : k === 'area' ? ' m²' : ' m');
 
-  function summary() {
-    const t = state.type;
-    const parts = [App.t('est.type.' + t)];
-    for (const [k, v] of Object.entries(state.dims)) parts.push(`${App.t('est.dim.' + k)} ${num(v)}${unit(k)}`);
-    parts.push(App.t('est.mat.' + state.mat));
-    const o = state.opts;
-    for (const k of TYPES[t].opts) {
-      if (k === 'worktop') parts.push(`${App.t('est.opt.worktop')}: ${App.t('est.opt.' + o.worktop)}`);
-      else if (COUNTS[k]) { if (o[k]) parts.push(`${App.t('est.opt.' + k)}: ${o[k]}`); }
-      else if (o[k]) parts.push(App.t('est.opt.' + k));
-    }
-    return parts.join(' · ');
-  }
+  const summary = () => M.summary(state, App.t, n => num(n));
 
   // ---------- controls ----------
   function renderControls() {
@@ -156,11 +101,34 @@
       state.opts[k] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
       update();
     });
+    document.getElementById('pdf-btn').addEventListener('click', downloadPdf);
     document.getElementById('to-quote').addEventListener('click', () => {
       const msg = document.getElementById('q-msg');
       if (!msg.value.trim()) msg.value = summary();
       document.getElementById('q-service').value = state.type;
     });
+  }
+
+  // The server draws the PDF from the configuration (and recomputes the price itself).
+  async function downloadPdf(e) {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/estimate/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config: state, lang: App.lang }) });
+      if (!res.ok) throw new Error();
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Timberway-${App.t('est.type.' + state.type)}.pdf`.replace(/[\\/:*?"<>|]+/g, '-');
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err) {
+      alert(App.t('form.err'));
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   // ---------- 3D (CSS transforms) ----------
@@ -308,7 +276,7 @@
     current() {
       if (!pricing) return null;
       const r = compute();
-      return { summary: summary(), min: r.min, max: r.max };
+      return { config: state, summary: summary(), min: r.min, max: r.max };
     }
   };
 

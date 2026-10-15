@@ -199,6 +199,7 @@ input[type=range] { padding: 0; border: 0; accent-color: var(--wood-600); height
 .breakdown dd { margin: 0; text-align: right; }
 .vat { font-size: .78rem; opacity: .7; }
 .result .btn { width: 100%; margin-top: 6px; }
+.result .btn-pdf { color: var(--sand-100); margin-top: 10px; }
 .summary-box { margin-top: 20px; background: rgba(255,255,255,.07); border-radius: 12px; padding: 14px 16px; }
 .summary-box p { margin: 6px 0 0; opacity: .9; font-size: .92rem; }
 .price-small { font-weight: 700; color: var(--wood-300); }
