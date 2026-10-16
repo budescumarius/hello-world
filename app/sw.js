@@ -1,7 +1,8 @@
 // Service worker: aplicația funcționează complet offline după prima încărcare.
-const VERSION = 'santier-v1';
+const VERSION = 'santier-v3';
 const ASSETS = [
-  './', './index.html', './styles.css', './app.js', './manifest.webmanifest',
+  './', './index.html', './styles.css', './pv.js', './app.js', './manifest.webmanifest',
+  './vendor/pdfmake.min.js', './vendor/vfs_fonts.js',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'
 ];
 
@@ -21,6 +22,7 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+  if (url.pathname.includes('/api/')) return; // datele de pe server nu se pun în cache
 
   if (url.origin === location.origin) {
     // Stale-while-revalidate pentru fișierele aplicației

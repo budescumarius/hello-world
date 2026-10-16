@@ -323,3 +323,49 @@ button.chip.on { outline: 2px solid var(--c, var(--primary)); }
   .doc { box-shadow: none; padding: 0; max-width: none; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* Adăugare punct direct din plan */
+.viewer { -webkit-touch-callout: none; }
+.ghost { position: absolute; width: 0; height: 0; transform: scale(var(--inv, 1)); transform-origin: 0 0; z-index: 5; }
+.ghost-pin { position: absolute; left: -17px; top: -44px; width: 34px; height: 44px; opacity: .9; }
+.ghost-pin svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 2px 3px rgba(0,0,0,.35)); }
+.ghost-pin span { position: absolute; top: 4px; left: 0; right: 0; text-align: center; color: #fff; font-weight: 800; font-size: 18px; line-height: 22px; }
+.ghost-btn {
+  position: absolute; left: 0; bottom: 52px; transform: translateX(-50%); white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px; padding: 10px 16px; border: 0; border-radius: 999px;
+  background: var(--primary); color: #fff; font-weight: 700; font-size: 15px; box-shadow: 0 6px 18px rgba(0,0,0,.25); cursor: pointer;
+}
+.ghost-btn svg { width: 18px; height: 18px; }
+.ghost-btn::after { content: ""; position: absolute; left: 50%; bottom: -6px; margin-left: -6px; border: 6px solid transparent; border-bottom: 0; border-top-color: var(--primary); }
+
+/* Indicator sincronizare */
+.sync-dot i, .sync-dot-inline { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #98a2b3; }
+.sync-dot[data-st=ok] i, .sync-dot-inline[data-st=ok] { background: #2f9e44; }
+.sync-dot[data-st=busy] i, .sync-dot-inline[data-st=busy] { background: #1f4fd8; animation: blink 1s infinite; }
+.sync-dot[data-st=pending] i, .sync-dot-inline[data-st=pending] { background: #f08c00; }
+.sync-dot[data-st=error] i, .sync-dot-inline[data-st=error] { background: #e5484d; }
+@keyframes blink { 50% { opacity: .3; } }
+.login { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+.login .card { width: 100%; max-width: 380px; padding: 24px; }
+
+/* Proces-verbal */
+.pv-sec { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.pv-sec-head { display: flex; gap: 8px; align-items: center; }
+.pv-sec-head input { flex: 1; font-weight: 700; padding: 9px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); min-width: 0; }
+.pv-item { border-left: 3px solid var(--primary); padding-left: 8px; display: flex; flex-direction: column; gap: 6px; }
+.pv-item.done { border-left-color: #2f9e44; opacity: .7; }
+.pv-item textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); resize: vertical; }
+.pv-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.pv-meta input[type=date], .pv-meta input[list] { padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); min-width: 0; }
+.pv-meta input[list] { width: 110px; }
+.pv-done { display: flex; align-items: center; gap: 4px; font-size: 14px; }
+.pv-done input { width: 18px; height: 18px; }
+.pv-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+.pv-photo { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.pv-photo img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 10px; }
+.pv-photo input { padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--surface); }
+.pv-photo .icon-btn { position: absolute; top: 4px; right: 4px; width: 30px; height: 30px; background: rgba(0,0,0,.55); color: #fff; }
+.pv-photos .add { aspect-ratio: 4/3; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 2px dashed var(--border); border-radius: 10px; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; }
+.logo-box { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.logo-prev { width: 180px; height: 70px; border: 1px solid var(--border); border-radius: 10px; background: #fff; display: flex; align-items: center; justify-content: center; color: #333; font-weight: 700; overflow: hidden; }
+.logo-prev img { max-width: 100%; max-height: 100%; object-fit: contain; }
