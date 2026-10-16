@@ -59,3 +59,68 @@ function blob_path(string $id): string
 {
     return __DIR__ . '/uploads/' . substr($id, -2) . '/' . $id;
 }
+
+// ---------------------------------------------------------------- E-mail (SMTP per utilizator)
+function ensure_mail_schema(PDO $pdo): void
+{
+    $pdo->exec("CREATE TABLE IF NOT EXISTS smtp (
+        user_id INT NOT NULL PRIMARY KEY,
+        from_name VARCHAR(120) NOT NULL DEFAULT '',
+        from_email VARCHAR(190) NOT NULL DEFAULT '',
+        host VARCHAR(190) NOT NULL DEFAULT '',
+        port INT NOT NULL DEFAULT 465,
+        secure VARCHAR(8) NOT NULL DEFAULT 'ssl',
+        username VARCHAR(190) NOT NULL DEFAULT '',
+        password TEXT NULL,
+        updated DATETIME NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+// Parola SMTP se păstrează criptată; cheia vine din config.php (nu din baza de date)
+function secret_key(array $cfg): string
+{
+    return hash('sha256', ($cfg['secret'] ?? '') . '|' . $cfg['db_pass'] . '|' . $cfg['db_name'] . '|santier-smtp', true);
+}
+function encrypt_secret(string $plain, array $cfg): string
+{
+    $iv = random_bytes(12);
+    $tag = '';
+    $ct = openssl_encrypt($plain, 'aes-256-gcm', secret_key($cfg), OPENSSL_RAW_DATA, $iv, $tag);
+    return base64_encode($iv . $tag . $ct);
+}
+function decrypt_secret(?string $enc, array $cfg): string
+{
+    if (!$enc) return '';
+    $raw = base64_decode($enc, true);
+    if ($raw === false || strlen($raw) < 29) return '';
+    $pt = openssl_decrypt(substr($raw, 28), 'aes-256-gcm', secret_key($cfg), OPENSSL_RAW_DATA, substr($raw, 0, 12), substr($raw, 12, 16));
+    return $pt === false ? '' : $pt;
+}
+
+function make_mailer(array $s): PHPMailer\PHPMailer\PHPMailer
+{
+    require_once __DIR__ . '/vendor/phpmailer/Exception.php';
+    require_once __DIR__ . '/vendor/phpmailer/PHPMailer.php';
+    require_once __DIR__ . '/vendor/phpmailer/SMTP.php';
+    $m = new PHPMailer\PHPMailer\PHPMailer(true);
+    $m->isSMTP();
+    $m->Host = $s['host'];
+    $m->Port = (int)$s['port'];
+    $m->SMTPAuth = $s['username'] !== '';
+    $m->Username = $s['username'];
+    $m->Password = $s['password'];
+    if ($s['secure'] === 'ssl') $m->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
+    elseif ($s['secure'] === 'tls') $m->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+    else { $m->SMTPSecure = ''; $m->SMTPAutoTLS = false; }
+    $m->CharSet = 'UTF-8';
+    $m->Timeout = 25;
+    $m->getSMTPInstance()->Timelimit = 30; // nu așteptăm la nesfârșit un server care nu răspunde
+    $m->setFrom($s['from_email'], $s['from_name']);
+    return $m;
+}
+
+function text_to_html(string $t): string
+{
+    return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222">'
+        . nl2br(htmlspecialchars($t, ENT_QUOTES, 'UTF-8')) . '</div>';
+}

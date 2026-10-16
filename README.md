@@ -21,6 +21,21 @@ Cu server, datele stau într-o bază de date MySQL și sunt aceleași pe telefon
 4. Șterge fișierul `api/install.php` din File Manager.
 5. Deschide `https://domeniul-tau.ro/` și conectează-te. Din meniul **Cont și sincronizare → Utilizatori** poți adăuga colegi.
 
+### Trimitere e-mail din aplicație
+Fiecare utilizator își setează adresa de pe care trimite: **meniul ⋯ → Adresa mea de e-mail (trimitere)**.
+- **Adresă pe domeniul tău (Hostico)**: o creezi în cPanel → **Email Accounts**. Serverul e de obicei `mail.domeniul-tau`, port 465 SSL, iar utilizatorul e adresa completă.
+- **Gmail**: ai nevoie de o *parolă pentru aplicații*, creată din Cont Google → Securitate, cu verificarea în 2 pași activată.
+- Butonul **„Trimite-mi un e-mail de test”** verifică setările.
+
+După generarea unui PV sau raport, butonul **„Trimite pe e-mail din aplicație”**:
+- deschide lista firmelor din proiect, unde bifezi destinatarii, plus câmpuri pentru alte adrese și CC;
+- completează automat subiectul și mesajul din șablon; le poți modifica înainte de trimitere;
+- atașează PDF-ul.
+
+Șabloanele se editează din **meniul ⋯ → Șabloane e-mail**.
+
+Parola SMTP se păstrează criptată pe server și nu ajunge pe telefoane.
+
 Notă: certificatul **SSL (https)** trebuie să fie activ (cPanel → SSL/TLS Status / AutoSSL), altfel iPhone-ul nu poate instala aplicația pentru folosire offline.
 
 Planurile și fotografiile se salvează în `api/uploads/` (protejat, accesibil doar prin aplicație). Dacă un PDF/imagine mare nu urcă, mărește `upload_max_filesize` și `post_max_size` din cPanel → **Select PHP Version → Options**.

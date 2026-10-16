@@ -15,6 +15,7 @@ if (!$installed && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         'db_name' => trim($_POST['db_name'] ?? ''),
         'db_user' => trim($_POST['db_user'] ?? ''),
         'db_pass' => (string)($_POST['db_pass'] ?? ''),
+        'secret' => bin2hex(random_bytes(32)),
     ];
     $user = strtolower(trim($_POST['admin_user'] ?? ''));
     $pass = (string)($_POST['admin_pass'] ?? '');
@@ -23,6 +24,7 @@ if (!$installed && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
         if (strlen($pass) < 6) throw new RuntimeException('Parola administratorului trebuie să aibă minim 6 caractere.');
         $pdo = connect($cfg);
         create_schema($pdo);
+        ensure_mail_schema($pdo);
         $pdo->prepare('INSERT INTO users (username, name, pass_hash, role, created) VALUES (?, ?, ?, ?, ?)')
             ->execute([$user, trim($_POST['admin_name'] ?? ''), password_hash($pass, PASSWORD_DEFAULT), 'admin', gmdate('Y-m-d H:i:s')]);
         if (!is_dir(__DIR__ . '/uploads')) mkdir(__DIR__ . '/uploads', 0755, true);

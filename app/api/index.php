@@ -195,6 +195,78 @@ switch ($r) {
         }
         fail('Metodă nepermisă', 405);
 
+    case 'smtp':
+        ensure_mail_schema($pdo);
+        $st = $pdo->prepare('SELECT * FROM smtp WHERE user_id = ?');
+        $st->execute([$me['id']]);
+        $row = $st->fetch() ?: null;
+        if (method() === 'POST') {
+            $in = json_in();
+            $email = trim((string)($in['from_email'] ?? ''));
+            $host = trim((string)($in['host'] ?? ''));
+            $port = (int)($in['port'] ?? 465);
+            $secure = in_array($in['secure'] ?? '', ['ssl', 'tls', 'none'], true) ? $in['secure'] : 'ssl';
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) fail('Adresa de e-mail nu este validă');
+            if (!preg_match('/^[a-z0-9.-]+$/i', $host)) fail('Serverul SMTP nu este valid');
+            if ($port < 1 || $port > 65535) fail('Port invalid');
+            $pass = (string)($in['password'] ?? '');
+            $enc = $pass !== '' ? encrypt_secret($pass, $cfg) : ($row['password'] ?? null);
+            $pdo->prepare('REPLACE INTO smtp (user_id, from_name, from_email, host, port, secure, username, password, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                ->execute([$me['id'], trim((string)($in['from_name'] ?? '')), $email, $host, $port, $secure, trim((string)($in['username'] ?? '')), $enc, now()]);
+            out(['ok' => true]);
+        }
+        if (!$row) out(['smtp' => null]);
+        unset($row['password']);
+        $row['has_password'] = true;
+        out(['smtp' => $row]);
+
+    case 'smtp-test':
+    case 'mail':
+        if (method() !== 'POST') fail('Metodă nepermisă', 405);
+        ensure_mail_schema($pdo);
+        $st = $pdo->prepare('SELECT * FROM smtp WHERE user_id = ?');
+        $st->execute([$me['id']]);
+        $s = $st->fetch();
+        if (!$s) fail('Configurează mai întâi adresa ta de trimitere (Setări → E-mail)');
+        $s['password'] = decrypt_secret($s['password'], $cfg);
+        try {
+            $m = make_mailer($s);
+            if ($r === 'smtp-test') {
+                $m->addAddress($s['from_email']);
+                $m->Subject = 'Test e-mail Șantier';
+                $m->Body = "Acesta este un e-mail de test trimis din aplicația Șantier.\nConfigurarea funcționează.";
+                $m->send();
+                out(['ok' => true]);
+            }
+            $split = fn($v) => array_values(array_filter(array_map('trim', preg_split('/[,;\s]+/', (string)$v))));
+            $to = $split($_POST['to'] ?? '');
+            $cc = $split($_POST['cc'] ?? '');
+            if (!$to) fail('Alege cel puțin un destinatar');
+            if (count($to) + count($cc) > 40) fail('Prea mulți destinatari (maxim 40)');
+            foreach (array_merge($to, $cc) as $a) if (!filter_var($a, FILTER_VALIDATE_EMAIL)) fail('Adresă invalidă: ' . $a);
+            foreach ($to as $a) $m->addAddress($a);
+            foreach ($cc as $a) $m->addCC($a);
+            if (!empty($_POST['copy'])) $m->addBCC($s['from_email']);
+            $m->addReplyTo($s['from_email'], $s['from_name']);
+            $m->Subject = trim((string)($_POST['subject'] ?? ''));
+            $body = (string)($_POST['body'] ?? '');
+            $m->isHTML(true);
+            $m->Body = text_to_html($body);
+            $m->AltBody = $body;
+            $f = $_FILES['file'] ?? null;
+            if ($f) {
+                if ($f['error'] !== UPLOAD_ERR_OK) fail('Atașamentul nu a ajuns pe server (cod ' . $f['error'] . ' – poate e prea mare)');
+                if ($f['size'] > 24 * 1024 * 1024) fail('Atașamentul depășește 24 MB – reduceți numărul de fotografii');
+                $name = preg_replace('/[^\w.\-]+/u', '_', (string)($_POST['filename'] ?? 'document.pdf'));
+                $m->addAttachment($f['tmp_name'], $name, 'base64', 'application/pdf');
+            }
+            $m->send();
+            out(['ok' => true, 'sent' => count($to) + count($cc)]);
+        } catch (Throwable $e) {
+            $msg = isset($m) && $m->ErrorInfo ? $m->ErrorInfo : $e->getMessage();
+            fail('Trimiterea a eșuat: ' . $msg, 502);
+        }
+
     default:
         fail('Rută necunoscută', 404);
 }

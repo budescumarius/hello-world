@@ -117,11 +117,12 @@ async function outboxDone(e) {
   if (cur && cur.v === e.v) await db.rawDel('outbox', e.k);
 }
 
-async function api(r, { method = 'GET', body, raw, params = '' } = {}) {
+async function api(r, { method = 'GET', body, raw, form, params = '' } = {}) {
   const headers = {};
   if (sync.token) headers['X-Token'] = sync.token;
   let payload;
-  if (raw) { headers['Content-Type'] = raw.type || 'image/jpeg'; payload = raw; } else if (body) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
+  if (form) payload = form;
+  else if (raw) { headers['Content-Type'] = raw.type || 'image/jpeg'; payload = raw; } else if (body) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
   const res = await fetch(`${API}?r=${r}${params}`, { method, headers, body: payload, cache: 'no-store' });
   if (res.status === 401 && r !== 'login') { authLost(); throw new Error('Sesiunea a expirat. Conectează-te din nou.'); }
   if (!res.ok) {
@@ -238,7 +239,7 @@ function syncDot() {
 let pendingRefresh = false;
 let viewRefresh = null;
 function refreshView() {
-  if (openSheets.size || document.querySelector('.photo-view') || /\/print$/.test(location.hash)) { pendingRefresh = true; return; }
+  if (openSheets.size || document.querySelector('.photo-view')) { pendingRefresh = true; return; }
   pendingRefresh = false;
   if (viewRefresh) viewRefresh(); else render();
 }
@@ -543,7 +544,6 @@ function formSheet({ title, fields, values = {}, onSave, onDelete, extra = '' })
 // ---------------------------------------------------------------- Router
 const state = { filters: {}, viewerStatus: new Set(Object.keys(STATUS)) };
 let viewerIntent = null;
-let printJob = null;
 let cleanupView = null;
 
 async function render() {
@@ -558,7 +558,6 @@ async function render() {
       const project = await db.get('projects', p[1]);
       if (!project) return go('#/');
       if (p[2] === 'plan' && p[3]) return await viewPlan(project, p[3]);
-      if (p[2] === 'print') return await viewPrint(project);
       return await viewProject(project, p[2] || 'plans');
     }
     return await viewProjects();
@@ -629,6 +628,8 @@ function appMenu() {
   actionSheet('Meniu', [
     ...(sync.enabled ? [{ label: 'Cont și sincronizare', run: accountSheet }] : []),
     { label: 'Setări firmă (logo, antet PV)', run: settingsSheet },
+    ...(sync.enabled ? [{ label: 'Adresa mea de e-mail (trimitere)', run: smtpSheet }] : []),
+    { label: 'Șabloane e-mail', run: templatesSheet },
     { label: 'Exportă backup (toate datele)', run: exportBackup },
     { label: 'Importă backup', run: importBackup },
     { label: 'Spațiu de stocare', run: storageInfo },
@@ -913,10 +914,11 @@ async function tabCompanies(pr, el) {
 
 // ---- Rapoarte
 async function tabReports(pr, el) {
-  const [plans, companies, points] = await Promise.all([db.where('plans', pr.id), db.where('companies', pr.id), db.where('points', pr.id)]);
+  const [plans, companies, points, st] = await Promise.all([db.where('plans', pr.id), db.where('companies', pr.id), db.where('points', pr.id), getSettings()]);
+  const L = PVL[st.lang] || PVL.fr;
   el.innerHTML = `<div class="card form">
     <div class="card-title">Raport de puncte (PDF)</div>
-    ${field({ name: 'title', label: 'Titlu raport' }, 'Raport puncte de șantier')}
+    ${field({ name: 'title', label: 'Titlu raport' }, L.rep.title)}
     <div class="field"><span>Statusuri incluse</span><div class="inline-checks">${Object.entries(STATUS).map(([k, s]) => `<label><input type="checkbox" name="st" value="${k}" ${k !== 'closed' ? 'checked' : ''}><span class="dot" style="--c:${s.color}"></span>${s.label}</label>`).join('')}</div></div>
     <div class="row2">
       ${field({ name: 'company', label: 'Firmă', type: 'select', options: [['', 'Toate firmele'], ...companies.map((c) => [c.id, c.name])] })}
@@ -930,7 +932,7 @@ async function tabReports(pr, el) {
       <label><input type="checkbox" name="optOverdue">Doar întârziate</label>
     </div></div>
     <div class="btns"><button class="btn primary" data-act="pdf">${I.print} Generează raport PDF</button><button class="btn" data-act="csv">Export Excel (CSV)</button></div>
-    <div class="muted">Pe iPhone/iPad: în ecranul de raport apasă „PDF”, apoi în meniul de tipărire folosește Partajează → Salvează în Fișiere sau trimite pe email/WhatsApp.</div>
+    <div class="muted">Raportul iese cu antetul și logo-ul firmei, în limba aleasă în Setări firmă, și se poate trimite direct pe e-mail.</div>
   </div>
   <div class="section-title">Statistici pe firme</div>
   ${companies.length ? `<div class="list">${companies.map((c) => {
@@ -944,7 +946,12 @@ async function tabReports(pr, el) {
     plans: $('[name=optPlans]', el).checked, crop: $('[name=optCrop]', el).checked,
     photos: $('[name=optPhotos]', el).checked, hist: $('[name=optHist]', el).checked, overdue: $('[name=optOverdue]', el).checked,
   });
-  $('[data-act=pdf]', el).onclick = () => { printJob = { type: 'report', opts: opts(), back: `#/p/${pr.id}/reports` }; go(`#/p/${pr.id}/print`); };
+  $('[data-act=pdf]', el).onclick = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try { await exportReport(pr, opts()); } catch (err) { console.error(err); toast('Eroare PDF: ' + err.message, 5000); }
+    btn.disabled = false;
+  };
   $('[data-act=csv]', el).onclick = () => {
     const o = opts();
     const list = filterReport(points, o).sort((a, b) => a.number - b.number);
@@ -1460,61 +1467,6 @@ async function cropPlan(plan, p, outW = 300, outH = 300) {
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
   drawPin(ctx, (p.x * plan.w - sx) * outW / sw, (p.y * plan.h - sy) * outH / sh, Math.max(10, outW / 22), STATUS[p.status].color, p.number);
   return c.toDataURL('image/jpeg', 0.85);
-}
-
-// ---------------------------------------------------------------- Raport / proces-verbal (print → PDF)
-async function viewPrint(pr) {
-  const job = printJob;
-  if (!job) return go(`#/p/${pr.id}/reports`);
-  app.innerHTML = `${bar({ back: job.back, title: 'Raport', sub: pr.name, right: `<button class="btn small primary" data-act="print" disabled>${I.print} PDF</button>` })}
-    <main class="content"><div class="doc" id="doc"><p>Se generează documentul…</p></div></main>`;
-  const [plans, points, companies] = await Promise.all([db.where('plans', pr.id), db.where('points', pr.id), db.where('companies', pr.id)]);
-  const comp = (id) => companies.find((c) => c.id === id);
-  const planOf = (id) => plans.find((p) => p.id === id);
-  const head = (title) => `<div class="head"><div><h1>${esc(title)}</h1><div><b>${esc(pr.name)}</b></div>
-      <div class="muted">${esc([pr.client && 'Beneficiar: ' + pr.client, pr.address].filter(Boolean).join(' · '))}</div></div>
-      <div class="muted" style="text-align:right">Generat: ${fmtTime(Date.now())}${pr.manager ? `<br>Responsabil: ${esc(pr.manager)}` : ''}</div></div>`;
-  const badge = (p) => `<span class="badge" style="--c:${STATUS[p.status].color}">${STATUS[p.status].label}</span>`;
-
-  async function pointBlock(p, o) {
-    const pl = planOf(p.planId);
-    const crop = o.crop && pl && p.x != null ? await cropPlan(pl, p) : '';
-    const photos = o.photos ? await Promise.all((p.photos || []).map(blobURL)) : [];
-    const c = comp(p.companyId);
-    return `<div class="pt">${crop ? `<img class="crop" src="${crop}" alt="">` : ''}<div class="body">
-      <div class="title"><span class="badge" style="--c:${STATUS[p.status].color}">#${p.number}</span>${esc(p.title)}</div>
-      <div class="kv">${badge(p)} · Prioritate: ${PRIORITY[p.priority] || '-'}${p.category ? ' · ' + esc(p.category) : ''}</div>
-      <div class="kv">Firmă: <b>${c ? esc(c.name) : '—'}</b>${p.due ? ` · Termen: <b ${isOverdue(p) ? 'style="color:#d92d20"' : ''}>${fmtDate(p.due)}${isOverdue(p) ? ' (depășit)' : ''}</b>` : ''}${pl ? ` · Plan: ${esc(pl.name)}` : ''}</div>
-      ${p.desc ? `<div class="pre" style="margin-top:4px">${esc(p.desc)}</div>` : ''}
-      ${o.hist && p.history && p.history.length ? `<div class="kv" style="margin-top:6px">${p.history.map((h) => `<div><small>${fmtTime(h.t)}</small> – ${esc(h.text)}</div>`).join('')}</div>` : ''}
-      ${photos.length ? `<div class="ph">${photos.map((u) => `<img src="${u}" alt="">`).join('')}</div>` : ''}
-    </div></div>`;
-  }
-
-  let html = '';
-  {
-    const o = job.opts;
-    const list = filterReport(points, o).sort((a, b) => a.number - b.number);
-    html += head(o.title);
-    const filt = [o.company && 'Firmă: ' + ((comp(o.company) || {}).name || ''), o.plan && 'Plan: ' + ((planOf(o.plan) || {}).name || ''), 'Statusuri: ' + o.statuses.map((s) => STATUS[s].label).join(', '), o.overdue && 'doar întârziate'].filter(Boolean).join(' · ');
-    html += `<p class="muted">${esc(filt)}</p>`;
-    html += `<table><tr><th>Total</th>${Object.values(STATUS).map((s) => `<th>${s.label}</th>`).join('')}<th>Întârziate</th></tr>
-      <tr><td><b>${list.length}</b></td>${Object.keys(STATUS).map((k) => `<td>${list.filter((p) => p.status === k).length}</td>`).join('')}<td>${list.filter(isOverdue).length}</td></tr></table>`;
-    if (o.plans) {
-      for (const pl of plans) {
-        const pts = list.filter((p) => p.planId === pl.id && p.x != null);
-        if (!pts.length) continue;
-        html += `<div class="section"><h2>Plan: ${esc(pl.name)} (${pts.length} puncte)</h2><img class="plan-img" src="${await planWithPins(pl, pts)}" alt=""></div>`;
-      }
-    }
-    html += `<h2>Puncte (${list.length})</h2>`;
-    for (const p of list) html += await pointBlock(p, o);
-    if (!list.length) html += '<p>Niciun punct pentru criteriile alese.</p>';
-  }
-  $('#doc').innerHTML = html;
-  const btn = $('[data-act=print]');
-  btn.disabled = false;
-  btn.onclick = () => window.print();
 }
 
 // ---------------------------------------------------------------- Pornire

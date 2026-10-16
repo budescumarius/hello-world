@@ -35,7 +35,14 @@ async function settingsSheet() {
         ${field({ name: 'color', label: 'Culoare accent', type: 'color' }, st.color)}
       </div>
       ${field({ name: 'remark', label: 'Remarcă generală (la finalul fiecărui PV, gol = text standard)', type: 'textarea', rows: 3 }, st.remark)}
+      <div class="field"><span>E-mail</span><div class="btns">
+        ${sync.enabled ? '<button type="button" class="btn" data-smtp>Adresa mea de trimitere</button>' : ''}
+        <button type="button" class="btn" data-tpl>Șabloane e-mail</button></div>
+        ${sync.enabled ? '' : '<div class="muted">Trimiterea directă din aplicație funcționează când aplicația rulează pe serverul tău (Hostico).</div>'}</div>
     </form>`, { full: true });
+  const smtpBtn = $('[data-smtp]', s.el);
+  if (smtpBtn) smtpBtn.onclick = smtpSheet;
+  $('[data-tpl]', s.el).onclick = templatesSheet;
   const form = $('form', s.el);
   const drawLogo = async () => {
     const u = logoId ? await blobURL(logoId) : '';
@@ -82,6 +89,13 @@ async function addOwnCompany(pid) {
 // ---------------------------------------------------------------- Texte PV (pe limbi)
 const PVL = {
   fr: {
+    status: { open: 'Ouvert', progress: 'En cours', done: 'Résolu', closed: 'Clôturé' },
+    prio: { low: 'Basse', normal: 'Normale', high: 'Haute', urgent: 'Urgente' },
+    rep: { title: 'Rapport de chantier – points ouverts', generated: 'Généré le', total: 'Total', overdue: 'En retard', plan: 'Plan', points: 'Points', company: 'Entreprise', due: 'Échéance', priority: 'Priorité', statuses: 'Statuts', onlyOverdue: 'uniquement en retard', none: 'Aucun point pour ces critères.', late: 'dépassée' },
+    mail: {
+      pv: { subject: 'PV de chantier n° {nr} – {proiect} – {data}', body: 'Madame, Monsieur,\n\nVeuillez trouver ci-joint le procès-verbal de chantier n° {nr} du {data} concernant le chantier {proiect} ({adresa}).\n\nSans remarque de votre part endéans les 2 jours, son contenu est considéré comme accepté.\nProchaine réunion : {urmatoarea}.\n\nBien à vous,\n\n{expeditor}\n{firma}' },
+      report: { subject: '{titlu} – {proiect} – {data}', body: 'Madame, Monsieur,\n\nVeuillez trouver ci-joint le rapport « {titlu} » du {data} concernant le chantier {proiect} ({adresa}), comprenant {nr_puncte} point(s).\n\nNous restons à votre disposition pour toute question.\n\nBien à vous,\n\n{expeditor}\n{firma}' },
+    },
     transmission: 'E-Mail TRANSMISSION', to: 'To', from: 'From', date: 'Date', annex: 'Annexes',
     photos: (n) => `${n} photo${n > 1 ? 's' : ''}`,
     title: (addr, n, d) => `${addr ? addr + ' : ' : ''}PV de chantier n° ${n} du ${d}`,
@@ -95,6 +109,13 @@ const PVL = {
     sections: ['Avancement et documents remis', 'Documents à recevoir', 'Remarques'],
   },
   ro: {
+    status: { open: 'Deschis', progress: 'În lucru', done: 'Rezolvat', closed: 'Închis' },
+    prio: { low: 'Scăzută', normal: 'Normală', high: 'Ridicată', urgent: 'Urgentă' },
+    rep: { title: 'Raport de șantier – puncte deschise', generated: 'Generat la', total: 'Total', overdue: 'Întârziate', plan: 'Plan', points: 'Puncte', company: 'Firmă', due: 'Termen', priority: 'Prioritate', statuses: 'Statusuri', onlyOverdue: 'doar întârziate', none: 'Niciun punct pentru criteriile alese.', late: 'depășit' },
+    mail: {
+      pv: { subject: 'PV de șantier nr. {nr} – {proiect} – {data}', body: 'Bună ziua,\n\nVă transmitem atașat procesul-verbal de șantier nr. {nr} din {data} pentru șantierul {proiect} ({adresa}).\n\nÎn lipsa unor observații în termen de 2 zile, conținutul este considerat acceptat.\nUrmătoarea ședință: {urmatoarea}.\n\nCu stimă,\n\n{expeditor}\n{firma}' },
+      report: { subject: '{titlu} – {proiect} – {data}', body: 'Bună ziua,\n\nVă transmitem atașat raportul „{titlu}” din {data} pentru șantierul {proiect} ({adresa}), cu {nr_puncte} punct(e).\n\nRămânem la dispoziție pentru orice întrebare.\n\nCu stimă,\n\n{expeditor}\n{firma}' },
+    },
     transmission: 'TRANSMITERE E-MAIL', to: 'Către', from: 'De la', date: 'Data', annex: 'Anexe',
     photos: (n) => `${n} fotografi${n > 1 ? 'i' : 'e'}`,
     title: (addr, n, d) => `${addr ? addr + ' : ' : ''}Proces-verbal de șantier nr. ${n} din ${d}`,
@@ -108,6 +129,13 @@ const PVL = {
     sections: ['Progres și documente predate', 'Documente de primit', 'Observații'],
   },
   nl: {
+    status: { open: 'Open', progress: 'In uitvoering', done: 'Opgelost', closed: 'Afgesloten' },
+    prio: { low: 'Laag', normal: 'Normaal', high: 'Hoog', urgent: 'Dringend' },
+    rep: { title: 'Werfrapport – open punten', generated: 'Aangemaakt op', total: 'Totaal', overdue: 'Te laat', plan: 'Plan', points: 'Punten', company: 'Firma', due: 'Termijn', priority: 'Prioriteit', statuses: 'Statussen', onlyOverdue: 'enkel te laat', none: 'Geen punten voor deze criteria.', late: 'verstreken' },
+    mail: {
+      pv: { subject: 'Werfverslag nr. {nr} – {proiect} – {data}', body: 'Geachte,\n\nIn bijlage vindt u het werfverslag nr. {nr} van {data} voor de werf {proiect} ({adresa}).\n\nZonder opmerkingen binnen 2 dagen wordt de inhoud als aanvaard beschouwd.\nVolgende vergadering: {urmatoarea}.\n\nMet vriendelijke groeten,\n\n{expeditor}\n{firma}' },
+      report: { subject: '{titlu} – {proiect} – {data}', body: 'Geachte,\n\nIn bijlage vindt u het rapport "{titlu}" van {data} voor de werf {proiect} ({adresa}), met {nr_puncte} punt(en).\n\nMet vriendelijke groeten,\n\n{expeditor}\n{firma}' },
+    },
     transmission: 'E-Mail TRANSMISSIE', to: 'Aan', from: 'Van', date: 'Datum', annex: 'Bijlagen',
     photos: (n) => `${n} foto${n > 1 ? "'s" : ''}`,
     title: (addr, n, d) => `${addr ? addr + ' : ' : ''}Werfverslag nr. ${n} van ${d}`,
@@ -121,6 +149,13 @@ const PVL = {
     sections: ['Vordering en ontvangen documenten', 'Te ontvangen documenten', 'Opmerkingen'],
   },
   en: {
+    status: { open: 'Open', progress: 'In progress', done: 'Resolved', closed: 'Closed' },
+    prio: { low: 'Low', normal: 'Normal', high: 'High', urgent: 'Urgent' },
+    rep: { title: 'Site report – open items', generated: 'Generated on', total: 'Total', overdue: 'Overdue', plan: 'Plan', points: 'Items', company: 'Company', due: 'Due', priority: 'Priority', statuses: 'Statuses', onlyOverdue: 'overdue only', none: 'No items for these criteria.', late: 'overdue' },
+    mail: {
+      pv: { subject: 'Site meeting report no. {nr} – {proiect} – {data}', body: 'Dear Sir or Madam,\n\nPlease find attached site meeting report no. {nr} of {data} for the {proiect} site ({adresa}).\n\nUnless we receive remarks within 2 days, its content is deemed accepted.\nNext meeting: {urmatoarea}.\n\nKind regards,\n\n{expeditor}\n{firma}' },
+      report: { subject: '{titlu} – {proiect} – {data}', body: 'Dear Sir or Madam,\n\nPlease find attached the report "{titlu}" of {data} for the {proiect} site ({adresa}), with {nr_puncte} item(s).\n\nKind regards,\n\n{expeditor}\n{firma}' },
+    },
     transmission: 'E-Mail TRANSMISSION', to: 'To', from: 'From', date: 'Date', annex: 'Attachments',
     photos: (n) => `${n} photo${n > 1 ? 's' : ''}`,
     title: (addr, n, d) => `${addr ? addr + ' : ' : ''}Site meeting report no. ${n} of ${d}`,
@@ -165,7 +200,7 @@ async function tabMeetings(pr, el) {
   el.innerHTML = (meetings.length ? `<div class="list">${meetings.map((m) => {
     const open = m.sections.reduce((n, s) => n + s.items.filter((i) => !i.done).length, 0);
     return `<button class="row" data-m="${m.id}"><span class="num" style="--c:var(--primary)">${m.number}</span><span class="main">
-      <div class="t">PV n° ${m.number} – ${fmtDate(m.date)}</div><div class="s">${(m.present || []).length} prezenți · ${open} remarci deschise${m.next ? ' · următoarea: ' + fmtDate(m.next) : ''}</div></span></button>`;
+      <div class="t">PV n° ${m.number} – ${fmtDate(m.date)}</div><div class="s">${(m.present || []).length} prezenți · ${open} remarci deschise${m.next ? ' · următoarea: ' + fmtDate(m.next) : ''}${m.sentLog && m.sentLog.length ? ` · <span style="color:#2f9e44;font-weight:600">✉ trimis ${fmtTime(m.sentLog[m.sentLog.length - 1].t)}</span>` : ''}</div></span></button>`;
   }).join('')}</div>` : empty('Niciun proces-verbal', 'Creează procesul-verbal al vizitei de șantier: participanți, subiecte cu termene și responsabili, fotografii. PDF-ul iese cu antetul și logo-ul firmei tale.'))
     + `<div class="muted" style="margin:14px 4px">Antetul, logo-ul și limba PV-ului se setează din <a href="#" data-set style="color:var(--primary);font-weight:600">Setări firmă</a>.</div>`
     + `<button class="fab" data-act="addm">${I.plus}<span>PV nou</span></button>`;
@@ -498,11 +533,20 @@ async function buildPVDoc(pr, m) {
     content.push({ table: { widths: ['*', '*'], body: rows, dontBreakRows: true }, layout: 'noBorders' });
   }
 
+  return {
+    ...pdfChrome(st, L, logo, `${L.pvShort} ${pr.shortName || pr.name}${pr.address ? ' – ' + pr.address : ''}`, dateStr, site),
+    info: { title: `${L.pvShort} ${m.number} – ${pr.name}`, author: st.name },
+    content,
+  };
+}
+
+// Antetul (logo + firmă) și subsolul (dată, șantier, pagină, contact) comune tuturor documentelor
+function pdfChrome(st, L, logo, runningTitle, dateStr, site) {
+  const accent = st.color || '#1f4fd8';
   const contactLine = [st.address, st.phone, st.email, st.website, st.vat].filter(Boolean).join('   •   ');
   return {
     pageSize: 'A4',
     pageMargins: [36, 84, 36, 66],
-    info: { title: `${L.pvShort} ${m.number} – ${pr.name}`, author: st.name },
     defaultStyle: { font: 'Roboto', fontSize: 9.5, lineHeight: 1.12 },
     styles: { h2: { fontSize: 13, bold: true, color: accent } },
     header: (page) => ({
@@ -515,7 +559,7 @@ async function buildPVDoc(pr, m) {
           ],
         } : {
           columns: [
-            { width: '*', text: `${L.pvShort} ${pr.shortName || pr.name}${pr.address ? ' – ' + pr.address : ''}`, fontSize: 8.5, italics: true, margin: [0, 18, 0, 0] },
+            { width: '*', text: runningTitle, fontSize: 8.5, italics: true, margin: [0, 18, 0, 0] },
             logo ? { image: logo, fit: [90, 26], width: 90, alignment: 'right' } : { text: st.name.toUpperCase(), fontSize: 9, bold: true, color: accent, characterSpacing: 2, width: 'auto', margin: [0, 18, 0, 0] },
           ],
         },
@@ -537,7 +581,6 @@ async function buildPVDoc(pr, m) {
         contactLine ? { text: contactLine, fontSize: 7, alignment: 'center', color: '#555', characterSpacing: 0.6 } : '',
       ],
     }),
-    content,
   };
 }
 
@@ -548,22 +591,291 @@ async function exportPV(pr, m) {
   const blob = await new Promise((res) => pdfMake.createPdf(dd).getBlob(res));
   const name = `PV${String(m.number).padStart(2, '0')}-${(pr.shortName || pr.name).replace(/[^\w\-]+/g, '_')}-${m.date.replace(/-/g, '').slice(2)}.pdf`;
   toast('PDF gata');
-  pdfReadySheet(blob, name);
+  const st = await getSettings();
+  const L = PVL[st.lang] || PVL.fr;
+  const companies = await db.where('companies', pr.id);
+  pdfReadySheet(blob, name, {
+    kind: 'pv', pr,
+    vars: {
+      nr: m.number, data: m.dateText || pvDate(m.date, L), proiect: pr.name, adresa: pr.address || '', descriere: pr.desc || '',
+      urmatoarea: m.next ? L.nextText(weekday(m.next, L), pvDate(m.next, L), m.nextTime) : '—',
+    },
+    preselect: companies.filter((c) => c.email && c.code !== 'EG' && c.name !== st.name).map((c) => c.id),
+    async onSent(to) {
+      const cur = await db.get('meetings', m.id);
+      if (!cur) return;
+      cur.sentLog = [...(cur.sentLog || []), { t: Date.now(), to }];
+      await db.put('meetings', cur);
+    },
+  });
   return blob;
 }
 
 // Partajarea trebuie pornită dintr-o atingere nouă (cerință iOS), de aceea apare o fereastră cu butoane
-function pdfReadySheet(blob, name) {
+function pdfReadySheet(blob, name, mail) {
   const url = URL.createObjectURL(blob);
   const file = new File([blob], name, { type: 'application/pdf' });
   const canShare = navigator.canShare && navigator.canShare({ files: [file] });
   const s = sheet(`<div class="sheet-head"><span style="width:70px"></span><h2>PDF gata</h2><button class="link" data-close>Închide</button></div>
     <div class="sheet-body"><div class="card" style="margin-bottom:12px"><div class="card-title">${esc(name)}</div><div class="muted">${(blob.size / 1024).toFixed(0)} KB</div></div>
     <div class="actions" style="padding:0">
-      ${canShare ? '<button class="btn primary" data-a="share">Trimite (email, WhatsApp…)</button>' : ''}
+      ${mail && sync.enabled ? '<button class="btn primary" data-a="mail">✉ Trimite pe e-mail din aplicație</button>' : ''}
+      ${canShare ? `<button class="btn ${mail && sync.enabled ? '' : 'primary'}" data-a="share">Partajează (Mail, WhatsApp…)</button>` : ''}
       <a class="btn" href="${url}" target="_blank" rel="noopener">Deschide PDF</a>
       <a class="btn" href="${url}" download="${esc(name)}">Descarcă</a>
     </div></div>`, { onClose: () => setTimeout(() => URL.revokeObjectURL(url), 60000) });
+  const mb = $('[data-a=mail]', s.el);
+  if (mb) mb.onclick = () => composeMail({ ...mail, blob, filename: name });
   const sh = $('[data-a=share]', s.el);
   if (sh) sh.onclick = async () => { try { await navigator.share({ files: [file], title: name }); } catch (e) { if (e.name !== 'AbortError') toast(e.message); } };
+}
+
+
+// ---------------------------------------------------------------- Raport de puncte (PDF cu antetul firmei)
+async function buildReportDoc(pr, o) {
+  const [st, companies, points, plans] = await Promise.all([getSettings(), db.where('companies', pr.id), db.where('points', pr.id), db.where('plans', pr.id)]);
+  const L = PVL[st.lang] || PVL.fr;
+  const accent = st.color || '#1f4fd8';
+  const logo = st.logoId ? await blobDataURL(st.logoId, 900, 'image/png') : null;
+  const list = filterReport(points, o).sort((a, b) => a.number - b.number);
+  const comp = (id) => companies.find((c) => c.id === id);
+  const planOf = (id) => plans.find((p) => p.id === id);
+  const dateStr = pvDate(today(), L);
+  const filt = [o.company && `${L.rep.company}: ${(comp(o.company) || {}).name || ''}`, o.plan && `${L.rep.plan}: ${(planOf(o.plan) || {}).name || ''}`,
+    `${L.rep.statuses}: ${o.statuses.map((k) => L.status[k]).join(', ')}`, o.overdue && L.rep.onlyOverdue].filter(Boolean).join('  ·  ');
+
+  const content = [
+    {
+      table: { widths: ['*'], body: [[{ stack: [{ text: o.title, bold: true, fontSize: 12 }, { text: [pr.name, pr.address].filter(Boolean).join(' – '), bold: true }, ...(pr.desc ? [{ text: pr.desc }] : [])], alignment: 'center', fillColor: '#d9d9d9', margin: [4, 4, 4, 4] }]] },
+      layout: { hLineWidth: () => 0.6, vLineWidth: () => 0.6 }, margin: [0, 0, 0, 8],
+    },
+    { text: `${L.rep.generated} ${dateStr}   ·   ${filt}`, fontSize: 8.5, color: '#555', margin: [0, 0, 0, 8] },
+    {
+      table: {
+        widths: Array(6).fill('*'),
+        body: [
+          [L.rep.total, ...Object.keys(STATUS).map((k) => L.status[k]), L.rep.overdue].map((h) => ({ text: h, bold: true, alignment: 'center', fillColor: '#f2f2f2' })),
+          [list.length, ...Object.keys(STATUS).map((k) => list.filter((p) => p.status === k).length), list.filter(isOverdue).length].map((v) => ({ text: String(v), alignment: 'center' })),
+        ],
+      },
+      layout: { hLineWidth: () => 0.6, vLineWidth: () => 0.6 }, margin: [0, 0, 0, 12],
+    },
+  ];
+  if (o.plans) {
+    for (const pl of plans) {
+      const pts = list.filter((p) => p.planId === pl.id && p.x != null);
+      if (!pts.length) continue;
+      content.push({ stack: [{ text: `${L.rep.plan}: ${pl.name} (${pts.length})`, style: 'h2', margin: [0, 6, 0, 6] }, { image: await planWithPins(pl, pts, 1800), fit: [523, 640], alignment: 'center' }], unbreakable: true, margin: [0, 0, 0, 10] });
+    }
+  }
+  content.push({ text: `${L.rep.points} (${list.length})`, style: 'h2', margin: [0, 8, 0, 6] });
+  if (!list.length) content.push({ text: L.rep.none });
+  for (const p of list) {
+    const pl = planOf(p.planId);
+    const c = comp(p.companyId);
+    const crop = o.crop && pl && p.x != null ? await cropPlan(pl, p, 300, 300) : null;
+    const photos = [];
+    if (o.photos) for (const id of p.photos || []) { const d = await blobDataURL(id, 900); if (d) photos.push(d); }
+    const late = isOverdue(p);
+    const details = [
+      { text: [{ text: `#${p.number}  `, bold: true, color: STATUS[p.status].color }, { text: p.title, bold: true }], fontSize: 10.5 },
+      { text: [{ text: L.status[p.status], bold: true, color: STATUS[p.status].color }, `   ·   ${L.rep.priority}: ${L.prio[p.priority] || '-'}`, p.category ? `   ·   ${p.category}` : ''], fontSize: 8.5, margin: [0, 2, 0, 0] },
+      { text: [`${L.rep.company}: `, { text: c ? c.name : '—', bold: true }, p.due ? `   ·   ${L.rep.due}: ` : '', p.due ? { text: pvDate(p.due, L) + (late ? ` (${L.rep.late})` : ''), bold: true, color: late ? '#d92d20' : '#222' } : '', pl ? `   ·   ${L.rep.plan}: ${pl.name}` : ''], fontSize: 8.5, margin: [0, 2, 0, 0] },
+      ...(p.desc ? [{ text: p.desc, margin: [0, 4, 0, 0] }] : []),
+      ...(o.hist && p.history && p.history.length ? [{ stack: p.history.map((h) => ({ text: `${fmtTime(h.t)} – ${h.text}`, fontSize: 7.5, color: '#555' })), margin: [0, 4, 0, 0] }] : []),
+    ];
+    const rows = [[...(crop ? [{ image: crop, width: 110 }] : []), { stack: details }]];
+    for (let i = 0; i < photos.length; i += 4) {
+      rows.push([{ columns: photos.slice(i, i + 4).map((d) => ({ image: d, fit: [122, 92], width: 125 })), columnGap: 6, colSpan: crop ? 2 : 1 }, ...(crop ? [''] : [])]);
+    }
+    content.push({
+      table: { widths: crop ? [110, '*'] : ['*'], body: rows, dontBreakRows: true },
+      layout: { hLineWidth: (i, n) => (i === 0 || i === n.table.body.length ? 0.6 : 0), vLineWidth: (i, n) => (i === 0 || i === n.table.widths.length ? 0.6 : 0), hLineColor: () => '#bbb', vLineColor: () => '#bbb', paddingTop: () => 5, paddingBottom: () => 5, paddingLeft: () => 6, paddingRight: () => 6 },
+      unbreakable: photos.length <= 4, margin: [0, 0, 0, 8],
+    });
+  }
+  return {
+    ...pdfChrome(st, L, logo, `${o.title} – ${pr.name}`, dateStr, (pr.shortName || pr.name || '').toUpperCase()),
+    info: { title: `${o.title} – ${pr.name}`, author: st.name },
+    content,
+    _count: list.length,
+  };
+}
+
+async function exportReport(pr, o) {
+  toast('Se generează raportul…', 30000);
+  const pdfMake = await loadPdfMake();
+  const dd = await buildReportDoc(pr, o);
+  const count = dd._count;
+  delete dd._count;
+  const blob = await new Promise((res) => pdfMake.createPdf(dd).getBlob(res));
+  const st = await getSettings();
+  const L = PVL[st.lang] || PVL.fr;
+  const name = `Rapport-${(pr.shortName || pr.name).replace(/[^\w\-]+/g, '_')}-${today().replace(/-/g, '').slice(2)}.pdf`;
+  toast('Raport gata');
+  const companies = await db.where('companies', pr.id);
+  pdfReadySheet(blob, name, {
+    kind: 'report', pr,
+    vars: { titlu: o.title, data: pvDate(today(), L), proiect: pr.name, adresa: pr.address || '', nr_puncte: count },
+    preselect: o.company ? [o.company] : companies.filter((c) => c.email && c.code !== 'EG' && c.name !== st.name).map((c) => c.id),
+  });
+}
+
+// ---------------------------------------------------------------- E-mail: adresa de trimitere, șabloane, compunere
+const SMTP_PRESETS = {
+  cpanel: { label: 'Hostico / cPanel (adresa ta pe domeniu)', port: 465, secure: 'ssl' },
+  gmail: { label: 'Gmail', host: 'smtp.gmail.com', port: 465, secure: 'ssl' },
+  outlook: { label: 'Outlook / Office 365', host: 'smtp.office365.com', port: 587, secure: 'tls' },
+  other: { label: 'Alt furnizor' },
+};
+
+async function smtpSheet() {
+  let cur;
+  try { cur = (await apiJSON('smtp')).smtp; } catch (e) { toast(e.message); return; }
+  cur = cur || { from_name: sync.user ? sync.user.name : '', from_email: '', host: '', port: 465, secure: 'ssl', username: '' };
+  const s = sheet(`<div class="sheet-head"><button class="link" data-close>Anulează</button><h2>Adresa mea de trimitere</h2><button class="link strong" data-save>Salvează</button></div>
+    <form class="sheet-body form" autocomplete="off">
+      <div class="muted">E-mailurile (PV-uri, rapoarte) pleacă de pe această adresă, iar răspunsurile vin tot aici. Fiecare utilizator își poate seta propria adresă.</div>
+      ${field({ name: 'from_name', label: 'Numele afișat', placeholder: 'ex. Marius Budescu – Madibu Group' }, cur.from_name)}
+      ${field({ name: 'from_email', label: 'Adresa ta de e-mail', type: 'email', required: true, placeholder: 'ex. marius@madibugroup.be' }, cur.from_email)}
+      ${field({ name: 'preset', label: 'Furnizor', type: 'select', options: Object.entries(SMTP_PRESETS).map(([k, v]) => [k, v.label]) }, cur.host === 'smtp.gmail.com' ? 'gmail' : cur.host === 'smtp.office365.com' ? 'outlook' : 'cpanel')}
+      <div class="muted" id="smtpHelp"></div>
+      <div class="row2">${field({ name: 'host', label: 'Server SMTP', placeholder: 'mail.domeniul-tau.be' }, cur.host)}${field({ name: 'port', label: 'Port', type: 'number' }, cur.port)}</div>
+      <div class="row2">${field({ name: 'secure', label: 'Securitate', type: 'select', options: [['ssl', 'SSL (port 465)'], ['tls', 'STARTTLS (port 587)'], ['none', 'Fără']] }, cur.secure)}
+        ${field({ name: 'username', label: 'Utilizator (de obicei adresa de e-mail)' }, cur.username)}</div>
+      ${field({ name: 'password', label: cur.has_password ? 'Parola (lasă gol pentru a o păstra pe cea salvată)' : 'Parola contului de e-mail', type: 'password' }, '')}
+      <button type="button" class="btn" data-test>Salvează și trimite-mi un e-mail de test</button>
+    </form>`, { full: true });
+  const f = $('form', s.el).elements;
+  f.password.setAttribute('autocomplete', 'new-password');
+  const help = {
+    cpanel: 'Creează adresa în cPanel → Email Accounts (ex. marius@madibugroup.be). Serverul este de obicei mail.domeniul-tău, port 465 SSL; utilizator = adresa completă, parola = parola căsuței de e-mail.',
+    gmail: 'Pentru Gmail activează verificarea în 2 pași, apoi creează o „Parolă pentru aplicații” (Cont Google → Securitate) și folosește-o aici în locul parolei obișnuite.',
+    outlook: 'Pentru Outlook / Office 365 folosește adresa și parola contului (sau o parolă de aplicație, dacă ai autentificare în 2 pași).',
+    other: 'Completează datele SMTP primite de la furnizorul tău de e-mail.',
+  };
+  const applyPreset = (first) => {
+    const k = f.preset.value;
+    const p = SMTP_PRESETS[k];
+    $('#smtpHelp', s.el).textContent = help[k];
+    if (first) return;
+    if (p.host) f.host.value = p.host;
+    else if (k === 'cpanel' && f.from_email.value.includes('@')) f.host.value = 'mail.' + f.from_email.value.split('@')[1];
+    if (p.port) f.port.value = p.port;
+    if (p.secure) f.secure.value = p.secure;
+  };
+  f.preset.onchange = () => applyPreset(false);
+  f.from_email.onchange = () => {
+    if (!f.username.value) f.username.value = f.from_email.value;
+    if (f.preset.value === 'cpanel' && !f.host.value && f.from_email.value.includes('@')) f.host.value = 'mail.' + f.from_email.value.split('@')[1];
+  };
+  applyPreset(true);
+  const save = async () => {
+    const body = { from_name: f.from_name.value.trim(), from_email: f.from_email.value.trim(), host: f.host.value.trim(), port: +f.port.value || 465, secure: f.secure.value, username: f.username.value.trim() || f.from_email.value.trim(), password: f.password.value };
+    if (!cur.has_password && !body.password) throw new Error('Completează parola contului de e-mail');
+    await apiJSON('smtp', { method: 'POST', body });
+    cur.has_password = true;
+    f.password.value = '';
+  };
+  $('[data-save]', s.el).onclick = async () => { try { await save(); toast('Adresa de trimitere a fost salvată'); s.close(); } catch (e) { toast(e.message, 5000); } };
+  $('[data-test]', s.el).onclick = async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try { await save(); toast('Se trimite e-mailul de test…', 20000); await apiJSON('smtp-test', { method: 'POST' }); toast('Trimis! Verifică ' + f.from_email.value, 5000); } catch (err) { toast(err.message, 8000); }
+    b.disabled = false;
+  };
+}
+
+async function mailTemplate(kind) {
+  const st = await getSettings();
+  const L = PVL[st.lang] || PVL.fr;
+  const t = (st.mailTpl && st.mailTpl[kind]) || {};
+  return { subject: t.subject || L.mail[kind].subject, body: t.body || L.mail[kind].body, st };
+}
+const fillTpl = (t, vars) => String(t).replace(/\{(\w+)\}/g, (m, k) => (vars[k] != null ? String(vars[k]) : m));
+
+async function templatesSheet() {
+  const st = await getSettings();
+  const L = PVL[st.lang] || PVL.fr;
+  const tpl = st.mailTpl || {};
+  const v = (k, f) => (tpl[k] && tpl[k][f]) || L.mail[k][f];
+  const s = sheet(`<div class="sheet-head"><button class="link" data-close>Anulează</button><h2>Șabloane e-mail</h2><button class="link strong" data-save>Salvează</button></div>
+    <form class="sheet-body form">
+      <div class="muted">Textul se completează automat la trimitere și îl poți modifica de fiecare dată înainte de trimitere. Câmpuri disponibile:
+        <b>{nr}</b> nr. PV, <b>{data}</b>, <b>{proiect}</b>, <b>{adresa}</b>, <b>{descriere}</b>, <b>{urmatoarea}</b> ședință, <b>{titlu}</b> raport, <b>{nr_puncte}</b>, <b>{firma}</b>, <b>{expeditor}</b>.</div>
+      <div class="section-title" style="margin:4px 0 0">Proces-verbal</div>
+      ${field({ name: 'pvSubject', label: 'Subiect' }, v('pv', 'subject'))}
+      ${field({ name: 'pvBody', label: 'Mesaj', type: 'textarea', rows: 10 }, v('pv', 'body'))}
+      <div class="section-title" style="margin:4px 0 0">Raport</div>
+      ${field({ name: 'repSubject', label: 'Subiect' }, v('report', 'subject'))}
+      ${field({ name: 'repBody', label: 'Mesaj', type: 'textarea', rows: 9 }, v('report', 'body'))}
+      <button type="button" class="btn" data-reset>Revino la textele standard (${esc(st.lang.toUpperCase())})</button>
+    </form>`, { full: true });
+  const f = $('form', s.el).elements;
+  $('[data-reset]', s.el).onclick = () => {
+    f.pvSubject.value = L.mail.pv.subject; f.pvBody.value = L.mail.pv.body;
+    f.repSubject.value = L.mail.report.subject; f.repBody.value = L.mail.report.body;
+  };
+  $('[data-save]', s.el).onclick = async () => {
+    // textul identic cu cel standard nu se salvează, ca să urmeze limba aleasă
+    const pick = (val, def) => (val.trim() === def ? '' : val);
+    st.mailTpl = {
+      pv: { subject: pick(f.pvSubject.value, L.mail.pv.subject), body: pick(f.pvBody.value, L.mail.pv.body) },
+      report: { subject: pick(f.repSubject.value, L.mail.report.subject), body: pick(f.repBody.value, L.mail.report.body) },
+    };
+    await db.put('settings', st);
+    toast('Șabloane salvate');
+    s.close();
+  };
+}
+
+async function composeMail({ kind, pr, vars, preselect = [], blob, filename, onSent }) {
+  let smtp;
+  try { smtp = (await apiJSON('smtp')).smtp; } catch (e) { toast(e.message); return; }
+  if (!smtp) {
+    if (confirm('Nu ai setat încă adresa de e-mail de pe care se trimite. O setezi acum?')) smtpSheet();
+    return;
+  }
+  const [companies, tpl] = await Promise.all([db.where('companies', pr.id), mailTemplate(kind)]);
+  const all = { ...vars, firma: tpl.st.name, expeditor: smtp.from_name || (sync.user && sync.user.name) || '' };
+  const withMail = companies.filter((c) => c.email);
+  const s = sheet(`<div class="sheet-head"><button class="link" data-close>Anulează</button><h2>Trimite pe e-mail</h2><button class="link strong" data-send>Trimite</button></div>
+    <form class="sheet-body form" autocomplete="off">
+      <div class="muted">De la: <b>${esc(smtp.from_name ? smtp.from_name + ' <' + smtp.from_email + '>' : smtp.from_email)}</b></div>
+      <div class="field"><span>Destinatari</span>${withMail.length ? `<div class="checks">${withMail.map((c) => `<label><input type="checkbox" name="rc" value="${esc(c.email)}" ${preselect.includes(c.id) ? 'checked' : ''}><span><b>${esc(c.code || '')}</b> ${esc(c.name)}${c.contact ? ' – ' + esc(c.contact) : ''}<br><span class="muted">${esc(c.email)}</span></span></label>`).join('')}</div>` : '<div class="muted">Nicio firmă din proiect nu are adresă de e-mail (le poți adăuga în tabul „Firme”).</div>'}</div>
+      ${field({ name: 'extra', label: 'Alte adrese (separate prin virgulă)', type: 'email', placeholder: 'ex. client@exemplu.be' })}
+      ${field({ name: 'cc', label: 'CC (opțional)', type: 'email' })}
+      <label class="inline-checks"><label><input type="checkbox" name="copy" checked>Trimite-mi și mie o copie</label></label>
+      ${field({ name: 'subject', label: 'Subiect' }, fillTpl(tpl.subject, all))}
+      ${field({ name: 'body', label: 'Mesaj', type: 'textarea', rows: 12 }, fillTpl(tpl.body, all))}
+      <div class="card" style="display:flex;gap:10px;align-items:center"><span style="font-size:22px">📎</span><div><div class="t" style="font-weight:600">${esc(filename)}</div><div class="muted">${(blob.size / 1024).toFixed(0)} KB</div></div></div>
+    </form>`, { full: true });
+  const f = $('form', s.el).elements;
+  f.extra.setAttribute('multiple', ''); f.cc.setAttribute('multiple', '');
+  $('[data-send]', s.el).onclick = async (e) => {
+    const btn = e.currentTarget;
+    const to = [...$$('input[name=rc]:checked', s.el).map((x) => x.value), ...f.extra.value.split(/[,;\s]+/).filter(Boolean)];
+    if (!to.length) { toast('Alege cel puțin un destinatar'); return; }
+    if (!f.subject.value.trim()) { toast('Completează subiectul'); return; }
+    const fd = new FormData();
+    fd.append('to', [...new Set(to)].join(','));
+    fd.append('cc', f.cc.value);
+    if (f.copy.checked) fd.append('copy', '1');
+    fd.append('subject', f.subject.value.trim());
+    fd.append('body', f.body.value);
+    fd.append('filename', filename);
+    fd.append('file', blob, filename);
+    btn.disabled = true;
+    btn.textContent = 'Se trimite…';
+    try {
+      await apiJSON('mail', { method: 'POST', form: fd });
+      toast(`✉ Trimis la ${to.length} destinatar${to.length > 1 ? 'i' : ''}`, 4000);
+      if (onSent) await onSent([...new Set(to)]);
+      s.close();
+    } catch (err) {
+      toast(err.message, 9000);
+      btn.disabled = false;
+      btn.textContent = 'Trimite';
+    }
+  };
 }
