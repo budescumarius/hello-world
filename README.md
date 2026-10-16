@@ -1,3 +1,10 @@
+# hello-world
+
+- `madibugroup/` – site-ul www.madibugroup.be cu panou de administrare. Vezi [madibugroup/INSTALARE.md](madibugroup/INSTALARE.md).
+- `app/` – aplicația Șantier (PWA), descrisă mai jos.
+
+---
+
 # Șantier – aplicație pentru iPhone și iPad
 
 Aplicație web instalabilă (PWA) pentru urmărirea șantierelor: planuri, puncte de observație/defecte, fotografii, firme, ședințe și rapoarte PDF. Funcționează **offline**, iar datele rămân pe dispozitiv.

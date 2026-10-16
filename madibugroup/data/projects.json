@@ -1,0 +1,618 @@
+[
+  {
+    "id": "sceptre",
+    "slug": "sceptre",
+    "old_slugs": [],
+    "title": {
+      "fr": "Sceptre",
+      "nl": ""
+    },
+    "summary": {
+      "fr": "",
+      "nl": ""
+    },
+    "body": {
+      "fr": "",
+      "nl": ""
+    },
+    "category": "renovation",
+    "commune": "",
+    "year": "2025",
+    "surface": "",
+    "status": "done",
+    "featured": true,
+    "published": true,
+    "sort": 0,
+    "cover": {
+      "src": "/wp-content/uploads/2025/10/IMG_5862.jpg",
+      "thumb": "/wp-content/uploads/2025/10/IMG_5862.jpg",
+      "alt": ""
+    },
+    "images": [
+      {
+        "src": "/wp-content/gallery/sceptre/IMG_5664.JPG",
+        "thumb": "/wp-content/gallery/sceptre/IMG_5664.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/sceptre/IMG_5862.JPG",
+        "thumb": "/wp-content/gallery/sceptre/IMG_5862.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/sceptre/IMG_5614.JPG",
+        "thumb": "/wp-content/gallery/sceptre/IMG_5614.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/sceptre/IMG_5004.JPG",
+        "thumb": "/wp-content/gallery/sceptre/IMG_5004.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/sceptre/IMG_5853.JPG",
+        "thumb": "/wp-content/gallery/sceptre/IMG_5853.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/sceptre/IMG_0969.JPG",
+        "thumb": "/wp-content/gallery/sceptre/IMG_0969.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/sceptre/IMG_9320.JPG",
+        "thumb": "/wp-content/gallery/sceptre/IMG_9320.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/sceptre/IMG_9289.JPG",
+        "thumb": "/wp-content/gallery/sceptre/IMG_9289.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/sceptre/IMG_9288.JPG",
+        "thumb": "/wp-content/gallery/sceptre/IMG_9288.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/sceptre/IMG_6445.JPG",
+        "thumb": "/wp-content/gallery/sceptre/IMG_6445.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/sceptre/IMG_7474.JPG",
+        "thumb": "/wp-content/gallery/sceptre/IMG_7474.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/sceptre/IMG_6447.JPG",
+        "thumb": "/wp-content/gallery/sceptre/IMG_6447.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/sceptre/IMG_9329.JPG",
+        "thumb": "/wp-content/gallery/sceptre/IMG_9329.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/sceptre/IMG_9342.JPG",
+        "thumb": "/wp-content/gallery/sceptre/IMG_9342.JPG",
+        "alt": ""
+      }
+    ],
+    "before": null,
+    "after": null,
+    "created": "2025-10-30 23:28:44",
+    "updated": "2025-10-30 23:28:44"
+  },
+  {
+    "id": "michel-132",
+    "slug": "michel-132",
+    "old_slugs": [
+      "michel-132-renolab"
+    ],
+    "title": {
+      "fr": "Michel 132 – Renolab",
+      "nl": ""
+    },
+    "summary": {
+      "fr": "",
+      "nl": ""
+    },
+    "body": {
+      "fr": "",
+      "nl": ""
+    },
+    "category": "renovation",
+    "commune": "",
+    "year": "2025",
+    "surface": "",
+    "status": "done",
+    "featured": false,
+    "published": true,
+    "sort": 0,
+    "cover": {
+      "src": "/wp-content/uploads/2025/10/IMG_2781.jpg",
+      "thumb": "/wp-content/uploads/2025/10/IMG_2781.jpg",
+      "alt": ""
+    },
+    "images": [
+      {
+        "src": "/wp-content/gallery/michel-132/IMG_1072.JPG",
+        "thumb": "/wp-content/gallery/michel-132/IMG_1072.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/michel-132/IMG_1047.JPG",
+        "thumb": "/wp-content/gallery/michel-132/IMG_1047.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/michel-132/IMG_2758.JPG",
+        "thumb": "/wp-content/gallery/michel-132/IMG_2758.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/michel-132/IMG_1070.JPG",
+        "thumb": "/wp-content/gallery/michel-132/IMG_1070.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/michel-132/IMG_2768.JPG",
+        "thumb": "/wp-content/gallery/michel-132/IMG_2768.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/michel-132/IMG_1092.JPG",
+        "thumb": "/wp-content/gallery/michel-132/IMG_1092.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/michel-132/IMG_6138.JPG",
+        "thumb": "/wp-content/gallery/michel-132/IMG_6138.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/michel-132/IMG_6137.JPG",
+        "thumb": "/wp-content/gallery/michel-132/IMG_6137.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/michel-132/IMG_9215.JPG",
+        "thumb": "/wp-content/gallery/michel-132/IMG_9215.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/michel-132/IMG_9240.JPG",
+        "thumb": "/wp-content/gallery/michel-132/IMG_9240.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/michel-132/IMG_6239.JPG",
+        "thumb": "/wp-content/gallery/michel-132/IMG_6239.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/michel-132/IMG_2781.JPG",
+        "thumb": "/wp-content/gallery/michel-132/IMG_2781.JPG",
+        "alt": ""
+      }
+    ],
+    "before": null,
+    "after": null,
+    "created": "2025-10-30 23:22:14",
+    "updated": "2025-10-30 23:22:14"
+  },
+  {
+    "id": "claude",
+    "slug": "claude",
+    "old_slugs": [],
+    "title": {
+      "fr": "Claude",
+      "nl": ""
+    },
+    "summary": {
+      "fr": "",
+      "nl": ""
+    },
+    "body": {
+      "fr": "",
+      "nl": ""
+    },
+    "category": "renovation",
+    "commune": "",
+    "year": "2025",
+    "surface": "",
+    "status": "done",
+    "featured": false,
+    "published": true,
+    "sort": 0,
+    "cover": {
+      "src": "/wp-content/uploads/2025/10/IMG_5142.jpeg",
+      "thumb": "/wp-content/uploads/2025/10/IMG_5142.jpeg",
+      "alt": ""
+    },
+    "images": [
+      {
+        "src": "/wp-content/gallery/claude/IMG_1796.JPG",
+        "thumb": "/wp-content/gallery/claude/IMG_1796.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/claude/IMG_0685.jpeg",
+        "thumb": "/wp-content/gallery/claude/IMG_0685.jpeg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/claude/IMG_5139.jpeg",
+        "thumb": "/wp-content/gallery/claude/IMG_5139.jpeg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/claude/IMG_2444.jpeg",
+        "thumb": "/wp-content/gallery/claude/IMG_2444.jpeg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/claude/IMG_5137.jpeg",
+        "thumb": "/wp-content/gallery/claude/IMG_5137.jpeg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/claude/IMG_5142.jpeg",
+        "thumb": "/wp-content/gallery/claude/IMG_5142.jpeg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/claude/IMG_2488.JPG",
+        "thumb": "/wp-content/gallery/claude/IMG_2488.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/claude/IMG_8524.jpeg",
+        "thumb": "/wp-content/gallery/claude/IMG_8524.jpeg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/claude/IMG_6413.jpeg",
+        "thumb": "/wp-content/gallery/claude/IMG_6413.jpeg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/claude/IMG_6418.jpeg",
+        "thumb": "/wp-content/gallery/claude/IMG_6418.jpeg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/claude/IMG_8605-2.jpeg",
+        "thumb": "/wp-content/gallery/claude/IMG_8605-2.jpeg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/claude/IMG_8605.jpeg",
+        "thumb": "/wp-content/gallery/claude/IMG_8605.jpeg",
+        "alt": ""
+      }
+    ],
+    "before": null,
+    "after": null,
+    "created": "2025-10-30 22:56:50",
+    "updated": "2025-10-30 22:56:50"
+  },
+  {
+    "id": "hyle-137",
+    "slug": "hyle-137",
+    "old_slugs": [],
+    "title": {
+      "fr": "HYLE 137",
+      "nl": ""
+    },
+    "summary": {
+      "fr": "",
+      "nl": ""
+    },
+    "body": {
+      "fr": "",
+      "nl": ""
+    },
+    "category": "renovation",
+    "commune": "",
+    "year": "2025",
+    "surface": "",
+    "status": "done",
+    "featured": false,
+    "published": true,
+    "sort": 0,
+    "cover": {
+      "src": "/wp-content/uploads/2025/07/img-0162.jpg",
+      "thumb": "/wp-content/uploads/2025/07/img-0162.jpg",
+      "alt": ""
+    },
+    "images": [
+      {
+        "src": "/wp-content/gallery/hyle-137/img-0160.jpg",
+        "thumb": "/wp-content/gallery/hyle-137/img-0160.jpg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/hyle-137/img-0147.jpg",
+        "thumb": "/wp-content/gallery/hyle-137/img-0147.jpg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/hyle-137/img-0140.jpg",
+        "thumb": "/wp-content/gallery/hyle-137/img-0140.jpg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/hyle-137/img-0155.jpg",
+        "thumb": "/wp-content/gallery/hyle-137/img-0155.jpg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/hyle-137/img-152.jpg",
+        "thumb": "/wp-content/gallery/hyle-137/img-152.jpg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/hyle-137/img-0142.jpg",
+        "thumb": "/wp-content/gallery/hyle-137/img-0142.jpg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/hyle-137/img-0162.jpg",
+        "thumb": "/wp-content/gallery/hyle-137/img-0162.jpg",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/hyle-137/img-0178.jpg",
+        "thumb": "/wp-content/gallery/hyle-137/img-0178.jpg",
+        "alt": ""
+      }
+    ],
+    "before": null,
+    "after": null,
+    "created": "2025-07-19 23:23:10",
+    "updated": "2025-07-19 23:23:10"
+  },
+  {
+    "id": "ateliers",
+    "slug": "ateliers",
+    "old_slugs": [
+      "renovation-maison"
+    ],
+    "title": {
+      "fr": "Ateliers",
+      "nl": ""
+    },
+    "summary": {
+      "fr": "",
+      "nl": ""
+    },
+    "body": {
+      "fr": "",
+      "nl": ""
+    },
+    "category": "renovation",
+    "commune": "",
+    "year": "2023",
+    "surface": "",
+    "status": "done",
+    "featured": false,
+    "published": true,
+    "sort": 0,
+    "cover": {
+      "src": "/wp-content/uploads/2023/08/IMG_3397.jpg",
+      "thumb": "/wp-content/uploads/2023/08/IMG_3397.jpg",
+      "alt": ""
+    },
+    "images": [
+      {
+        "src": "/wp-content/gallery/ateliers/IMG_3400.JPG",
+        "thumb": "/wp-content/gallery/ateliers/IMG_3400.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/ateliers/IMG_0192-2.JPG",
+        "thumb": "/wp-content/gallery/ateliers/IMG_0192-2.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/ateliers/IMG_3397.JPG",
+        "thumb": "/wp-content/gallery/ateliers/IMG_3397.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/ateliers/IMG_3398.JPG",
+        "thumb": "/wp-content/gallery/ateliers/IMG_3398.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/ateliers/IMG_3399.JPG",
+        "thumb": "/wp-content/gallery/ateliers/IMG_3399.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/ateliers/IMG_0920.JPG",
+        "thumb": "/wp-content/gallery/ateliers/IMG_0920.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/ateliers/IMG_3406.JPG",
+        "thumb": "/wp-content/gallery/ateliers/IMG_3406.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/ateliers/IMG_3409.JPG",
+        "thumb": "/wp-content/gallery/ateliers/IMG_3409.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/ateliers/IMG_8500.JPG",
+        "thumb": "/wp-content/gallery/ateliers/IMG_8500.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/ateliers/IMG_7496.JPG",
+        "thumb": "/wp-content/gallery/ateliers/IMG_7496.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/ateliers/IMG_3413.JPG",
+        "thumb": "/wp-content/gallery/ateliers/IMG_3413.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/ateliers/IMG_5481.JPG",
+        "thumb": "/wp-content/gallery/ateliers/IMG_5481.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/ateliers/IMG_5667.JPG",
+        "thumb": "/wp-content/gallery/ateliers/IMG_5667.JPG",
+        "alt": ""
+      }
+    ],
+    "before": null,
+    "after": null,
+    "created": "2023-08-12 00:03:48",
+    "updated": "2023-08-12 00:03:48"
+  },
+  {
+    "id": "cambridge",
+    "slug": "cambridge",
+    "old_slugs": [
+      "painting"
+    ],
+    "title": {
+      "fr": "Cambridge",
+      "nl": ""
+    },
+    "summary": {
+      "fr": "",
+      "nl": ""
+    },
+    "body": {
+      "fr": "",
+      "nl": ""
+    },
+    "category": "renovation",
+    "commune": "",
+    "year": "",
+    "surface": "",
+    "status": "done",
+    "featured": false,
+    "published": true,
+    "sort": 0,
+    "cover": {
+      "src": "/wp-content/uploads/2015/05/IMG_1366.jpg",
+      "thumb": "/wp-content/uploads/2015/05/IMG_1366.jpg",
+      "alt": ""
+    },
+    "images": [
+      {
+        "src": "/wp-content/gallery/cambridge/IMG_6077.JPG",
+        "thumb": "/wp-content/gallery/cambridge/IMG_6077.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/cambridge/IMG_6070.JPG",
+        "thumb": "/wp-content/gallery/cambridge/IMG_6070.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/cambridge/IMG_6066.JPG",
+        "thumb": "/wp-content/gallery/cambridge/IMG_6066.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/cambridge/IMG_6076.JPG",
+        "thumb": "/wp-content/gallery/cambridge/IMG_6076.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/cambridge/IMG_1372.JPG",
+        "thumb": "/wp-content/gallery/cambridge/IMG_1372.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/cambridge/IMG_8642.JPG",
+        "thumb": "/wp-content/gallery/cambridge/IMG_8642.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/cambridge/IMG_8641.JPG",
+        "thumb": "/wp-content/gallery/cambridge/IMG_8641.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/cambridge/IMG_8666.JPG",
+        "thumb": "/wp-content/gallery/cambridge/IMG_8666.JPG",
+        "alt": ""
+      },
+      {
+        "src": "/wp-content/gallery/cambridge/IMG_7381.JPG",
+        "thumb": "/wp-content/gallery/cambridge/IMG_7381.JPG",
+        "alt": ""
+      }
+    ],
+    "before": null,
+    "after": null,
+    "created": "2015-05-27 12:38:52",
+    "updated": "2015-05-27 12:38:52"
+  },
+  {
+    "id": "renovation-maison-avant-apres",
+    "slug": "renovation-maison-avant-apres",
+    "old_slugs": [],
+    "title": {
+      "fr": "Rénovation d'une maison",
+      "nl": ""
+    },
+    "summary": {
+      "fr": "Rénovation complète d'une maison : le même espace avant le chantier et à la livraison.",
+      "nl": "Totaalrenovatie van een woning: dezelfde ruimte voor de werken en bij de oplevering."
+    },
+    "body": {
+      "fr": "",
+      "nl": ""
+    },
+    "category": "renovation",
+    "commune": "",
+    "year": "2023",
+    "surface": "",
+    "status": "done",
+    "featured": false,
+    "published": true,
+    "sort": 0,
+    "cover": {
+      "src": "/wp-content/gallery/renovation-maison/IMG_2745.jpeg",
+      "thumb": "/wp-content/gallery/renovation-maison/IMG_2745.jpeg",
+      "alt": "Après"
+    },
+    "images": [
+      {
+        "src": "/wp-content/gallery/renovation-maison/IMG_2745.jpeg",
+        "thumb": "/wp-content/gallery/renovation-maison/IMG_2745.jpeg",
+        "alt": "Après"
+      },
+      {
+        "src": "/wp-content/gallery/renovation-maison/IMG_4939.jpeg",
+        "thumb": "/wp-content/gallery/renovation-maison/IMG_4939.jpeg",
+        "alt": "Avant"
+      }
+    ],
+    "before": {
+      "src": "/wp-content/gallery/renovation-maison/IMG_4939.jpeg",
+      "thumb": "/wp-content/gallery/renovation-maison/IMG_4939.jpeg",
+      "alt": "Avant"
+    },
+    "after": {
+      "src": "/wp-content/gallery/renovation-maison/IMG_2745.jpeg",
+      "thumb": "/wp-content/gallery/renovation-maison/IMG_2745.jpeg",
+      "alt": "Après"
+    },
+    "created": "2023-08-12 00:00:00",
+    "updated": "2023-08-12 00:00:00"
+  }
+]

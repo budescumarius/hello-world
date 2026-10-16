@@ -1,0 +1,8 @@
+# Données créées sur le serveur — ne pas versionner
+settings.json
+messages.json
+subscribers.json
+login-attempts.json
+setup-code.txt
+*.lock
+*.tmp
