@@ -323,3 +323,27 @@ button.chip.on { outline: 2px solid var(--c, var(--primary)); }
   .doc { box-shadow: none; padding: 0; max-width: none; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* Adăugare punct direct din plan */
+.viewer { -webkit-touch-callout: none; }
+.ghost { position: absolute; width: 0; height: 0; transform: scale(var(--inv, 1)); transform-origin: 0 0; z-index: 5; }
+.ghost-pin { position: absolute; left: -17px; top: -44px; width: 34px; height: 44px; opacity: .9; }
+.ghost-pin svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 2px 3px rgba(0,0,0,.35)); }
+.ghost-pin span { position: absolute; top: 4px; left: 0; right: 0; text-align: center; color: #fff; font-weight: 800; font-size: 18px; line-height: 22px; }
+.ghost-btn {
+  position: absolute; left: 0; bottom: 52px; transform: translateX(-50%); white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px; padding: 10px 16px; border: 0; border-radius: 999px;
+  background: var(--primary); color: #fff; font-weight: 700; font-size: 15px; box-shadow: 0 6px 18px rgba(0,0,0,.25); cursor: pointer;
+}
+.ghost-btn svg { width: 18px; height: 18px; }
+.ghost-btn::after { content: ""; position: absolute; left: 50%; bottom: -6px; margin-left: -6px; border: 6px solid transparent; border-bottom: 0; border-top-color: var(--primary); }
+
+/* Indicator sincronizare */
+.sync-dot i, .sync-dot-inline { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #98a2b3; }
+.sync-dot[data-st=ok] i, .sync-dot-inline[data-st=ok] { background: #2f9e44; }
+.sync-dot[data-st=busy] i, .sync-dot-inline[data-st=busy] { background: #1f4fd8; animation: blink 1s infinite; }
+.sync-dot[data-st=pending] i, .sync-dot-inline[data-st=pending] { background: #f08c00; }
+.sync-dot[data-st=error] i, .sync-dot-inline[data-st=error] { background: #e5484d; }
+@keyframes blink { 50% { opacity: .3; } }
+.login { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+.login .card { width: 100%; max-width: 380px; padding: 24px; }

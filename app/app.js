@@ -26,12 +26,16 @@ const I = {
 
 // ---------------------------------------------------------------- IndexedDB
 const STORES = ['projects', 'plans', 'points', 'companies', 'meetings', 'blobs'];
+const SYNCED = ['projects', 'plans', 'points', 'companies', 'meetings'];
 let _db;
 function openDB() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open('santier', 1);
+    const r = indexedDB.open('santier', 2);
     r.onupgradeneeded = () => {
-      STORES.forEach((s) => { if (!r.result.objectStoreNames.contains(s)) r.result.createObjectStore(s, { keyPath: 'id' }); });
+      const d = r.result;
+      STORES.forEach((s) => { if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' }); });
+      // coada de modificări care trebuie trimise la server
+      if (!d.objectStoreNames.contains('outbox')) d.createObjectStore('outbox', { keyPath: 'k' });
     };
     r.onsuccess = () => { _db = r.result; res(_db); };
     r.onerror = () => rej(r.error);
@@ -50,30 +54,343 @@ function tx(store, mode, fn) {
 }
 const db = {
   get: (s, id) => tx(s, 'readonly', (st) => st.get(id)),
-  put: (s, o) => tx(s, 'readwrite', (st) => st.put(o)).then(() => o),
-  del: (s, id) => tx(s, 'readwrite', (st) => st.delete(id)),
   all: (s) => tx(s, 'readonly', (st) => st.getAll()),
   clear: (s) => tx(s, 'readwrite', (st) => st.clear()),
+  count: (s) => tx(s, 'readonly', (st) => st.count()),
+  // scriere locală fără sincronizare (folosită pentru datele venite de pe server)
+  rawPut: (s, o) => tx(s, 'readwrite', (st) => st.put(o)).then(() => o),
+  rawDel: (s, id) => tx(s, 'readwrite', (st) => st.delete(id)),
+  async put(s, o) {
+    if (SYNCED.includes(s)) o._mod = Date.now();
+    await db.rawPut(s, o);
+    await queueChange(s, o.id, 'put');
+    return o;
+  },
+  async del(s, id) {
+    await db.rawDel(s, id);
+    await queueChange(s, id, 'del');
+  },
   async where(s, pid) { return (await db.all(s)).filter((o) => o.projectId === pid); },
 };
 
 const urlCache = new Map();
+async function blobRecord(id) {
+  if (!id) return null;
+  return (await db.get('blobs', id)) || (await fetchRemoteBlob(id));
+}
 async function blobURL(id) {
   if (!id) return '';
   if (urlCache.has(id)) return urlCache.get(id);
-  const r = await db.get('blobs', id);
+  const r = await blobRecord(id);
   if (!r) return '';
+  if (urlCache.has(id)) return urlCache.get(id);
   const u = URL.createObjectURL(r.blob);
   urlCache.set(id, u);
   return u;
 }
-async function getBlob(id) { const r = await db.get('blobs', id); return r && r.blob; }
+async function getBlob(id) { const r = await blobRecord(id); return r && r.blob; }
 async function saveBlob(blob) { const id = uid(); await db.put('blobs', { id, blob }); return id; }
 async function delBlob(id) {
   if (!id) return;
   await db.del('blobs', id);
   const u = urlCache.get(id);
   if (u) { URL.revokeObjectURL(u); urlCache.delete(id); }
+}
+
+// ---------------------------------------------------------------- Server și sincronizare
+const API = 'api/index.php';
+const sync = { enabled: false, token: '', user: null, rev: 0, busy: false, again: false, timer: null, status: 'off', error: '' };
+const ls = {
+  get(k) { try { return JSON.parse(localStorage.getItem('santier.' + k)); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem('santier.' + k, JSON.stringify(v)); } catch (e) { /* stocare indisponibilă */ } },
+  del(k) { try { localStorage.removeItem('santier.' + k); } catch (e) { /* idem */ } },
+};
+
+async function queueChange(store, id, op) {
+  if (!sync.enabled || !id) return;
+  await db.rawPut('outbox', { k: store + ':' + id, store, id, op, t: Date.now(), v: uid() });
+  scheduleSync();
+}
+// Coada se golește doar dacă intrarea nu a fost modificată între timp
+async function outboxDone(e) {
+  const cur = await db.get('outbox', e.k);
+  if (cur && cur.v === e.v) await db.rawDel('outbox', e.k);
+}
+
+async function api(r, { method = 'GET', body, raw, params = '' } = {}) {
+  const headers = {};
+  if (sync.token) headers['X-Token'] = sync.token;
+  let payload;
+  if (raw) { headers['Content-Type'] = raw.type || 'image/jpeg'; payload = raw; } else if (body) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
+  const res = await fetch(`${API}?r=${r}${params}`, { method, headers, body: payload, cache: 'no-store' });
+  if (res.status === 401 && r !== 'login') { authLost(); throw new Error('Sesiunea a expirat. Conectează-te din nou.'); }
+  if (!res.ok) {
+    let m = 'Eroare server ' + res.status;
+    try { m = (await res.json()).error || m; } catch (e) { /* răspuns non-JSON */ }
+    throw new Error(m);
+  }
+  return res;
+}
+const apiJSON = async (r, o) => (await api(r, o)).json();
+
+const blobFetches = new Map();
+function fetchRemoteBlob(id) {
+  if (!sync.enabled || !navigator.onLine) return Promise.resolve(null);
+  if (!blobFetches.has(id)) {
+    blobFetches.set(id, api('blob', { params: '&id=' + encodeURIComponent(id) })
+      .then((res) => res.blob())
+      .then((blob) => db.rawPut('blobs', { id, blob }))
+      .catch(() => null)
+      .finally(() => blobFetches.delete(id)));
+  }
+  return blobFetches.get(id);
+}
+
+function scheduleSync(delay = 1200) {
+  if (!sync.enabled) return;
+  clearTimeout(sync.timer);
+  sync.timer = setTimeout(runSync, delay);
+}
+
+async function runSync() {
+  if (!sync.enabled) return;
+  if (sync.busy) { sync.again = true; return; }
+  if (!navigator.onLine) { setSyncStatus('offline'); return; }
+  sync.busy = true;
+  setSyncStatus('busy');
+  try {
+    const outbox = await db.all('outbox');
+    // 1. fișierele (planuri, fotografii) înaintea înregistrărilor care le folosesc
+    for (const e of outbox.filter((x) => x.store === 'blobs')) {
+      if (e.op === 'put') {
+        const r = await db.get('blobs', e.id);
+        if (r) await api('blob', { method: 'POST', raw: r.blob, params: '&id=' + e.id });
+      } else {
+        await api('blob', { method: 'DELETE', params: '&id=' + e.id });
+      }
+      await outboxDone(e);
+    }
+    // 2. înregistrările: trimite modificările locale și primește modificările celorlalți
+    const items = [];
+    for (const e of outbox.filter((x) => x.store !== 'blobs')) {
+      if (e.op === 'put') {
+        const o = await db.get(e.store, e.id);
+        if (o) items.push({ e, c: { store: e.store, id: e.id, op: 'put', mod: o._mod || 0, data: o } });
+        else await outboxDone(e);
+      } else {
+        items.push({ e, c: { store: e.store, id: e.id, op: 'del', mod: e.t } });
+      }
+    }
+    let more = true;
+    while (items.length || more) {
+      const batch = items.splice(0, 100);
+      const res = await apiJSON('sync', { method: 'POST', body: { since: sync.rev, changes: batch.map((b) => b.c) } });
+      for (const b of batch) await outboxDone(b.e);
+      await applyRemote(res.changes);
+      sync.rev = res.rev;
+      ls.set('rev', sync.rev);
+      more = res.more;
+    }
+    setSyncStatus((await db.count('outbox')) ? 'pending' : 'ok');
+    prefetchPlans();
+  } catch (e) {
+    console.warn('sync', e);
+    setSyncStatus(navigator.onLine ? 'error' : 'offline', e.message);
+  } finally {
+    sync.busy = false;
+    if (sync.again) { sync.again = false; scheduleSync(300); }
+  }
+}
+
+async function applyRemote(changes) {
+  let touched = false;
+  for (const c of changes) {
+    if (!SYNCED.includes(c.store)) continue;
+    if (await db.get('outbox', c.store + ':' + c.id)) continue; // modificarea locală netrimisă are prioritate
+    const old = await db.get(c.store, c.id);
+    if (c.del) {
+      if (old) { await db.rawDel(c.store, c.id); touched = true; }
+    } else if (c.data && (!old || (old._mod || 0) !== (c.data._mod || 0))) {
+      await db.rawPut(c.store, c.data);
+      touched = true;
+    }
+  }
+  if (touched) refreshView();
+}
+
+// Planurile se descarcă în avans, ca să fie disponibile și fără internet
+async function prefetchPlans() {
+  for (const p of await db.all('plans')) {
+    for (const id of [p.thumbId, p.blobId]) if (id && !(await db.get('blobs', id))) await fetchRemoteBlob(id);
+  }
+}
+
+const SYNC_LABEL = { off: '', busy: 'Se sincronizează…', ok: 'Sincronizat', pending: 'Modificări netrimise', offline: 'Fără internet – datele se trimit când revine conexiunea', error: 'Eroare de sincronizare' };
+function setSyncStatus(st, err = '') {
+  sync.status = st;
+  sync.error = err;
+  $$('.sync-dot').forEach((el) => { el.dataset.st = st; el.title = SYNC_LABEL[st] + (err ? ': ' + err : ''); });
+}
+function syncDot() {
+  return sync.enabled ? `<button class="icon-btn sync-dot" data-st="${sync.status}" title="${esc(SYNC_LABEL[sync.status])}" aria-label="Sincronizare" onclick="accountSheet()"><i></i></button>` : '';
+}
+
+let pendingRefresh = false;
+let viewRefresh = null;
+function refreshView() {
+  if (openSheets.size || document.querySelector('.photo-view') || /\/print$/.test(location.hash)) { pendingRefresh = true; return; }
+  pendingRefresh = false;
+  if (viewRefresh) viewRefresh(); else render();
+}
+
+function authLost() {
+  if (!sync.enabled) return;
+  sync.enabled = false;
+  sync.token = '';
+  sync.mode = 'login';
+  ls.del('auth');
+  closeAllSheets();
+  viewLogin('Sesiunea a expirat. Conectează-te din nou.');
+}
+
+async function enqueueAllLocal() {
+  for (const s of [...SYNCED, 'blobs']) {
+    for (const o of await db.all(s)) {
+      if (SYNCED.includes(s) && !o._mod) { o._mod = o.updated || o.created || 1; await db.rawPut(s, o); }
+      await db.rawPut('outbox', { k: s + ':' + o.id, store: s, id: o.id, op: 'put', t: Date.now(), v: uid() });
+    }
+  }
+}
+
+let syncLoop = false;
+function startSyncLoop() {
+  runSync();
+  if (syncLoop) return;
+  syncLoop = true;
+  setInterval(() => { if (document.visibilityState === 'visible') runSync(); }, 30000);
+  window.addEventListener('online', () => runSync());
+  window.addEventListener('offline', () => setSyncStatus('offline'));
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') runSync(); });
+}
+
+async function detectServer() {
+  const saved = ls.get('auth');
+  try {
+    const res = await fetch(API + '?r=ping', { cache: 'no-store' });
+    if (res.status === 503) return 'notinstalled';
+    const j = res.ok ? await res.json().catch(() => null) : null;
+    if (!j || j.app !== 'santier') return 'local';
+    return saved ? 'server' : 'login';
+  } catch (e) {
+    // fără conexiune: dacă eram conectați, lucrăm offline cu datele locale
+    return saved ? 'server' : 'local';
+  }
+}
+
+function viewLogin(msg = '') {
+  if (cleanupView) { cleanupView(); cleanupView = null; }
+  app.innerHTML = `<main class="content login">
+    <form class="card form" id="login">
+      <img src="icons/icon.svg" alt="" width="64" height="64" style="align-self:center">
+      <h1 style="text-align:center;margin:0">Șantier</h1>
+      <div class="muted" style="text-align:center">Conectează-te pentru a accesa proiectele echipei.</div>
+      ${msg ? `<div class="chip red" style="justify-content:center">${esc(msg)}</div>` : ''}
+      ${field({ name: 'username', label: 'Utilizator', placeholder: 'ex. marius' })}
+      ${field({ name: 'password', label: 'Parolă', type: 'password' })}
+      <button class="btn primary block" type="submit">Conectare</button>
+    </form></main>`;
+  const form = $('#login');
+  form.elements.username.setAttribute('autocapitalize', 'none');
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      const j = await apiJSON('login', { method: 'POST', body: { username: form.elements.username.value.trim().toLowerCase(), password: form.elements.password.value } });
+      ls.set('auth', { token: j.token, user: j.user });
+      sync.token = j.token; sync.user = j.user; sync.enabled = true;
+      sync.rev = ls.get('rev') || 0;
+      await enqueueAllLocal(); // datele create pe acest dispozitiv înainte de conectare urcă pe server
+      sync.mode = 'server';
+      toast('Conectat. Se descarcă datele…', 4000);
+      await runSync();
+      startSyncLoop();
+      go('#/');
+    } catch (err) {
+      toast(err.message, 4000);
+      btn.disabled = false;
+    }
+  };
+}
+
+function viewNotInstalled() {
+  app.innerHTML = `<main class="content">${empty('Serverul nu este instalat încă', 'Deschide pagina de instalare pentru a conecta baza de date MySQL și a crea contul de administrator.')}
+    <div style="text-align:center"><a class="btn primary" href="api/install.php">Deschide instalarea</a></div></main>`;
+}
+
+function accountSheet() {
+  const s = sheet(`<div class="sheet-head"><span style="width:70px"></span><h2>Cont și sincronizare</h2><button class="link" data-close>Închide</button></div>
+    <div class="sheet-body form">
+      <div class="card"><div class="card-title">${esc(sync.user ? (sync.user.name || sync.user.username) : '')}</div>
+        <div class="muted">Utilizator: ${esc(sync.user ? sync.user.username : '')}${sync.user && sync.user.role === 'admin' ? ' · administrator' : ''}</div>
+        <div class="chips"><span class="chip"><span class="sync-dot-inline" data-st="${sync.status}"></span><span id="syncTxt">${esc(SYNC_LABEL[sync.status] + (sync.error ? ': ' + sync.error : ''))}</span></span></div></div>
+      <div class="actions" style="padding:0">
+        <button class="btn" data-a="now">Sincronizează acum</button>
+        ${sync.user && sync.user.role === 'admin' ? '<button class="btn" data-a="users">Utilizatori (echipa)</button>' : ''}
+        <button class="btn" data-a="pass">Schimbă parola</button>
+        <button class="btn danger" data-a="logout">Deconectare</button>
+      </div></div>`);
+  $('[data-a=now]', s.el).onclick = async () => { $('#syncTxt', s.el).textContent = SYNC_LABEL.busy; await runSync(); $('#syncTxt', s.el).textContent = SYNC_LABEL[sync.status] + (sync.error ? ': ' + sync.error : ''); };
+  const ub = $('[data-a=users]', s.el);
+  if (ub) ub.onclick = () => { s.close(); usersSheet(); };
+  $('[data-a=pass]', s.el).onclick = () => {
+    s.close();
+    formSheet({
+      title: 'Schimbă parola',
+      fields: [{ name: 'old', label: 'Parola actuală', type: 'password', required: true }, { name: 'new', label: 'Parola nouă (minim 6 caractere)', type: 'password', required: true }],
+      async onSave(v) { await apiJSON('password', { method: 'POST', body: v }); toast('Parola a fost schimbată'); },
+    });
+  };
+  $('[data-a=logout]', s.el).onclick = async () => {
+    const pending = await db.count('outbox');
+    if (pending && !confirm(`Există ${pending} modificări netrimise la server, care se vor pierde. Continui?`)) return;
+    if (!pending && !confirm('Te deconectezi? Datele locale de pe acest dispozitiv vor fi șterse (rămân pe server).')) return;
+    try { await api('logout', { method: 'POST' }); } catch (e) { /* oricum ieșim */ }
+    sync.enabled = false; sync.token = ''; sync.user = null; sync.rev = 0; sync.mode = 'login';
+    ls.del('auth'); ls.del('rev');
+    for (const st of [...STORES, 'outbox']) await db.clear(st);
+    urlCache.forEach((u) => URL.revokeObjectURL(u)); urlCache.clear();
+    s.close();
+    viewLogin();
+  };
+}
+
+async function usersSheet() {
+  let users;
+  try { users = (await apiJSON('users')).users; } catch (e) { toast(e.message); return; }
+  const s = sheet(`<div class="sheet-head"><span style="width:70px"></span><h2>Utilizatori</h2><button class="link" data-close>Închide</button></div>
+    <div class="sheet-body form">
+      <div class="list">${users.map((u) => `<button class="row" data-u="${u.id}"><span class="main"><div class="t">${esc(u.name || u.username)}</div><div class="s">${esc(u.username)}${u.role === 'admin' ? ' · administrator' : ''}</div></span></button>`).join('')}</div>
+      <button class="btn primary" data-add>${I.plus} Adaugă utilizator</button>
+      <div class="muted">Toți utilizatorii văd și pot modifica toate proiectele. Administratorii pot gestiona și conturile.</div>
+    </div>`);
+  const edit = (u) => {
+    s.close();
+    formSheet({
+      title: u ? 'Editează utilizator' : 'Utilizator nou',
+      values: u ? { ...u, password: '' } : { role: 'user' },
+      fields: [
+        { name: 'name', label: 'Nume complet' },
+        { name: 'username', label: 'Utilizator (pentru logare)', required: true, placeholder: 'ex. ion.popescu' },
+        { name: 'role', label: 'Rol', type: 'select', options: [['user', 'Utilizator'], ['admin', 'Administrator']] },
+        { name: 'password', label: u ? 'Parolă nouă (lasă gol pentru a nu o schimba)' : 'Parolă (minim 6 caractere)', type: 'password', required: !u },
+      ],
+      async onSave(v) { await apiJSON('users', { method: 'POST', body: { ...v, id: u ? u.id : 0 } }); toast('Salvat'); usersSheet(); },
+      onDelete: u ? async () => { await apiJSON('users', { method: 'DELETE', params: '&id=' + u.id }); toast('Utilizator șters'); usersSheet(); } : null,
+    });
+  };
+  $('[data-add]', s.el).onclick = () => edit();
+  $$('[data-u]', s.el).forEach((b) => { b.onclick = () => edit(users.find((u) => String(u.id) === b.dataset.u)); });
 }
 
 // ---------------------------------------------------------------- Utilitare
@@ -103,7 +420,7 @@ function bar({ back, title, sub, right = '' }) {
   return `<header class="bar">
     ${back ? `<a class="icon-btn" href="${back}" aria-label="Înapoi">${I.back}</a>` : ''}
     <div class="titles"><h1>${esc(title)}</h1>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div>
-    <div class="right">${right}</div>
+    <div class="right">${syncDot()}${right}</div>
   </header>`;
 }
 const empty = (title, text) => `<div class="empty"><h3>${esc(title)}</h3><div>${esc(text)}</div></div>`;
@@ -180,6 +497,7 @@ function sheet(html, { full = false, onClose } = {}) {
       ov.classList.remove('show');
       setTimeout(() => ov.remove(), 200);
       if (onClose) onClose();
+      if (pendingRefresh && !openSheets.size) setTimeout(refreshView, 250);
     },
   };
   openSheets.add(api);
@@ -231,6 +549,9 @@ let cleanupView = null;
 async function render() {
   closeAllSheets();
   if (cleanupView) { cleanupView(); cleanupView = null; }
+  viewRefresh = null;
+  pendingRefresh = false;
+  if (!sync.enabled && sync.mode === 'login') return viewLogin();
   const p = location.hash.replace(/^#\/?/, '').split('/');
   try {
     if (p[0] === 'p' && p[1]) {
@@ -303,6 +624,7 @@ async function deleteProject(pid) {
 
 function appMenu() {
   actionSheet('Meniu', [
+    ...(sync.enabled ? [{ label: 'Cont și sincronizare', run: accountSheet }] : []),
     { label: 'Exportă backup (toate datele)', run: exportBackup },
     { label: 'Importă backup', run: importBackup },
     { label: 'Spațiu de stocare', run: storageInfo },
@@ -348,7 +670,7 @@ async function importBackup() {
   try {
     const obj = JSON.parse(await file.text());
     if (obj.app !== 'santier' || !obj.data) throw new Error('Fișierul nu este un backup Șantier');
-    const mode = confirm('Înlocuiești TOATE datele existente cu cele din backup?\n\nOK = înlocuiește\nAnulează = adaugă/actualizează peste datele existente');
+    const mode = !sync.enabled && confirm('Înlocuiești TOATE datele existente cu cele din backup?\n\nOK = înlocuiește\nAnulează = adaugă/actualizează peste datele existente');
     toast('Se importă…', 20000);
     if (mode) { for (const s of STORES) await db.clear(s); urlCache.clear(); }
     for (const s of Object.keys(obj.data)) if (STORES.includes(s)) for (const o of obj.data[s]) await db.put(s, o);
@@ -863,7 +1185,7 @@ function photoViewer(blobId, { onDelete, onReplace }) {
   const ov = document.createElement('div');
   ov.className = 'photo-view';
   document.body.appendChild(ov);
-  const close = () => ov.remove();
+  const close = () => { ov.remove(); if (pendingRefresh && !openSheets.size) refreshView(); };
 
   async function showView() {
     const u = await blobURL(blobId);
@@ -935,7 +1257,8 @@ async function viewPlan(pr, planId) {
   app.innerHTML = `<div class="viewer-wrap">
     ${bar({ back: `#/p/${pr.id}/plans`, title: plan.name, sub: pr.name, right: `<button class="icon-btn" data-act="filter" aria-label="Filtru">${I.filter}</button>` })}
     <div class="viewer" id="vp">
-      <div class="plan-inner" id="inner" style="width:${plan.w}px;height:${plan.h}px"><img src="${src}" alt="" draggable="false"><div id="pins"></div></div>
+      <div class="plan-inner" id="inner" style="width:${plan.w}px;height:${plan.h}px"><img src="${src}" alt="" draggable="false"><div id="pins"></div>
+        <div class="ghost" id="ghost" hidden><div class="ghost-pin">${PIN_SVG('#1f4fd8')}<span>+</span></div><button type="button" class="ghost-btn">${I.plus} Adaugă punct aici</button></div></div>
       <div class="banner" id="banner" hidden></div>
       <div class="viewer-tools">
         <button class="icon-btn" data-z="in" aria-label="Mărește">${I.plus}</button>
@@ -943,10 +1266,13 @@ async function viewPlan(pr, planId) {
         <button class="icon-btn" data-z="fit" aria-label="Încadrează">${I.fit}</button>
       </div>
     </div>
-    <button class="fab" id="addbtn">${I.plus}<span>Punct</span></button>
+    <button class="fab" id="addbtn">${I.plus}<span>Adaugă punct</span></button>
   </div>`;
 
-  const vp = $('#vp'); const inner = $('#inner'); const pinsEl = $('#pins'); const banner = $('#banner'); const addBtn = $('#addbtn');
+  const vp = $('#vp'); const inner = $('#inner'); const pinsEl = $('#pins'); const banner = $('#banner'); const addBtn = $('#addbtn'); const ghost = $('#ghost');
+  let ghostPos = null;
+  const showGhost = (x, y) => { ghostPos = { x, y }; ghost.style.left = x * 100 + '%'; ghost.style.top = y * 100 + '%'; ghost.hidden = false; };
+  const hideGhost = () => { ghostPos = null; ghost.hidden = true; };
   let scale = 1, tx = 0, ty = 0, minS = 0.1, maxS = 8;
 
   const apply = () => {
@@ -980,7 +1306,8 @@ async function viewPlan(pr, planId) {
     mode = m;
     vp.classList.toggle('adding', m !== 'view');
     addBtn.classList.toggle('on', m === 'add');
-    $('span', addBtn).textContent = m === 'add' ? 'Anulează' : 'Punct';
+    $('span', addBtn).textContent = m === 'add' ? 'Anulează' : 'Adaugă punct';
+    hideGhost();
     if (m === 'view') { banner.hidden = true; return; }
     const mp = points.find((p) => p.id === moveId);
     banner.hidden = false;
@@ -988,15 +1315,23 @@ async function viewPlan(pr, planId) {
     $('[data-cancel]', banner).onclick = () => setMode('view');
   }
   const reload = async (hl) => { points = (await db.where('points', pr.id)).filter((p) => p.planId === plan.id); drawPins(hl); };
+  viewRefresh = () => reload();
+  const createAt = (x, y) => { hideGhost(); editPoint({ projectId: pr.id, planId: plan.id, x, y }, { onDone: () => reload() }); };
+  const planXY = (e) => {
+    const r = inner.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width; const y = (e.clientY - r.top) / r.height;
+    return { x, y, inside: x >= 0 && x <= 1 && y >= 0 && y <= 1 };
+  };
 
   async function onTap(e, target) {
     const pinEl = target && target.closest && target.closest('.pin');
-    const r = inner.getBoundingClientRect();
-    const x = (e.clientX - r.left) / r.width; const y = (e.clientY - r.top) / r.height;
-    const inside = x >= 0 && x <= 1 && y >= 0 && y <= 1;
+    const onGhost = target && target.closest && target.closest('.ghost');
+    const { x, y, inside } = planXY(e);
     if (mode === 'add' && inside) {
       setMode('view');
-      editPoint({ projectId: pr.id, planId: plan.id, x, y }, { onDone: () => reload() });
+      createAt(x, y);
+    } else if (mode === 'view' && onGhost && ghostPos) {
+      createAt(ghostPos.x, ghostPos.y);
     } else if (mode === 'move' && inside) {
       const p = (await db.get('points', moveId));
       if (p) {
@@ -1007,8 +1342,13 @@ async function viewPlan(pr, planId) {
       setMode('view');
       reload(moveId);
     } else if (mode === 'view' && pinEl) {
+      hideGhost();
       const p = points.find((q) => q.id === pinEl.dataset.id);
       if (p) editPoint(p, { onDone: () => reload() });
+    } else if (mode === 'view' && inside) {
+      showGhost(x, y); // atingere pe plan → apare opțiunea „Adaugă punct aici”
+    } else {
+      hideGhost();
     }
   }
 
@@ -1027,7 +1367,16 @@ async function viewPlan(pr, planId) {
     if (ptrs.size === 1) {
       const p = rel(e);
       g = { kind: 'pan', sx: p.x, sy: p.y, tx, ty, t: Date.now(), moved: false, target: e.target };
+      // apăsare lungă pe plan = punct nou direct în acel loc
+      const pos = planXY(e);
+      const gg = g;
+      if (mode === 'view' && pos.inside && !e.target.closest('.pin, .ghost')) {
+        g.lp = setTimeout(() => {
+          if (g === gg && !gg.moved && ptrs.size === 1) { gg.lpFired = true; if (navigator.vibrate) navigator.vibrate(15); createAt(pos.x, pos.y); }
+        }, 550);
+      }
     } else if (ptrs.size === 2) {
+      if (g) clearTimeout(g.lp);
       const pi = pinchInfo();
       g = { kind: 'pinch', d0: pi.d, s0: scale, cx: (pi.mx - tx) / scale, cy: (pi.my - ty) / scale, moved: true };
     }
@@ -1038,7 +1387,7 @@ async function viewPlan(pr, planId) {
     if (g.kind === 'pan' && ptrs.size === 1) {
       const p = rel(e);
       const dx = p.x - g.sx, dy = p.y - g.sy;
-      if (Math.abs(dx) + Math.abs(dy) > 8) g.moved = true;
+      if (Math.abs(dx) + Math.abs(dy) > 8) { g.moved = true; clearTimeout(g.lp); }
       if (g.moved) { tx = g.tx + dx; ty = g.ty + dy; apply(); }
     } else if (g.kind === 'pinch' && ptrs.size >= 2) {
       const pi = pinchInfo();
@@ -1050,7 +1399,8 @@ async function viewPlan(pr, planId) {
   const end = (e) => {
     if (!ptrs.has(e.pointerId)) return;
     ptrs.delete(e.pointerId);
-    if (g && g.kind === 'pan' && !g.moved && e.type === 'pointerup' && Date.now() - g.t < 600) onTap(e, g.target);
+    if (g) clearTimeout(g.lp);
+    if (g && g.kind === 'pan' && !g.moved && !g.lpFired && e.type === 'pointerup' && Date.now() - g.t < 600) onTap(e, g.target);
     if (ptrs.size === 1) {
       const p = [...ptrs.values()][0];
       g = { kind: 'pan', sx: p.x, sy: p.y, tx, ty, t: 0, moved: true };
@@ -1067,7 +1417,7 @@ async function viewPlan(pr, planId) {
   vp.addEventListener('dblclick', (e) => { const p = rel(e); zoomAt(p.x, p.y, scale * 2); });
   vp.addEventListener('touchend', (e) => {
     // dublă atingere = zoom (iOS nu trimite dblclick cu touch-action:none)
-    if (e.changedTouches.length !== 1 || mode !== 'view') return;
+    if (e.changedTouches.length !== 1 || mode !== 'view' || e.target.closest('.ghost, .pin')) return;
     const now = Date.now();
     if (now - lastTap < 300) { const t = e.changedTouches[0]; const p = rel(t); zoomAt(p.x, p.y, scale * 2); lastTap = 0; } else lastTap = now;
   });
@@ -1099,6 +1449,7 @@ async function viewPlan(pr, planId) {
     if (p && p.x != null) center(p.x, p.y, scale * 3);
   }
   setMode(mode);
+  if (mode === 'view' && !points.length) toast('Atinge planul unde vrei să adaugi un punct', 3500);
 }
 
 // ---------------------------------------------------------------- Imagini pentru rapoarte
@@ -1231,5 +1582,13 @@ async function viewPrint(pr) {
   }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  sync.mode = await detectServer();
+  if (sync.mode === 'notinstalled') return viewNotInstalled();
+  if (sync.mode === 'server') {
+    const a = ls.get('auth');
+    sync.enabled = true; sync.token = a.token; sync.user = a.user; sync.rev = ls.get('rev') || 0;
+    sync.status = navigator.onLine ? 'busy' : 'offline';
+    startSyncLoop();
+  }
   render();
 }());
