@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-const SYNC_STORES = ['projects', 'plans', 'points', 'companies', 'meetings'];
+const SYNC_STORES = ['projects', 'plans', 'points', 'companies', 'meetings', 'settings'];
 const ID_RE = '/^[a-z0-9]{6,40}$/';
 const MAX_BLOB = 60 * 1024 * 1024;
 

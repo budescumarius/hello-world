@@ -25,12 +25,12 @@ const I = {
 };
 
 // ---------------------------------------------------------------- IndexedDB
-const STORES = ['projects', 'plans', 'points', 'companies', 'meetings', 'blobs'];
-const SYNCED = ['projects', 'plans', 'points', 'companies', 'meetings'];
+const STORES = ['projects', 'plans', 'points', 'companies', 'meetings', 'settings', 'blobs'];
+const SYNCED = ['projects', 'plans', 'points', 'companies', 'meetings', 'settings'];
 let _db;
 function openDB() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open('santier', 2);
+    const r = indexedDB.open('santier', 3);
     r.onupgradeneeded = () => {
       const d = r.result;
       STORES.forEach((s) => { if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' }); });
@@ -600,7 +600,9 @@ function editProject(pr) {
     fields: [
       { name: 'name', label: 'Nume proiect', required: true, placeholder: 'ex. Bloc rezidențial A' },
       { name: 'client', label: 'Beneficiar' },
+      { name: 'shortName', label: 'Nume scurt (în subsolul PV, ex. DEROM)' },
       { name: 'address', label: 'Adresă șantier' },
+      { name: 'desc', label: 'Descriere lucrare (în titlul PV)', placeholder: 'ex. Rénovation d’une habitation existante' },
       { name: 'manager', label: 'Responsabil / diriginte' },
       { name: 'start', label: 'Data începerii', type: 'date' },
     ],
@@ -608,6 +610,7 @@ function editProject(pr) {
       const isNew = !pr;
       const o = Object.assign(pr || { id: uid(), created: Date.now() }, v);
       await db.put('projects', o);
+      if (isNew) await addOwnCompany(o.id);
       if (isNew) go(`#/p/${o.id}/plans`); else render();
     },
     onDelete: pr ? async () => { await deleteProject(pr.id); go('#/'); } : null,
@@ -618,13 +621,14 @@ async function deleteProject(pid) {
   for (const pl of await db.where('plans', pid)) { await delBlob(pl.blobId); await delBlob(pl.thumbId); await db.del('plans', pl.id); }
   for (const pt of await db.where('points', pid)) { for (const b of pt.photos || []) await delBlob(b); await db.del('points', pt.id); }
   for (const c of await db.where('companies', pid)) await db.del('companies', c.id);
-  for (const m of await db.where('meetings', pid)) await db.del('meetings', m.id);
+  for (const m of await db.where('meetings', pid)) { for (const ph of m.photos || []) await delBlob(ph.id); await db.del('meetings', m.id); }
   await db.del('projects', pid);
 }
 
 function appMenu() {
   actionSheet('Meniu', [
     ...(sync.enabled ? [{ label: 'Cont și sincronizare', run: accountSheet }] : []),
+    { label: 'Setări firmă (logo, antet PV)', run: settingsSheet },
     { label: 'Exportă backup (toate datele)', run: exportBackup },
     { label: 'Importă backup', run: importBackup },
     { label: 'Spațiu de stocare', run: storageInfo },
@@ -879,7 +883,7 @@ async function tabCompanies(pr, el) {
     const pts = points.filter((p) => p.companyId === c.id);
     const act = pts.filter(isActive).length;
     return `<button class="row" data-c="${c.id}"><span class="main"><div class="t">${esc(c.name)}</div>
-      <div class="s">${[c.trade, c.contact, c.phone, c.email].filter(Boolean).map(esc).join(' · ') || '—'}</div></span>
+      <div class="s">${[c.code, c.trade, c.contact, c.phone, c.email].filter(Boolean).map(esc).join(' · ') || '—'}</div></span>
       <span class="chip">${act} active / ${pts.length}</span></button>`;
   }).join('')}</div>` : empty('Nicio firmă', 'Adaugă firmele și subcontractorii implicați pentru a le aloca puncte și a-i trece în procesele-verbale.'))
     + `<button class="fab" data-act="addc">${I.plus}<span>Firmă nouă</span></button>`;
@@ -887,12 +891,13 @@ async function tabCompanies(pr, el) {
     title: c ? 'Editează firma' : 'Firmă nouă', values: c || {},
     fields: [
       { name: 'name', label: 'Denumire', required: true },
-      { name: 'trade', label: 'Specialitate', placeholder: 'ex. Instalații electrice', list: 'trades' },
-      { name: 'contact', label: 'Persoană de contact' },
+      { name: 'trade', label: 'Activitate / rol', placeholder: 'ex. Maître de l’ouvrage, Architecte', list: 'trades' },
+      { name: 'contact', label: 'Persoană de contact (ex. Mr P. Gillot)' },
+      { name: 'code', label: 'Abreviere în PV (ex. MO, EG, AR)', placeholder: 'MO' },
       { name: 'phone', label: 'Telefon', type: 'tel' },
       { name: 'email', label: 'Email', type: 'email' },
     ],
-    extra: `<datalist id="trades">${['Antreprenor general', 'Structură', 'Zidărie', 'Instalații electrice', 'Instalații sanitare', 'HVAC', 'Finisaje', 'Tâmplărie', 'Acoperiș', 'Fațadă', 'Amenajări exterioare', 'Proiectant', 'Beneficiar', 'Diriginte de șantier'].map((t) => `<option value="${t}">`).join('')}</datalist>`,
+    extra: `<datalist id="trades">${['Maître de l’ouvrage', 'Entreprise générale', 'Architecte', 'Bureau d’études', 'Coordinateur sécurité', 'Sous-traitant', 'Antreprenor general', 'Structură', 'Zidărie', 'Instalații electrice', 'Instalații sanitare', 'HVAC', 'Finisaje', 'Tâmplărie', 'Acoperiș', 'Fațadă', 'Amenajări exterioare', 'Proiectant', 'Beneficiar', 'Diriginte de șantier'].map((t) => `<option value="${t}">`).join('')}</datalist>`,
     async onSave(v) { await db.put('companies', Object.assign(c || { id: uid(), projectId: pr.id, created: Date.now() }, v)); render(); },
     onDelete: c ? async () => {
       await db.del('companies', c.id);
@@ -904,51 +909,7 @@ async function tabCompanies(pr, el) {
   $$('[data-c]', el).forEach((b) => { b.onclick = () => edit(companies.find((c) => c.id === b.dataset.c)); });
 }
 
-// ---- Ședințe
-async function tabMeetings(pr, el) {
-  const meetings = (await db.where('meetings', pr.id)).sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.created - a.created);
-  el.innerHTML = (meetings.length ? `<div class="list">${meetings.map((m) => `<button class="row" data-m="${m.id}"><span class="main">
-      <div class="t">${esc(m.title)}</div><div class="s">${fmtDate(m.date)}${m.location ? ' · ' + esc(m.location) : ''} · ${(m.pointIds || []).length} puncte · ${(m.attendees || []).length} firme</div></span></button>`).join('')}</div>`
-    : empty('Nicio ședință', 'Creează procese-verbale de ședință de șantier cu participanții, notițele și punctele discutate, apoi exportă-le PDF.'))
-    + `<button class="fab" data-act="addm">${I.plus}<span>Ședință nouă</span></button>`;
-  $('[data-act=addm]', el).onclick = () => editMeeting(pr, null, meetings.length + 1);
-  $$('[data-m]', el).forEach((b) => { b.onclick = () => editMeeting(pr, meetings.find((m) => m.id === b.dataset.m)); });
-}
-
-async function editMeeting(pr, m, n) {
-  const [companies, points] = await Promise.all([db.where('companies', pr.id), db.where('points', pr.id)]);
-  const isNew = !m;
-  m = m || { id: uid(), projectId: pr.id, created: Date.now(), title: `Ședință de șantier nr. ${n}`, date: today(), location: pr.address || '', attendees: [], extra: '', notes: '', pointIds: points.filter(isActive).map((p) => p.id), next: '' };
-  const sorted = [...points].sort((a, b) => (isActive(b) - isActive(a)) || a.number - b.number);
-  const s = sheet(`<div class="sheet-head"><button class="link" data-close>Anulează</button><h2>${isNew ? 'Ședință nouă' : 'Ședință'}</h2><button class="link strong" data-save>Salvează</button></div>
-  <form class="sheet-body form">
-    ${field({ name: 'title', label: 'Titlu', required: true }, m.title)}
-    <div class="row2">${field({ name: 'date', label: 'Data', type: 'date' }, m.date)}${field({ name: 'next', label: 'Următoarea ședință', type: 'date' }, m.next)}</div>
-    ${field({ name: 'location', label: 'Locație' }, m.location)}
-    <div class="field"><span>Firme participante</span>${companies.length ? `<div class="checks">${companies.map((c) => `<label><input type="checkbox" name="att" value="${c.id}" ${m.attendees.includes(c.id) ? 'checked' : ''}><span>${esc(c.name)}${c.contact ? ` <span class="muted">(${esc(c.contact)})</span>` : ''}</span></label>`).join('')}</div>` : '<div class="muted">Adaugă firme în tabul „Firme”.</div>'}</div>
-    ${field({ name: 'extra', label: 'Alți participanți (nume, funcție)', type: 'textarea', rows: 2 }, m.extra)}
-    ${field({ name: 'notes', label: 'Discuții / decizii', type: 'textarea', rows: 6 }, m.notes)}
-    <div class="field"><span>Puncte discutate</span>${sorted.length ? `<div class="checks">${sorted.map((p) => `<label><input type="checkbox" name="pts" value="${p.id}" ${m.pointIds.includes(p.id) ? 'checked' : ''}><span class="num" style="--c:${STATUS[p.status].color};min-width:30px;height:26px">${p.number}</span><span>${esc(p.title)}</span></label>`).join('')}</div>` : '<div class="muted">Nu există puncte în proiect.</div>'}</div>
-    <div class="btns"><button type="button" class="btn primary" data-pv>${I.print} Proces-verbal PDF</button>${!isNew ? '<button type="button" class="btn danger" data-del>Șterge</button>' : ''}</div>
-  </form>`, { full: true });
-  const form = $('form', s.el);
-  const collect = () => {
-    const v = form.elements;
-    Object.assign(m, {
-      title: v.title.value.trim() || 'Ședință', date: v.date.value, next: v.next.value, location: v.location.value.trim(),
-      extra: v.extra.value.trim(), notes: v.notes.value,
-      attendees: $$('input[name=att]:checked', form).map((x) => x.value), pointIds: $$('input[name=pts]:checked', form).map((x) => x.value),
-    });
-  };
-  $('[data-save]', s.el).onclick = async () => { collect(); await db.put('meetings', m); s.close(); render(); };
-  $('[data-pv]', s.el).onclick = async () => {
-    collect(); await db.put('meetings', m);
-    printJob = { type: 'meeting', meetingId: m.id, back: `#/p/${pr.id}/meetings` };
-    go(`#/p/${pr.id}/print`);
-  };
-  const del = $('[data-del]', s.el);
-  if (del) del.onclick = async () => { if (confirm('Ștergi această ședință?')) { await db.del('meetings', m.id); s.close(); render(); } };
-}
+// ---- Ședințe / procese-verbale: vezi pv.js
 
 // ---- Rapoarte
 async function tabReports(pr, el) {
@@ -1505,7 +1466,7 @@ async function cropPlan(plan, p, outW = 300, outH = 300) {
 async function viewPrint(pr) {
   const job = printJob;
   if (!job) return go(`#/p/${pr.id}/reports`);
-  app.innerHTML = `${bar({ back: job.back, title: job.type === 'meeting' ? 'Proces-verbal' : 'Raport', sub: pr.name, right: `<button class="btn small primary" data-act="print" disabled>${I.print} PDF</button>` })}
+  app.innerHTML = `${bar({ back: job.back, title: 'Raport', sub: pr.name, right: `<button class="btn small primary" data-act="print" disabled>${I.print} PDF</button>` })}
     <main class="content"><div class="doc" id="doc"><p>Se generează documentul…</p></div></main>`;
   const [plans, points, companies] = await Promise.all([db.where('plans', pr.id), db.where('points', pr.id), db.where('companies', pr.id)]);
   const comp = (id) => companies.find((c) => c.id === id);
@@ -1531,23 +1492,7 @@ async function viewPrint(pr) {
   }
 
   let html = '';
-  if (job.type === 'meeting') {
-    const m = await db.get('meetings', job.meetingId);
-    if (!m) return go(job.back);
-    const pts = m.pointIds.map((id) => points.find((p) => p.id === id)).filter(Boolean).sort((a, b) => a.number - b.number);
-    html += head(`Proces-verbal – ${m.title}`);
-    html += `<div class="section"><p><b>Data:</b> ${fmtDate(m.date)}${m.location ? ` &nbsp; <b>Locația:</b> ${esc(m.location)}` : ''}</p></div>`;
-    html += `<h2>Participanți</h2><table><tr><th>Firmă</th><th>Specialitate</th><th>Reprezentant</th><th>Contact</th></tr>${m.attendees.map(comp).filter(Boolean).map((c) => `<tr><td>${esc(c.name)}</td><td>${esc(c.trade || '')}</td><td>${esc(c.contact || '')}</td><td>${esc([c.phone, c.email].filter(Boolean).join(', '))}</td></tr>`).join('') || '<tr><td colspan="4">—</td></tr>'}</table>`;
-    if (m.extra) html += `<p class="pre"><b>Alți participanți:</b> ${esc(m.extra)}</p>`;
-    if (m.notes) html += `<h2>Discuții și decizii</h2><div class="pre">${esc(m.notes)}</div>`;
-    html += `<h2>Puncte urmărite (${pts.length})</h2>`;
-    html += pts.length ? `<table><tr><th>Nr.</th><th>Descriere</th><th>Firmă</th><th>Status</th><th>Termen</th><th>Ultimul comentariu</th></tr>${pts.map((p) => {
-      const lastC = [...(p.history || [])].reverse().find((h) => h.kind === 'comment');
-      return `<tr><td><b>${p.number}</b></td><td><b>${esc(p.title)}</b>${p.desc ? `<br>${esc(p.desc)}` : ''}</td><td>${esc((comp(p.companyId) || {}).name || '—')}</td><td>${badge(p)}</td><td>${fmtDate(p.due)}</td><td>${lastC ? esc(lastC.text) : ''}</td></tr>`;
-    }).join('')}</table>` : '<p>—</p>';
-    if (m.next) html += `<p style="margin-top:16px"><b>Următoarea ședință:</b> ${fmtDate(m.next)}</p>`;
-    html += `<div class="sign">${(m.attendees.map(comp).filter(Boolean).map((c) => `<div>${esc(c.name)}<br>Semnătura</div>`).join('')) || '<div>Semnătura</div>'}</div>`;
-  } else {
+  {
     const o = job.opts;
     const list = filterReport(points, o).sort((a, b) => a.number - b.number);
     html += head(o.title);
