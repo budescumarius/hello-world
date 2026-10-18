@@ -245,6 +245,8 @@ function layout(p) {
   </div>`;
   bindShell();
   mobileActions();
+  const topEl = $('.top'); if (topEl) document.documentElement.style.setProperty('--top-h', `${topEl.offsetHeight}px`);
+  const tOn = $('.tabs a.on'); if (tOn && isPhone()) tOn.scrollIntoView({ block: 'nearest', inline: 'center' });
   setTimeout(installTip, 2500);
   return $('#page');
 }
@@ -260,10 +262,13 @@ const isPhone = () => window.matchMedia('(max-width: 860px)').matches;
 function mobileActions() {
   const box = $('.top-actions'); if (!box || !isPhone()) return;
   const items = [...box.querySelectorAll('a, button')].filter((x) => !x.closest('label'));
+  // un seul bouton principal avec icône : bouton rond « + » (comme une application)
+  if (items.length === 1 && items[0].classList.contains('primary') && items[0].querySelector('svg')) { items[0].classList.add('m-icon'); items[0].setAttribute('aria-label', items[0].textContent.trim()); }
   if (items.length < 2) return;
   const keep = [...items].reverse().find((x) => x.classList.contains('primary') && x.parentElement === box) || null;
   const extra = items.filter((x) => x !== keep);
   extra.forEach((x) => x.classList.add('m-hide'));
+  if (keep && keep.querySelector('svg')) { keep.classList.add('m-icon'); keep.setAttribute('aria-label', keep.textContent.trim()); }
   // groupes de boutons (ex. Cartes / Liste) entièrement passés dans le menu
   [...box.children].forEach((g) => { if (!g.matches('a, button') && g.querySelector('a, button') && [...g.querySelectorAll('a, button')].every((x) => x.classList.contains('m-hide'))) g.classList.add('m-hide'); });
   box.insertAdjacentHTML('beforeend', `<button class="icon-btn m-more" aria-label="Plus d'actions">${I.more}</button>`);

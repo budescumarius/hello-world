@@ -552,7 +552,7 @@ table.lines { width: 100%; border-collapse: collapse; min-width: 760px; }
 .card.flat { box-shadow: none; background: var(--surface-2); margin: 12px 0; }
 .lines tr.l-title.lv2 td { background: #f7f8fd; }
 .lines tr.l-title.lv2 .in { font-size: 14px; font-weight: 600; padding-left: 18px; }
-@media (max-width: 700px) { .vz-head, .vz-bottom { flex-direction: column; } .vz-right { align-items: stretch; } .doc.vz h1, .vz-meta { text-align: left; } .doc.vz .vz-tot { width: 100%; flex-basis: auto; } }
+@media (max-width: 700px) { .doc.vz:not(.vz-paper) .vz-head, .doc.vz:not(.vz-paper) .vz-bottom { flex-direction: column; } }
 
 /* ---------- Import Excel */
 .dt.imp select { padding: 4px 6px; border: 1px solid var(--border); border-radius: 7px; }
@@ -779,7 +779,7 @@ body:has(.pi-bar) .ai-fab { bottom: calc(84px + env(safe-area-inset-bottom)); }
 .vz-cgv h3 { font-size: 1.6em; color: var(--p, #2b3270); margin: 0 0 16px; text-align: left; }
 .vz-cgv p { margin: 0 0 9px; break-inside: avoid; }
 .vz-cgv.cgv-cols .vz-cgv-body { column-count: 2; column-gap: 26px; font-size: .95em; }
-@media screen and (max-width: 860px) { .vz-sheet { min-height: 0; padding: 22px 18px 40px; } .vz-pgno { right: 18px; } .vz-cgv.cgv-cols .vz-cgv-body { column-count: 1; } }
+/* téléphone : la feuille garde sa mise en page A4 (réduite par fitDocs) */
 @media print { .doc.vz.vz-paper { max-width: none; } .vz-sheet { min-height: 0; box-shadow: none; padding: 0; } .vz-sheet + .vz-sheet { margin-top: 0; break-before: page; page-break-before: always; } }
 
 /* TVA (VIES), obligations sociales */
@@ -860,3 +860,66 @@ body:has(.pi-bar) .ai-fab { bottom: calc(84px + env(safe-area-inset-bottom)); }
 .install-tip button { background: none; border: 0; color: #fff; font-size: 13px; cursor: pointer; }
 .install-tip .btn { background: #fff; color: #0f1a3d; font-weight: 700; height: 34px; }
 @media (max-width: 860px) { .dt-tools .search { flex: 1 1 100%; } .dt-tools .dt-count { margin-left: auto; } .top-actions > label { font-size: 12px; } }
+
+@media (max-width: 860px) {
+  .doc.vz.vz-paper { padding: 0 !important; margin: 0 auto; }
+  .print-page { padding: 10px 8px calc(20px + env(safe-area-inset-bottom)); overflow-x: hidden; }
+  .vz-sheet + .vz-sheet { margin-top: 18px; }
+  [data-doc] { overflow: hidden; }
+}
+
+/* =========================================================== Téléphone : finitions (en-tête, onglets, dates, lignes de devis) */
+@media (max-width: 860px) {
+  /* en-tête et onglets : un seul bloc collé en haut */
+  .main { display: flex; flex-direction: column; min-height: 100dvh; }
+  .top { position: sticky; top: 0; }
+  .tabs { position: sticky; top: var(--top-h, 56px); z-index: 29; }
+  .top-sub { flex-wrap: nowrap; }
+  .top-sub > * { flex: none; }
+  .top-actions .btn.primary.m-icon { width: 38px; height: 38px; padding: 0; border-radius: 50%; justify-content: center; font-size: 0; gap: 0; }
+  .top-actions .btn.primary.m-icon svg { width: 20px; height: 20px; margin: 0; }
+  .top-actions .btn.primary.m-icon > :not(svg) { display: none; }
+  /* onglets avec icônes (facture) : répartis, icône au-dessus du texte */
+  .tabs:has(a svg) { justify-content: space-around; padding: 0; }
+  .tabs:has(a svg) a { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11.5px; padding: 8px 2px 7px; text-align: center; }
+  .tabs:has(a svg) a svg { margin: 0; width: 19px; height: 19px; }
+  .tabs a { scroll-margin: 0 40px; }
+  /* dates iOS : même largeur que les autres champs, texte à gauche */
+  input[type=date], input[type=datetime-local], input[type=time], input[type=month] { -webkit-appearance: none; appearance: none; display: block; width: 100%; min-width: 0; max-width: 100%; min-height: 44px; text-align: left; box-sizing: border-box; }
+  input::-webkit-date-and-time-value { text-align: left; margin: 0; }
+  .field, .grid-form > *, .pi-form > * { min-width: 0; }
+  /* lignes de devis / facture : une carte par ligne */
+  .lines-wrap { overflow: visible; margin: 0; padding: 0; border-radius: 14px; }
+  .lines-wrap table.lines, table.lines { min-width: 0 !important; display: block; }
+  .lines thead { display: none; }
+  .lines tbody { display: block; }
+  .lines tr { display: block; border-bottom: 1px solid var(--border); }
+  .lines td { border: 0; padding: 0; }
+  .lines tr.l-item { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 8px; padding: 10px 10px 12px; }
+  .lines tr.l-item td { display: block; width: auto !important; }
+  .lines tr.l-item td.c-no { grid-column: 1 / 3; grid-row: 1; padding: 6px 0 0; }
+  .lines tr.l-item td.c-a { grid-column: 3; grid-row: 1; justify-self: end; }
+  .lines tr.l-item td.c-d { grid-column: 1 / -1; }
+  .lines tr.l-item td.c-d .in { border-color: var(--border); background: #fff; min-height: 44px; }
+  .lines tr.l-item td[data-l]::before { content: attr(data-l); display: block; font-size: 11px; font-weight: 600; color: var(--muted); margin: 0 0 2px 2px; }
+  .lines tr.l-item td[data-l] .in { border-color: var(--border); background: #fff; text-align: left; }
+  .lines tr.l-item td.tot { padding: 0; align-self: end; }
+  .lines tr.l-item td.tot { font-size: 15px; }
+  .lines tr.l-title, .lines tr.l-text { display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
+  .lines tr.l-title td, .lines tr.l-text td { display: block; }
+  .lines tr.l-title td:nth-child(2), .lines tr.l-text td:nth-child(2) { flex: 1; min-width: 0; }
+  .lines tr.l-title .c-no { padding: 0; flex: none; }
+  .lines tr.l-title td.c-n { flex: none; white-space: nowrap; }
+  .lines tr.l-text td:first-child { display: none; }
+  .lines tr.l-title { background: #f3f5fb; }
+  .lines tr.l-title td { background: transparent; }
+  .lines-add { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .lines-add .btn { width: 100%; justify-content: center; }
+}
+@media (max-width: 860px) {
+  .lines-add { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lines-add .btn { min-width: 0; white-space: normal; line-height: 1.2; min-height: 40px; height: auto; padding: 6px 8px; }
+  .pi-bar { margin-left: -10px !important; margin-right: -10px !important; }
+  /* aucune page ne doit élargir l'écran (sinon iOS dézoome toute la page) */
+  .main, .page { max-width: 100vw; overflow-x: clip; }
+}

@@ -145,14 +145,14 @@ function linesEditor(el, doc, opts) {
         if (l.kind === 'text') return `<tr class="l-text" data-i="${i}"><td></td><td colspan="${showCost ? 8 : 6}"><textarea class="in" data-k="desc" rows="1" placeholder="Texte libre / commentaire" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea></td><td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
         const m = num(l.cost) > 0 ? r2((num(l.price) / num(l.cost) - 1) * 100) : '';
         return `<tr class="l-item ${l.option ? 'opt' : ''}" data-i="${i}"><td class="c-no">${nos[i]}${l.type ? `<i class="tdot" style="--c:${TYPE_COLORS[l.type] || '#999'}" title="${esc(TYPES[l.type] || 'Ouvrage')}"></i>` : ''}</td>
-          <td><textarea class="in" data-k="desc" rows="1" placeholder="Désignation" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea>${l.option ? '<small class="muted">En option – non compris dans le total</small>' : ''}</td>
-          <td class="c-u"><input class="in" data-k="unit" value="${esc(l.unit)}" list="units" ${opts.readOnly ? 'readonly' : ''}></td>
-          <td class="c-n"><input class="in r" data-k="qty" inputmode="decimal" value="${esc(l.qty)}" ${opts.readOnly ? 'readonly' : ''}></td>
-          ${showCost ? `<td class="c-n"><input class="in r" data-k="cost" inputmode="decimal" value="${esc(l.cost ?? '')}" ${opts.readOnly || l.costBy ? 'readonly' : ''} title="${l.costBy ? 'Ouvrage : ' + Object.entries(l.costBy).map(([k, v]) => `${TYPES[k] || k} ${money(v)}`).join(', ') : ''}"></td>
-            <td class="c-n"><input class="in r" data-k="margin" inputmode="decimal" value="${esc(m)}" ${opts.readOnly ? 'readonly' : ''}></td>` : ''}
-          <td class="c-n"><input class="in r" data-k="price" inputmode="decimal" value="${esc(l.price)}" ${opts.readOnly ? 'readonly' : ''}></td>
-          <td class="c-v"><select class="in" data-k="vat" ${opts.readOnly ? 'disabled' : ''}>${vatOptions(l.vat).map(([v, t]) => `<option value="${v}" ${num(v) === num(l.vat) ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
-          <td class="c-n tot">${money(num(l.qty) * num(l.price))}</td>
+          <td class="c-d"><textarea class="in" data-k="desc" rows="1" placeholder="Désignation" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea>${l.option ? '<small class="muted">En option – non compris dans le total</small>' : ''}</td>
+          <td class="c-u" data-l="Unité"><input class="in" data-k="unit" value="${esc(l.unit)}" list="units" ${opts.readOnly ? 'readonly' : ''}></td>
+          <td class="c-n" data-l="Qté"><input class="in r" data-k="qty" inputmode="decimal" value="${esc(l.qty)}" ${opts.readOnly ? 'readonly' : ''}></td>
+          ${showCost ? `<td class="c-n" data-l="Déboursé u."><input class="in r" data-k="cost" inputmode="decimal" value="${esc(l.cost ?? '')}" ${opts.readOnly || l.costBy ? 'readonly' : ''} title="${l.costBy ? 'Ouvrage : ' + Object.entries(l.costBy).map(([k, v]) => `${TYPES[k] || k} ${money(v)}`).join(', ') : ''}"></td>
+            <td class="c-n" data-l="Marge %"><input class="in r" data-k="margin" inputmode="decimal" value="${esc(m)}" ${opts.readOnly ? 'readonly' : ''}></td>` : ''}
+          <td class="c-n" data-l="PU HT"><input class="in r" data-k="price" inputmode="decimal" value="${esc(l.price)}" ${opts.readOnly ? 'readonly' : ''}></td>
+          <td class="c-v" data-l="TVA"><select class="in" data-k="vat" ${opts.readOnly ? 'disabled' : ''}>${vatOptions(l.vat).map(([v, t]) => `<option value="${v}" ${num(v) === num(l.vat) ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
+          <td class="c-n tot" data-l="Total HT">${money(num(l.qty) * num(l.price))}</td>
           <td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
       }).join('') || `<tr><td colspan="${showCost ? 10 : 8}" class="empty">Aucune ligne. Ajoutez un chapitre, une ligne ou des éléments de la bibliothèque.</td></tr>`}</tbody></table></div>
       <datalist id="units">${UNITS.map((u) => `<option value="${u}">`).join('')}</datalist>
@@ -313,7 +313,7 @@ async function makePdf() {
   holder.querySelectorAll('.no-print').forEach((x) => x.remove());
   holder.querySelectorAll('.vz-sheet').forEach((x) => { x.style.minHeight = '0'; x.style.boxShadow = 'none'; x.style.margin = '0'; x.style.borderRadius = '0'; });
   const docEl = holder.querySelector('.doc') || holder;
-  docEl.style.cssText += ';max-width:none;width:' + W + 'px;margin:0;box-shadow:none;border-radius:0;';
+  docEl.style.cssText += ';max-width:none;width:' + W + 'px;margin:0;box-shadow:none;border-radius:0;zoom:1;';
   document.body.appendChild(holder);
   try {
     await Promise.all([...holder.querySelectorAll('img')].map((im) => (im.complete ? 0 : new Promise((r) => { im.onload = im.onerror = r; }))));
@@ -445,3 +445,21 @@ function vatAutofill(form, map = {}, opts = {}) {
   if (opts.now && inp.value.trim()) check(false);
   return { check };
 }
+
+// Téléphone : un devis / une facture s'affiche comme un PDF (feuille A4 entière, réduite à la largeur de l'écran ; zoom avec deux doigts)
+function fitDocs() {
+  $$('.doc.vz-paper').forEach((d) => {
+    const host = d.parentElement; if (!host) return;
+    const cs = getComputedStyle(host);
+    const w = host.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const z = Math.min(1, w / 794);
+    d.style.width = '794px'; d.style.maxWidth = 'none';
+    d.style.zoom = z < 0.999 ? String(Math.floor(z * 1000) / 1000) : '';
+  });
+}
+(() => {
+  let raf = 0; const run = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(fitDocs); };
+  window.addEventListener('resize', run);
+  new MutationObserver((ms) => { if (ms.some((m) => [...m.addedNodes].some((n) => n.nodeType === 1 && (n.matches('.doc.vz-paper') || n.querySelector('.doc.vz-paper'))))) run(); })
+    .observe(document.documentElement, { childList: true, subtree: true });
+})();
