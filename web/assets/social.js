@@ -1,6 +1,6 @@
 'use strict';
 /* Obligations sociales belges (construction) :
-   - déclaration de travaux (art. 30bis) et enregistrement Checkin@Work pour les devis acceptés ;
+   - déclaration de travaux (art. 30bis) et enregistrement Checkin@Work, sur la page du chantier ;
    - obligation de retenue (dettes sociales / fiscales) avant de payer un sous-traitant.
    Les services officiels (socialsecurity.be) demandent une connexion eID / itsme : l'application prépare les données à recopier,
    ouvre le service et garde le numéro de déclaration, le résultat de la vérification et l'attestation. */
@@ -19,44 +19,46 @@ const copyRows = (rows) => `<div class="copy-rows">${rows.filter(([, v]) => v).m
 const bindCopy = (root, rows) => { const list = rows.filter(([, v]) => v); $$('[data-cp]', root).forEach((b) => { b.onclick = () => copyTxt(String(list[+b.dataset.cp][1])); }); };
 const entNo = (vat) => { const e = enterpriseNo(vat); return e ? `${e.slice(0, 4)}.${e.slice(4, 7)}.${e.slice(7)}` : ''; };
 
-// ---------------------------------------------------------------- Devis accepté : déclaration de travaux + Checkin@Work
-function socialQuoteCard(q, c, pr) {
-  const d = q.data; const s = soc();
-  const ht = totals(d).base;
+// ---------------------------------------------------------------- Chantier : déclaration de travaux + Checkin@Work
+// ht = montant HT des devis acceptés du chantier ; les enregistrements sont gardés sur le chantier (p.data.decl30bis / p.data.checkin)
+function socialProjectCard(p, ht, quotes = []) {
+  const d = p.data; const s = soc();
+  // anciens enregistrements faits depuis un devis : repris
+  const fromQ = (k) => (k in d ? d[k] : (quotes.find((q) => q.data[k]) || { data: {} }).data[k]);
   const needDecl = ht >= s.seuilDecl; const needCheckin = ht >= s.seuilCheckin;
-  const line = (key, label, need, why, rec) => `<div class="soc-row">
-      <div class="grow"><b>${label}</b><br><small class="${need ? 'late' : 'muted'}">${esc(why)}</small>
+  const line = (key, label, btn, need, why, rec) => `<div class="soc-row">
+      <div class="grow"><b>${label}</b><br><small class="${need && !rec ? 'late' : 'muted'}">${esc(why)}</small>
       ${rec ? `<br><small class="good">✓ ${esc(rec.no ? 'N° ' + rec.no : 'Fait')} – ${fmtDate(rec.date)}</small>` : ''}</div>
-      <button class="btn sm ${need && !rec ? 'primary' : ''}" data-soc="${key}">${rec ? 'Voir / modifier' : label.split(' ')[0] === 'Déclaration' ? 'Déclarer les travaux' : 'Faire le Checkin'}</button></div>`;
-  return `<div class="card soc-card"><div class="card-h"><h3>Obligations sociales</h3><small class="muted">Montant HT : ${money(ht)}</small></div>
-    ${line('decl', 'Déclaration de travaux (30bis)', needDecl, needDecl ? `Obligatoire : montant ≥ ${money(s.seuilDecl)} HT` : `Non obligatoire sous ${money(s.seuilDecl)} HT (sauf sous-traitance sur un chantier qui y est soumis)`, d.decl30bis)}
-    ${line('checkin', 'Checkin@Work', needCheckin, needCheckin ? `Obligatoire : chantier ≥ ${money(s.seuilCheckin)} HT – enregistrer chaque jour les personnes présentes` : `Non obligatoire sous ${money(s.seuilCheckin)} HT`, d.checkin)}
+      <button class="btn sm ${need && !rec ? 'primary' : ''}" data-soc="${key}">${rec ? 'Voir / modifier' : btn}</button></div>`;
+  return `<div class="card soc-card"><div class="card-h"><h3>Obligations sociales</h3><small class="muted">Devis acceptés : ${money(ht)} HT</small></div>
+    ${line('decl30bis', 'Déclaration de travaux (30bis)', 'Déclarer les travaux', needDecl, needDecl ? `Obligatoire : montant ≥ ${money(s.seuilDecl)} HT` : `Non obligatoire sous ${money(s.seuilDecl)} HT (sauf sous-traitance sur un chantier qui y est soumis)`, fromQ('decl30bis'))}
+    ${line('checkin', 'Checkin@Work', 'Faire le Checkin', needCheckin, needCheckin ? `Obligatoire : chantier ≥ ${money(s.seuilCheckin)} HT – enregistrer chaque jour les personnes présentes` : `Non obligatoire sous ${money(s.seuilCheckin)} HT`, fromQ('checkin'))}
   </div>`;
 }
-function bindSocialQuote(root, q, c, pr, after) {
-  $$('[data-soc]', root).forEach((b) => { b.onclick = () => socialDialog(b.dataset.soc, q, c, pr, after); });
+function bindSocialProject(root, p, c, ht, quotes, after) {
+  $$('[data-soc]', root).forEach((b) => { b.onclick = () => socialDialog(b.dataset.soc, p, c, ht, quotes, after); });
 }
-function socialDialog(kind, q, c, pr, after) {
-  const d = q.data; const s = soc(); const co = company(); const cd = (c && c.data) || {};
-  const isDecl = kind === 'decl'; const key = isDecl ? 'decl30bis' : 'checkin';
-  const site = pr ? [pr.data.address, [pr.data.zip, pr.data.city].filter(Boolean).join(' ')].filter(Boolean).join(', ') : (d.siteAddress || '');
+function socialDialog(key, p, c, ht, quotes, after) {
+  const d = p.data; const s = soc(); const co = company(); const cd = (c && c.data) || {};
+  const isDecl = key === 'decl30bis';
+  const site = [d.address, [d.zip, d.city].filter(Boolean).join(' ')].filter(Boolean).join(', ');
   const rows = [
     ['Commettant (client)', contactName(c)],
     ['N° d\'entreprise du client', entNo(cd.vat) || (cd.vat ? cd.vat : 'particulier (pas de n° d\'entreprise)')],
     ['Adresse du client', [cd.address, [cd.zip, cd.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')],
     ['Adresse du chantier', site],
-    ['Nature des travaux', d.title || (pr && pr.data.name) || ''],
-    ['Montant des travaux HT', fnum(totals(d).base)],
-    ['Date de début', fmtDate((pr && pr.data.start) || today())],
-    ['Date de fin prévue', fmtDate(pr && pr.data.end)],
+    ['Nature des travaux', d.name || ''],
+    ['Montant des travaux HT', fnum(ht)],
+    ['Date de début', fmtDate(d.start || today())],
+    ['Date de fin prévue', fmtDate(d.end)],
     ['Notre n° d\'entreprise', entNo(co.vat)],
-    ['Référence du devis', q.number],
+    ['Référence du chantier', p.number],
+    ['Devis', quotes.filter((q) => q.data.status === 'accepte').map((q) => q.number).join(', ')],
   ];
-  const rec = d[key] || {};
+  const rec = (key in d ? d[key] : (quotes.find((q) => q.data[key]) || { data: {} }).data[key]) || {};
   formModal({
     title: isDecl ? 'Déclaration de travaux (30bis)' : 'Checkin@Work', wide: true, saveLabel: 'Enregistrer',
     values: { no: rec.no || '', date: rec.date || today(), note: rec.note || '' },
-    extra: '',
     fields: [
       { name: 'h', type: 'html', cls: 'full', html: `<div class="hint-box">1. Ouvrez le service officiel (connexion eID / itsme). 2. Recopiez les données ci-dessous (bouton copier). 3. Notez ici le numéro ${isDecl ? 'de déclaration' : 'du chantier / de l\'enregistrement'}.</div>
         <div class="btns"><a class="btn primary" href="${esc(isDecl ? s.urlDecl : s.urlCheckin)}" target="_blank" rel="noopener">${I.send} Ouvrir ${isDecl ? 'la déclaration de travaux' : 'Checkin@Work'} (ONSS)</a></div>
@@ -65,8 +67,8 @@ function socialDialog(kind, q, c, pr, after) {
       { name: 'note', label: 'Remarque', cls: 'full' },
     ],
     after: (form) => bindCopy(form, rows),
-    onDelete: d[key] ? async () => { delete d[key]; await persist('quote', q); if (after) after(); } : null,
-    async onSave(v) { d[key] = { no: v.no, date: v.date || today(), note: v.note }; await persist('quote', q); toast('Enregistré'); if (after) after(); },
+    onDelete: rec.date ? async () => { d[key] = null; await persist('project', p); if (after) after(); } : null,
+    async onSave(v) { d[key] = { no: v.no, date: v.date || today(), note: v.note }; await persist('project', p); toast('Enregistré'); if (after) after(); },
   });
 }
 

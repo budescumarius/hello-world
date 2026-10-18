@@ -153,6 +153,7 @@ async function tabOverview(p, el, contacts) {
         </div>
       </div>
       <div class="col-side">
+        ${socialProjectCard(p, f.budget, all.quote)}
         <div class="card info">
           ${[['Adresse', [d.address, [d.zip, d.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')], ['Début', fmtDate(d.start)], ['Fin prévue', fmtDate(d.end)], ['Accès', d.access]].filter(([, v]) => v).map(([k, v]) => `<div class="kv"><span>${k}</span><div>${esc(v)}</div></div>`).join('')}
           ${d.address ? `<a class="btn sm" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([d.address, d.zip, d.city].filter(Boolean).join(' '))}">${I.pin} Itinéraire</a>` : ''}
@@ -164,6 +165,7 @@ async function tabOverview(p, el, contacts) {
         <div class="card"><div class="card-h"><h3>Activité récente</h3></div><div class="feed">${act.map((a) => `<div><b>${esc(a.user_name || '')}</b> ${{ create: 'a créé', update: 'a modifié', delete: 'a supprimé', mail: 'a envoyé par email' }[a.action] || a.action} <span class="muted">${esc(TYPE_LABELS[a.type] || a.type)}</span> ${esc(a.label || '')}<small class="muted">${fmtDT(a.created_at)}</small></div>`).join('') || '<div class="empty sm">Aucune activité</div>'}</div></div>
       </div></div>`;
   bindKpis(el);
+  bindSocialProject(el, p, byId(contacts, d.clientId), f.budget, all.quote, () => render());
 }
 const TYPE_LABELS = { project: 'chantier', quote: 'devis', invoice: 'facture', order: 'commande', expense: 'achat', timesheet: 'heures', point: 'point', meeting: 'PV', form: 'formulaire', diary: 'journal', plan: 'plan', phase: 'phase', task: 'tâche', document: 'document', contact: 'contact', opportunity: 'opportunité', intervention: 'intervention' };
 
