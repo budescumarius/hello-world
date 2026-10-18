@@ -105,6 +105,8 @@ route('purchase', async (id) => {
   // même fournisseur et même n° de facture déjà encodé : probablement un doublon
   const dup = d.ref && d.supplierId ? all.find((x) => x.id !== e.id && x.data.ref === d.ref && +x.data.supplierId === +d.supplierId) : null;
   const vat = purchVat(d); let ttc = purchTtc(d); let manualVat = vat.length > 1;
+  // TVA lue de travers à l'import (ex. le total pris pour la TVA) : recalculée depuis le TTC
+  if (vat.length === 1 && ttc && Math.abs(vat[0].amount) >= Math.abs(ttc) * 0.5) vat[0].amount = r2(ttc - ttc / (1 + num(vat[0].rate) / 100));
   const alloc = Array.isArray(d.alloc) && d.alloc.length ? d.alloc.map((x) => ({ pid: x.pid || '', amount: num(x.amount), category: x.category || d.category }))
     : e.project_id ? [{ pid: e.project_id, amount: num(d.amount), category: d.category || 'mat' }] : [];
   let fileId = d.fileId; let fileName = d.fileName;

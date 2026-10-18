@@ -54,7 +54,9 @@ function docBlocks(kind, it, c, project, t) {
     isInv && d.kind !== 'avoir' && days != null ? `<div>Paiement : ${esc(fill(t.payTerms, { jours: days, date: fmtDate(d.due) }))}</div>` : '',
     kind === 'order' && d.deliveryDate ? `<div>Livraison souhaitée : ${esc(longDate(d.deliveryDate))}</div>` : '',
   ].join('');
-  const clientBox = `<div class="vz-client"><b>${esc(kind === 'order' ? contactName(c) : clientLabel(c))}</b>
+  const bill = kind !== 'order' && it.data.billSame === false;
+  const clientBox = bill ? `<div class="vz-client"><b>${esc(it.data.billName || clientLabel(c))}</b><div class="vz-addr">${esc(it.data.billAddress || '').replace(/\n/g, '<br>')}</div>${it.data.billVat ? `<div>TVA : ${esc(it.data.billVat)}</div>` : ''}</div>`
+    : `<div class="vz-client"><b>${esc(kind === 'order' ? contactName(c) : clientLabel(c))}</b>
     ${cd.company && (cd.name || cd.firstname) ? `<div>Att. ${esc([cd.civility, cd.name, cd.firstname].filter(Boolean).join(' '))}</div>` : ''}
     <div class="vz-addr">${[cd.address, [cd.zip, cd.city].filter(Boolean).join(' '), cd.country].filter(Boolean).map(esc).join('<br>')}</div>
     ${cd.vat ? `<div>TVA : ${esc(cd.vat)}</div>` : ''}</div>`;
@@ -157,6 +159,12 @@ function mentionsBlock(kind, d, t) {
 }
 
 async function printDoc(kind, id) {
+  const r = await docHtml(kind, id);
+  const { it, d, c, project, title, html, typ, co } = r;
+  return printDocPage(kind, id, it, d, c, project, title, html, typ, co);
+}
+// Rendu du document (devis, facture, commande) : utilisé pour l'impression et l'aperçu « Visualisation »
+async function docHtml(kind, id) {
   const typ = { quote: 'quote', invoice: 'invoice', order: 'order' }[kind];
   const it = await db.get(typ, id);
   const d = it.data;
@@ -178,6 +186,9 @@ async function printDoc(kind, id) {
     ${kind === 'quote' ? `${co.terms ? `<div class="vz-terms pre">${esc(co.terms)}</div>` : ''}<div class="vz-sign"><div>Pour ${esc(co.name || "l'entreprise")}</div><div>Pour accord, le client<br><small>Date, nom et signature précédés de la mention « Bon pour accord »</small></div></div>` : ''}
     ${t.footer || co.footer ? `<div class="vz-foot">${esc(t.footer || co.footer)}</div>` : ''}
   </div>`;
+  return { it, d, c, project, title, html, typ, co };
+}
+function printDocPage(kind, id, it, d, c, project, title, html, typ, co) {
   const mailDoc = () => {
     const tot = money(totals(d).total);
     const site = project ? ` – ${project.data.name}` : '';

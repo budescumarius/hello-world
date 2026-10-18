@@ -343,7 +343,7 @@ const structComm = (n) => {
 };
 async function newInvoice(preset) {
   const co = company();
-  const it = await persist('invoice', { project_id: preset.project_id || null, data: { kind: 'facture', status: 'brouillon', date: today(), due: addDays(today(), num(co.paymentDays) || 30), lines: [], payments: [], discount: 0, reverse: false, notes: co.invoiceNotes || '', ...preset.data } });
+  const it = await persist('invoice', { project_id: preset.project_id || null, data: { kind: 'facture', status: 'brouillon', date: today(), due: addDays(today(), num(co.paymentDays) || 30), payDays: num(co.paymentDays) || 30, defaultVat: defVat(), ownerId: S.me.id, billSame: true, lines: [], payments: [], discount: 0, reverse: false, notes: co.invoiceNotes || '', ...preset.data } });
   go(`#/invoice/${it.id}`);
 }
 async function invoiceFromQuote(q) {
@@ -495,119 +495,6 @@ async function progressInvoice(q, prev, base, existing) {
     if (existing) { Object.assign(existing.data, extra); await persist('invoice', existing); toast('État d\'avancement mis à jour'); render(); } else newInvoice({ ...base, data: { ...base.data, ...extra } });
   };
 }
-
-route('invoices', async () => {
-  const [invoices, contacts, projects] = await Promise.all([db.list('invoice'), db.list('contact'), db.list('project')]);
-  const rows = invoices.map((i) => ({ ...i, st: invState(i) }));
-  const y = String(new Date().getFullYear());
-  const yr = rows.filter((r) => (r.data.date || '').startsWith(y) && r.st.s !== 'brouillon');
-  const page = layout({ active: 'finances', icon: 'coins', title: 'Factures', actions: `<button class="btn" data-act="csv">Export comptable</button><button class="btn primary" data-act="new">${I.plus} Nouvelle facture</button>` });
-  page.innerHTML = `<div class="kpis">${kpi(`Facturé ${y} HT`, money(yr.reduce((a, r) => a + r.st.t.base, 0)))}${kpi('À envoyer', money(rows.filter((r) => r.st.s === 'brouillon').reduce((a, r) => a + r.st.t.total, 0)), { sub: `${rows.filter((r) => r.st.s === 'brouillon').length} brouillon(s)` })}
-    ${kpi('À encaisser', money(rows.filter((r) => ['impayee', 'partielle'].includes(r.st.s)).reduce((a, r) => a + r.st.rest, 0)))}${kpi('En retard', money(rows.filter((r) => r.st.s === 'retard').reduce((a, r) => a + r.st.rest, 0)), { cls: 'bad', sub: `${rows.filter((r) => r.st.s === 'retard').length} facture(s)` })}</div><div id="tbl"></div>`;
-  dataTable($('#tbl'), {
-    rows, state: ui.tbl_inv || (ui.tbl_inv = {}),
-    search: (i) => [i.number, i.data.title, contactName(byId(contacts, i.data.clientId)), (byId(projects, i.project_id) || { data: {} }).data.name].join(' '),
-    filters: { def: '', options: [['', 'Toutes'], ...Object.entries(IST).map(([k, [l, c]]) => [k, l, c])], match: (i, f) => i.st.s === f },
-    columns: [
-      { l: 'N°', v: (i) => `<b>${esc(i.number || 'Brouillon')}</b>`, sort: (i) => i.number || '' },
-      { l: 'Type', v: (i) => esc(IKIND[i.data.kind] || 'Facture') },
-      { l: 'Client', v: (i) => esc(contactName(byId(contacts, i.data.clientId))) },
-      { l: 'Chantier', v: (i) => esc((byId(projects, i.project_id) || { data: {} }).data.name || '') },
-      { l: 'Date', v: (i) => fmtDate(i.data.date), sort: (i) => i.data.date },
-      { l: 'Échéance', v: (i) => `<span class="${i.st.s === 'retard' ? 'late' : ''}">${fmtDate(i.data.due)}</span>`, sort: (i) => i.data.due },
-      { l: 'Statut', v: (i) => st(IST, i.st.s) },
-      { l: 'Total TVAC', cls: 'r', v: (i) => `<b>${money(i.st.t.total)}</b>`, sort: (i) => i.st.t.total },
-      { l: 'Reste', cls: 'r', v: (i) => (i.st.s === 'brouillon' || i.st.s === 'avoir' ? '' : money(i.st.rest)), sort: (i) => i.st.rest },
-    ],
-    onRow: (i) => go(`#/invoice/${i.id}`), empty: 'Aucune facture',
-  });
-  $('[data-act=new]').onclick = () => newInvoice({ data: {} });
-  $('[data-act=csv]').onclick = () => downloadCSV(`factures-${today()}.csv`, [['Numero', 'Type', 'Date', 'Echeance', 'Client', 'TVA client', 'Chantier', 'Base HT', 'TVA', 'Total TVAC', 'Paye', 'Reste', 'Statut'],
-    ...rows.filter((r) => r.st.s !== 'brouillon').map((r) => { const c = byId(contacts, r.data.clientId) || { data: {} }; return [r.number, IKIND[r.data.kind], fmtDate(r.data.date), fmtDate(r.data.due), contactName(c), c.data.vat, (byId(projects, r.project_id) || { data: {} }).data.name, fnum(r.st.t.base), fnum(r.st.t.vat), fnum(r.st.t.total), fnum(r.st.paid), fnum(r.st.rest), IST[r.st.s][0]]; })]);
-});
-
-route('invoice', async (id) => {
-  const it = await db.get('invoice', +id);
-  const [contacts, projects] = await Promise.all([db.list('contact'), db.list('project')]);
-  const d = it.data; d.payments = d.payments || [];
-  const c = byId(contacts, d.clientId); const pr = byId(projects, it.project_id);
-  const s = invState(it);
-  const locked = d.status === 'emise';
-  const save = debounce(async () => { try { await persist('invoice', it, { silent: true }); $('[data-saved]').textContent = 'Enregistré'; } catch (e) { toast('Erreur : ' + e.message); } }, 800);
-  const page = layout({ active: 'finances', icon: 'coins', title: `${IKIND[d.kind] || 'Facture'} ${it.number || '(brouillon)'}`, back: pr ? `#/project/${pr.id}/invoices` : '#/invoices',
-    sub: `${st(IST, s.s)}${d.peppol && d.peppol.sentAt ? ` ${badge('Peppol ✓', '#0c8599')}` : ''} <span class="muted" data-saved></span>`,
-    actions: `<a class="btn" href="#/print/invoice/${it.id}">${I.print} PDF</a>${locked ? `<button class="btn" data-act="peppol">Peppol</button>` : ''}${!locked ? `<button class="btn primary" data-act="emit">Valider et numéroter</button>` : ''}<button class="btn" data-act="more">${I.more} Actions</button>` });
-  page.innerHTML = `<div class="card doc-head" data-act="head">
-      <div><small class="muted">Client</small><b>${c ? `<a href="#/contact/${c.id}">${esc(contactName(c))}</a>` : '<span class="late">À définir</span>'}</b></div>
-      <div><small class="muted">Chantier</small><b>${pr ? `<a href="#/project/${pr.id}">${esc(pr.data.name)}</a>` : '—'}</b></div>
-      <div><small class="muted">Date · échéance</small><b>${fmtDate(d.date)} → ${fmtDate(d.due)}</b></div>
-      <div><small class="muted">Communication</small><b>${esc(d.communication || '—')}</b></div>
-      ${!locked ? `<button class="btn sm">${I.edit} Modifier</button>` : '<span class="badge" style="--c:#2f9e44">Validée</span>'}</div>
-    ${locked ? '<div class="alert info">Facture validée : les lignes ne sont plus modifiables. Pour corriger, créez une note de crédit.</div>' : ''}
-    ${!locked && d.kind === 'situation' && d.quoteId ? `<div class="alert info">État d'avancement EA${d.situationNo || ''} : les lignes sont calculées depuis l'avancement. <button class="btn sm" data-act="prog">Modifier l'avancement</button></div>` : ''}
-    <div id="lines"></div>
-    <div class="cols-2"><div>${d.kind === 'avoir' || !locked ? '' : `<div class="card"><div class="card-h"><h3>Paiements reçus</h3><button class="btn sm primary" data-act="pay">${I.plus} Paiement</button></div>
-      <div class="rows">${d.payments.map((p, i) => `<button class="row" data-pay="${i}"><span class="grow"><b>${money(p.amount)}</b><small class="muted">${fmtDate(p.date)} · ${esc(p.method || '')}${p.note ? ' · ' + esc(p.note) : ''}</small></span></button>`).join('') || '<div class="empty sm">Aucun paiement</div>'}</div>
-      <div class="totals flat"><div class="tr"><span>Payé</span><b>${money(s.paid)}</b></div><div class="tr big"><span>Reste à payer</span><span class="${s.s === 'retard' ? 'late' : ''}">${money(s.rest)}</span></div></div></div>`}</div><div id="tot"></div></div>`;
-  const drawTot = () => { $('#tot').innerHTML = totalsBox(totals(d), d, false); };
-  linesEditor($('#lines'), d, { showCost: false, readOnly: locked || (d.kind === 'situation' && !!d.quoteId), onChange: () => { drawTot(); $('[data-saved]').textContent = 'Modification…'; save(); } });
-  drawTot();
-  const head = () => formModal({
-    title: 'En-tête de la facture', wide: true, values: { ...d, project_id: it.project_id },
-    fields: [
-      { name: 'kind', label: 'Type', type: 'select', options: optsOf(IKIND) },
-      { name: 'clientId', label: 'Client', type: 'contact', contacts, kinds: ['client', 'prospect', 'architecte', 'autre'] },
-      { name: 'project_id', label: 'Chantier', type: 'select', options: [['', '—'], ...projects.map((p) => [p.id, `${p.number} · ${p.data.name}`])] },
-      { name: 'date', label: 'Date', type: 'date' }, { name: 'due', label: 'Échéance', type: 'date' },
-      { name: 'title', label: 'Objet', cls: 'full' },
-      { name: 'discount', label: 'Remise globale %', type: 'percent' },
-      { name: 'reverse', label: 'Autoliquidation', type: 'check' },
-      { name: 'notes', label: 'Mentions', type: 'textarea', cls: 'full' },
-    ],
-    async onSave(v) { await resolveContact(v, 'clientId', 'client'); it.project_id = v.project_id ? +v.project_id : null; delete v.project_id; Object.assign(d, v, { discount: num(v.discount) }); await persist('invoice', it); render(); },
-  });
-  $('[data-act=head]').onclick = (e) => { if (!locked && !e.target.closest('a')) head(); };
-  const emit = $('[data-act=emit]');
-  if (emit) emit.onclick = async () => {
-    await save.flush();
-    if (!d.clientId) return toast('Choisissez d\'abord le client');
-    if (!d.lines.some((l) => l.kind === 'item')) return toast('La facture ne contient aucune ligne');
-    if (d.reverse && !(c && c.data.vat)) return toast('Autoliquidation : indiquez d\'abord le n° de TVA du client (obligatoire sur la facture)', 5000);
-    if (!confirm('Valider la facture ? Elle recevra son numéro définitif et ne sera plus modifiable.')) return;
-    const r = await api('POST', `number/${d.kind === 'avoir' ? 'avoir' : 'invoice'}`);
-    it.number = r.number; d.status = 'emise'; d.emittedAt = today();
-    if (!d.communication && company().country !== 'FR') d.communication = structComm(r.number.replace(/\D/g, ''));
-    await persist('invoice', it); toast(`Facture ${it.number} validée`); render();
-  };
-  const editPay = (i) => {
-    const p = i == null ? { date: today(), amount: Math.max(0, s.rest), method: 'Virement' } : d.payments[i];
-    formModal({
-      title: i == null ? 'Nouveau paiement' : 'Paiement', values: p,
-      fields: [{ name: 'amount', label: 'Montant', type: 'money', required: true }, { name: 'date', label: 'Date', type: 'date' }, { name: 'method', label: 'Mode', type: 'select', options: PAY_METHODS.map((x) => [x, x]) }, { name: 'note', label: 'Remarque', cls: 'full' }],
-      async onSave(v) { Object.assign(p, v, { amount: num(v.amount) }); if (i == null) d.payments.push(p); await persist('invoice', it); render(); },
-      onDelete: i == null ? null : async () => { d.payments.splice(i, 1); await persist('invoice', it); render(); },
-    });
-  };
-  const pb = $('[data-act=pay]'); if (pb) pb.onclick = () => editPay(null);
-  const pp = $('[data-act=peppol]'); if (pp) pp.onclick = () => peppolInvoice(it);
-  const editProg = async () => {
-    const q = await db.get('quote', +d.quoteId);
-    const others = (await db.list('invoice')).filter((i) => +i.data.quoteId === q.id && i.id !== it.id);
-    progressInvoice(q, others, { project_id: it.project_id, data: {} }, it);
-  };
-  const pg = $('[data-act=prog]'); if (pg) pg.onclick = editProg;
-  $$('[data-pay]').forEach((b) => { b.onclick = () => editPay(+b.dataset.pay); });
-  $('[data-act=more]').onclick = () => menuSheet('Facture', [
-    ...(!locked ? [{ label: 'Modifier l\'en-tête', icon: 'edit', run: head }] : []),
-    { label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/invoice/${it.id}?mail=1`) },
-    ...(!locked && d.kind === 'situation' && d.quoteId ? [{ label: 'Modifier l\'état d\'avancement', icon: 'edit', run: editProg }] : []),
-    ...(locked ? [{ label: 'Peppol – facture électronique', icon: 'file', primary: true, run: () => peppolInvoice(it) }] : []),
-    ...(locked && d.kind !== 'avoir' ? [{ label: 'Créer une note de crédit', icon: 'copy', run: () => newInvoice({ project_id: it.project_id, data: { kind: 'avoir', clientId: d.clientId, quoteId: d.quoteId, reverse: d.reverse, discount: d.discount, title: `Annulation facture ${it.number}`, refInvoice: it.number, lines: d.lines.map((l) => (l.kind === 'item' ? { ...l, id: lid(), qty: -num(l.qty) } : { ...l, id: lid() })) } }) }] : []),
-    ...(d.quoteId ? [{ label: 'Ouvrir le devis', icon: 'calc', run: () => go(`#/quote/${d.quoteId}`) }] : []),
-    ...(!locked ? [{ sep: true }, { label: 'Supprimer le brouillon', danger: true, icon: 'trash', run: async () => { if (confirm('Supprimer ce brouillon ?')) { await db.del('invoice', it.id); go(pr ? `#/project/${pr.id}/invoices` : '#/invoices'); } } }] : []),
-  ]);
-  cleanupView = () => save.flush();
-});
 
 route('payments', async () => {
   const [invoices, contacts] = await Promise.all([db.list('invoice'), db.list('contact')]);

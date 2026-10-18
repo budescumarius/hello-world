@@ -194,7 +194,7 @@ function linesEditor(el, doc, opts) {
   }
   let drawT;
   const drawSoon = () => { clearTimeout(drawT); drawT = setTimeout(() => { if (!el.contains(document.activeElement) || document.activeElement.tagName === 'BUTTON') { draw(); changed(); } }, 150); };
-  const newItem = () => ({ id: lid(), kind: 'item', desc: '', unit: 'u', qty: 1, cost: '', price: 0, vat: defVat(), type: 'divers' });
+  const newItem = () => ({ id: lid(), kind: 'item', desc: '', unit: 'u', qty: 1, cost: '', price: 0, vat: opts.defVat != null && opts.defVat !== '' ? num(opts.defVat) : defVat(), type: 'divers' });
   async function add(k, at) {
     const pos = at == null ? doc.lines.length : at;
     if (k === 'lib') return pickArticles((items) => { doc.lines.splice(pos, 0, ...items); draw(); changed(); });

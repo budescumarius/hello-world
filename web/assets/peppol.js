@@ -84,7 +84,7 @@ function buildUBL(it, client, project) {
   const party = (p, scheme, id, withEnterprise) => `<cac:Party>
       <cbc:EndpointID schemeID="${xe(scheme)}">${xe(id)}</cbc:EndpointID>
       <cac:PartyName><cbc:Name>${xe(p.name)}</cbc:Name></cac:PartyName>
-      <cac:PostalAddress><cbc:StreetName>${xe(p.street)}</cbc:StreetName><cbc:CityName>${xe(p.city)}</cbc:CityName><cbc:PostalZone>${xe(p.zip)}</cbc:PostalZone><cac:Country><cbc:IdentificationCode>${p.cc}</cbc:IdentificationCode></cac:Country></cac:PostalAddress>
+      <cac:PostalAddress>${p.street ? `<cbc:StreetName>${xe(p.street)}</cbc:StreetName>` : ''}${p.city ? `<cbc:CityName>${xe(p.city)}</cbc:CityName>` : ''}${p.zip ? `<cbc:PostalZone>${xe(p.zip)}</cbc:PostalZone>` : ''}<cac:Country><cbc:IdentificationCode>${p.cc}</cbc:IdentificationCode></cac:Country></cac:PostalAddress>
       ${p.vat ? `<cac:PartyTaxScheme><cbc:CompanyID>${xe(p.vat)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
       <cac:PartyLegalEntity><cbc:RegistrationName>${xe(p.name)}</cbc:RegistrationName>${withEnterprise && p.enterprise ? `<cbc:CompanyID schemeID="0208">${xe(p.enterprise)}</cbc:CompanyID>` : ''}</cac:PartyLegalEntity>
       ${p.email || p.phone ? `<cac:Contact>${p.phone ? `<cbc:Telephone>${xe(p.phone)}</cbc:Telephone>` : ''}${p.email ? `<cbc:ElectronicMail>${xe(p.email)}</cbc:ElectronicMail>` : ''}</cac:Contact>` : ''}
@@ -118,8 +118,10 @@ function buildUBL(it, client, project) {
   <cbc:${isCN ? 'CreditNoteTypeCode' : 'InvoiceTypeCode'}>${isCN ? 381 : 380}</cbc:${isCN ? 'CreditNoteTypeCode' : 'InvoiceTypeCode'}>
   ${[d.title, d.notes].filter(Boolean).length ? `<cbc:Note>${xe([d.title, d.notes].filter(Boolean).join(' – ').slice(0, 1000))}</cbc:Note>` : ''}
   <cbc:DocumentCurrencyCode>${cur}</cbc:DocumentCurrencyCode>
-  <cbc:BuyerReference>${xe(d.ref || (project ? project.data.name : '') || it.number)}</cbc:BuyerReference>
+  <cbc:BuyerReference>${xe(d.buyerRef || d.orderRef || d.ref || (project ? project.data.name : '') || it.number)}</cbc:BuyerReference>
+  ${d.orderRef ? `<cac:OrderReference><cbc:ID>${xe(d.orderRef)}</cbc:ID></cac:OrderReference>` : ''}
   ${isCN && d.refInvoice ? `<cac:BillingReference><cac:InvoiceDocumentReference><cbc:ID>${xe(d.refInvoice)}</cbc:ID></cac:InvoiceDocumentReference></cac:BillingReference>` : ''}
+  ${d.contractRef ? `<cac:ContractDocumentReference><cbc:ID>${xe(d.contractRef)}</cbc:ID></cac:ContractDocumentReference>` : ''}
   ${project && !isCN ? `<cac:ProjectReference><cbc:ID>${xe(project.number || project.data.name)}</cbc:ID></cac:ProjectReference>` : ''}
   <cac:AccountingSupplierParty>${party(s, sScheme, sRest.join(':'), true)}</cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>${party(b, bScheme, bRest.join(':'), true)}</cac:AccountingCustomerParty>

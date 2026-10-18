@@ -61,7 +61,7 @@ async function purchasePreset(file, projectId) {
     return { ...base, fileId: up.id, fileName: up.name, desc: g.ref ? `Facture ${g.ref}` : file.name.replace(/\.pdf$/i, ''), ref: g.ref || '', date: g.date || today(), due: g.due || '',
       ...(g.base != null ? { amount: g.base } : {}), ...(g.rate != null ? { vat: g.rate } : {}), ...(g.tax != null ? { vatAmount: g.tax } : {}),
       ...(g.total != null ? { ttc: g.total } : {}), ...(g.tax != null ? { vatLines: [{ rate: g.rate != null ? g.rate : defVat(), amount: g.tax }] } : {}),
-      iban: g.iban || '', communication: g.comm || '', structured: !!g.comm && g.comm.length === 12, source: 'pdf',
+      iban: g.iban || '', bic: g.bic || '', communication: g.comm || '', structured: !!g.comm && g.comm.length === 12, source: 'pdf',
       supplierId: sup ? sup.id : '', supplierGuess: !sup && (g.name || g.vat) ? { name: g.name, vat: g.vatRaw } : null,
       readNote: hasTxt ? `Lu dans le PDF : ${[g.ref && 'n° ' + g.ref, g.date && 'date', g.total != null && 'total ' + money(g.total), g.vatRaw && 'TVA ' + g.vatRaw].filter(Boolean).join(' · ') || 'peu d\'informations reconnues'}. Vérifiez les montants.` : 'PDF scanné (image) : complétez les montants à la main.' };
   }
@@ -102,36 +102,62 @@ function pdfLines(tc) {
     const y = Math.round(it.transform[5]); const x = it.transform[4];
     let row = rows.find((r) => Math.abs(r.y - y) <= 3);
     if (!row) { row = { y, parts: [] }; rows.push(row); }
-    row.parts.push({ x, s: it.str });
+    row.parts.push({ x, w: it.width || 0, fs: Math.hypot(it.transform[0], it.transform[1]) || 10, s: it.str });
   }
-  return rows.sort((a, b) => b.y - a.y).map((r) => r.parts.sort((a, b) => a.x - b.x).map((p) => p.s).join(' ').replace(/\s+/g, ' ').trim()).join('\n');
+  // morceaux collés quand l'écart est faible (texte espacé « 2 0 2 6 » ou découpé « 202 » + « 6 »)
+  return rows.sort((a, b) => b.y - a.y).map((r) => {
+    const ps = r.parts.sort((a, b) => a.x - b.x); let out = ''; let end = null;
+    for (const p of ps) { out += end == null ? p.s : (p.x - end < p.fs * 0.2 ? '' : ' ') + p.s; end = p.x + p.w; }
+    return out.replace(/\s+/g, ' ').trim();
+  }).join('\n');
 }
 
 // Reconnaissance des informations principales d'une facture (FR / NL / EN)
 function parseInvoiceText(text) {
-  const lines = String(text || '').replace(/ | /g, ' ').split('\n').map((s) => s.trim()).filter(Boolean);
-  const AM = /(?<![\d.,])(-?\d{1,3}(?:[ .,']?\d{3})*[.,]\d{2})(?![\d])/g;
-  // « 1.234,56 », « 1 234,56 », « 1,234.56 » : les 2 derniers chiffres sont toujours les décimales
-  const amt = (s) => { s = s.replace(/[\s']/g, ''); return parseFloat(`${s.slice(0, -3).replace(/[.,]/g, '')}.${s.slice(-2)}`); };
-  const amounts = (s) => [...s.matchAll(AM)].map((m) => amt(m[1]));
-  const RE_TOTAL = /(total|totaal|montant|net)\s*(t\.?t\.?c|tvac|t\.v\.a\.c|incl|à\s*payer|a\s*payer|te\s*betalen|g[ée]n[ée]ral|due|ttc)|net\s*à\s*payer|à\s*payer|a\s*payer|te\s*betalen|amount\s*due|total\s*due/i;
+  const lines = String(text || '').replace(/ | /g, ' ')
+    .replace(/\b((?:19|20)\d) (\d)\b/g, '$1$2') // « 202 6 » → « 2026 »
+    .split('\n').map((s) => s.trim()).filter(Boolean)
+    // texte espacé lettre par lettre (« B r u x e l l e s , 6 j a n v i e r ») : on recolle
+    .map((l) => { const tk = l.split(' '); return tk.length >= 6 && tk.filter((x) => x.length === 1).length >= tk.length * 0.7 ? tk.join('') : l; });
+  const RE_TOTAL = /(total|totaal|montant|net)\s*(t\.?t\.?c|tvac|t\.v\.a\.c|incl|à\s*payer|a\s*payer|te\s*betalen|g[ée]n[ée]ral|due|ttc)|net\s*à\s*payer|à\s*payer|a\s*payer|te\s*betalen|amount\s*due|total\s*due|^\s*total\s*:?\s*[\d€]|^\s*total\s*$/i;
   const RE_BASE = /(total|totaal|montant|sous[- ]?total|subtotaal|subtotal|base|maatstaf|net)\s*(h\.?\s?t\.?\s?v?\.?a?\.?\b|hors\s*t|htva|excl|imposable|van\s*heffing|maatstaf|net\b)|sous[- ]?total|subtotaal|subtotal|total\s*net/i;
-  const RE_TAX = /\b(t\.?v\.?a\.?|btw|vat|mwst)\b(?!\s*(n[°º]|nr|num|number|nummer|:?\s*[a-z]{2}\s?\d{4}))/i;
+  const RE_TAX = /\b(t\.?v\.?a\.?|btw|vat|mwst)\b(?!\s*(n[°º]|nr|num|number|nummer|:?\s*[a-z]{2}\s?[.\-]?\s?\d{3}))/i;
+  // montants : « 1.234,56 », « 1 234,56 », « 1,234.56 », ou sans décimales s'ils sont suivis/précédés de € / EUR (« 336 EUR »)
+  const toNum = (s) => {
+    s = s.replace(/[\s']/g, '');
+    if (/[.,]\d{2}$/.test(s)) return parseFloat(`${s.slice(0, -3).replace(/[.,]/g, '')}.${s.slice(-2)}`);
+    if (/,\d$/.test(s)) return parseFloat(s.replace(/\./g, '').replace(',', '.'));
+    return parseFloat(s.replace(/[.,]/g, ''));
+  };
+  const amounts = (s) => {
+    const found = [];
+    for (const m of s.matchAll(/(?<![\d.,])(-?\d{1,3}(?:[ .,']?\d{3})*[.,]\d{2})(?![\d])/g)) found.push({ i: m.index, v: toNum(m[1]) });
+    for (const m of s.matchAll(/(?<![\d.,])(-?\d{1,3}(?:[ .']\d{3})+|-?\d+)(?:,\d)?\s*(?:€|EUR\b)/gi)) if (!found.some((f) => Math.abs(f.i - m.index) < 4)) found.push({ i: m.index, v: toNum(m[0].replace(/\s*(€|EUR)$/i, '')) });
+    for (const m of s.matchAll(/(?:€|EUR)\s*(-?\d{1,3}(?:[ .']\d{3})+|-?\d+)(?:[.,]\d{1,2})?(?![\d])/gi)) if (!found.some((f) => Math.abs(f.i - m.index) < 6)) found.push({ i: m.index, v: toNum(m[0].replace(/^(€|EUR)\s*/i, '')) });
+    return found.sort((a, b) => a.i - b.i).map((f) => f.v).filter((v) => !Number.isNaN(v));
+  };
+  const isLabel = (l) => RE_TOTAL.test(l) || RE_BASE.test(l) || RE_TAX.test(l);
   const pick = (re, not = []) => {
     for (let i = lines.length - 1; i >= 0; i--) {
       const l = lines[i];
       if (!re.test(l) || not.some((n) => n.test(l))) continue;
-      let a = amounts(l); if (!a.length && lines[i + 1]) a = amounts(lines[i + 1]);
+      let a = amounts(l);
+      // montant sur la ligne suivante, seulement si celle-ci ne porte pas elle-même un autre libellé (ex. « TOTAL »)
+      if (!a.length && lines[i + 1] && !isLabel(lines[i + 1])) a = amounts(lines[i + 1]);
       if (a.length) return Math.abs(a[a.length - 1]);
     }
     return null;
   };
+  // taux écrit sur la facture (« TVA 21 % »)
+  let rateTxt = null;
+  for (const l of lines) { const m = l.match(/\b(?:t\.?v\.?a\.?|btw|vat)\b[^%\d]{0,12}(\d{1,2}(?:[.,]\d+)?)\s*%/i) || l.match(/(\d{1,2}(?:[.,]\d+)?)\s*%\s*(?:t\.?v\.?a|btw|vat)\b/i); if (m) { rateTxt = num(m[1]); break; } }
   let total = pick(RE_TOTAL); let base = pick(RE_BASE, [RE_TOTAL]); let tax = pick(RE_TAX, [RE_TOTAL, RE_BASE]);
   if (base != null && total != null && base > total) [base, total] = [total, base];
+  if (tax != null && total != null && tax >= total * 0.5) tax = null; // une TVA ne fait jamais la moitié du total : c'était un autre montant
   if (total != null && base != null && (tax == null || Math.abs(base + tax - total) > 0.05)) tax = r2(total - base);
   else if (total != null && tax != null && base == null) base = r2(total - tax);
   else if (base != null && tax != null && total == null) total = r2(base + tax);
-  else if (total != null && base == null) { const v = defVat(); base = r2(total / (1 + v / 100)); tax = r2(total - base); }
+  else if (total != null && base == null) { const v = rateTxt != null ? rateTxt : defVat(); base = r2(total / (1 + v / 100)); tax = r2(total - base); }
   let rate = null;
   if (base && tax != null) { const r = (tax / base) * 100; const near = vatList().reduce((best, x) => (Math.abs(x - r) < Math.abs(best - r) ? x : best), vatList()[0]); rate = Math.abs(near - r) < 0.6 ? near : r2(r); }
   // dates
@@ -140,38 +166,52 @@ function parseInvoiceText(text) {
     let m = s.match(/\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4}|\d{2})\b/);
     if (m) { const y = m[3].length === 2 ? 2000 + +m[3] : +m[3]; if (+m[2] >= 1 && +m[2] <= 12 && +m[1] >= 1 && +m[1] <= 31) return `${y}-${String(m[2]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`; }
     m = s.match(/\b(\d{4})-(\d{2})-(\d{2})\b/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
-    m = s.toLowerCase().match(/\b(\d{1,2})\s+([a-zéûô]{3,9})\.?\s+(\d{4})\b/); if (m && MONTHS[m[2]]) return `${m[3]}-${String(MONTHS[m[2]]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
+    m = s.toLowerCase().match(/(?:^|[^\d])(\d{1,2})(?:er)?\s*([a-zéûô]{3,9})\.?\s*(\d{4})(?!\d)/); if (m && MONTHS[m[2]]) return `${m[3]}-${String(MONTHS[m[2]]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
     return null;
   };
   const RE_DUE = /[ée]ch[ée]ance|vervaldag|vervaldatum|due\s*date|payable\s*(avant|le)|à\s*payer\s*(avant|pour)|uiterste|betaaldatum/i;
+  const RE_PERIOD = /\(\s*\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4}\s*(au|-|–|tot|to)\s*\d/i; // période (« du 07/01 au 06/02 »)
   let due = null; let date = null;
   for (let i = 0; i < lines.length; i++) {
+    if (RE_PERIOD.test(lines[i])) continue;
     const d = dateIn(lines[i]) || (/(date|datum)\s*:?\s*$/i.test(lines[i]) && lines[i + 1] ? dateIn(lines[i + 1]) : null);
     if (!d) continue;
-    if (RE_DUE.test(lines[i])) { if (!due) due = d; } else if (/date|datum|le\s|du\s/i.test(lines[i]) && !date) date = d;
+    if (RE_DUE.test(lines[i])) { if (!due) due = d; } else if (/date|datum|le\s|du\s|,\s*(le\s*)?\d{1,2}(er)?\s*[a-zéû]{3,9}\s*\d{4}/i.test(lines[i]) && !date) date = d;
   }
-  if (!date) for (const l of lines) { const d = dateIn(l); if (d && !RE_DUE.test(l)) { date = d; break; } }
+  if (!date) for (const l of lines) { const d = dateIn(l); if (d && !RE_DUE.test(l) && !RE_PERIOD.test(l)) { date = d; break; } }
   // numéro de facture
   let ref = null;
   for (let i = 0; i < lines.length && !ref; i++) {
     const m = lines[i].match(/(?:facture|factuur|invoice|rechnung|note\s+de\s+cr[ée]dit|creditnota)\s*(?:n[°ºo]\.?|nr\.?|no\.?|num[ée]ro|nummer|number|#)?\s*:?\s*([A-Z0-9][A-Z0-9\-\/._]{2,30})/i);
-    if (m && /\d/.test(m[1])) ref = m[1];
+    if (m && /\d/.test(m[1])) ref = m[1].replace(/[.]$/, '');
     else if (/^(facture|factuur|invoice)?\s*(n[°º]|nr|num[ée]ro|nummer)\.?\s*:?\s*$/i.test(lines[i]) && lines[i + 1] && /^[A-Z0-9][A-Z0-9\-\/._]{2,30}$/i.test(lines[i + 1]) && /\d/.test(lines[i + 1])) ref = lines[i + 1];
   }
-  // n° de TVA du fournisseur (différent du nôtre)
-  const own = digitsOf(company().vat);
-  let vat = null; let vatRaw = null; let vatLine = -1;
-  lines.forEach((l, i) => { for (const m of l.matchAll(/\b(BE|LU|NL|FR|DE)\s?[-.]?\s?(\d[\d .]{7,14}\d)\b/gi)) { const dg = digitsOf(m[2]); if (!vat && dg.length >= 8 && dg !== own) { vat = dg; vatRaw = (m[1] + m[2].replace(/\D/g, '')).toUpperCase(); vatLine = i; } } });
-  // nom probable du fournisseur : première ligne « société » du document
-  const coName = (company().name || '').toLowerCase();
-  const name = lines.slice(0, 12).find((l) => /[a-z]{3}/i.test(l) && l.length <= 60 && !/factu|invoice|date|page|tél|tel\b|@|www|^\d|iban|tva|btw|vat|rue|straat|avenue|chaussée|^n[°º]/i.test(l) && (!coName || !l.toLowerCase().includes(coName))) || '';
+  // n° de TVA du fournisseur : jamais le nôtre (dans tous ses formats), ni ceux du bloc « client » (notre nom et adresse)
+  const co = company();
+  const own = new Set([co.vat, co.enterprise, (co.peppolId || '').split(':')[1], typeof sellerInfo === 'function' ? sellerInfo().enterprise : ''].map(digitsOf).filter((x) => x.length >= 8));
+  const coName = (co.name || '').toLowerCase().replace(/\b(srl|sprl|sa|nv|bv|bvba)\b/g, '').trim();
+  const coStreet = (co.address || co.street || '').split('\n')[0].toLowerCase().slice(0, 14);
+  const ownBlock = new Set();
+  lines.forEach((l, i) => { const ll = l.toLowerCase(); if ((coName && coName.length > 3 && ll.includes(coName)) || (coStreet.length > 6 && ll.includes(coStreet))) for (let k = i - 2; k <= i + 4; k++) ownBlock.add(k); });
+  const LEGAL = /\b(SRL|SPRL|SA|NV|BV|BVBA|SCS|SCRL|SC|SNC|SCOMM|COMMV|CV|ASBL|VZW|GMBH|SARL|SAS|LTD|LLC)\b/i;
+  const cands = [];
+  lines.forEach((l, i) => { for (const m of l.matchAll(/\b(BE|LU|NL|FR|DE)\s?[-.:]?\s?(\d[\d .]{7,14}\d)\b/gi)) { const dg = digitsOf(m[2]); if (dg.length >= 8 && !own.has(dg) && !ownBlock.has(i)) cands.push({ dg, raw: (m[1] + m[2].replace(/\D/g, '')).toUpperCase(), i, score: (LEGAL.test(l) ? 2 : 0) + (i > lines.length * 0.6 ? 1 : 0) }); } });
+  cands.sort((a, b) => b.score - a.score || a.i - b.i);
+  const vat = cands[0] ? cands[0].dg : null; const vatRaw = cands[0] ? cands[0].raw : null; const vatLine = cands[0] ? cands[0].i : -1;
+  // nom du fournisseur : sur la ligne de son n° de TVA (pied de page) ou juste au-dessus, sinon une ligne « société » de l'en-tête
+  const clean = (l) => l.split(/\s[·•|–]\s|\s-\s/)[0].replace(/\b(TVA|BTW|VAT|N°\s*TVA|BCE|KBO|RPM|RPR)\b.*$/i, '').replace(/[\s,:;·•\-–]+$/, '').trim();
+  const okName = (l) => l && /[a-z]{3}/i.test(l) && l.length <= 70 && !dateIn(l) && !/factu|invoice|page|tél|tel\b|@|www|iban|swift|bic|rue |straat|avenue|chaussée|place |^\d|^n[°º]/i.test(l) && (!coName || !l.toLowerCase().includes(coName));
+  let name = '';
+  if (vatLine >= 0) { const a = clean(lines[vatLine]); if (okName(a)) name = a; else if (vatLine > 0 && okName(clean(lines[vatLine - 1]))) name = clean(lines[vatLine - 1]); }
+  if (!name) name = (lines.slice(0, 15).find((l, i) => !ownBlock.has(i) && okName(l) && LEGAL.test(l)) || lines.slice(0, 12).find((l, i) => !ownBlock.has(i) && okName(l)) || '').trim();
   // IBAN du fournisseur (pas le nôtre) et communication structurée +++123/4567/89012+++
-  const ownIban = String(company().iban || '').replace(/\s/g, '').toUpperCase();
+  const ownIban = String(co.iban || '').replace(/\s/g, '').toUpperCase();
   let iban = null;
   for (const m of String(text).toUpperCase().matchAll(/\b([A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}(?:[ ]?[A-Z0-9]{1,4})?)\b/g)) { const v = m[1].replace(/\s/g, ''); if (/^(BE\d{14}|LU\d{18}|NL\d{2}[A-Z]{4}\d{10}|FR\d{12}[A-Z0-9]{11}\d{2}|DE\d{20})$/.test(v) && v !== ownIban) { iban = v; break; } }
   const cm = String(text).match(/\+{3}\s*(\d{3})\s*\/\s*(\d{4})\s*\/\s*(\d{5})\s*\+{3}/) || String(text).match(/\*{3}\s*(\d{3})\s*\/\s*(\d{4})\s*\/\s*(\d{5})\s*\*{3}/);
   const comm = cm ? cm[1] + cm[2] + cm[3] : null;
-  return { total, base, tax, rate, date, due, ref, vat, vatRaw, name, vatLine, iban, comm };
+  const bicM = String(text).match(/\b(?:BIC|SWIFT)\s*:?\s*([A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?)\b/i);
+  return { total, base, tax, rate, date, due, ref, vat, vatRaw, name, vatLine, iban, comm, bic: bicM ? bicM[1].toUpperCase() : null };
 }
 
 // ---------------------------------------------------------------- Réception Peppol automatique (point d'accès Peppyrus)

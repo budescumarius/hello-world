@@ -34,9 +34,10 @@ const userName = (id) => (S.users.find((u) => u.id === id) || {}).name || '—';
 const initials = (n) => String(n || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 const avatar = (id) => { const u = S.users.find((x) => x.id === id); return u ? `<span class="avatar" style="--c:${esc(u.color)}" title="${esc(u.name)}">${esc(initials(u.name))}</span>` : ''; };
 function debounce(fn, ms = 500) {
-  let t;
-  const d = (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
-  d.flush = () => { clearTimeout(t); return fn(); };
+  let t; let pending = false;
+  const d = (...a) => { clearTimeout(t); pending = true; t = setTimeout(() => { pending = false; fn(...a); }, ms); };
+  // flush : n'enregistre que s'il reste une modification en attente
+  d.flush = () => { clearTimeout(t); if (!pending) return Promise.resolve(); pending = false; return fn(); };
   return d;
 }
 
@@ -133,6 +134,8 @@ const ic = (d, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="curr
 const I = {
   spark: ic('<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>'),
   hist: ic('<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/>'),
+  eye: ic('<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>'),
+  percent: ic('<path d="M19 5L5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>'),
   chat: ic('<path d="M21 12a8 8 0 01-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1121 12z"/>'),
   more: ic('<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>'),
   upload: ic('<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>'),
@@ -191,7 +194,7 @@ const MENU = [
   { k: 'installations', l: 'Installations', i: 'install', h: '#/installations' },
   { k: 'tasks', l: 'Tâches', i: 'tasks', h: '#/tasks' },
   { k: 'planning', l: 'Plannings', i: 'calendar', sub: [['Planning des chantiers', '#/planning/projects'], ['Planning des équipes', '#/planning/team']] },
-  { k: 'finances', l: 'Finances', i: 'coins', sub: [['Factures', '#/invoices'], ['Paiements reçus', '#/payments'], ['Factures fournisseurs', '#/expenses']] },
+  { k: 'finances', l: 'Finances', i: 'coins', sub: [['Factures clients', '#/invoices'], ['Paiements reçus', '#/payments'], ['Factures fournisseurs', '#/expenses']] },
   { k: 'hr', l: 'RH', i: 'people', sub: [['Personnel', '#/hr/staff'], ['Pointage', '#/hr/timesheets'], ['Absences', '#/hr/absences']] },
   { k: 'stats', l: 'Statistiques', i: 'chart', h: '#/stats' },
 ];
@@ -378,8 +381,9 @@ function formModal({ title, fields, values = {}, onSave, onDelete, onClose, extr
 
 // ---------------------------------------------------------------- Tableaux
 // columns: [{ l: 'Titre', v: (row) => html, sort: (row) => valeur, cls }]
-function dataTable(el, { columns, rows, onRow, empty: emptyMsg = 'Aucun élément', search, filters, state: st = {}, toolbar = '', footer }) {
-  st.q = st.q || ''; st.f = st.f ?? (filters ? filters.def ?? '' : '');
+// pageSize : pagination (« Afficher 20 éléments ») ; le pied de tableau reçoit toute la liste filtrée
+function dataTable(el, { columns, rows, onRow, empty: emptyMsg = 'Aucun élément', search, filters, state: st = {}, toolbar = '', footer, pageSize }) {
+  st.q = st.q || ''; st.f = st.f ?? (filters ? filters.def ?? '' : ''); st.pg = st.pg || 1; if (pageSize) st.ps = st.ps || pageSize;
   const draw = () => {
     const q = st.q.toLowerCase();
     let list = rows.filter((r) => (!filters || !st.f || filters.match(r, st.f)) && (!q || !search || search(r).toLowerCase().includes(q)));
@@ -388,11 +392,19 @@ function dataTable(el, { columns, rows, onRow, empty: emptyMsg = 'Aucun élémen
       const key = c.sort || ((r) => String(c.v(r)).replace(/<[^>]+>/g, ''));
       list = [...list].sort((a, b) => { const x = key(a); const y = key(b); return (x > y ? 1 : x < y ? -1 : 0) * Math.sign(st.sort); });
     }
+    const pages = st.ps ? Math.max(1, Math.ceil(list.length / st.ps)) : 1;
+    if (st.pg > pages) st.pg = pages;
+    const shown = st.ps ? list.slice((st.pg - 1) * st.ps, st.pg * st.ps) : list;
+    const off = st.ps ? (st.pg - 1) * st.ps : 0;
     $('.dt-body', el).innerHTML = list.length
       ? `<table class="dt"><thead><tr>${columns.map((c, i) => `<th class="${c.cls || ''}" data-s="${i + 1}">${esc(c.l)}${Math.abs(st.sort) === i + 1 ? (st.sort > 0 ? ' ▲' : ' ▼') : ''}</th>`).join('')}</tr></thead>
-        <tbody>${list.map((r, i) => `<tr data-r="${i}">${columns.map((c) => `<td class="${c.cls || ''}" data-l="${esc(c.l)}">${c.v(r) ?? ''}</td>`).join('')}</tr>`).join('')}</tbody>
-        ${footer ? `<tfoot>${footer(list)}</tfoot>` : ''}</table>`
+        <tbody>${shown.map((r, i) => `<tr data-r="${i + off}">${columns.map((c) => `<td class="${c.cls || ''}" data-l="${esc(c.l)}">${c.v(r) ?? ''}</td>`).join('')}</tr>`).join('')}</tbody>
+        ${footer ? `<tfoot>${footer(list)}</tfoot>` : ''}</table>
+        ${st.ps ? `<div class="dt-pager"><label>Afficher <select data-ps>${[10, 20, 50, 100].map((n) => `<option ${n === st.ps ? 'selected' : ''}>${n}</option>`).join('')}</select> éléments</label><span class="grow"></span>
+          ${pages > 1 ? `<button class="btn sm" data-pg="${st.pg - 1}" ${st.pg <= 1 ? 'disabled' : ''} aria-label="Page précédente">←</button>${Array.from({ length: pages }, (_, i) => i + 1).filter((n) => n === 1 || n === pages || Math.abs(n - st.pg) <= 2).map((n, i, a) => `${i && n - a[i - 1] > 1 ? '<span class="muted">…</span>' : ''}<button class="btn sm ${n === st.pg ? 'primary' : ''}" data-pg="${n}">${n}</button>`).join('')}<button class="btn sm" data-pg="${st.pg + 1}" ${st.pg >= pages ? 'disabled' : ''} aria-label="Page suivante">→</button>` : ''}</div>` : ''}`
       : `<div class="empty">${esc(emptyMsg)}</div>`;
+    $$('[data-pg]', el).forEach((b) => { b.onclick = () => { st.pg = +b.dataset.pg; draw(); }; });
+    const ps = $('[data-ps]', el); if (ps) ps.onchange = () => { st.ps = +ps.value; st.pg = 1; draw(); };
     $$('[data-s]', el).forEach((th) => { th.onclick = () => { const k = +th.dataset.s; st.sort = st.sort === k ? -k : k; draw(); }; });
     if (onRow) $$('tbody tr', el).forEach((tr) => { tr.onclick = (e) => { if (!e.target.closest('a,button,input')) onRow(list[+tr.dataset.r]); }; });
     const cnt = $('.dt-count', el); if (cnt) cnt.textContent = `${list.length} élément${list.length > 1 ? 's' : ''}`;
@@ -402,8 +414,8 @@ function dataTable(el, { columns, rows, onRow, empty: emptyMsg = 'Aucun élémen
       ${filters ? `<div class="chips">${filters.options.map(([k, l, c]) => `<button class="chip ${st.f === k ? 'on' : ''}" data-f="${esc(k)}" ${c ? `style="--c:${c}"` : ''}>${c ? '<i class="dot"></i>' : ''}${esc(l)}</button>`).join('')}</div>` : ''}
       <span class="grow"></span>${toolbar}<span class="dt-count muted"></span></div>
     <div class="dt-body"></div></div>`;
-  const s = $('.search input', el); if (s) s.oninput = () => { st.q = s.value; draw(); };
-  $$('[data-f]', el).forEach((b) => { b.onclick = () => { st.f = b.dataset.f; $$('[data-f]', el).forEach((x) => x.classList.toggle('on', x === b)); draw(); }; });
+  const s = $('.search input', el); if (s) s.oninput = () => { st.q = s.value; st.pg = 1; draw(); };
+  $$('[data-f]', el).forEach((b) => { b.onclick = () => { st.f = b.dataset.f; st.pg = 1; $$('[data-f]', el).forEach((x) => x.classList.toggle('on', x === b)); draw(); }; });
   draw();
 }
 const badge = (label, color) => `<span class="badge" style="--c:${color}">${esc(label)}</span>`;
@@ -420,7 +432,7 @@ function go(hash) { if (location.hash === hash) render(); else location.hash = h
 async function render() {
   if (!S.ready) return;
   closeModals();
-  if (cleanupView) { try { cleanupView(); } catch (e) { /* vue déjà détruite */ } cleanupView = null; }
+  if (cleanupView) { try { await cleanupView(); } catch (e) { /* vue déjà détruite */ } cleanupView = null; }
   const parts = location.hash.replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean);
   const fn = ROUTES[parts[0] || 'dashboard'] || ROUTES.dashboard;
   const seq = ++renderSeq;
