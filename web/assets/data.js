@@ -311,7 +311,7 @@ async function makePdf() {
   holder.style.cssText = `position:fixed;left:-20000px;top:0;width:${W}px;background:#fff;`;
   holder.innerHTML = page.innerHTML;
   holder.querySelectorAll('.no-print').forEach((x) => x.remove());
-  holder.querySelectorAll('.pdf-break').forEach((x) => { x.style.borderTop = '0'; x.style.marginTop = '0'; });
+  holder.querySelectorAll('.vz-sheet').forEach((x) => { x.style.minHeight = '0'; x.style.boxShadow = 'none'; x.style.margin = '0'; x.style.borderRadius = '0'; });
   const docEl = holder.querySelector('.doc') || holder;
   docEl.style.cssText += ';max-width:none;width:' + W + 'px;margin:0;box-shadow:none;border-radius:0;';
   document.body.appendChild(holder);

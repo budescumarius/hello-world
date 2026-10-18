@@ -4,14 +4,42 @@
 
 const MENTION_6 = "Taux de TVA: en l'absence de contestation par écrit, dans un délai d'un mois à compter de la réception de la facture, le client est présumé reconnaître que\n(1) les travaux sont effectués à un bâtiment d'habitation dont la première occupation a eu lieu au cours d'une année civile qui précède d'au moins (dix ou quinze ans) la date de la première facture relative à ces travaux,\n(2) qu'après l'exécution de ces travaux, l'habitation est utilisée, soit exclusivement, soit à titre principal comme logement privé et\n(3) que ces travaux sont fournis et facturés à un consommateur final.\nSi au moins une de ces conditions n'est pas remplie, le taux normal de TVA de 21% sera applicable et le client endossera, par rapport à ces conditions, la responsabilité quant au paiement de la taxe, des intérêts et des amendes dus.";
 const MENTION_AL = "Autoliquidation – TVA due par le cocontractant en application de l'article 51, § 2, alinéa 1er, 5° du Code de la TVA (article 20 de l'arrêté royal n° 1).";
+const MENTION_21 = "Taux normal de TVA de 21 % : appliqué aux constructions neuves, aux bâtiments de moins de dix ans et aux travaux qui ne remplissent pas les conditions du taux réduit de 6 % (logement privé de plus de dix ans, utilisé à titre principal comme habitation et facturé au consommateur final).";
+// Conditions générales proposées par défaut (modifiables dans Paramètres → Modèles) : à faire vérifier par votre conseiller
+const CGV_DEF = `Article 1 – Champ d'application
+Les présentes conditions générales s'appliquent à toutes nos offres, devis, commandes, travaux et factures. Toute dérogation doit faire l'objet d'un accord écrit. Les conditions du client ne nous sont pas opposables.
+
+Article 2 – Devis et commande
+Nos devis sont valables pendant la durée qui y est indiquée. La commande est ferme dès la signature du devis par le client ou dès le paiement de l'acompte. Les travaux non prévus au devis font l'objet d'un avenant ou sont facturés en régie.
+
+Article 3 – Prix
+Les prix s'entendent hors TVA. Le taux de TVA appliqué dépend des informations communiquées par le client (âge du bâtiment, affectation, qualité de consommateur final) ; toute modification de ces éléments entraîne la correction du taux.
+
+Article 4 – Délais d'exécution
+Les délais sont donnés à titre indicatif. Les retards dus aux intempéries, à un cas de force majeure, aux autres corps de métier ou à des retards de livraison des fournisseurs ne peuvent donner lieu à une indemnité ni à la résiliation du contrat.
+
+Article 5 – Acomptes et états d'avancement
+Un acompte peut être demandé à la commande. Les travaux sont facturés au fur et à mesure de leur avancement. L'acompte est déduit des factures suivantes.
+
+Article 6 – Paiement
+Nos factures sont payables au compte indiqué, dans le délai mentionné sur la facture. En cas de non-paiement à l'échéance, des intérêts de retard et une indemnité forfaitaire peuvent être réclamés conformément à la législation belge applicable (loi du 2 août 2002 pour les professionnels, Code de droit économique pour les consommateurs). En cas de retard de paiement, nous nous réservons le droit de suspendre les travaux.
+
+Article 7 – Réception et réclamations
+La réception des travaux a lieu à leur achèvement. Toute réclamation relative à une facture doit être adressée par écrit dans les 15 jours de sa réception. Les vices apparents doivent être signalés au plus tard à la réception.
+
+Article 8 – Propriété des matériaux
+Les matériaux livrés restent notre propriété jusqu'au paiement complet du prix.
+
+Article 9 – Litiges
+Le droit belge est applicable. En cas de litige, les tribunaux de l'arrondissement judiciaire du siège social de l'entreprise sont compétents, sans préjudice des règles protectrices du consommateur.`;
 const TPL_DEF = {
   primary: '#2b3270', band: '#4c5fc7', light: '#d9dcf2', payColor: '#e03131', noteColor: '#1c7ed6', font: 'Montserrat', size: 10.5,
   quoteTitle: 'DEVIS N°{numero}', invoiceTitle: 'Facture n°{numero}', creditTitle: 'Note de crédit n°{numero}', orderTitle: 'Bon de commande n°{numero}',
   showTM: true, tmLabel: 'TM', showManager: true, thousands: '.',
   payText: 'Merci de faire le virement sur le compte {societe}', payTerms: '{jours} jour(s) Après date de facturation',
-  mention6: MENTION_6, mention12: '', mentionAL: MENTION_AL, mentionsOnQuote: true,
+  mention6: MENTION_6, mention12: '', mention21: MENTION_21, mentionAL: MENTION_AL, mentionsOnQuote: true,
   recap: true, footer: '', css: '',
-  cgvTitle: 'Conditions générales', cgv: '', cgvInvoice: true, cgvQuote: true, cgvOrder: false, cgvCols: true,
+  cgvTitle: 'Conditions générales', cgv: '', cgvInvoice: true, cgvQuote: true, cgvOrder: false, cgvCols: false,
 };
 const tpl = () => ({ ...TPL_DEF, ...(S.settings.template || {}) });
 const fill = (s, vars) => String(s || '').replace(/\{(\w+)\}/g, (m, k) => (vars[k] != null ? vars[k] : m));
@@ -149,13 +177,13 @@ function totalsBlock(kind, it, t, paid) {
 // Conditions générales : sur une nouvelle page (page 2 du PDF), texte libre ; **gras** et titres « Article … » mis en évidence
 function cgvBlock(kind, t) {
   const on = { invoice: t.cgvInvoice, quote: t.cgvQuote, order: t.cgvOrder }[kind];
-  const txt = String(t.cgv || company().terms || '').trim();
+  const txt = String(t.cgv || company().terms || CGV_DEF).trim();
   if (!on || !txt) return '';
   const body = txt.split(/\n{2,}/).map((para) => {
     const h = esc(para).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
     return /^(article|art\.|\d+[.)]\s|[IVX]+[.)]\s)/i.test(para) && para.split('\n')[0].length < 90 ? `<p><b>${h.replace(/<br>/, '</b><br>')}${h.includes('<br>') ? '' : '</b>'}</p>` : `<p>${h}</p>`;
   }).join('');
-  return `<div class="vz-cgv pdf-break ${t.cgvCols ? 'cols' : ''}"><h3>${esc(t.cgvTitle || 'Conditions générales')}</h3><div class="vz-cgv-body">${body}</div></div>`;
+  return `<div class="vz-sheet vz-cgv pdf-break ${t.cgvCols ? 'cgv-cols' : ''}"><h3>${esc(t.cgvTitle || 'Conditions générales')}</h3><div class="vz-cgv-body">${body}</div><div class="vz-pgno no-print">Page 2/2</div></div>`;
 }
 // Coordonnées de l'entreprise ou du client manquantes : avertissement à l'écran (non imprimé)
 function coMissing(kind, c) {
@@ -164,7 +192,7 @@ function coMissing(kind, c) {
   const out = [];
   if (miss.length) out.push(`Coordonnées de l'entreprise à compléter pour qu'elles apparaissent sur le document : <b>${miss.join(', ')}</b>.${isAdmin() ? ' <a href="#/settings/company">Paramètres → Entreprise</a>' : ''}`);
   if (!c) out.push(`Aucun ${kind === 'order' ? 'fournisseur' : 'client'} choisi : le cadre de l'adresse reste vide.`);
-  return out.length ? `<div class="vz-warn no-print">${out.map((x) => `<div>⚠ ${x}</div>`).join('')}</div>` : '';
+  return out.length ? `<div class="vz-warn vz-warn-top no-print">${out.map((x) => `<div>⚠ ${x}</div>`).join('')}</div>` : '';
 }
 
 // Mentions légales obligatoires selon les taux utilisés
@@ -177,6 +205,7 @@ function mentionsBlock(kind, d, t) {
   else {
     if (rates.has(6) && t.mention6) out.push(['TVA 6,0% :', t.mention6]);
     if (rates.has(12) && t.mention12) out.push(['TVA 12,0% :', t.mention12]);
+    if (rates.has(21) && t.mention21) out.push(['TVA 21,0% :', t.mention21]);
   }
   return out.map(([k, v]) => `<div class="vz-mention"><u>${k}</u><div class="pre">${esc(v)}</div></div>`).join('');
 }
@@ -197,7 +226,8 @@ async function docHtml(kind, id) {
   const { head, info, title } = docBlocks(kind, it, c, project, t);
   const paid = kind === 'invoice' ? invState(it).paid : 0;
   const isProg = kind === 'invoice' && d.kind === 'situation' && (d.progressRows || []).length;
-  const html = `<style>${docCSS(t)}</style><div class="doc vz">
+  const cgv = cgvBlock(kind, t);
+  const html = `<style>${docCSS(t)}</style><div class="doc vz vz-paper"><div class="vz-sheet">
     ${coMissing(kind, c)}${head}${info}
     ${d.intro ? `<p class="pre vz-intro">${esc(d.intro)}</p>` : ''}
     ${isProg ? progressTable(d, t) : linesTable(d, t)}
@@ -208,7 +238,8 @@ async function docHtml(kind, id) {
     ${d.notes ? `<div class="vz-notes pre">${esc(d.notes)}</div>` : ''}
     ${kind === 'quote' ? `${co.terms && !t.cgvQuote ? `<div class="vz-terms pre">${esc(co.terms)}</div>` : ''}<div class="vz-sign"><div>Pour ${esc(co.name || "l'entreprise")}</div><div>Pour accord, le client<br><small>Date, nom et signature précédés de la mention « Bon pour accord »</small></div></div>` : ''}
     ${t.footer || co.footer ? `<div class="vz-foot">${esc(t.footer || co.footer)}</div>` : ''}
-    ${cgvBlock(kind, t)}
+    <div class="vz-pgno no-print">Page 1${cgv ? '/2' : '/1'}</div></div>
+    ${cgv}
   </div>`;
   return { it, d, c, project, title, html, typ, co };
 }
@@ -263,11 +294,12 @@ function templateSettings(page) {
     { name: 'h4', type: 'html', cls: 'full', html: '<div class="section-t">Mentions obligatoires</div><small class="muted">Ajoutées automatiquement quand la facture contient des lignes au taux concerné, ou en autoliquidation. Vérifiez les textes avec votre comptable.</small>' },
     { name: 'mention6', label: 'Mention TVA 6 %', type: 'textarea', rows: 7, cls: 'full' },
     { name: 'mention12', label: 'Mention TVA 12 % (facultatif)', type: 'textarea', rows: 3, cls: 'full' },
+    { name: 'mention21', label: 'Mention TVA 21 % (facultatif, videz pour ne rien afficher)', type: 'textarea', rows: 3, cls: 'full' },
     { name: 'mentionAL', label: 'Mention autoliquidation', type: 'textarea', rows: 3, cls: 'full' },
     { name: 'mentionsOnQuote', label: 'Imprimer aussi ces mentions sur les devis', type: 'check' },
     { name: 'h6', type: 'html', cls: 'full', html: '<div class="section-t">Conditions générales (nouvelle page)</div><small class="muted">Imprimées sur une page à part, après le document (page 2 du PDF). Un paragraphe par article, séparés par une ligne vide ; **texte** = gras.</small>' },
-    { name: 'cgvTitle', label: 'Titre' }, { name: 'cgvCols', label: 'Sur deux colonnes (petit texte)', type: 'check' },
-    { name: 'cgv', label: 'Texte des conditions générales', type: 'textarea', rows: 12, cls: 'full', placeholder: 'Article 1 – Champ d\'application\nLes présentes conditions…\n\nArticle 2 – Prix\n…' },
+    { name: 'cgvTitle', label: 'Titre' }, { name: 'cgvCols', label: 'Sur deux colonnes à l\'écran et à l\'impression (le PDF reste sur une colonne)', type: 'check' },
+    { name: 'cgv', label: 'Texte des conditions générales', type: 'textarea', rows: 12, cls: 'full', placeholder: 'Vide = conditions générales proposées par défaut (9 articles)' },
     { name: 'cgvInvoice', label: 'Sur les factures', type: 'check' }, { name: 'cgvQuote', label: 'Sur les devis', type: 'check' }, { name: 'cgvOrder', label: 'Sur les bons de commande', type: 'check' },
     { name: 'h5', type: 'html', cls: 'full', html: '<div class="section-t">Avancé</div>' },
     { name: 'footer', label: 'Pied de page', cls: 'full' },

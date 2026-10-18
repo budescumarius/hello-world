@@ -768,12 +768,16 @@ body:has(.pi-bar) .ai-fab { bottom: calc(84px + env(safe-area-inset-bottom)); }
 [data-pays] .card-h { gap: 10px; }
 @media (max-width: 700px) { td.sel { width: auto; } .bulk { width: 100%; } }
 
-/* Conditions générales : page à part */
-.doc.vz > .vz-warn:first-child { background: #fff4e5; border: 1px solid #f5c48a; color: #8a4b00; font-weight: 500; border-radius: 8px; padding: 10px 14px; margin: -10px 0 22px; }
-.doc.vz > .vz-warn:first-child a { color: inherit; font-weight: 700; }
-.vz-cgv { margin-top: 40px; padding-top: 26px; border-top: 2px dashed #d0d5df; font-size: .82em; color: #333; text-align: justify; }
-.vz-cgv h3 { font-size: 1.5em; color: var(--p, #2b3270); margin: 0 0 14px; text-align: left; }
-.vz-cgv p { margin: 0 0 8px; break-inside: avoid; }
-.vz-cgv.cols .vz-cgv-body { column-count: 2; column-gap: 26px; font-size: .92em; }
-@media (max-width: 700px) { .vz-cgv.cols .vz-cgv-body { column-count: 1; } }
-@media print { .vz-cgv { break-before: page; page-break-before: always; border-top: 0; margin-top: 0; padding-top: 0; } }
+/* Documents : feuilles A4 à l'écran (comme le PDF), conditions générales sur la 2e feuille */
+.doc.vz.vz-paper { background: none; box-shadow: none; padding: 0; max-width: 794px; border-radius: 0; }
+.vz-sheet { position: relative; background: #fff; width: 100%; min-height: 1123px; padding: 46px 48px 54px; box-shadow: 0 4px 22px rgba(16, 24, 40, .14); border-radius: 2px; }
+.vz-sheet + .vz-sheet { margin-top: 26px; }
+.vz-pgno { position: absolute; right: 48px; bottom: 18px; font-size: .75em; color: #666; }
+.vz-warn-top { background: #fff4e5; border: 1px solid #f5c48a; color: #8a4b00; font-weight: 500; border-radius: 8px; padding: 10px 14px; margin: -14px 0 22px; }
+.vz-warn-top a { color: inherit; font-weight: 700; }
+.vz-cgv { font-size: .82em; color: #333; text-align: justify; }
+.vz-cgv h3 { font-size: 1.6em; color: var(--p, #2b3270); margin: 0 0 16px; text-align: left; }
+.vz-cgv p { margin: 0 0 9px; break-inside: avoid; }
+.vz-cgv.cgv-cols .vz-cgv-body { column-count: 2; column-gap: 26px; font-size: .95em; }
+@media screen and (max-width: 860px) { .vz-sheet { min-height: 0; padding: 22px 18px 40px; } .vz-pgno { right: 18px; } .vz-cgv.cgv-cols .vz-cgv-body { column-count: 1; } }
+@media print { .doc.vz.vz-paper { max-width: none; } .vz-sheet { min-height: 0; box-shadow: none; padding: 0; } .vz-sheet + .vz-sheet { margin-top: 0; break-before: page; page-break-before: always; } }
