@@ -63,7 +63,8 @@ route('contacts', async (kind = 'client') => {
   const list = await db.list('contact');
   const labels = { client: 'Clients', prospect: 'Prospects', fournisseur: 'Fournisseurs', soustraitant: 'Sous-traitants', all: 'Tous les contacts' };
   const page = layout({ active: 'contacts', icon: 'contacts', title: labels[kind] || 'Contacts',
-    actions: `<button class="btn" data-act="csv">Export CSV</button><button class="btn primary" data-act="new">${I.plus} Nouveau contact</button>` });
+    actions: `<button class="btn" data-act="imp">Importer (Excel, CSV, vCard)</button><button class="btn" data-act="csv">Export CSV</button><button class="btn primary" data-act="new">${I.plus} Nouveau contact</button>` });
+  $('[data-act=imp]').onclick = () => importContacts(kind === 'all' ? 'client' : kind);
   const rows = list.filter((c) => kind === 'all' || c.data.kind === kind);
   dataTable(page, {
     rows, state: ui.tbl_contacts || (ui.tbl_contacts = {}),

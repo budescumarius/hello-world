@@ -552,3 +552,13 @@ table.lines { width: 100%; border-collapse: collapse; min-width: 760px; }
 .lines tr.l-title.lv2 td { background: #f7f8fd; }
 .lines tr.l-title.lv2 .in { font-size: 14px; font-weight: 600; padding-left: 18px; }
 @media (max-width: 700px) { .vz-head, .vz-bottom { flex-direction: column; } .vz-right { align-items: stretch; } .doc.vz h1, .vz-meta { text-align: left; } .doc.vz .vz-tot { width: 100%; flex-basis: auto; } }
+
+/* ---------- Import Excel */
+.dt.imp select { padding: 4px 6px; border: 1px solid var(--border); border-radius: 7px; }
+.dt.imp tr.k-title td { background: #e8ebf8; font-weight: 700; }
+.dt.imp tr.k-sub td { background: #f3f4fb; font-weight: 600; }
+.dt.imp tr.k-text td { color: var(--muted); font-style: italic; }
+.dt.imp tr.k-skip td { opacity: .4; text-decoration: line-through; }
+.dt.imp tbody tr { cursor: default; }
+.map-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 860px) { .map-grid { grid-template-columns: 1fr; } }

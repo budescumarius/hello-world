@@ -157,7 +157,7 @@ function linesEditor(el, doc, opts) {
       }).join('') || `<tr><td colspan="${showCost ? 10 : 8}" class="empty">Aucune ligne. Ajoutez un chapitre, une ligne ou des éléments de la bibliothèque.</td></tr>`}</tbody></table></div>
       <datalist id="units">${UNITS.map((u) => `<option value="${u}">`).join('')}</datalist>
       ${opts.readOnly ? '' : `<div class="btns lines-add"><button class="btn" data-add="title">${I.plus} Chapitre</button><button class="btn" data-add="sub">${I.plus} Sous-chapitre</button><button class="btn" data-add="item">${I.plus} Ligne</button><button class="btn" data-add="text">${I.plus} Texte</button>
-        ${opts.library !== false ? `<button class="btn primary" data-add="lib">${I.book} Depuis la bibliothèque</button>` : ''}
+        ${opts.library !== false ? `<button class="btn primary" data-add="lib">${I.book} Depuis la bibliothèque</button>` : ''}<button class="btn" data-add="xls">${I.file} Importer Excel</button>
         ${opts.showCost ? `<label class="chk small"><input type="checkbox" data-showcost ${showCost ? 'checked' : ''}>Afficher déboursés et marges</label>` : ''}</div>`}`;
     bind();
   };
@@ -198,6 +198,7 @@ function linesEditor(el, doc, opts) {
   async function add(k, at) {
     const pos = at == null ? doc.lines.length : at;
     if (k === 'lib') return pickArticles((items) => { doc.lines.splice(pos, 0, ...items); draw(); changed(); });
+    if (k === 'xls') return importLinesExcel((items) => { doc.lines.splice(pos, 0, ...items); draw(); changed(); });
     const l = k === 'title' ? { id: lid(), kind: 'title', desc: '' } : k === 'sub' ? { id: lid(), kind: 'title', level: 2, desc: '' } : k === 'text' ? { id: lid(), kind: 'text', desc: '' } : newItem();
     doc.lines.splice(pos, 0, l);
     draw(); changed();

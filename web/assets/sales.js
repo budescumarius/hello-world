@@ -71,7 +71,7 @@ async function editArticle(a, preset = {}) {
 route('library', async () => {
   const all = await db.list('article');
   const page = layout({ active: 'library', icon: 'book', title: 'Bibliothèque',
-    actions: `<button class="btn" data-act="imp">Importer CSV</button><button class="btn" data-act="exp">Exporter CSV</button><button class="btn" data-act="bulk">Indexer les prix</button><button class="btn primary" data-act="new">${I.plus} Nouvel article</button>` });
+    actions: `<button class="btn" data-act="imp">Importer Excel / CSV</button><button class="btn" data-act="exp">Exporter CSV</button><button class="btn" data-act="bulk">Indexer les prix</button><button class="btn primary" data-act="new">${I.plus} Nouvel article</button>` });
   dataTable(page, {
     rows: all, state: ui.tbl_lib || (ui.tbl_lib = {}),
     search: (a) => [a.data.code, a.data.name, a.data.category].join(' '),
@@ -116,10 +116,10 @@ function parseCSV(text) {
 }
 const normKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
 async function importLibrary(existing) {
-  const [file] = await pickFile('.csv,text/csv');
+  const [file] = await pickFile('.csv,text/csv,.xlsx,.xls,.ods');
   if (!file) return;
   try {
-    const rows = parseCSV(await file.text());
+    const rows = /\.csv$/i.test(file.name) ? parseCSV(await file.text()) : Object.values(await readSheets(file))[0].map((r) => r.map((c) => String(c ?? '')));
     const h = rows[0].map(normKey);
     const col = (...n) => h.findIndex((x) => n.includes(x));
     const ix = { code: col('code', 'ref', 'reference'), name: col('designation', 'nom', 'libelle', 'name'), kind: col('type'), category: col('categorie', 'famille'), unit: col('unite', 'unit', 'u'),
@@ -224,7 +224,8 @@ async function newQuote(preset = {}) {
 route('quotes', async () => {
   const [quotes, contacts, projects] = await Promise.all([db.list('quote'), db.list('contact'), db.list('project')]);
   const sum = (s) => quotes.filter((q) => q.data.status === s).reduce((a, q) => a + totals(q.data).base, 0);
-  const page = layout({ active: 'quotes', icon: 'calc', title: 'Devis', actions: `<button class="btn primary" data-act="new">${I.plus} Nouveau devis</button>` });
+  const page = layout({ active: 'quotes', icon: 'calc', title: 'Devis', actions: `<button class="btn" data-act="xls">${I.file} Devis depuis Excel</button><button class="btn primary" data-act="new">${I.plus} Nouveau devis</button>` });
+  $('[data-act=xls]').onclick = () => quoteFromExcel();
   page.innerHTML = `<div class="kpis">${kpi('À envoyer', money(sum('brouillon')), { sub: `${quotes.filter((q) => q.data.status === 'brouillon').length} devis` })}${kpi('En cours (envoyés)', money(sum('envoye')), { sub: `${quotes.filter((q) => q.data.status === 'envoye').length} devis` })}
     ${kpi('Acceptés', money(sum('accepte')), { cls: 'good', sub: `${quotes.filter((q) => q.data.status === 'accepte').length} devis` })}${kpi('Taux de transformation', `${quotes.filter((q) => ['accepte', 'refuse'].includes(q.data.status)).length ? Math.round(quotes.filter((q) => q.data.status === 'accepte').length / quotes.filter((q) => ['accepte', 'refuse'].includes(q.data.status)).length * 100) : 0} %`)}</div><div id="tbl"></div>`;
   dataTable($('#tbl'), {
