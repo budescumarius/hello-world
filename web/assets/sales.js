@@ -363,60 +363,134 @@ async function invoiceFromQuote(q) {
     { label: 'Facture de solde (reste à facturer)', run: () => {
       const pb = prevBase(prev);
       const lines = d.lines.filter((l) => !l.option).map(disco);
-      if (Object.values(pb).some((b) => Math.abs(b) > 0.005)) lines.push({ id: lid(), kind: 'title', desc: 'Déductions' });
-      for (const [rate, b] of Object.entries(pb)) if (Math.abs(b) > 0.005) lines.push({ id: lid(), kind: 'item', desc: `Déjà facturé (${prev.map((i) => i.number || 'brouillon').join(', ')})${many ? ` – TVA ${fnum(+rate)} %` : ''}`, unit: 'forfait', qty: 1, price: -b, vat: +rate, type: 'divers' });
+      for (const [rate, b] of Object.entries(pb)) if (Math.abs(b) > 0.005) lines.push({ id: lid(), kind: 'item', deduction: 'previous', desc: `Déjà facturé (${prev.map((i) => i.number || 'brouillon').join(', ')})${many ? ` – TVA ${fnum(+rate)} %` : ''}`, unit: 'forfait', qty: 1, price: -b, vat: +rate, type: 'divers' });
       mk({ kind: 'finale', lines });
     } },
   ]);
 }
-function progressInvoice(q, prev, base) {
+// ---------------------------------------------------------------- États d'avancement
+// Pourcentage cumulé déjà facturé pour chaque ligne du devis (hors facture `exceptId`)
+function prevProgress(list, lineId, exceptId) {
+  let m = 0;
+  for (const i of list) {
+    if (i.id === exceptId || i.data.kind !== 'situation') continue;
+    const r = (i.data.progressRows || []).find((x) => x.lineId === lineId);
+    m = Math.max(m, r ? num(r.cum) : num((i.data.progress || {})[lineId]));
+  }
+  return m;
+}
+// Acomptes du devis et montants déjà déduits par taux (hors facture `exceptId`)
+function acompteState(list, exceptId) {
+  const adv = {}; const done = {};
+  for (const i of list) {
+    if (i.id === exceptId) continue;
+    if (i.data.kind === 'acompte') for (const v of totals(i.data).vats) adv[v.rate] = r2((adv[v.rate] || 0) + v.base);
+    if (i.data.kind === 'situation') for (const l of i.data.lines || []) if (l.kind === 'item' && l.deduction === 'acompte') done[num(l.vat)] = r2((done[num(l.vat)] || 0) - r2(num(l.qty) * num(l.price)));
+  }
+  return { adv, done, advTotal: r2(Object.values(adv).reduce((a, v) => a + v, 0)), doneTotal: r2(Object.values(done).reduce((a, v) => a + v, 0)) };
+}
+
+// existing : facture d'avancement en brouillon à modifier
+async function progressInvoice(q, prev, base, existing) {
   const d = q.data; const disc = num(d.discount) / 100;
-  const nos = numbering(d.lines);
-  const prevPct = (lineId) => Math.max(0, ...prev.filter((i) => i.data.progress).map((i) => num(i.data.progress[lineId])));
-  const acomptes = prev.filter((i) => i.data.kind === 'acompte');
-  const n = prev.filter((i) => i.data.kind === 'situation').length + 1;
-  const m = modal(`${mhead(`État d'avancement n° ${n} – devis ${q.number}`)}<div class="m-body">
-    <p class="muted">Indiquez le pourcentage <b>cumulé</b> réalisé par ligne. La facture reprend la différence avec les états précédents.</p>
-    <div class="btns"><button class="btn sm" data-all="100">Tout à 100 %</button><button class="btn sm" data-all="prev">Réinitialiser</button></div>
-    <table class="dt"><thead><tr><th>N°</th><th>Désignation</th><th class="r">Montant HT</th><th class="r">Précédent</th><th class="r">Cumulé %</th></tr></thead><tbody>
-    ${d.lines.map((l, i) => (l.kind === 'title' ? `<tr class="sec"><td>${nos[i]}</td><td colspan="4"><b>${esc(l.desc)}</b></td></tr>` : l.kind === 'item' && !l.option ? `<tr><td>${nos[i]}</td><td>${esc(l.desc.split('\n')[0])}</td><td class="r">${money(num(l.qty) * num(l.price) * (1 - disc))}</td><td class="r">${fnum(prevPct(l.id))} %</td><td class="r"><input class="pct" data-pid="${l.id}" data-prev="${prevPct(l.id)}" inputmode="decimal" value="${prevPct(l.id)}"></td></tr>` : '')).join('')}
-    </tbody></table>
-    ${acomptes.length ? `<label class="chk"><input type="checkbox" data-ded checked>Déduire les acomptes au prorata (${acomptes.map((a) => a.number || 'brouillon').join(', ')})</label>` : ''}
-    <div class="totals"><div class="tr big"><span>À facturer HT</span><span data-tot></span></div></div></div>
-    <div class="m-foot"><span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-ok>Créer la facture</button></div>`, { wide: true });
-  const inputs = $$('[data-pid]', m.el);
-  const line = (id) => d.lines.find((l) => l.id === id);
-  const calc = () => inputs.reduce((a, inp) => { const l = line(inp.dataset.pid); return a + num(l.qty) * num(l.price) * (1 - disc) * (Math.min(100, num(inp.value)) - num(inp.dataset.prev)) / 100; }, 0);
-  const upd = () => { $('[data-tot]', m.el).textContent = money(calc()); };
-  inputs.forEach((i) => { i.oninput = upd; });
-  $$('[data-all]', m.el).forEach((b) => { b.onclick = () => { inputs.forEach((i) => { i.value = b.dataset.all === 'prev' ? i.dataset.prev : 100; }); upd(); }; });
+  const src = d.lines.filter((l) => l.kind === 'title' || (l.kind === 'item' && !l.option));
+  const old = existing ? existing.data.progressRows || [] : [];
+  const rows = src.map((l) => (l.kind === 'title' ? { lineId: l.id, kind: 'title', level: tlevel(l), desc: l.desc } : {
+    lineId: l.id, kind: 'item', desc: l.desc, unit: l.unit, vat: num(l.vat), type: l.type, qty: num(l.qty), price: r2(num(l.price) * (1 - disc)),
+    prev: prevProgress(prev, l.id, existing && existing.id),
+  }));
+  rows.forEach((r) => { if (r.kind === 'item') { const o = old.find((x) => x.lineId === r.lineId); r.cum = o ? num(o.cum) : r.prev; } });
+  const n = existing ? existing.data.situationNo : prev.filter((i) => i.data.kind === 'situation').length + 1;
+  const ac = acompteState(prev, existing && existing.id);
+  const nos = numbering(rows);
+  const amt = (r, pct) => r2(r.qty * r.price * pct / 100);
+  const m = modal(`${mhead(`État d'avancement n° ${n} (EA${n}) – devis ${q.number}`)}<div class="m-body">
+    <p class="muted">Encodez l'avancement <b>cumulé</b> de chaque poste, en % ou en quantité. La facture reprend uniquement la différence avec les états précédents. Sur un chapitre, le % s'applique à toutes ses lignes.</p>
+    <div class="btns"><button class="btn sm" data-all="100">Tout à 100 %</button><button class="btn sm" data-all="prev">Revenir à l'état précédent</button></div>
+    <div class="dt-body"><table class="dt prog"><thead><tr><th>N°</th><th>Désignation</th><th class="r">Qté prévue</th><th>U</th><th class="r">PU HT</th><th class="r">Montant HT</th><th class="r">Préc.</th><th class="r">Cumul %</th><th class="r">Cumul qté</th><th class="r">Cet état</th></tr></thead><tbody>
+    ${rows.map((r, i) => (r.kind === 'title'
+    ? `<tr class="sec ${r.level === 2 ? 'lv2' : ''}"><td>${nos[i]}</td><td colspan="6"><b>${esc(r.desc)}</b></td><td class="r"><input class="pct" data-ch="${i}" inputmode="decimal" placeholder="%"></td><td></td><td class="r" data-ct="${i}"></td></tr>`
+    : `<tr data-r="${i}"><td>${nos[i]}</td><td>${esc(r.desc.split('\n')[0])}</td><td class="r">${fnum(r.qty, 3)}</td><td>${esc(r.unit)}</td><td class="r">${money(r.price)}</td><td class="r">${money(amt(r, 100))}</td><td class="r">${fnum(r.prev, 1)} %</td>
+       <td class="r"><input class="pct" data-p="${i}" inputmode="decimal" value="${r2(r.cum)}"></td><td class="r"><input class="pct" data-q="${i}" inputmode="decimal" value="${r2(r.qty * r.cum / 100)}"></td><td class="r" data-per="${i}"></td></tr>`)).join('')}
+    </tbody></table></div>
+    ${ac.advTotal ? `<div class="card flat"><b>Acomptes facturés : ${money(ac.advTotal)} HT</b> · déjà déduits ${money(ac.doneTotal)} · reste ${money(ac.advTotal - ac.doneTotal)}
+      <div class="grid-form" style="margin-top:8px">${fieldHTML({ name: 'dmode', label: 'Déduction de l\'acompte', type: 'select', options: [['prorata', 'Au prorata de l\'avancement (recommandé)'], ['manual', 'Montant libre HT'], ['none', 'Pas de déduction sur cet état']] }, existing ? existing.data.deductMode || 'prorata' : 'prorata')}${fieldHTML({ name: 'damount', label: 'Montant HT à déduire', type: 'money' }, existing ? existing.data.deductAmount || '' : '')}</div></div>` : ''}
+    <div class="totals"><div class="tr"><span>Sous-total n°1 (travaux de cet état)</span><b data-t1></b></div>${ac.advTotal ? '<div class="tr"><span>Déduction acompte</span><b data-t2></b></div>' : ''}<div class="tr big"><span>Sous-total n°2 (HT facturé)</span><span data-t3></span></div><div class="tr int"><span>Avancement global cumulé</span><span data-t4></span></div></div></div>
+    <div class="m-foot"><span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-ok>${existing ? 'Mettre à jour la facture' : 'Créer la facture'}</button></div>`, { wide: true });
+  const items = rows.filter((r) => r.kind === 'item');
+  const clamp = (x) => Math.min(100, Math.max(0, x));
+  const deduction = () => {
+    if (!ac.advTotal) return {};
+    const mode = $('[name=dmode]', m.el).value;
+    $('[name=damount]', m.el).closest('.field').hidden = mode !== 'manual';
+    const remain = {}; for (const [rate, v] of Object.entries(ac.adv)) remain[rate] = r2(v - (ac.done[rate] || 0));
+    const out = {};
+    if (mode === 'none') return out;
+    const period = {}; const market = {};
+    for (const r of items) { period[r.vat] = (period[r.vat] || 0) + amt(r, r.cum - r.prev); market[r.vat] = (market[r.vat] || 0) + amt(r, 100); }
+    const allDone = items.every((r) => r.cum >= 100);
+    if (mode === 'manual') {
+      const want = num($('[name=damount]', m.el).value); const totRemain = Object.values(remain).reduce((a, v) => a + Math.max(0, v), 0);
+      for (const [rate, v] of Object.entries(remain)) if (v > 0 && totRemain) out[rate] = r2(Math.min(v, want * v / totRemain));
+      return out;
+    }
+    for (const [rate, v] of Object.entries(remain)) {
+      if (v <= 0) continue;
+      out[rate] = allDone ? v : r2(Math.min(v, Math.max(0, ac.adv[rate] * (period[rate] || 0) / (market[rate] || 1))));
+    }
+    return out;
+  };
+  const upd = () => {
+    let t1 = 0;
+    rows.forEach((r, i) => {
+      if (r.kind !== 'item') return;
+      const p = amt(r, r.cum - r.prev); t1 += p;
+      $(`[data-per="${i}"]`, m.el).textContent = money(p);
+      $(`[data-r="${i}"]`, m.el).classList.toggle('neg', r.cum < r.prev);
+    });
+    rows.forEach((r, i) => { if (r.kind === 'title') { const end = blockEnd(rows, i); $(`[data-ct="${i}"]`, m.el).textContent = money(rows.slice(i + 1, end).filter((x) => x.kind === 'item').reduce((a, x) => a + amt(x, x.cum - x.prev), 0)); } });
+    const ded = Object.values(deduction()).reduce((a, v) => a + v, 0);
+    const market = items.reduce((a, r) => a + amt(r, 100), 0); const cum = items.reduce((a, r) => a + amt(r, r.cum), 0);
+    $('[data-t1]', m.el).textContent = money(t1);
+    if ($('[data-t2]', m.el)) $('[data-t2]', m.el).textContent = money(-ded);
+    $('[data-t3]', m.el).textContent = money(t1 - ded);
+    $('[data-t4]', m.el).textContent = `${fnum(market ? (cum / market) * 100 : 0, 1)} % – ${money(cum)} / ${money(market)}`;
+  };
+  $$('[data-p]', m.el).forEach((inp) => { inp.oninput = () => { const r = rows[+inp.dataset.p]; r.cum = clamp(num(inp.value)); $(`[data-q="${inp.dataset.p}"]`, m.el).value = r2(r.qty * r.cum / 100); upd(); }; });
+  $$('[data-q]', m.el).forEach((inp) => { inp.oninput = () => { const r = rows[+inp.dataset.q]; r.cum = r.qty ? clamp(num(inp.value) / r.qty * 100) : 0; $(`[data-p="${inp.dataset.q}"]`, m.el).value = r2(r.cum); upd(); }; });
+  $$('[data-ch]', m.el).forEach((inp) => {
+    inp.onchange = () => {
+      if (inp.value.trim() === '') return;
+      const i = +inp.dataset.ch; const v = clamp(num(inp.value));
+      rows.slice(i + 1, blockEnd(rows, i)).forEach((r, k) => { if (r.kind !== 'item') return; r.cum = v; const j = i + 1 + k; $(`[data-p="${j}"]`, m.el).value = r2(v); $(`[data-q="${j}"]`, m.el).value = r2(r.qty * v / 100); });
+      upd();
+    };
+  });
+  $$('[data-all]', m.el).forEach((b) => { b.onclick = () => { rows.forEach((r, i) => { if (r.kind !== 'item') return; r.cum = b.dataset.all === 'prev' ? r.prev : 100; $(`[data-p="${i}"]`, m.el).value = r2(r.cum); $(`[data-q="${i}"]`, m.el).value = r2(r.qty * r.cum / 100); }); upd(); }; });
+  ['dmode', 'damount'].forEach((k) => { const e = $(`[name=${k}]`, m.el); if (e) e.addEventListener(k === 'dmode' ? 'change' : 'input', upd); });
   upd();
-  $('[data-ok]', m.el).onclick = () => {
-    const progress = {}; const lines = []; let pendingTitle = null; const byRate = {};
-    for (const l of d.lines) {
-      if (l.kind === 'title') { pendingTitle = l; continue; }
-      if (l.kind !== 'item' || l.option) continue;
-      const inp = inputs.find((x) => x.dataset.pid === l.id);
-      const cum = Math.min(100, Math.max(0, num(inp.value))); const pv = num(inp.dataset.prev);
-      progress[l.id] = Math.max(cum, pv);
-      const delta = cum - pv;
-      if (Math.abs(delta) < 1e-4) continue;
-      if (pendingTitle) { lines.push({ ...pendingTitle, id: lid() }); pendingTitle = null; }
-      const qty = Math.round(num(l.qty) * delta / 100 * 1000) / 1000; const price = r2(num(l.price) * (1 - disc));
-      lines.push({ ...l, id: lid(), desc: `${l.desc}\n(avancement cumulé ${fnum(cum)} %, précédent ${fnum(pv)} %)`, qty, price });
-      byRate[num(l.vat)] = (byRate[num(l.vat)] || 0) + qty * price;
-    }
-    if (!lines.length) return toast('Aucun avancement nouveau à facturer');
-    const ded = $('[data-ded]', m.el);
-    if (ded && ded.checked) {
-      const qv = Object.fromEntries(totals(d).vats.map((v) => [v.rate, v.base]));
-      const adv = {}; for (const a of acomptes) for (const v of totals(a.data).vats) adv[v.rate] = (adv[v.rate] || 0) + v.base;
-      const ls = [];
-      for (const [rate, b] of Object.entries(byRate)) { if (!adv[rate] || !qv[rate]) continue; const amount = r2(adv[rate] * b / qv[rate]); if (amount) ls.push({ id: lid(), kind: 'item', desc: 'Déduction acompte au prorata', unit: 'forfait', qty: 1, price: -amount, vat: +rate, type: 'divers' }); }
-      if (ls.length) lines.push({ id: lid(), kind: 'title', desc: 'Déductions' }, ...ls);
-    }
+  $('[data-ok]', m.el).onclick = async () => {
+    const lines = []; let pending = [];
+    rows.forEach((r) => {
+      if (r.kind === 'title') { pending = pending.filter((x) => tlevel(x) < r.level); pending.push({ id: lid(), kind: 'title', level: r.level === 2 ? 2 : undefined, desc: r.desc }); return; }
+      const delta = r.cum - r.prev;
+      if (Math.abs(delta) < 1e-6) return;
+      lines.push(...pending); pending = [];
+      lines.push({ id: lid(), kind: 'item', srcId: r.lineId, desc: r.desc, unit: r.unit, qty: Math.round(r.qty * delta / 100 * 10000) / 10000, price: r.price, vat: r.vat, type: r.type });
+    });
+    if (!lines.some((l) => l.kind === 'item')) return toast('Aucun avancement nouveau à facturer');
+    const ded = deduction();
+    const dedLines = Object.entries(ded).filter(([, v]) => v > 0).map(([rate, v]) => ({ id: lid(), kind: 'item', deduction: 'acompte', desc: `Déduction acompte${Object.keys(ded).length > 1 ? ` (TVA ${fnum(+rate)} %)` : ''}`, unit: 'forfait', qty: 1, price: -v, vat: +rate, type: 'divers' }));
+    lines.push(...dedLines);
+    const dedNow = dedLines.reduce((a, l) => a - l.price, 0);
+    const restPct = ac.advTotal ? Math.max(0, Math.round(((ac.advTotal - ac.doneTotal - dedNow) / ac.advTotal) * 100)) : 0;
+    const extra = {
+      kind: 'situation', situationNo: n, ref: `EA${n}`, progressRows: rows.map((r) => ({ ...r })), lines,
+      deductMode: ac.advTotal ? $('[name=dmode]', m.el).value : null, deductAmount: ac.advTotal ? num($('[name=damount]', m.el).value) : null,
+      docNote: ac.advTotal ? `Acompte - reste à déduire ${restPct}%` : (existing ? existing.data.docNote : ''),
+    };
     m.close();
-    newInvoice({ ...base, data: { ...base.data, kind: 'situation', situationNo: n, lines, progress } });
+    if (existing) { Object.assign(existing.data, extra); await persist('invoice', existing); toast('État d\'avancement mis à jour'); render(); } else newInvoice({ ...base, data: { ...base.data, ...extra } });
   };
 }
 
@@ -468,12 +542,13 @@ route('invoice', async (id) => {
       <div><small class="muted">Communication</small><b>${esc(d.communication || '—')}</b></div>
       ${!locked ? `<button class="btn sm">${I.edit} Modifier</button>` : '<span class="badge" style="--c:#2f9e44">Validée</span>'}</div>
     ${locked ? '<div class="alert info">Facture validée : les lignes ne sont plus modifiables. Pour corriger, créez une note de crédit.</div>' : ''}
+    ${!locked && d.kind === 'situation' && d.quoteId ? `<div class="alert info">État d'avancement EA${d.situationNo || ''} : les lignes sont calculées depuis l'avancement. <button class="btn sm" data-act="prog">Modifier l'avancement</button></div>` : ''}
     <div id="lines"></div>
     <div class="cols-2"><div>${d.kind === 'avoir' || !locked ? '' : `<div class="card"><div class="card-h"><h3>Paiements reçus</h3><button class="btn sm primary" data-act="pay">${I.plus} Paiement</button></div>
       <div class="rows">${d.payments.map((p, i) => `<button class="row" data-pay="${i}"><span class="grow"><b>${money(p.amount)}</b><small class="muted">${fmtDate(p.date)} · ${esc(p.method || '')}${p.note ? ' · ' + esc(p.note) : ''}</small></span></button>`).join('') || '<div class="empty sm">Aucun paiement</div>'}</div>
       <div class="totals flat"><div class="tr"><span>Payé</span><b>${money(s.paid)}</b></div><div class="tr big"><span>Reste à payer</span><span class="${s.s === 'retard' ? 'late' : ''}">${money(s.rest)}</span></div></div></div>`}</div><div id="tot"></div></div>`;
   const drawTot = () => { $('#tot').innerHTML = totalsBox(totals(d), d, false); };
-  linesEditor($('#lines'), d, { showCost: false, readOnly: locked, onChange: () => { drawTot(); $('[data-saved]').textContent = 'Modification…'; save(); } });
+  linesEditor($('#lines'), d, { showCost: false, readOnly: locked || (d.kind === 'situation' && !!d.quoteId), onChange: () => { drawTot(); $('[data-saved]').textContent = 'Modification…'; save(); } });
   drawTot();
   const head = () => formModal({
     title: 'En-tête de la facture', wide: true, values: { ...d, project_id: it.project_id },
@@ -495,6 +570,7 @@ route('invoice', async (id) => {
     await save.flush();
     if (!d.clientId) return toast('Choisissez d\'abord le client');
     if (!d.lines.some((l) => l.kind === 'item')) return toast('La facture ne contient aucune ligne');
+    if (d.reverse && !(c && c.data.vat)) return toast('Autoliquidation : indiquez d\'abord le n° de TVA du client (obligatoire sur la facture)', 5000);
     if (!confirm('Valider la facture ? Elle recevra son numéro définitif et ne sera plus modifiable.')) return;
     const r = await api('POST', `number/${d.kind === 'avoir' ? 'avoir' : 'invoice'}`);
     it.number = r.number; d.status = 'emise'; d.emittedAt = today();
@@ -512,10 +588,17 @@ route('invoice', async (id) => {
   };
   const pb = $('[data-act=pay]'); if (pb) pb.onclick = () => editPay(null);
   const pp = $('[data-act=peppol]'); if (pp) pp.onclick = () => peppolInvoice(it);
+  const editProg = async () => {
+    const q = await db.get('quote', +d.quoteId);
+    const others = (await db.list('invoice')).filter((i) => +i.data.quoteId === q.id && i.id !== it.id);
+    progressInvoice(q, others, { project_id: it.project_id, data: {} }, it);
+  };
+  const pg = $('[data-act=prog]'); if (pg) pg.onclick = editProg;
   $$('[data-pay]').forEach((b) => { b.onclick = () => editPay(+b.dataset.pay); });
   $('[data-act=more]').onclick = () => menuSheet('Facture', [
     ...(!locked ? [{ label: 'Modifier l\'en-tête', icon: 'edit', run: head }] : []),
     { label: 'Envoyer par email', icon: 'mail', run: () => { location.href = `mailto:${encodeURIComponent((c && c.data.email) || '')}?subject=${encodeURIComponent(`${IKIND[d.kind]} ${it.number || ''}`)}&body=${encodeURIComponent(`Bonjour,\n\nVeuillez trouver ci-joint notre ${(IKIND[d.kind] || 'facture').toLowerCase()} ${it.number || ''} d'un montant de ${money(s.t.total)} TVAC, payable avant le ${fmtDate(d.due)}${company().iban ? ` sur le compte ${company().iban} avec la communication ${d.communication || it.number}` : ''}.\n\nCordialement,\n${S.me.name}\n${company().name || ''}`)}`; } },
+    ...(!locked && d.kind === 'situation' && d.quoteId ? [{ label: 'Modifier l\'état d\'avancement', icon: 'edit', run: editProg }] : []),
     ...(locked ? [{ label: 'Peppol – facture électronique', icon: 'file', primary: true, run: () => peppolInvoice(it) }] : []),
     ...(locked && d.kind !== 'avoir' ? [{ label: 'Créer une note de crédit', icon: 'copy', run: () => newInvoice({ project_id: it.project_id, data: { kind: 'avoir', clientId: d.clientId, quoteId: d.quoteId, reverse: d.reverse, discount: d.discount, title: `Annulation facture ${it.number}`, refInvoice: it.number, lines: d.lines.map((l) => (l.kind === 'item' ? { ...l, id: lid(), qty: -num(l.qty) } : { ...l, id: lid() })) } }) }] : []),
     ...(d.quoteId ? [{ label: 'Ouvrir le devis', icon: 'calc', run: () => go(`#/quote/${d.quoteId}`) }] : []),

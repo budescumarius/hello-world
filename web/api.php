@@ -251,6 +251,23 @@ switch ($seg[0] ?? '') {
         }
         fail(404, 'Route inconnue');
 
+    // ------------------------------------------------------------ Compteurs de numérotation (reprise d'une numérotation existante)
+    case 'counters':
+        if ($method === 'GET') {
+            require_user();
+            out((object)array_map('intval', array_column(q('SELECT k, n FROM counters')->fetchAll(), 'n', 'k')));
+        }
+        if ($method === 'PUT') {
+            $me = require_admin();
+            foreach (body() as $k => $n) {
+                if (!preg_match('/^[a-z_]{2,32}-\d{4}$/', (string)$k)) continue;
+                q('INSERT INTO counters (k, n) VALUES (?, ?) ON DUPLICATE KEY UPDATE n = VALUES(n)', [$k, max(0, (int)$n)]);
+            }
+            log_activity($me['id'], 'update', 'settings', null, null, 'Numérotation');
+            out(['ok' => true]);
+        }
+        fail(404, 'Route inconnue');
+
     // ------------------------------------------------------------ Annuaire Peppol (participant enregistré ?)
     case 'peppol':
         require_user();

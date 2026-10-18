@@ -115,7 +115,8 @@ function make_number(string $kind): string {
     $prefix = $prefixes[$kind] ?? ($defaults[$kind] ?? strtoupper(substr($kind, 0, 3)));
     $y = date('Y');
     $n = next_counter("$kind-$y");
-    return ($prefix !== '' ? $prefix . '-' : '') . $y . '-' . str_pad((string)$n, 4, '0', STR_PAD_LEFT);
+    $pad = max(1, min(6, (int)setting('numpad', 4)));
+    return ($prefix !== '' ? $prefix . '-' : '') . $y . '-' . str_pad((string)$n, $pad, '0', STR_PAD_LEFT);
 }
 
 function log_activity(int $uid, string $action, string $type, ?int $id, ?int $pid, ?string $label): void {

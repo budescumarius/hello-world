@@ -56,14 +56,35 @@ function totals(doc) {
   const vat = r2(vats.reduce((s, v) => s + v.vat, 0));
   return { net, discount, base, vats, vat, total: r2(base + vat), cost: r2(cost), costBy, margin: r2(base - cost) };
 }
+// Numérotation à 3 niveaux : chapitre 1.0.0, sous-chapitre 1.1.0, ligne 1.1.1 (ou 1.0.1 sans sous-chapitre)
+const tlevel = (l) => (l.kind === 'title' ? (+l.level === 2 ? 2 : 1) : 3);
 function numbering(lines) {
-  let s = 0; let n = 0;
-  return lines.map((l) => { if (l.kind === 'title') { s++; n = 0; return String(s); } if (l.kind === 'text') return ''; n++; return s ? `${s}.${n}` : String(n); });
+  const hasT = lines.some((l) => l.kind === 'title');
+  let c = 0; let s = 0; let n = 0;
+  return lines.map((l) => {
+    if (l.kind === 'title') { if (tlevel(l) === 2) { s++; n = 0; return `${c}.${s}.0`; } c++; s = 0; n = 0; return `${c}.0.0`; }
+    if (l.kind === 'text') return '';
+    n++; return hasT ? `${c}.${s}.${n}` : String(n);
+  });
 }
 function sectionTotals(lines) {
-  const m = {}; let cur = null;
-  for (const l of lines) { if (l.kind === 'title') { cur = l.id; m[cur] = 0; } else if (cur && l.kind === 'item' && !l.option) m[cur] = r2(m[cur] + num(l.qty) * num(l.price)); }
+  const m = {}; let c = null; let s = null;
+  for (const l of lines) {
+    if (l.kind === 'title') { if (tlevel(l) === 2) { s = l.id; m[s] = 0; } else { c = l.id; s = null; m[c] = 0; } } else if (l.kind === 'item' && !l.option) {
+      const t = num(l.qty) * num(l.price);
+      if (c) m[c] = r2(m[c] + t);
+      if (s) m[s] = r2(m[s] + t);
+    }
+  }
   return m;
+}
+// Fin du bloc commençant à i (un chapitre emporte ses sous-chapitres et lignes)
+function blockEnd(lines, i) {
+  const lv = tlevel(lines[i]);
+  if (lv === 3) return i + 1;
+  let k = i + 1;
+  while (k < lines.length && !(lines[k].kind === 'title' && tlevel(lines[k]) <= lv)) k++;
+  return k;
 }
 function invState(inv) {
   const d = inv.data;
@@ -120,7 +141,7 @@ function linesEditor(el, doc, opts) {
       <thead><tr><th class="c-no">N°</th><th>Désignation</th><th class="c-u">Unité</th><th class="c-n">Qté</th>
         ${showCost ? '<th class="c-n">Déboursé u.</th><th class="c-n">Marge %</th>' : ''}<th class="c-n">PU HT</th><th class="c-v">TVA</th><th class="c-n">Total HT</th><th class="c-a"></th></tr></thead>
       <tbody>${doc.lines.map((l, i) => {
-        if (l.kind === 'title') return `<tr class="l-title" data-i="${i}"><td class="c-no">${nos[i]}</td><td colspan="${showCost ? 7 : 5}"><input class="in" data-k="desc" value="${esc(l.desc)}" placeholder="Titre du chapitre" ${opts.readOnly ? 'readonly' : ''}></td><td class="c-n"><b data-sec="${l.id}">${money(st[l.id])}</b></td><td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
+        if (l.kind === 'title') return `<tr class="l-title ${tlevel(l) === 2 ? 'lv2' : ''}" data-i="${i}"><td class="c-no">${nos[i]}</td><td colspan="${showCost ? 7 : 5}"><input class="in" data-k="desc" value="${esc(l.desc)}" placeholder="${tlevel(l) === 2 ? 'Titre du sous-chapitre' : 'Titre du chapitre'}" ${opts.readOnly ? 'readonly' : ''}></td><td class="c-n"><b data-sec="${l.id}">${money(st[l.id])}</b></td><td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
         if (l.kind === 'text') return `<tr class="l-text" data-i="${i}"><td></td><td colspan="${showCost ? 8 : 6}"><textarea class="in" data-k="desc" rows="1" placeholder="Texte libre / commentaire" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea></td><td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
         const m = num(l.cost) > 0 ? r2((num(l.price) / num(l.cost) - 1) * 100) : '';
         return `<tr class="l-item ${l.option ? 'opt' : ''}" data-i="${i}"><td class="c-no">${nos[i]}${l.type ? `<i class="tdot" style="--c:${TYPE_COLORS[l.type] || '#999'}" title="${esc(TYPES[l.type] || 'Ouvrage')}"></i>` : ''}</td>
@@ -135,7 +156,7 @@ function linesEditor(el, doc, opts) {
           <td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
       }).join('') || `<tr><td colspan="${showCost ? 10 : 8}" class="empty">Aucune ligne. Ajoutez un chapitre, une ligne ou des éléments de la bibliothèque.</td></tr>`}</tbody></table></div>
       <datalist id="units">${UNITS.map((u) => `<option value="${u}">`).join('')}</datalist>
-      ${opts.readOnly ? '' : `<div class="btns lines-add"><button class="btn" data-add="title">${I.plus} Chapitre</button><button class="btn" data-add="item">${I.plus} Ligne</button><button class="btn" data-add="text">${I.plus} Texte</button>
+      ${opts.readOnly ? '' : `<div class="btns lines-add"><button class="btn" data-add="title">${I.plus} Chapitre</button><button class="btn" data-add="sub">${I.plus} Sous-chapitre</button><button class="btn" data-add="item">${I.plus} Ligne</button><button class="btn" data-add="text">${I.plus} Texte</button>
         ${opts.library !== false ? `<button class="btn primary" data-add="lib">${I.book} Depuis la bibliothèque</button>` : ''}
         ${opts.showCost ? `<label class="chk small"><input type="checkbox" data-showcost ${showCost ? 'checked' : ''}>Afficher déboursés et marges</label>` : ''}</div>`}`;
     bind();
@@ -177,28 +198,32 @@ function linesEditor(el, doc, opts) {
   async function add(k, at) {
     const pos = at == null ? doc.lines.length : at;
     if (k === 'lib') return pickArticles((items) => { doc.lines.splice(pos, 0, ...items); draw(); changed(); });
-    const l = k === 'title' ? { id: lid(), kind: 'title', desc: '' } : k === 'text' ? { id: lid(), kind: 'text', desc: '' } : newItem();
+    const l = k === 'title' ? { id: lid(), kind: 'title', desc: '' } : k === 'sub' ? { id: lid(), kind: 'title', level: 2, desc: '' } : k === 'text' ? { id: lid(), kind: 'text', desc: '' } : newItem();
     doc.lines.splice(pos, 0, l);
     draw(); changed();
     const inp = $(`tr[data-i="${pos}"] [data-k=desc]`, el); if (inp) inp.focus();
   }
+  // déplace une ligne, ou un (sous-)chapitre avec son contenu, d'un cran parmi ses frères
   function moveBlock(i, dir) {
     const L = doc.lines;
     if (L[i].kind !== 'title') { const j = i + dir; if (j >= 0 && j < L.length) [L[i], L[j]] = [L[j], L[i]]; return; }
-    const nextT = (from) => { for (let k = from; k < L.length; k++) if (L[k].kind === 'title') return k; return L.length; };
-    const end = nextT(i + 1);
-    if (dir < 0) { let p = -1; for (let k = i - 1; k >= 0; k--) if (L[k].kind === 'title') { p = k; break; } if (p >= 0) L.splice(p, 0, ...L.splice(i, end - i)); } else if (end < L.length) L.splice(i, 0, ...L.splice(end, nextT(end + 1) - end));
+    const lv = tlevel(L[i]); const end = blockEnd(L, i);
+    if (dir < 0) {
+      let p = -1;
+      for (let k = i - 1; k >= 0; k--) { if (L[k].kind === 'title' && tlevel(L[k]) < lv) break; if (L[k].kind === 'title' && tlevel(L[k]) === lv) { p = k; break; } }
+      if (p >= 0) L.splice(p, 0, ...L.splice(i, end - i));
+    } else if (end < L.length && L[end].kind === 'title' && tlevel(L[end]) === lv) L.splice(i, 0, ...L.splice(end, blockEnd(L, end) - end));
   }
   function lineMenu(i) {
     const l = doc.lines[i];
-    menuSheet(l.kind === 'title' ? 'Chapitre' : 'Ligne', [
+    menuSheet(l.kind === 'title' ? (tlevel(l) === 2 ? 'Sous-chapitre' : 'Chapitre') : 'Ligne', [
+      ...(l.kind === 'title' ? [{ label: tlevel(l) === 2 ? 'Transformer en chapitre' : 'Transformer en sous-chapitre', run: () => { if (tlevel(l) === 2) delete l.level; else l.level = 2; draw(); changed(); } }] : []),
       { label: 'Insérer une ligne en dessous', run: () => add('item', i + 1) },
       { label: 'Insérer depuis la bibliothèque en dessous', run: () => add('lib', i + 1) },
       { label: 'Monter', run: () => { moveBlock(i, -1); draw(); changed(); } },
       { label: 'Descendre', run: () => { moveBlock(i, 1); draw(); changed(); } },
       { label: 'Dupliquer', run: () => {
-        let end = i + 1;
-        if (l.kind === 'title') while (end < doc.lines.length && doc.lines[end].kind !== 'title') end++;
+        const end = blockEnd(doc.lines, i);
         doc.lines.splice(end, 0, ...doc.lines.slice(i, end).map((x) => ({ ...JSON.parse(JSON.stringify(x)), id: lid() })));
         draw(); changed();
       } },
@@ -207,10 +232,8 @@ function linesEditor(el, doc, opts) {
         { label: l.option ? 'Inclure dans le total' : 'Mettre en option (hors total)', run: () => { l.option = !l.option; draw(); changed(); } },
         { label: 'Enregistrer dans la bibliothèque', run: () => editArticle(null, { name: l.desc.split('\n')[0], desc: l.desc.split('\n').slice(1).join('\n'), unit: l.unit, kind: TYPES[l.type] ? l.type : 'divers', cost: l.cost, margin: num(l.cost) > 0 ? r2((num(l.price) / num(l.cost) - 1) * 100) : 0, vat: l.vat }) },
       ] : []),
-      { label: l.kind === 'title' ? 'Supprimer le chapitre et ses lignes' : 'Supprimer', danger: true, run: () => {
-        let end = i + 1;
-        if (l.kind === 'title') while (end < doc.lines.length && doc.lines[end].kind !== 'title') end++;
-        doc.lines.splice(i, end - i); draw(); changed();
+      { label: l.kind === 'title' ? 'Supprimer avec tout son contenu' : 'Supprimer', danger: true, run: () => {
+        doc.lines.splice(i, blockEnd(doc.lines, i) - i); draw(); changed();
       } },
     ]);
   }
@@ -257,53 +280,9 @@ function totalsBox(t, doc, internal) {
   </div>`;
 }
 
-// ---------------------------------------------------------------- Impression (devis, facture, commande, bon d'intervention)
-async function printDoc(kind, id) {
-  const typ = { quote: 'quote', invoice: 'invoice', order: 'order' }[kind];
-  const it = await db.get(typ, id);
-  const d = it.data;
-  const [contacts, project] = await Promise.all([db.list('contact'), it.project_id ? db.get('project', it.project_id).catch(() => null) : null]);
-  const c = byId(contacts, kind === 'order' ? d.supplierId : d.clientId) || { data: {} };
-  const co = company();
-  const t = totals(d);
-  const isInv = kind === 'invoice';
-  const ist = isInv ? invState(it) : null;
-  const title = kind === 'quote' ? 'Devis' : kind === 'order' ? (d.kind === 'soustraitant' ? 'Bon de commande sous-traitance' : 'Bon de commande') : (IKIND[d.kind] || 'Facture');
-  const nos = numbering(d.lines || []);
-  const secT = sectionTotals(d.lines || []);
-  const cd = c.data;
-  const html = `<div class="doc">
-    <div class="d-head"><div class="d-from">${co.logoId ? `<img class="d-logo" src="${fileUrl(co.logoId)}" alt="">` : ''}<b class="d-co">${esc(co.name || '')}</b>
-      <div>${nl2br(co.address || '')}</div><div>${esc([co.vat && 'TVA ' + co.vat, co.rpm].filter(Boolean).join(' · '))}</div><div>${esc([co.phone, co.email].filter(Boolean).join(' · '))}</div></div>
-      <div class="d-meta"><h1>${esc(title)}</h1><div>N° <b>${esc(it.number || 'BROUILLON')}</b></div><div>Date : <b>${fmtDate(d.date)}</b></div>
-        ${kind === 'quote' ? `<div>Valable jusqu'au : <b>${fmtDate(d.valid)}</b></div>` : ''}${isInv && d.kind !== 'avoir' ? `<div>Échéance : <b>${fmtDate(d.due)}</b></div>` : ''}
-        ${kind === 'order' && d.deliveryDate ? `<div>Livraison souhaitée : <b>${fmtDate(d.deliveryDate)}</b></div>` : ''}${d.ref ? `<div>Réf. : ${esc(d.ref)}</div>` : ''}</div></div>
-    <div class="d-parties"><div class="d-box"><small>${kind === 'order' ? 'Fournisseur' : 'Client'}</small><b>${esc(contactName(c))}</b>
-        <div>${nl2br([cd.address, [cd.zip, cd.city].filter(Boolean).join(' '), cd.country].filter(Boolean).join('\n'))}</div><div>${esc(cd.vat ? 'TVA ' + cd.vat : '')}</div></div>
-      <div class="d-box"><small>${kind === 'order' ? 'Chantier / livraison' : 'Chantier'}</small><b>${esc(project ? project.data.name : (d.title || ''))}</b><div>${esc(project ? [project.data.address, project.data.city].filter(Boolean).join(', ') : (d.siteAddress || ''))}</div></div></div>
-    ${d.title && kind !== 'order' ? `<p class="d-obj"><b>Objet :</b> ${esc(d.title)}</p>` : ''}${d.intro ? `<p class="pre">${esc(d.intro)}</p>` : ''}
-    <table class="d-lines"><thead><tr><th>N°</th><th>Désignation</th><th>Unité</th><th class="r">Qté</th><th class="r">PU HT</th><th class="r">TVA</th><th class="r">Total HT</th></tr></thead><tbody>
-      ${(d.lines || []).map((l, i) => (l.kind === 'title' ? `<tr class="sec"><td><b>${nos[i]}</b></td><td colspan="5"><b>${esc(l.desc)}</b></td><td class="r"><b>${money(secT[l.id])}</b></td></tr>`
-        : l.kind === 'text' ? `<tr><td></td><td colspan="6" class="pre muted">${esc(l.desc)}</td></tr>`
-        : `<tr${l.option ? ' class="opt"' : ''}><td>${nos[i]}</td><td class="pre">${esc(l.desc)}${l.option ? '<br><i>(en option)</i>' : ''}</td><td>${esc(l.unit)}</td><td class="r">${fnum(num(l.qty), 3)}</td><td class="r">${money(l.price)}</td><td class="r">${fnum(num(l.vat))} %</td><td class="r">${money(num(l.qty) * num(l.price))}</td></tr>`)).join('')}
-    </tbody></table>
-    <table class="d-tot"><tr><td>Total HT</td><td class="r">${money(t.net)}</td></tr>
-      ${t.discount ? `<tr><td>Remise ${fnum(num(d.discount))} %</td><td class="r">−${money(t.discount)}</td></tr><tr><td>Total HT après remise</td><td class="r">${money(t.base)}</td></tr>` : ''}
-      ${d.reverse ? '<tr><td>TVA</td><td class="r">Autoliquidation</td></tr>' : t.vats.map((v) => `<tr><td>TVA ${fnum(v.rate)} % sur ${money(v.base)}</td><td class="r">${money(v.vat)}</td></tr>`).join('')}
-      <tr class="big"><td>Total TVAC</td><td class="r">${money(t.total)}</td></tr>
-      ${ist && ist.paid ? `<tr><td>Déjà payé</td><td class="r">${money(ist.paid)}</td></tr><tr class="big"><td>Reste à payer</td><td class="r">${money(ist.rest)}</td></tr>` : ''}</table>
-    ${d.reverse ? `<p><b>${esc(co.reverseText || 'Autoliquidation – TVA due par le cocontractant (art. 20 AR n°1).')}</b></p>` : ''}
-    ${d.notes ? `<p class="pre">${esc(d.notes)}</p>` : ''}
-    ${isInv && d.kind !== 'avoir' && co.iban ? `<div class="d-box d-pay"><small>Paiement</small>Merci de verser <b>${money(ist.rest)}</b> avant le <b>${fmtDate(d.due)}</b> sur le compte <b>${esc(co.iban)}</b>${co.bic ? ` (BIC ${esc(co.bic)})` : ''} avec la communication <b>${esc(d.communication || it.number || '')}</b>.</div>` : ''}
-    ${kind === 'quote' ? `<div class="d-sign"><div>Pour ${esc(co.name || "l'entreprise")}</div><div>Pour accord, le client<br><small>Date, nom et signature précédés de « Bon pour accord »</small></div></div>` : ''}
-    ${co.terms && kind === 'quote' ? `<div class="d-terms pre">${esc(co.terms)}</div>` : ''}
-    ${co.footer ? `<div class="d-foot">${esc(co.footer)}</div>` : ''}
-  </div>`;
-  printPage(`${title} ${it.number || ''}`, html, { quote: `#/quote/${id}`, invoice: `#/invoice/${id}`, order: `#/order/${id}` }[kind]);
-}
+// ---------------------------------------------------------------- Page d'impression (documents : voir docs.js)
 function printPage(title, html, back) {
   app.innerHTML = `<div class="print-shell"><header class="top no-print"><a class="icon-btn" href="${back}" aria-label="Retour">${I.back}</a><div class="top-title"><h1>${esc(title)}</h1></div>
     <div class="top-actions"><button class="btn primary" data-act="print">${I.print} Imprimer / PDF</button></div></header><div class="print-page">${html}</div></div>`;
   $('[data-act=print]').onclick = () => { const old = document.title; document.title = title.replace(/[^\w\- ]+/g, '').trim(); window.print(); setTimeout(() => { document.title = old; }, 800); };
 }
-route('print', (kind, id) => printDoc(kind, +id));

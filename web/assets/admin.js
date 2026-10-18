@@ -141,10 +141,11 @@ route('stats', async () => {
 // ---------------------------------------------------------------- Paramètres
 route('settings', async (tab = 'company') => {
   if (S.me.role !== 'admin') return go('#/dashboard');
-  const page = layout({ active: '', icon: 'gear', title: 'Paramètres', tabs: [['company', 'Entreprise'], ['docs', 'Documents & numérotation'], ['peppol', 'Peppol'], ['users', 'Utilisateurs'], ['activity', 'Journal d\'activité']].map(([k, l]) => `<a href="#/settings/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
+  const page = layout({ active: '', icon: 'gear', title: 'Paramètres', tabs: [['company', 'Entreprise'], ['docs', 'Documents & numérotation'], ['templates', 'Modèles de documents'], ['peppol', 'Peppol'], ['users', 'Utilisateurs'], ['activity', 'Journal d\'activité']].map(([k, l]) => `<a href="#/settings/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
   const co = { ...company() };
   if (tab === 'users') return settingsUsers(page);
   if (tab === 'peppol') return peppolSettings(page);
+  if (tab === 'templates') return templateSettings(page);
   if (tab === 'activity') {
     const act = await api('GET', 'activity&limit=200');
     page.innerHTML = `<div class="card"><div class="feed">${act.map((a) => `<div><b>${esc(a.user_name || '')}</b> ${{ create: 'a créé', update: 'a modifié', delete: 'a supprimé' }[a.action] || a.action} <span class="muted">${esc(TYPE_LABELS[a.type] || a.type)}</span> ${esc(a.label || '')}<small class="muted">${fmtDT(a.created_at)}</small></div>`).join('')}</div></div>`;
@@ -165,7 +166,7 @@ route('settings', async (tab = 'company') => {
     { name: 'p_quote', label: 'Préfixe devis' }, { name: 'p_invoice', label: 'Préfixe factures' }, { name: 'p_avoir', label: 'Préfixe notes de crédit' }, { name: 'p_order', label: 'Préfixe commandes' },
     { name: 'p_project', label: 'Préfixe chantiers' }, { name: 'p_intervention', label: 'Préfixe interventions' },
     { name: 'quoteNotes', label: 'Mentions par défaut sur les devis', type: 'textarea', cls: 'full' }, { name: 'terms', label: 'Conditions générales (imprimées sous le devis)', type: 'textarea', rows: 6, cls: 'full' },
-    { name: 'invoiceNotes', label: 'Mentions par défaut sur les factures', type: 'textarea', cls: 'full' }, { name: 'reverseText', label: 'Mention d\'autoliquidation', cls: 'full' },
+    { name: 'invoiceNotes', label: 'Mentions par défaut sur les factures', type: 'textarea', cls: 'full' },
     { name: 'footer', label: 'Pied de page des documents', cls: 'full' },
   ];
   const pre = S.settings.prefixes || {};
@@ -179,7 +180,7 @@ route('settings', async (tab = 'company') => {
     const v = readFields(form, fields);
     if (tab === 'company') { Object.assign(co, v); delete co.logo; await api('PUT', 'settings', { company: co }); S.settings.company = co; } else {
       const rates = String(v.vatRates).split(/[;\s]+/).map((x) => parseFloat(x.replace(',', '.'))).filter((x) => !isNaN(x));
-      Object.assign(co, { vatRates: rates.length ? rates : [21, 6, 0], defaultVat: num(v.defaultVat), quoteValidity: num(v.quoteValidity), paymentDays: num(v.paymentDays), quoteNotes: v.quoteNotes, terms: v.terms, invoiceNotes: v.invoiceNotes, reverseText: v.reverseText, footer: v.footer });
+      Object.assign(co, { vatRates: rates.length ? rates : [21, 6, 0], defaultVat: num(v.defaultVat), quoteValidity: num(v.quoteValidity), paymentDays: num(v.paymentDays), quoteNotes: v.quoteNotes, terms: v.terms, invoiceNotes: v.invoiceNotes, footer: v.footer });
       const prefixes = { quote: v.p_quote, invoice: v.p_invoice, avoir: v.p_avoir, order: v.p_order, project: v.p_project, intervention: v.p_intervention };
       await api('PUT', 'settings', { company: co, prefixes }); S.settings.company = co; S.settings.prefixes = prefixes;
     }

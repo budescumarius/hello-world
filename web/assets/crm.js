@@ -4,6 +4,7 @@
 const contactFields = (kind) => [
   { name: 'kind', label: 'Type', type: 'select', options: optsOf(CONTACT_KINDS) },
   { name: 'company', label: 'Société', placeholder: 'Laisser vide pour un particulier' },
+  { name: 'civility', label: 'Civilité', type: 'select', options: [['', '—'], ['M.', 'M.'], ['Mme.', 'Mme.'], ['M. et Mme.', 'M. et Mme.'], ['Me', 'Me'], ['Dr', 'Dr']] },
   { name: 'firstname', label: 'Prénom' },
   { name: 'name', label: 'Nom' },
   { name: 'vat', label: 'N° TVA / entreprise' },

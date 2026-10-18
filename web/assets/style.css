@@ -498,3 +498,57 @@ table.lines { width: 100%; border-collapse: collapse; min-width: 760px; }
 .peppol-st { margin-bottom: 10px; }
 .steps { padding-left: 20px; line-height: 1.7; margin: 0; }
 .link-btn { border: 0; background: none; color: var(--primary); padding: 0; cursor: pointer; font-weight: 600; margin-right: 8px; }
+
+/* ---------- Modèle de documents (devis / factures) */
+.doc.vz { max-width: 860px; padding: 40px 44px 30px; line-height: 1.45; }
+.doc.vz h1 { font-size: 2.4em; font-weight: 700; text-transform: none; letter-spacing: 0; color: #2d2d2d; margin: 0 0 6px; text-align: right; }
+.vz-head { display: flex; justify-content: space-between; gap: 30px; margin-bottom: 26px; }
+.vz-left { flex: 0 0 auto; max-width: 46%; }
+.vz-logo { max-width: 230px; max-height: 110px; display: block; margin: 0 0 24px 6px; }
+.vz-co { color: #333; }
+.vz-co b { font-size: 1.15em; }
+.vz-right { flex: 1; display: flex; flex-direction: column; align-items: flex-end; }
+.vz-meta { text-align: right; color: #333; margin-bottom: 14px; }
+.vz-meta .vz-ref { margin-bottom: 4px; }
+.vz-client { border: 1px solid #c9ccd6; padding: 12px 16px; width: 100%; max-width: 330px; min-height: 96px; }
+.vz-client b { display: block; margin-bottom: 10px; font-size: 1.05em; }
+.vz-info { margin: 0 0 24px; color: #333; }
+.vz-info > div { margin: 2px 0; }
+.vz-intro { margin-bottom: 14px; }
+.doc.vz table { border: 0; }
+.doc.vz .vz-lines { width: 100%; border-collapse: collapse; margin: 0 0 22px; }
+.doc.vz .vz-lines th { background: none; border: 0; border-bottom: 1.5px solid #c9ccd6; color: #333; font-weight: 500; font-size: .9em; padding: 6px 8px; text-transform: uppercase; vertical-align: bottom; }
+.doc.vz .vz-lines td { border: 0; padding: 7px 8px; vertical-align: top; }
+.doc.vz .vz-lines .c-no { width: 54px; } .doc.vz .vz-lines .c-tm { width: 34px; text-align: center; } .doc.vz .vz-lines .c-u { width: 56px; }
+.doc.vz tr.vz-l1 td { background: var(--p); color: #fff; padding: 9px 8px; border-top: 6px solid #fff; }
+.doc.vz tr.vz-l2 td { background: var(--light); color: var(--p); padding: 8px; border-top: 6px solid #fff; }
+.doc.vz tr.vz-txt td { color: #444; font-size: .92em; padding-left: 52px; }
+.doc.vz .vz-prog td { font-size: .95em; }
+.vz-bottom { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; margin: 10px 0 20px; break-inside: avoid; }
+.vz-pay { flex: 1; padding-top: 18px; }
+.vz-red { color: var(--payc, #e03131); font-family: Helvetica, Arial, sans-serif; font-size: 1.15em; margin-bottom: 10px; }
+.vz-blue { color: var(--notec, #1c7ed6); font-family: Helvetica, Arial, sans-serif; font-size: 1.15em; margin-top: 22px; }
+.doc.vz .vz-tot { width: 250px; flex: 0 0 250px; border-collapse: separate; border-spacing: 0 2px; margin: 0; font-family: Helvetica, Arial, sans-serif; font-size: .95em; }
+.doc.vz .vz-tot td { border: 0 !important; padding: 4px 8px; text-align: right; }
+.doc.vz .vz-tot tr.b1 td { background: var(--band); color: #fff; }
+.doc.vz .vz-tot tr.b1 td:last-child, .doc.vz .vz-tot tr.b2 td:last-child { background: color-mix(in srgb, var(--band) 75%, #fff); }
+.doc.vz .vz-tot tr.b2 td { background: var(--p); color: #fff; }
+.doc.vz .vz-tot tr.b2 td:last-child { background: var(--p); }
+.doc.vz .vz-recap { width: 380px; margin: 0 0 20px auto; border-collapse: collapse; font-size: .9em; break-inside: avoid; }
+.doc.vz .vz-recap th { background: var(--light); color: var(--p); text-align: left; border: 0; padding: 5px 8px; }
+.doc.vz .vz-recap td { border: 0; border-bottom: 1px solid #e3e5ee; padding: 4px 8px; }
+.vz-mention { display: flex; gap: 14px; margin: 14px 0; font-size: .92em; color: #333; break-inside: avoid; }
+.vz-mention > u { flex: 0 0 auto; }
+.vz-notes { margin: 14px 0; color: #333; }
+.vz-terms { margin-top: 18px; font-size: .82em; color: #555; border-top: 1px solid #ddd; padding-top: 10px; }
+.vz-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 30px; break-inside: avoid; }
+.vz-sign > div { border: 1px solid #c9ccd6; min-height: 90px; padding: 8px 10px; color: #444; }
+.vz-foot { margin-top: 26px; text-align: center; font-size: .8em; color: #777; }
+.vz-warn { color: #b42318; font-weight: 600; }
+.dt.prog input.pct { width: 74px; }
+.dt.prog tr.lv2 td { background: #eef0fa; }
+.dt.prog tr.neg td { color: var(--danger); }
+.card.flat { box-shadow: none; background: var(--surface-2); margin: 12px 0; }
+.lines tr.l-title.lv2 td { background: #f7f8fd; }
+.lines tr.l-title.lv2 .in { font-size: 14px; font-weight: 600; padding-left: 18px; }
+@media (max-width: 700px) { .vz-head, .vz-bottom { flex-direction: column; } .vz-right { align-items: stretch; } .doc.vz h1, .vz-meta { text-align: left; } .doc.vz .vz-tot { width: 100%; flex-basis: auto; } }
