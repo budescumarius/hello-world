@@ -1,0 +1,46 @@
+# BâtiPro – aplicație web de gestiune pentru construcții (în stilul Vertuoza + Aproplan)
+
+Aplicație web multi-utilizator, în franceză, pe care o instalezi pe domeniul tău (găzduire cPanel cu PHP + MySQL).
+Toți utilizatorii conectați văd toate proiectele firmei, iar fiecare element arată cine l-a creat și cine l-a modificat.
+
+## Module
+- **Tableau de bord**: opportunités, devis, factures (en retard / à envoyer / à encaisser), chantiers, tâches, suivi.
+- **Contacts**: clients, prospects, fournisseurs, sous-traitants, architectes – fiche avec tout l'historique.
+- **Opportunités**: pipeline Kanban (glisser-déposer), relances, montant pondéré.
+- **Devis**: chapitres, lignes, textes, options, éléments de la bibliothèque, déboursés et marges par ligne, TVA par ligne, remise, autoliquidation, PDF. À l'acceptation, le chantier se crée automatiquement.
+- **Bibliothèque**: articles (main d'œuvre, matériaux, matériel, sous-traitance) et **ouvrages composés**, import/export CSV, indexation des prix.
+- **Fiches techniques** et **dossiers de fin de chantier**.
+- **Commandes** fournisseurs / sous-traitants, générées depuis le devis (une commande par fournisseur).
+- **Chantiers** avec onglets : Aperçu financier (budget, déboursé prévu, coût réel, engagé, facturé, encaissé, marge), Devis, Commandes, Factures, Achats, Heures, Planning, **Plans, Points, PV de réunion, Formulaires, Journal, Documents** (partie Aproplan).
+- **Factures**: facture, acompte %, état d'avancement (% cumulé par ligne, déduction des acomptes), facture de solde, note de crédit, numérotation définitive à la validation, communication structurée belge, paiements, export comptable.
+- **Interventions** (rapport, photos, signature client, facturation) et **Installations** (contrats d'entretien, prochaines échéances).
+- **Tâches**, **Planning des chantiers** (Gantt) et **Planning des équipes** (semaine, glisser-déposer).
+- **RH**: personnel (coût horaire), pointage, absences.
+- **Statistiques**: CA, encaissements, coûts, pipeline, rentabilité par chantier.
+- **Paramètres**: entreprise, logo, TVA, préfixes, mentions, utilisateurs (admin / utilisateur), journal d'activité.
+
+## Instalare pe cPanel (aprox. 10 minute)
+1. **Bază de date**: cPanel → *Bases de données MySQL* (*MySQL Databases*):
+   - creează o bază (ex. `cont_batipro`) și un utilizator cu parolă;
+   - adaugă utilizatorul la bază cu **toate privilegiile**.
+2. **Fișiere**: cPanel → *Gestionnaire de fichiers*:
+   - urcă arhiva `batipro.zip` în `public_html` (sau într-un subdosar, ex. `public_html/gestion`);
+   - dezarhiveaz-o (*Extract*).
+   - Fișierele `.htaccess` sunt incluse (pot fi ascunse în File Manager; activează „Show hidden files”).
+3. Deschide în browser `https://domeniul-tau.be/install.php` (sau `/gestion/install.php`):
+   - completează datele bazei de date, numele firmei și contul tău de administrator.
+4. **Șterge `install.php`** din File Manager după instalare.
+5. Conectează-te, apoi mergi la ⚙ *Paramètres*:
+   - completează firma, logo-ul, IBAN-ul, cotele TVA și prefixele;
+   - creează conturi pentru colegi din *Utilisateurs*.
+
+**Cerințe:** PHP 7.4+ (recomandat 8.1+) cu PDO MySQL, MySQL 5.7+ sau MariaDB 10.3+ și HTTPS (certificatul gratuit AutoSSL din cPanel). Fișierele încărcate stau în `uploads/` și sunt servite numai utilizatorilor conectați.
+
+## Backup
+- cPanel → *Sauvegarde*: descarcă baza de date.
+- Păstrează și o copie a dosarului `uploads/`.
+
+## Rulare locală (dezvoltare)
+```bash
+php -S localhost:8080   # din dosarul web/, cu o bază MySQL locală
+```
