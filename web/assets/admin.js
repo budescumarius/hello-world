@@ -179,7 +179,7 @@ route('settings', async (tab = 'company') => {
   const form = $('form', page);
   const up = $('[data-uplogo]', form);
   if (up) up.onclick = async () => { const [f] = await pickFile('image/*'); if (!f) return; const r = await resizeImage(await blobToImg(f), 600, 'image/png'); const res = await upload(new File([r.blob], 'logo.png', { type: 'image/png' })); co.logoId = res.id; $('[data-logo]', form).innerHTML = `<img src="${fileUrl(res.id)}" style="max-height:60px">`; };
-  if (tab === 'company') vatAutofill(form, { name: 'name', street: 'street', zip: 'zip', city: 'city', country: 'country' }, { countryCode: true });
+  if (tab === 'company') vatAutofill(form, { name: 'name', street: 'street', zip: 'zip', city: 'city', country: 'country', phone: 'phone', email: 'email', website: 'website' }, { countryCode: true });
   form.onsubmit = async (e) => {
     e.preventDefault();
     const v = readFields(form, fields);

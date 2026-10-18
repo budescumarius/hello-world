@@ -283,6 +283,30 @@ function vat_lookup(string $raw, string $defCc = 'BE'): array {
     if ($cc === 'BE' && (97 - ((int)substr($num, 0, 8) % 97)) !== (int)substr($num, 8, 2)) {
         return ['valid' => false, 'vat' => $cc . $num, 'cc' => $cc, 'error' => 'Numéro incorrect (chiffres de contrôle) : vérifiez la saisie.'];
     }
+    $out = ['vat' => $cc . $num, 'cc' => $cc, 'checked' => date('Y-m-d H:i')];
+    $countries = ['BE' => 'Belgique', 'FR' => 'France', 'LU' => 'Luxembourg', 'NL' => 'Pays-Bas', 'DE' => 'Allemagne', 'RO' => 'Roumanie', 'IT' => 'Italie', 'ES' => 'Espagne', 'PT' => 'Portugal', 'PL' => 'Pologne'];
+    $out['country'] = $countries[$cc] ?? $cc;
+    $viesErr = null; $v = null;
+    try { $v = vies_query($cc, $num); } catch (Throwable $e) { $viesErr = $e->getMessage(); }
+    // Belgique : registre public des entreprises (BCE / KBO Public Search) pour le statut, la forme légale, le téléphone…
+    $k = null;
+    if ($cc === 'BE') { try { $k = kbo_lookup($num); } catch (Throwable $e) { $k = null; } }
+    if (!$v && !$k) fail(502, $viesErr ?: 'Services VIES et BCE injoignables, réessayez plus tard');
+    if ($v) $out += ['valid' => $v['valid'], 'name' => $v['name'], 'street' => $v['street'], 'zip' => $v['zip'], 'city' => $v['city']];
+    if ($k) {
+        $out['kbo'] = $k;
+        foreach (['street', 'zip', 'city'] as $f) if (empty($out[$f]) && !empty($k[$f])) $out[$f] = $k[$f];
+        if (empty($out['name'])) $out['name'] = trim(($k['abbr'] ? $k['abbr'] . ' ' : '') . $k['name']);
+        foreach (['phone', 'email', 'website', 'legalForm', 'status', 'start'] as $f) $out[$f] = $k[$f] ?? '';
+        if (!$v) $out['valid'] = $k['active'];
+        $out['active'] = $k['active'];
+    }
+    if ($viesErr && $k) $out['note'] = 'VIES indisponible : données de la BCE';
+    return $out;
+}
+
+// Service VIES (Commission européenne) : n° de TVA actif + nom / adresse
+function vies_query(string $cc, string $num): array {
     $base = defined('VIES_URL') ? VIES_URL : 'https://ec.europa.eu/taxation_customs/vies/rest-api';
     $url = rtrim($base, '/') . '/ms/' . $cc . '/vat/' . rawurlencode($num);
     $raw = false; $code = 0;
@@ -295,11 +319,11 @@ function vat_lookup(string $raw, string $defCc = 'BE'): array {
         $raw = @file_get_contents($url, false, stream_context_create(['http' => ['timeout' => 15, 'header' => "Accept: application/json\r\n"]]));
         $code = $raw === false ? 0 : 200;
     }
-    if ($raw === false || $raw === '' || $code >= 500) fail(502, 'Service VIES (Commission européenne) injoignable, réessayez plus tard');
+    if ($raw === false || $raw === '' || $code >= 500) throw new RuntimeException('Service VIES (Commission européenne) injoignable, réessayez plus tard');
     $j = json_decode((string)$raw, true);
-    if (!is_array($j)) fail(502, 'Réponse VIES illisible');
+    if (!is_array($j)) throw new RuntimeException('Réponse VIES illisible');
     $err = (string)($j['userError'] ?? '');
-    if ($err !== '' && !in_array($err, ['VALID', 'INVALID'], true)) fail(502, 'VIES indisponible pour ce pays (' . $err . '), réessayez plus tard');
+    if ($err !== '' && !in_array($err, ['VALID', 'INVALID'], true)) throw new RuntimeException('VIES indisponible pour ce pays (' . $err . '), réessayez plus tard');
     $valid = (bool)($j['isValid'] ?? $j['valid'] ?? false);
     $clean = fn($x) => trim(preg_replace('/\s+/', ' ', (string)$x)) === '---' ? '' : trim((string)$x);
     $name = $clean($j['name'] ?? '');
@@ -311,6 +335,54 @@ function vat_lookup(string $raw, string $defCc = 'BE'): array {
     elseif (count($addr) === 1 && preg_match('/^(.*?),?\s+(\d{4,5})\s+(.+)$/u', $street, $m)) { $street = $m[1]; $zip = $m[2]; $city = $m[3]; }
     elseif ($last !== '') $city = $last;
     $countries = ['BE' => 'Belgique', 'FR' => 'France', 'LU' => 'Luxembourg', 'NL' => 'Pays-Bas', 'DE' => 'Allemagne', 'RO' => 'Roumanie', 'IT' => 'Italie', 'ES' => 'Espagne', 'PT' => 'Portugal', 'PL' => 'Pologne'];
-    return ['valid' => $valid, 'vat' => $cc . $num, 'cc' => $cc, 'name' => $name, 'street' => $street, 'zip' => $zip, 'city' => $city,
-        'country' => $countries[$cc] ?? $cc, 'checked' => date('Y-m-d H:i')];
+    return ['valid' => $valid, 'name' => $name, 'street' => $street, 'zip' => $zip, 'city' => $city];
+}
+
+// BCE / KBO Public Search : page publique d'une entreprise belge (statut, dénomination, siège, forme légale, contacts)
+function kbo_lookup(string $num): ?array {
+    $base = defined('KBO_URL') ? KBO_URL : 'https://kbopub.economie.fgov.be/kbopub/toonondernemingps.html';
+    $html = http_get($base . '?lang=fr&ondernemingsnummer=' . $num, 15, 'text/html');
+    if ($html === null || stripos($html, $num) === false && stripos($html, substr($num, 0, 4) . '.' . substr($num, 4, 3)) === false) return null;
+    $rows = [];
+    foreach (preg_split('/<tr[^>]*>/i', $html) as $tr) {
+        if (!preg_match_all('/<td[^>]*>(.*?)<\/td>/is', $tr, $m) || count($m[1]) < 2) continue;
+        $label = trim(str_replace("\u{00A0}", ' ', html_entity_decode(strip_tags($m[1][0]), ENT_QUOTES | ENT_HTML5, 'UTF-8')), " \t\n\r\0\x0B:");
+        $raw = preg_replace('/<span[^>]*class="upd"[^>]*>.*?<\/span>/is', '', $m[1][1]);
+        $raw = preg_replace('/<br\s*\/?>/i', "\n", $raw);
+        $val = html_entity_decode(strip_tags($raw), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $val = str_replace("\u{00A0}", ' ', $val);
+        $lines = array_values(array_filter(array_map(fn($l) => trim(preg_replace('/\s+/u', ' ', $l)), explode("\n", $val)),
+            fn($l) => $l !== '' && !preg_match('/^(Depuis le|Sinds|Dénomination en|Benaming in|Pas de données|Geen gegevens)/iu', $l)));
+        if ($label !== '' && !isset($rows[$label])) $rows[$label] = $lines;
+    }
+    $get = function (array $labels) use ($rows) { foreach ($rows as $k => $v) foreach ($labels as $l) if (stripos($k, $l) === 0) return $v; return []; };
+    $name = $get(['Dénomination', 'Naam', 'Benaming'])[0] ?? '';
+    if ($name === '') return null;
+    $addr = $get(['Adresse du siège', 'Adres van de zetel', 'Adresse de l\'unité']);
+    $street = $addr[0] ?? ''; $zip = ''; $city = '';
+    if (isset($addr[1]) && preg_match('/^(\d{4})\s+(.+)$/u', $addr[1], $mm)) { $zip = $mm[1]; $city = $mm[2]; }
+    $status = $get(['Statut', 'Status'])[0] ?? '';
+    $abbr = $get(['Abréviation', 'Afkorting'])[0] ?? '';
+    $legal = $get(['Forme légale', 'Forme juridique', 'Rechtsvorm'])[0] ?? '';
+    $short = ['société à responsabilité limitée' => 'SRL', 'société anonyme' => 'SA', 'société coopérative' => 'SC', 'société en commandite' => 'SComm', 'société en nom collectif' => 'SNC',
+        'association sans but lucratif' => 'ASBL', 'société privée à responsabilité limitée' => 'SPRL', 'personne physique' => ''];
+    $form = '';
+    foreach ($short as $k => $v) if (stripos($legal, $k) === 0) { $form = $v; break; }
+    return ['name' => $name, 'abbr' => $form, 'legalForm' => $legal, 'status' => $status, 'active' => (bool)preg_match('/^(actif|actief)/iu', $status),
+        'street' => $street, 'zip' => $zip, 'city' => $city, 'start' => $get(['Date de début', 'Begindatum'])[0] ?? '',
+        'phone' => $get(['Numéro de téléphone', 'Telefoonnummer'])[0] ?? '', 'email' => $get(['Adresse e-mail', 'E-mail'])[0] ?? '',
+        'website' => $get(['Adresse web', 'Webadres'])[0] ?? ''];
+}
+
+// Requête GET simple (curl ou flux PHP) ; null si injoignable
+function http_get(string $url, int $timeout = 15, string $accept = 'application/json'): ?string {
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => $timeout, CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTPHEADER => ['Accept: ' . $accept, 'Accept-Language: fr-BE,fr;q=0.9', 'User-Agent: Mozilla/5.0 (BatiPro)']]);
+        $r = curl_exec($ch); $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
+        return ($r === false || $code >= 400) ? null : (string)$r;
+    }
+    $r = @file_get_contents($url, false, stream_context_create(['http' => ['timeout' => $timeout, 'header' => "Accept: $accept\r\nUser-Agent: Mozilla/5.0 (BatiPro)\r\n"]]));
+    return $r === false ? null : $r;
 }

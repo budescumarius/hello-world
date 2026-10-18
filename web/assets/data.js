@@ -412,6 +412,9 @@ function vatAutofill(form, map = {}, opts = {}) {
     if (map.zip) out[map.zip] = r.zip;
     if (map.city) out[map.city] = r.city;
     if (map.country && E(map.country)) out[map.country] = opts.countryCode ? r.cc : r.country;
+    if (map.phone && r.phone) out[map.phone] = r.phone;
+    if (map.email && r.email) out[map.email] = r.email;
+    if (map.website && r.website) out[map.website] = r.website;
     return Object.fromEntries(Object.entries(out).filter(([k, v]) => v && E(k)));
   };
   const put = (vals, force) => { let n = 0; for (const [k, v] of Object.entries(vals)) { const el = E(k); if (force || !el.value.trim() || (el.tagName === 'SELECT')) { if (el.value !== v) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); n++; } } } return n; };
@@ -423,13 +426,16 @@ function vatAutofill(form, map = {}, opts = {}) {
     try {
       const r = await api('GET', `vat/lookup&vat=${encodeURIComponent(v)}&cc=${ccOf()}`);
       form.dataset.vatcheck = JSON.stringify({ valid: r.valid, vat: r.vat, name: r.name || '', date: today() });
-      if (!r.valid) { box.innerHTML = `<div class="vat-bad">✗ ${esc(r.error || 'Ce numéro n\'est pas actif à la TVA (VIES)')} </div>`; return; }
+      if (!r.valid && !r.kbo) { box.innerHTML = `<div class="vat-bad">✗ ${esc(r.error || 'Ce numéro n\'est pas actif à la TVA (VIES)')} </div>`; return; }
       if (opts.normalize !== false && inp.value !== r.vat) inp.value = r.vat;
       const vals = values(r);
       const filled = put(vals, false);
       const differ = Object.entries(vals).some(([k, x]) => E(k).value !== x);
-      box.innerHTML = `<div class="vat-ok">✓ TVA active${r.name ? ` – <b>${esc(r.name)}</b>` : ''}${r.street ? `<br><small>${esc([r.street, [r.zip, r.city].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</small>` : ''}
-        <small class="muted"> · vérifié VIES le ${fmtDate(today())}${filled ? ` · ${filled} champ(s) rempli(s)` : ''}</small>${differ ? ' <button type="button" class="link-btn" data-vatfill>Remplacer par ces données</button>' : ''}</div>`;
+      const k = r.kbo;
+      const head = r.valid ? '✓ TVA active' : k && k.active ? '⚠ Entreprise active (BCE) mais n° non actif à la TVA' : '✗ Entreprise non active';
+      box.innerHTML = `<div class="${r.valid ? 'vat-ok' : 'vat-bad'}">${head}${r.name ? ` – <b>${esc(r.name)}</b>` : ''}${r.street ? `<br><small>${esc([r.street, [r.zip, r.city].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</small>` : ''}
+        ${k ? `<br><small>${esc([k.status && `Statut : ${k.status}`, k.legalForm, k.start && `depuis le ${k.start}`].filter(Boolean).join(' · '))}</small>` : ''}
+        <small class="muted"> · vérifié ${r.note ? esc(r.note) : k ? 'VIES + BCE' : 'VIES'} le ${fmtDate(today())}${filled ? ` · ${filled} champ(s) rempli(s)` : ''}</small>${differ ? ' <button type="button" class="link-btn" data-vatfill>Remplacer par ces données</button>' : ''}</div>`;
       const b = $('[data-vatfill]', box); if (b) b.onclick = () => { put(vals, true); b.remove(); };
     } catch (e) { last = ''; box.innerHTML = `<div class="vat-bad">${/invalide/i.test(e.message) ? '✗ ' : 'Vérification impossible : '}${esc(e.message)} <button type="button" class="link-btn" data-vatretry>Réessayer</button></div>`; const b = $('[data-vatretry]', box); if (b) b.onclick = () => check(true); }
   };

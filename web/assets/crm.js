@@ -3,11 +3,11 @@
 
 const contactFields = (kind) => [
   { name: 'kind', label: 'Type', type: 'select', options: optsOf(CONTACT_KINDS) },
+  { name: 'vat', label: 'N° TVA / entreprise', placeholder: 'BE0123456789 → remplit la fiche', hint: '<button type="button" class="link-btn" data-vatgo>Rechercher (VIES + BCE)</button>' },
   { name: 'company', label: 'Société', placeholder: 'Laisser vide pour un particulier' },
   { name: 'civility', label: 'Civilité', type: 'select', options: [['', '—'], ['M.', 'M.'], ['Mme.', 'Mme.'], ['M. et Mme.', 'M. et Mme.'], ['Me', 'Me'], ['Dr', 'Dr']] },
   { name: 'firstname', label: 'Prénom' },
   { name: 'name', label: 'Nom' },
-  { name: 'vat', label: 'N° TVA / entreprise' },
   { name: 'peppolId', label: 'Identifiant Peppol', placeholder: 'auto : 0208 + n° d\'entreprise', hint: '<button type="button" class="link-btn" data-peppol>Vérifier sur Peppol</button><span data-peppolres></span>' },
   { name: 'trade', label: 'Corps de métier', list: 'trades', hint: kind === 'client' ? '' : 'Pour fournisseurs et sous-traitants' },
   { name: 'email', label: 'Email', type: 'email' },
@@ -44,7 +44,8 @@ function editContact(c, preset = {}, opts = {}) {
       onClose: () => res(saved),
       after: (form, m) => {
         if (opts.side) opts.side($('[data-side]', m.el), form);
-        vatAutofill(form, { name: 'company', street: 'address', zip: 'zip', city: 'city', country: 'country' });
+        const va = vatAutofill(form, { name: 'company', street: 'address', zip: 'zip', city: 'city', country: 'country', phone: 'phone', email: 'email' });
+        $('[data-vatgo]', form).onclick = () => va.check(true);
         $('[data-peppol]', form).onclick = () => {
           const d = { vat: form.elements.vat.value, peppolId: form.elements.peppolId.value };
           const id = peppolIdOf(d, countryCode(form.elements.country.value));
