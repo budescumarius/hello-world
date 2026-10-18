@@ -81,7 +81,7 @@ function projectFinance(p, all) {
   const est = qt.reduce((a, t) => a + t.cost, 0);
   const estBy = {}; qt.forEach((t) => Object.entries(t.costBy).forEach(([k, v]) => { const kk = k === 'ouvrage' ? 'divers' : k; estBy[kk] = (estBy[kk] || 0) + v; }));
   const realBy = {};
-  for (const e of all.expense) for (const x of expenseFor(e, p.id)) realBy[x.category] = (realBy[x.category] || 0) + x.amount;
+  for (const e of all.expense.filter((x) => !x.data.refused)) for (const x of expenseFor(e, p.id)) realBy[x.category] = (realBy[x.category] || 0) + x.amount;
   for (const h of all.timesheet) realBy.mo = (realBy.mo || 0) + num(h.data.hours) * num(h.data.rate);
   const real = Object.values(realBy).reduce((a, v) => a + v, 0);
   const engaged = all.order.filter((o) => !['facturee', 'annulee'].includes(o.data.status)).reduce((a, o) => a + totals(o.data).base, 0);
@@ -221,14 +221,15 @@ route('expenses', async () => {
     { label: 'Saisie manuelle', icon: 'edit', run: () => editExpense() },
   ]);
   const by = (s) => rows.filter((e) => purchState(e) === s);
-  const ttcSum = (l) => l.reduce((a, e) => a + purchTtc(e.data), 0);
+  const restSum = (l) => l.reduce((a, e) => a + purchRest(e.data), 0);
+  const unpaid = rows.filter((e) => ['apayer', 'partiel', 'retard'].includes(purchState(e)));
   page.innerHTML = `${by('avalider').length ? `<div class="hint-box warn">${by('avalider').length} facture(s) à valider : vérifiez les montants, liez-les aux chantiers puis « Soumettre ». <a href="#" data-chk>Afficher</a></div>` : ''}
-    <div class="kpis">${kpi('À valider', by('avalider').length, { cls: by('avalider').length ? 'warn' : '' })}${kpi('À payer TVAC', money(ttcSum([...by('apayer'), ...by('retard')])), { sub: `${by('apayer').length + by('retard').length} facture(s)` })}
-      ${kpi('En retard', money(ttcSum(by('retard'))), { cls: by('retard').length ? 'bad' : '', sub: `${by('retard').length} facture(s)` })}${kpi('Achats ce mois-ci HT', money(rows.filter((e) => (e.data.date || '').startsWith(today().slice(0, 7))).reduce((a, e) => a + num(e.data.amount), 0)))}</div><div id="tbl"></div>`;
+    <div class="kpis">${kpi('À valider', by('avalider').length, { cls: by('avalider').length ? 'warn' : '' })}${kpi('Reste à payer TVAC', money(restSum(unpaid)), { sub: `${unpaid.length} facture(s)${by('partiel').length ? ` dont ${by('partiel').length} part. payée(s)` : ''}` })}
+      ${kpi('En retard', money(restSum(by('retard'))), { cls: by('retard').length ? 'bad' : '', sub: `${by('retard').length} facture(s)` })}${kpi('Achats ce mois-ci HT', money(rows.filter((e) => (e.data.date || '').startsWith(today().slice(0, 7))).reduce((a, e) => a + num(e.data.amount), 0)))}</div><div id="tbl"></div>`;
   expensesTable($('#tbl'), rows, contacts, projects, true);
   const ck = $('[data-chk]'); if (ck) ck.onclick = (ev) => { ev.preventDefault(); const chip = $('#tbl [data-f="avalider"]'); if (chip) chip.click(); };
-  $('[data-act=csv]').onclick = () => downloadCSV('factures-fournisseurs.csv', [['Date', 'Reference', 'Fournisseur', 'Chantier', 'Type', 'HT', 'TVA', 'TTC', 'Echeance', 'Statut', 'IBAN', 'Communication'],
-    ...rows.flatMap((e) => expenseParts(e).map((x) => [fmtDate(e.data.date), e.data.ref, contactName(byId(contacts, e.data.supplierId)), x.pid ? (byId(projects, x.pid) || { data: {} }).data.name : 'Frais généraux', TYPES[x.category], fnum(x.amount), fnum(num(e.data.vatAmount)), fnum(purchTtc(e.data)), fmtDate(e.data.due), PURCH_ST[purchState(e)][0], e.data.iban || '', e.data.structured ? commFmt(e.data.communication || '') : (e.data.communication || '')]))]);
+  $('[data-act=csv]').onclick = () => downloadCSV('factures-fournisseurs.csv', [['Date', 'Reference', 'Fournisseur', 'Chantier', 'Type', 'HT', 'TVA', 'TTC', 'Paye', 'Echeance', 'Statut', 'IBAN', 'Communication'],
+    ...rows.flatMap((e) => expenseParts(e).map((x) => [fmtDate(e.data.date), e.data.ref, contactName(byId(contacts, e.data.supplierId)), x.pid ? (byId(projects, x.pid) || { data: {} }).data.name : 'Frais généraux', TYPES[x.category], fnum(x.amount), fnum(num(e.data.vatAmount)), fnum(purchTtc(e.data)), fnum(purchPaid(e.data)), fmtDate(e.data.due), PURCH_ST[purchState(e)][0], e.data.iban || '', e.data.structured ? commFmt(e.data.communication || '') : (e.data.communication || '')]))]);
   if (peppolApOn()) peppolSync().then((r) => { if (r && r.created.length && location.hash.startsWith('#/expenses')) render(); });
 });
 

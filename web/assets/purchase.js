@@ -1,16 +1,10 @@
 'use strict';
 /* Factures fournisseurs : liste avec statuts (À valider → À payer → Payée) et page de vérification avec la facture affichée à côté. */
 
-const PURCH_ST = { avalider: ['À valider', '#f08c00'], apayer: ['À payer', '#3b5bdb'], retard: ['En retard', '#e5484d'], payee: ['Payée', '#2f9e44'] };
+const PURCH_ST = { avalider: ['À valider', '#f08c00'], retard: ['En retard', '#e5484d'], partiel: ['Part. payée', '#0c8599'], apayer: ['À payer', '#3b5bdb'], payee: ['Payée', '#2f9e44'], refusee: ['Refusée', '#868e96'] };
 // montant saisi : toujours 2 décimales (« 883,30 »)
 const famt = (x) => (num(x) || 0).toLocaleString('fr-BE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const PURCH_SRC = { peppol: 'Peppol', pdf: 'PDF importé', xml: 'XML importé', photo: 'Photo' };
-function purchState(e) {
-  const d = e.data;
-  if (d.status === 'avalider' || d.toCheck) return 'avalider';
-  if (d.paid) return 'payee';
-  return d.due && d.due < today() ? 'retard' : 'apayer';
-}
 // TVA par taux (anciens achats : un seul taux)
 function purchVat(d) {
   if (Array.isArray(d.vatLines) && d.vatLines.length) return d.vatLines.map((x) => ({ rate: num(x.rate), amount: num(x.amount) }));
@@ -18,9 +12,29 @@ function purchVat(d) {
   return [{ rate: num(d.vat ?? defVat()), amount }];
 }
 const purchTtc = (d) => (d.ttc != null && d.ttc !== '' ? num(d.ttc) : r2(num(d.amount) + purchVat(d).reduce((a, x) => a + x.amount, 0)));
+// paiements (plusieurs tranches possibles) ; anciens achats : « paid » = payée en une fois
+const purchPaid = (d) => (Array.isArray(d.payments) && d.payments.length ? r2(d.payments.reduce((a, p) => a + num(p.amount), 0)) : d.paid ? purchTtc(d) : 0);
+const purchRest = (d) => r2(purchTtc(d) - purchPaid(d));
+function purchState(e) {
+  const d = e.data;
+  if (d.refused) return 'refusee';
+  if (d.status === 'avalider' || d.toCheck) return 'avalider';
+  const paid = purchPaid(d);
+  if ((paid !== 0 || d.paid || !purchTtc(d)) && Math.abs(purchRest(d)) < 0.01) return 'payee';
+  if (d.due && d.due < today()) return 'retard';
+  return paid ? 'partiel' : 'apayer';
+}
+const purchLog = (d, txt) => { (d.history = d.history || []).push({ t: new Date().toISOString(), uid: S.me.id, txt }); };
+// recalcule « paid » / « paidDate » après un changement de paiements
+function purchSyncPaid(d) {
+  d.payments = d.payments || [];
+  const full = d.payments.length && Math.abs(purchRest({ ...d, paid: false })) < 0.01;
+  d.paid = !!full; d.paidDate = full ? d.payments.map((p) => p.date).sort().pop() : null;
+}
 const purchStatusHtml = (e) => {
-  const s = purchState(e); const d = e.data;
-  const sub = s === 'payee' ? (d.paidDate ? fmtDate(d.paidDate) : '') : s === 'avalider' ? (PURCH_SRC[d.source] || (d.peppol ? 'Peppol' : '')) : (d.due ? `éch. ${fmtDate(d.due)}` : '');
+  const s = purchState(e); const d = e.data; const paid = purchPaid(d);
+  const sub = s === 'payee' ? (d.paidDate ? fmtDate(d.paidDate) : '') : s === 'avalider' ? (PURCH_SRC[d.source] || (d.peppol ? 'Peppol' : ''))
+    : s === 'refusee' ? '' : paid && s !== 'payee' ? `reste ${money(purchRest(d))}` : (d.due ? `éch. ${fmtDate(d.due)}` : '');
   return `<span class="pst">${badge(PURCH_ST[s][0], PURCH_ST[s][1])}${sub ? `<small class="muted">${esc(sub)}</small>` : ''}</span>`;
 };
 // Communication structurée belge : 10 chiffres + clé modulo 97
@@ -41,11 +55,21 @@ function expensesTable(el, rows, contacts, projects, showProject, pid) {
     if (isSplit(e) || (Array.isArray(e.data.alloc) && e.data.alloc.length)) return `${badge('Ventilé', '#7048e8')} <small class="muted">${expenseParts(e).map((x) => esc(x.pid ? (byId(projects, x.pid) || { data: { name: '?' } }).data.name : 'Frais généraux')).join(', ')}</small>`;
     return e.project_id ? esc((byId(projects, e.project_id) || { data: { name: '?' } }).data.name) : '<span class="muted">—</span>';
   };
+  const key = `exp_${pid || 'all'}`;
+  const st = ui[key] || (ui[key] = { sort: 7 });
+  const sel = st.sel || (st.sel = new Set());
+  [...sel].forEach((id) => { if (!rows.some((r) => r.id === id)) sel.delete(id); });
+  const search = (e) => [e.data.ref, e.data.desc, contactName(byId(contacts, e.data.supplierId)), fnum(num(e.data.amount)), String(e.data.amount)].join(' ');
+  const filters = { def: '', options: [['', 'Toutes'], ...Object.entries(PURCH_ST).map(([k, [l, c]]) => [k, l, c])], match: (e, f) => purchState(e) === f };
+  // lignes visibles avec le filtre et la recherche en cours (pour « tout sélectionner »)
+  const visible = () => rows.filter((e) => (!st.f || filters.match(e, st.f)) && (!st.q || search(e).toLowerCase().includes(st.q.toLowerCase())));
+  const sum = (l, f) => l.reduce((a, e) => a + f(e), 0);
+  const open = (e) => !['avalider', 'refusee'].includes(purchState(e));
   dataTable(el, {
-    rows, state: ui[`exp_${pid || 'all'}`] || (ui[`exp_${pid || 'all'}`] = { sort: -1 }),
-    search: (e) => [e.data.ref, e.data.desc, contactName(byId(contacts, e.data.supplierId)), fnum(num(e.data.amount)), String(e.data.amount)].join(' '),
-    filters: { def: '', options: [['', 'Toutes'], ...Object.entries(PURCH_ST).map(([k, [l, c]]) => [k, l, c])], match: (e, f) => purchState(e) === f },
+    rows, state: st, search, filters, pageSize: 20,
+    toolbar: `<div class="bulk" data-bulk></div>`,
     columns: [
+      { l: '✓', cls: 'sel', v: (e) => `<input type="checkbox" class="selbox" data-sel="${e.id}" ${sel.has(e.id) ? 'checked' : ''} aria-label="Sélectionner">` },
       { l: 'Date', v: (e) => fmtDate(e.data.date), sort: (e) => e.data.date || '' },
       { l: 'Type', v: (e) => `<span class="nowrap"><i class="tdot" style="--c:${TYPE_COLORS[cat(e)] || '#999'}"></i>${esc(TYPES[cat(e)] || '')}</span>` },
       { l: 'Fournisseur', v: (e) => `<b>${esc(contactName(byId(contacts, e.data.supplierId)))}</b>`, sort: (e) => contactName(byId(contacts, e.data.supplierId)) },
@@ -53,31 +77,137 @@ function expensesTable(el, rows, contacts, projects, showProject, pid) {
       ...(showProject ? [{ l: 'Chantier', v: where }] : []),
       { l: pid ? 'HT (part du chantier)' : 'Montant HT', cls: 'r', v: (e) => `<b>${money(amt(e))}</b>${pid && Array.isArray(e.data.alloc) && e.data.alloc.length ? `<br><small class="muted">sur ${money(e.data.amount)}</small>` : ''}`, sort: amt },
       { l: 'Statut', v: purchStatusHtml, sort: (e) => Object.keys(PURCH_ST).indexOf(purchState(e)) },
-      { l: '', v: (e) => `<span class="row-acts"><button class="icon-btn sm" data-cm="${e.id}" title="Commentaires">${I.chat}${(e.data.comments || []).length ? `<i class="cnt">${e.data.comments.length}</i>` : ''}</button><button class="icon-btn sm" data-ed="${e.id}" title="Modifier">${I.edit}</button><button class="icon-btn sm" data-mo="${e.id}" title="Plus">${I.more}</button></span>` },
+      { l: '', v: (e) => `<span class="row-acts">${purchState(e) === 'avalider' ? `<button class="icon-btn sm good" data-ok="${e.id}" title="Valider">✓</button>` : open(e) && purchState(e) !== 'payee' ? `<button class="icon-btn sm" data-pay="${e.id}" title="Ajouter le paiement">€</button>` : ''}<button class="icon-btn sm" data-cm="${e.id}" title="Commentaires">${I.chat}${(e.data.comments || []).length ? `<i class="cnt">${e.data.comments.length}</i>` : ''}</button><button class="icon-btn sm" data-ed="${e.id}" title="Modifier">${I.edit}</button><button class="icon-btn sm" data-mo="${e.id}" title="Plus">${I.more}</button></span>` },
     ],
     onRow: (e) => go(`#/purchase/${e.id}`), empty: 'Aucune facture fournisseur',
-    footer: (l) => `<tr><td colspan="${showProject ? 5 : 4}">Total</td><td class="r"><b>${money(l.reduce((a, e) => a + amt(e), 0))}</b></td><td colspan="2"></td></tr>`,
+    footer: (l) => { const o = l.filter(open); return `<tr><td colspan="${showProject ? 9 : 8}"><div class="inv-tot"><div><small>Total HT</small><b>${money(sum(l, amt))}</b></div>${pid ? '' : `<div><small>Total TVA</small><b>${money(sum(l, (e) => purchTtc(e.data) - num(e.data.amount)))}</b></div><div><small>Total TTC</small><b>${money(sum(l, (e) => purchTtc(e.data)))}</b></div><div><small>Déjà payé</small><b>${money(sum(o, (e) => purchPaid(e.data)))}</b></div><div><small>Total à payer</small><b>${money(sum(o, (e) => purchRest(e.data)))}</b></div>`}</div></td></tr>`; },
   });
+  const drawBulk = () => {
+    const box = $('[data-bulk]', el); if (!box) return;
+    const vis = visible(); const all = vis.length && vis.every((e) => sel.has(e.id));
+    box.innerHTML = `<label class="bulk-all"><input type="checkbox" data-selall ${all ? 'checked' : ''}> Tout</label>${sel.size ? `<button class="btn sm" data-bulkgo>Actions groupées ${I.chevron}</button><span class="muted">${sel.size} élément${sel.size > 1 ? 's' : ''} sélectionné${sel.size > 1 ? 's' : ''}</span>` : ''}`;
+    $('[data-selall]', box).onchange = (ev) => { vis.forEach((e) => (ev.target.checked ? sel.add(e.id) : sel.delete(e.id))); $$('[data-sel]', el).forEach((c) => { c.checked = sel.has(+c.dataset.sel); }); drawBulk(); };
+    const bg = $('[data-bulkgo]', box); if (bg) bg.onclick = () => purchBulk(rows.filter((e) => sel.has(e.id)), contacts, projects, () => { sel.clear(); render(); });
+  };
+  drawBulk();
+  // la barre de filtres/recherche redessine le tableau : on garde la case « Tout » à jour
+  $$('[data-f]', el).forEach((b) => b.addEventListener('click', drawBulk));
+  const q = $('.search input', el); if (q) q.addEventListener('input', drawBulk);
   if (el.dataset.bound) return; el.dataset.bound = '1';
+  el.addEventListener('change', (ev) => {
+    const c = ev.target.closest('[data-sel]'); if (!c) return;
+    if (c.checked) sel.add(+c.dataset.sel); else sel.delete(+c.dataset.sel);
+    drawBulk();
+  });
   el.addEventListener('click', (ev) => {
-    const b = ev.target.closest('[data-cm],[data-ed],[data-mo]'); if (!b) return;
-    const e = rows.find((x) => x.id === +(b.dataset.cm || b.dataset.ed || b.dataset.mo)); if (!e) return;
+    const b = ev.target.closest('[data-cm],[data-ed],[data-mo],[data-ok],[data-pay]'); if (!b) return;
+    const e = rows.find((x) => x.id === +(b.dataset.cm || b.dataset.ed || b.dataset.mo || b.dataset.ok || b.dataset.pay)); if (!e) return;
     if (b.dataset.ed) return go(`#/purchase/${e.id}`);
     if (b.dataset.cm) return purchComments(e);
+    if (b.dataset.ok) return purchApprove(e);
+    if (b.dataset.pay) return purchPayment(e);
     purchMenu(e);
   });
 }
 
-function purchMenu(e) {
+// Validation depuis la liste : il faut au moins le fournisseur, la référence et le montant
+async function purchApprove(e, quiet) {
   const d = e.data;
+  const miss = [!d.supplierId && 'fournisseur', !d.ref && 'référence', !purchTtc(d) && 'montant'].filter(Boolean);
+  if (miss.length) { if (!quiet) { toast(`À compléter avant validation : ${miss.join(', ')}`, 4000); go(`#/purchase/${e.id}`); } return false; }
+  d.status = 'validee'; d.toCheck = false; delete d.readNote; delete d.supplierGuess; purchLog(d, 'Facture validée');
+  await persist('expense', e, { silent: quiet });
+  if (!quiet) { toast('Facture validée – à payer', 2000); render(); }
+  return true;
+}
+async function purchRefuse(e) {
+  const v = await ask('Refuser la facture', [{ name: 'reason', label: 'Motif (facultatif)', type: 'textarea', cls: 'full', placeholder: 'ex. montant erroné, marchandise non livrée…' }]);
+  if (!v) return;
+  e.data.refused = true; e.data.refuseReason = v.reason || ''; purchLog(e.data, `Facture refusée${v.reason ? ' : ' + v.reason : ''}`);
+  await persist('expense', e); render();
+}
+
+// Paiement (total ou partiel) ; i = index pour modifier / supprimer une tranche
+function purchPayment(e, i = null, after) {
+  const d = e.data; d.payments = Array.isArray(d.payments) ? d.payments : [];
+  // ancien achat marqué « payé » sans détail : la tranche est reconstituée
+  if (d.paid && !d.payments.length) d.payments.push({ date: d.paidDate || today(), amount: purchTtc(d), method: 'Virement' });
+  if (purchState(e) === 'avalider') return toast('Validez d\'abord la facture', 3000);
+  const rest = purchRest(d);
+  const p = i == null ? { date: today(), amount: famt(rest), method: 'Virement' } : { ...d.payments[i], amount: famt(d.payments[i].amount) };
+  formModal({
+    title: i == null ? `Ajouter un paiement – ${d.ref || 'facture'}` : 'Paiement', values: p, saveLabel: 'Enregistrer le paiement',
+    extra: `<div class="pay-info"><div><span>Montant TTC</span><b>${money(purchTtc(d))}</b></div><div><span>Déjà payé</span><b>${money(purchPaid(d) - (i == null ? 0 : num(d.payments[i].amount)))}</b></div><div class="dark"><span>Reste à payer</span><b>${money(i == null ? rest : rest + num(d.payments[i].amount))}</b></div></div>
+      <div class="pay-quick">${i == null ? `<button type="button" class="chip" data-pq="1">Tout (${money(rest)})</button><button type="button" class="chip" data-pq="0.5">50 %</button>` : ''}</div>`,
+    fields: [{ name: 'amount', label: 'Montant payé', required: true }, { name: 'date', label: 'Date du paiement', type: 'date', required: true }, { name: 'method', label: 'Mode', type: 'select', options: PAY_METHODS.map((x) => [x, x]) }, { name: 'note', label: 'Remarque', cls: 'full', placeholder: 'ex. 2e tranche' }],
+    after: (form) => { $$('[data-pq]', form).forEach((b) => { b.onclick = () => { form.elements.amount.value = famt(r2(rest * +b.dataset.pq)); }; }); },
+    async onSave(v) {
+      const amount = r2(num(v.amount)); const max = i == null ? rest : r2(rest + num(d.payments[i].amount));
+      if (!amount) throw new Error('Indiquez le montant payé');
+      if (Math.abs(amount) - Math.abs(max) > 0.01) throw new Error(`Le paiement dépasse le reste à payer (${money(max)})`);
+      const row = { date: v.date, amount, method: v.method, note: v.note };
+      if (i == null) { d.payments.push(row); purchLog(d, `Paiement de ${money(amount)} (${v.method}) le ${fmtDate(v.date)}`); } else { d.payments[i] = row; purchLog(d, `Paiement modifié : ${money(amount)} le ${fmtDate(v.date)}`); }
+      purchSyncPaid(d); await persist('expense', e);
+      toast(d.paid ? 'Facture entièrement payée' : `Paiement enregistré – reste ${money(purchRest(d))}`, 2500);
+      if (after) after(); else render();
+    },
+    onDelete: i == null ? null : async () => { const x = d.payments.splice(i, 1)[0]; purchLog(d, `Paiement supprimé : ${money(x.amount)} du ${fmtDate(x.date)}`); purchSyncPaid(d); await persist('expense', e); if (after) after(); else render(); },
+  });
+}
+
+function purchHistory(e) {
+  const d = e.data;
+  const h = [...(d.history || [])].reverse();
+  modal(`${mhead(`Historique – ${d.ref || 'facture'}`)}<div class="m-body"><div class="feed">${h.map((x) => `<div><b>${esc(userName(x.uid))}</b> ${esc(x.txt)}<small class="muted">${fmtDT(x.t)}</small></div>`).join('') || '<p class="muted">Aucun événement enregistré.</p>'}
+    <div><span class="muted">Facture reçue ${esc(PURCH_SRC[d.source] ? '(' + PURCH_SRC[d.source] + ')' : '')} – ${fmtDate(d.date)}</span></div></div></div>
+    <div class="m-foot"><span class="grow"></span><button class="btn" data-close>Fermer</button></div>`);
+}
+
+function purchMenu(e) {
+  const d = e.data; const s = purchState(e);
   menuSheet(`Facture ${d.ref || ''}`.trim(), [
     { label: 'Ouvrir', icon: 'edit', run: () => go(`#/purchase/${e.id}`) },
-    ...(purchState(e) !== 'avalider' ? [d.paid ? { label: 'Annuler le paiement', icon: 'coins', run: async () => { d.paid = false; d.paidDate = null; await persist('expense', e); render(); } }
-      : { label: 'Marquer comme payée', icon: 'coins', run: async () => { const v = await ask('Paiement', [{ name: 'paidDate', label: 'Date du paiement', type: 'date' }], { paidDate: today() }); if (!v) return; d.paid = true; d.paidDate = v.paidDate || today(); await persist('expense', e); render(); } }] : []),
-    ...(d.fileId ? [{ label: 'Télécharger la facture', icon: 'file', run: () => { location.href = fileUrl(d.fileId, true); } }] : []),
+    ...(s === 'avalider' ? [{ label: 'Valider la facture', icon: 'check', primary: true, run: () => purchApprove(e) }] : []),
+    ...(!['avalider', 'refusee', 'payee'].includes(s) ? [{ label: 'Ajouter le paiement', icon: 'coins', primary: true, run: () => purchPayment(e) }] : []),
+    ...((d.payments || []).length ? [{ label: `Paiements (${d.payments.length})`, icon: 'coins', run: () => purchPayList(e) }] : d.paid ? [{ label: 'Annuler le paiement', icon: 'coins', run: async () => { d.paid = false; d.paidDate = null; purchLog(d, 'Paiement annulé'); await persist('expense', e); render(); } }] : []),
+    ...(d.fileId ? [{ label: 'Télécharger la facture (PDF)', icon: 'download', run: () => { location.href = fileUrl(d.fileId, true); } }] : []),
+    s === 'refusee' ? { label: 'Annuler le refus', icon: 'check', run: async () => { d.refused = false; purchLog(d, 'Refus annulé'); await persist('expense', e); render(); } } : { label: 'Refuser', icon: 'x', run: () => purchRefuse(e) },
+    { label: 'Afficher l\'historique', icon: 'hist', run: () => purchHistory(e) },
     { label: 'Commentaires', icon: 'chat', run: () => purchComments(e) },
     { sep: true },
     { label: 'Supprimer', icon: 'trash', danger: true, run: async () => { if (!confirm('Supprimer cette facture fournisseur ?')) return; await delFile(d.fileId); if (d.xmlFileId) await delFile(d.xmlFileId); await db.del('expense', e.id); render(); } },
+  ]);
+}
+function purchPayList(e) {
+  const d = e.data;
+  menuSheet(`Paiements – reste ${money(purchRest(d))}`, [
+    ...d.payments.map((p, i) => ({ label: `${fmtDate(p.date)} · ${money(p.amount)} · ${p.method || ''}${p.note ? ' · ' + p.note : ''}`, icon: 'coins', run: () => purchPayment(e, i) })),
+    ...(purchRest(d) > 0.009 ? [{ sep: true }, { label: 'Ajouter un paiement', icon: 'plus', primary: true, run: () => purchPayment(e) }] : []),
+  ]);
+}
+
+// Actions groupées sur la sélection
+function purchBulk(list, contacts, projects, done) {
+  const n = list.length;
+  menuSheet(`${n} facture${n > 1 ? 's' : ''} sélectionnée${n > 1 ? 's' : ''}`, [
+    { label: 'Valider', icon: 'check', run: async () => {
+      let ok = 0; const todo = list.filter((e) => purchState(e) === 'avalider');
+      for (const e of todo) if (await purchApprove(e, true)) ok++;
+      toast(`${ok} facture(s) validée(s)${todo.length - ok ? ` · ${todo.length - ok} incomplète(s) à ouvrir` : ''}`, 4000); done();
+    } },
+    { label: 'Marquer comme payées (solde total)', icon: 'coins', run: async () => {
+      const todo = list.filter((e) => !['avalider', 'refusee', 'payee'].includes(purchState(e)));
+      if (!todo.length) return toast('Aucune facture validée à payer dans la sélection', 3000);
+      const v = await ask(`Paiement de ${todo.length} facture(s) – ${money(todo.reduce((a, e) => a + purchRest(e.data), 0))}`, [{ name: 'date', label: 'Date du paiement', type: 'date' }, { name: 'method', label: 'Mode', type: 'select', options: PAY_METHODS.map((x) => [x, x]) }], { date: today(), method: 'Virement' });
+      if (!v) return;
+      for (const e of todo) { const d = e.data; d.payments = d.payments || []; const r = purchRest(d); d.payments.push({ date: v.date || today(), amount: r, method: v.method }); purchLog(d, `Paiement de ${money(r)} (${v.method}) le ${fmtDate(v.date)}`); purchSyncPaid(d); await persist('expense', e, { silent: true }); }
+      toast(`${todo.length} facture(s) payée(s)`, 2500); done();
+    } },
+    { label: 'Exporter en CSV', icon: 'download', run: () => downloadCSV('factures-fournisseurs-selection.csv', [['Date', 'Reference', 'Fournisseur', 'HT', 'TTC', 'Paye', 'Reste', 'Echeance', 'Statut', 'IBAN', 'Communication'],
+      ...list.map((e) => [fmtDate(e.data.date), e.data.ref, contactName(byId(contacts, e.data.supplierId)), fnum(num(e.data.amount)), fnum(purchTtc(e.data)), fnum(purchPaid(e.data)), fnum(purchRest(e.data)), fmtDate(e.data.due), PURCH_ST[purchState(e)][0], e.data.iban || '', e.data.structured ? commFmt(e.data.communication || '') : (e.data.communication || '')])]) },
+    { label: 'Refuser', icon: 'x', run: async () => { if (!confirm(`Refuser ${n} facture(s) ?`)) return; for (const e of list) { e.data.refused = true; purchLog(e.data, 'Facture refusée'); await persist('expense', e, { silent: true }); } done(); } },
+    { sep: true },
+    { label: 'Supprimer', icon: 'trash', danger: true, run: async () => { if (!confirm(`Supprimer définitivement ${n} facture(s) fournisseur ?`)) return; for (const e of list) { await delFile(e.data.fileId); if (e.data.xmlFileId) await delFile(e.data.xmlFileId); await db.del('expense', e.id); } done(); } },
   ]);
 }
 
@@ -119,6 +249,7 @@ route('purchase', async (id) => {
   const vatOpts = (r) => [...new Set([...vatList(), num(r)])].sort((a, b) => b - a).map((x) => `<option value="${x}" ${num(r) === x ? 'selected' : ''}>${fnum(x)} %</option>`).join('');
   page.innerHTML = `<div class="pi">
     <section class="card"><div class="card-h"><h3>Informations générales</h3></div>
+      ${d.refused ? `<div class="hint-box warn">Facture refusée${d.refuseReason ? ' : ' + esc(d.refuseReason) : ''}.</div>` : ''}
       ${d.readNote && st === 'avalider' ? `<div class="hint-box">${esc(d.readNote)}${/\.pdf$/i.test(d.fileName || '') ? ` <button type="button" class="link-btn" data-reread>Relire la facture</button>` : ''}</div>` : ''}
       ${dup ? `<div class="hint-box warn">⚠ Doublon probable : la facture ${esc(d.ref)} de ce fournisseur existe déjà (${fmtDate(dup.data.date)}, ${money(dup.data.amount)} HT). <a href="#/purchase/${dup.id}">Ouvrir l'autre</a></div>` : ''}
       <div class="pi-grid">
@@ -148,6 +279,7 @@ route('purchase', async (id) => {
       </div>
     </section>
     <section class="card"><div class="card-h"><h3>Lier la facture à un chantier</h3></div><div class="pi-alloc" data-alloc></div></section>
+    ${isNew ? '' : '<section class="card" data-pays></section>'}
   </div>
   <div class="pi-bar"><span class="grow"></span><button class="btn" data-cancel>Annuler</button><span class="btn-split"><button class="btn primary" data-submit>Soumettre</button><button class="btn primary" data-moresub aria-label="Autres actions">${I.chevron}</button></span></div>`;
   const form = $('.pi-form', page);
@@ -270,6 +402,21 @@ route('purchase', async (id) => {
     fileId = r.id; fileName = r.name; pdfText = null; toast('Facture jointe', 1500); viewer.draw();
   });
 
+  // --- paiements (en plusieurs tranches) : enregistrés tout de suite sur la facture
+  const drawPays = () => {
+    const box = $('[data-pays]', page); if (!box) return;
+    const ed = e.data; const s2 = purchState(e); const pays = ed.payments || [];
+    const tt = purchTtc(ed); const paid = purchPaid(ed);
+    box.innerHTML = `<div class="card-h"><h3>Paiements</h3>${badge(PURCH_ST[s2][0], PURCH_ST[s2][1])}<span class="grow"></span>${!['avalider', 'refusee', 'payee'].includes(s2) ? `<button type="button" class="btn sm primary" data-addpay>${I.plus} Ajouter un paiement</button>` : ''}</div>
+      ${s2 === 'avalider' ? '<p class="muted">Soumettez (validez) la facture pour pouvoir enregistrer les paiements.</p>' : ''}
+      ${pays.length ? `<table class="dt pay-tbl"><thead><tr><th>Date</th><th>Mode</th><th>Remarque</th><th class="r">Montant</th></tr></thead><tbody>${pays.map((x, i) => `<tr data-pi="${i}"><td>${fmtDate(x.date)}</td><td>${esc(x.method || '')}</td><td>${esc(x.note || '')}</td><td class="r"><b>${money(x.amount)}</b></td></tr>`).join('')}</tbody></table>`
+        : ed.paid ? `<p>Payée le ${fmtDate(ed.paidDate)}.</p>` : s2 !== 'avalider' ? '<p class="muted">Aucun paiement enregistré.</p>' : ''}
+      <div class="pay-info"><div><span>Montant TTC</span><b>${money(tt)}</b></div><div><span>Déjà payé</span><b>${money(paid)}</b></div><div class="dark ${s2 === 'retard' ? 'neg' : purchRest(ed) === 0 ? 'ok' : ''}"><span>Reste à payer${ed.due ? ` · échéance ${fmtDate(ed.due)}` : ''}</span><b>${money(purchRest(ed))}</b></div></div>`;
+    const ap = $('[data-addpay]', box); if (ap) ap.onclick = () => purchPayment(e, null, drawPays);
+    $$('[data-pi]', box).forEach((tr) => { tr.onclick = () => purchPayment(e, +tr.dataset.pi, drawPays); });
+  };
+  drawPays();
+
   drawVat(); drawAlloc();
 
   // --- enregistrement
@@ -287,13 +434,17 @@ route('purchase', async (id) => {
     const lines = vat.filter((x) => num(x.amount) !== 0 || vat.length === 1).map((x) => ({ rate: num(x.rate), amount: r2(num(x.amount)) }));
     const main = [...lines].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))[0] || { rate: defVat() };
     const structured = F('structured').checked;
-    Object.assign(e.data, d, {
+    // paiements, historique et refus : modifiés directement sur la facture, on garde leur état actuel
+    const keep = { payments: e.data.payments, paid: e.data.paid, paidDate: e.data.paidDate, history: e.data.history, refused: e.data.refused, refuseReason: e.data.refuseReason, comments: e.data.comments };
+    const wasOpen = e.data.status !== 'avalider' && !e.data.toCheck;
+    Object.assign(e.data, d, keep, {
       category: v.category, ref: v.ref, date: v.date, due: v.due, supplierId: v.supplierId ? +v.supplierId : null, iban: v.iban.replace(/\s/g, '').toUpperCase(), bic: v.bic.toUpperCase(),
       communication: structured ? v.communication.replace(/\D/g, '') : v.communication, structured,
       desc: v.desc || `Facture ${v.ref || ''}`.trim(), ttc: r2(t), vatLines: lines, vatAmount: totalVat(), vat: main.rate, amount: ht(), fileId, fileName,
       status: mode === 'draft' ? 'avalider' : 'validee', toCheck: mode === 'draft',
-      ...(mode === 'paid' ? { paid: true, paidDate: today() } : {}),
     });
+    if (mode !== 'draft' && !wasOpen) purchLog(e.data, 'Facture validée');
+    if (mode === 'paid' && purchRest(e.data) > 0.009) { const r = purchRest(e.data); (e.data.payments = e.data.payments || []).push({ date: today(), amount: r, method: 'Virement' }); purchLog(e.data, `Paiement de ${money(r)} le ${fmtDate(today())}`); purchSyncPaid(e.data); }
     ['readNote', 'supplierGuess', 'project_id'].forEach((k) => delete e.data[k]);
     if (rows.length === 1 && Math.abs(num(rows[0].amount) - ht()) < 0.01) { e.project_id = +rows[0].pid; e.data.category = rows[0].category || e.data.category; delete e.data.alloc; }
     else if (rows.length) { e.project_id = null; e.data.alloc = rows.map((a) => ({ pid: +a.pid, amount: r2(num(a.amount)), category: a.category || e.data.category })); }
@@ -308,6 +459,8 @@ route('purchase', async (id) => {
     { label: 'Soumettre et marquer payée', icon: 'coins', run: () => save('paid') },
     { label: 'Enregistrer sans valider (reste « À valider »)', icon: 'file', run: () => save('draft') },
     ...(fileId && isPdfFile() ? [{ label: 'Relire la facture (PDF)', icon: 'eye', run: reread }] : []),
+    ...(isNew ? [] : [e.data.refused ? { label: 'Annuler le refus', icon: 'check', run: async () => { e.data.refused = false; purchLog(e.data, 'Refus annulé'); await persist('expense', e); render(); } } : { label: 'Refuser la facture', icon: 'x', run: () => purchRefuse(e) },
+      { label: 'Afficher l\'historique', icon: 'hist', run: () => purchHistory(e) }]),
     ...(isNew ? [] : [{ sep: true }, { label: 'Supprimer la facture', icon: 'trash', danger: true, run: async () => { if (!confirm('Supprimer cette facture fournisseur ?')) return; await delFile(d.fileId); if (d.xmlFileId) await delFile(d.xmlFileId); await db.del('expense', e.id); go('#/expenses'); } }]),
   ]);
 });

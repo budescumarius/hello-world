@@ -751,3 +751,19 @@ body:has(.pi-bar) .ai-fab { bottom: calc(84px + env(safe-area-inset-bottom)); }
   .m-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: 42% minmax(0, 1fr); }
   .m-side { border-right: 0; border-bottom: 1px solid var(--border); }
 }
+
+/* Factures fournisseurs : sélection, actions groupées, paiements */
+.bulk { display: flex; align-items: center; gap: 10px; }
+.bulk-all { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.bulk input, td.sel input { width: 18px; height: 18px; accent-color: var(--primary); cursor: pointer; }
+.dt th:first-child:empty, td.sel { width: 34px; }
+.icon-btn.good { color: #2f9e44; font-weight: 700; }
+.pay-info { margin: 14px 0 0 auto; width: min(380px, 100%); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.pay-info > div { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.pay-info > div:last-child { border-bottom: 0; }
+.pay-info .dark { background: #16203a; color: #fff; } .pay-info .dark.ok { background: #2f9e44; } .pay-info .dark.neg { background: #e5484d; }
+.m-body .pay-info { margin: 14px 0 0; width: 100%; }
+.pay-quick { display: flex; gap: 8px; margin-top: 10px; }
+.pay-tbl tbody tr { cursor: pointer; }
+[data-pays] .card-h { gap: 10px; }
+@media (max-width: 700px) { td.sel { width: auto; } .bulk { width: 100%; } }

@@ -110,7 +110,7 @@ route('stats', async () => {
   const inv = all.invoice.map((i) => ({ i, s: invState(i) })).filter((x) => x.s.s !== 'brouillon');
   const ca = months.map((m) => inv.filter((x) => (x.i.data.date || '').startsWith(m)).reduce((a, x) => a + x.s.t.base, 0));
   const cash = months.map((m) => all.invoice.reduce((a, i) => a + (i.data.payments || []).filter((p) => (p.date || '').startsWith(m)).reduce((b, p) => b + num(p.amount), 0), 0));
-  const costs = months.map((m) => all.expense.filter((e) => (e.data.date || '').startsWith(m)).reduce((a, e) => a + num(e.data.amount), 0) + all.timesheet.filter((t) => (t.data.date || '').startsWith(m)).reduce((a, t) => a + num(t.data.hours) * num(t.data.rate), 0));
+  const costs = months.map((m) => all.expense.filter((e) => !e.data.refused && (e.data.date || '').startsWith(m)).reduce((a, e) => a + num(e.data.amount), 0) + all.timesheet.filter((t) => (t.data.date || '').startsWith(m)).reduce((a, t) => a + num(t.data.hours) * num(t.data.rate), 0));
   const qY = all.quote.filter((q) => (q.data.date || '').startsWith(String(year)));
   const decided = qY.filter((q) => ['accepte', 'refuse'].includes(q.data.status));
   const conv = decided.length ? Math.round(qY.filter((q) => q.data.status === 'accepte').length / decided.length * 100) : 0;

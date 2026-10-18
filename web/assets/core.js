@@ -133,6 +133,8 @@ async function uploadPhoto(file, projectId, max = 1800) {
 const ic = (d, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 const I = {
   spark: ic('<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>'),
+  check: ic('<path d="M20 6L9 17l-5-5"/>'),
+  x: ic('<circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/>'),
   hist: ic('<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/>'),
   eye: ic('<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>'),
   percent: ic('<path d="M19 5L5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>'),
@@ -408,7 +410,7 @@ function dataTable(el, { columns, rows, onRow, empty: emptyMsg = 'Aucun élémen
     $$('[data-pg]', el).forEach((b) => { b.onclick = () => { st.pg = +b.dataset.pg; draw(); }; });
     const ps = $('[data-ps]', el); if (ps) ps.onchange = () => { st.ps = +ps.value; st.pg = 1; draw(); };
     $$('[data-s]', el).forEach((th) => { th.onclick = () => { const k = +th.dataset.s; st.sort = st.sort === k ? -k : k; draw(); }; });
-    if (onRow) $$('tbody tr', el).forEach((tr) => { tr.onclick = (e) => { if (!e.target.closest('a,button,input')) onRow(list[+tr.dataset.r]); }; });
+    if (onRow) $$('tbody tr', el).forEach((tr) => { tr.onclick = (e) => { if (!e.target.closest('a,button,input,label,td.sel')) onRow(list[+tr.dataset.r]); }; });
     const cnt = $('.dt-count', el); if (cnt) cnt.textContent = `${list.length} élément${list.length > 1 ? 's' : ''}`;
   };
   el.innerHTML = `<div class="card dt-card"><div class="dt-tools">
