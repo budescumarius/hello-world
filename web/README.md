@@ -17,6 +17,7 @@ Toți utilizatorii conectați văd toate proiectele firmei, iar fiecare element 
 - **Mentions obligatoires** automatiques : texte TVA 6 % (logement > 10 ans) et autoliquidation (avec n° TVA du client obligatoire) – textes modifiables.
 - **États d'avancement** : avancement cumulé par poste (en % ou en quantité, ou par chapitre), quantité prévue / avancée, déduction de l'acompte au prorata (ou montant libre) avec « reste à déduire X % », récapitulatif du marché, modification possible tant que la facture n'est pas validée.
 - **Envoi par email**: PV de réunion, rapports de points, devis, factures et bons de commande envoyés directement depuis l'application (PDF joint) aux présents, aux intervenants concernés ou à toute autre adresse ; serveur SMTP configurable, réponses vers l'expéditeur.
+- **Assistant IA (Claude)**: bouton « Assistant » sur toutes les pages – calculs de matériaux et de prix, devis et commandes en brouillon à partir de la bibliothèque de prix, emails de demande de prix prêts à relire et envoyer, questions techniques de construction (avec recherche web). Clé API Anthropic dans *Paramètres › Assistant IA*.
 - **Achats**: import des factures fournisseurs en PDF (lecture automatique du n°, des dates, des montants et du n° de TVA ; facture électronique intégrée au PDF reconnue), en XML Peppol/UBL ou en photo ; répartition d'un achat sur plusieurs chantiers (montant et type de coût par chantier), repris dans le suivi financier de chaque chantier.
 - **Peppol (facturation électronique)**: export UBL Peppol BIS Billing 3.0 des factures et notes de crédit (validé contre les règles officielles EN 16931 + Peppol et le schéma UBL 2.1), contrôles avant envoi, identifiant Peppol des clients (0208 + n° d'entreprise) avec vérification dans l'annuaire Peppol, import des factures fournisseurs reçues (XML avec PDF intégré) dans les achats.
 - **Factures**: facture, acompte %, état d'avancement (% cumulé par ligne, déduction des acomptes), facture de solde, note de crédit, numérotation définitive à la validation, communication structurée belge, paiements, export comptable.
@@ -41,9 +42,10 @@ Toți utilizatorii conectați văd toate proiectele firmei, iar fiecare element 
    - completează firma, logo-ul, IBAN-ul, cotele TVA și prefixele;
    - creează conturi pentru colegi din *Utilisateurs*;
    - în *Peppol*: lipește cheia API Peppyrus (cont gratuit pe peppyrus.be) – facturile furnizorilor intră singure în *Achats & dépenses*, iar facturile tale se trimit direct pe Peppol. Opțional, în cPanel › *Cron Jobs*, la fiecare 15 minute: `php /home/CONTUL_TAU/public_html/cron.php`;
+   - în *Assistant IA*: lipește o cheie API de pe console.anthropic.com (plătești consumul direct la Anthropic). Arhiva conține deja dosarul `vendor/` cu SDK-ul Anthropic – nu trebuie instalat nimic. Cheia platformei servește și firmelor care nu au cheia lor;
    - în *Email*: pune serverul SMTP al unei adrese create în cPanel (ex. `mail.domeniultau.be`, port 465 SSL, adresa completă + parola) și apasă „Envoyer un test”. PV-urile, rapoartele de puncte, devizele, facturile și comenzile se trimit apoi direct din aplicație, cu PDF-ul atașat.
 
-**Cerințe:** PHP 7.4+ (recomandat 8.1+) cu PDO MySQL, MySQL 5.7+ sau MariaDB 10.3+ și HTTPS (certificatul gratuit AutoSSL din cPanel). Fișierele încărcate stau în `uploads/` și sunt servite numai utilizatorilor conectați.
+**Cerințe:** PHP 8.1+ (cPanel › *Select PHP Version*) cu PDO MySQL, MySQL 5.7+ sau MariaDB 10.3+ și HTTPS (certificatul gratuit AutoSSL din cPanel). Fișierele încărcate stau în `uploads/` și sunt servite numai utilizatorilor conectați.
 
 ## Mai multe firme pe aceeași instalare
 

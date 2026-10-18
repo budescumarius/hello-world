@@ -3,6 +3,7 @@
 declare(strict_types=1);
 require __DIR__ . '/lib.php';
 require __DIR__ . '/peppol_ap.php';
+require __DIR__ . '/ai.php';
 
 set_exception_handler(function (Throwable $e) {
     error_log('[batipro] ' . $e);
@@ -78,9 +79,10 @@ switch ($seg[0] ?? '') {
         // le mot de passe SMTP ne quitte jamais le serveur
         if (isset($settings['smtp']) && is_array($settings['smtp'])) { $settings['smtp']['hasPass'] = !empty($settings['smtp']['pass']); unset($settings['smtp']['pass']); }
         if (isset($settings['peppolap']) && is_array($settings['peppolap'])) { $settings['peppolap']['hasKey'] = !empty($settings['peppolap']['key']); unset($settings['peppolap']['key']); }
+        if (isset($settings['ai']) && is_array($settings['ai'])) { $settings['ai']['hasKey'] = !empty($settings['ai']['key']); unset($settings['ai']['key']); }
         $firm = q('SELECT id, name FROM companies WHERE id = ?', [cid()])->fetch() ?: ['id' => cid(), 'name' => ''];
         out(['user' => $u, 'users' => $users, 'settings' => $settings, 'version' => APP_VERSION,
-            'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => cid() === $u['company_id']]]);
+            'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => cid() === $u['company_id']], 'ai' => ai_ready()]);
 
     // ------------------------------------------------------------ Utilisateurs
     case 'users':
@@ -139,6 +141,12 @@ switch ($seg[0] ?? '') {
                     $old = setting('smtp', []) ?: [];
                     if (($v['pass'] ?? '') === '' && empty($v['clearPass'])) $v['pass'] = $old['pass'] ?? '';
                     unset($v['hasPass'], $v['clearPass']);
+                }
+                if ($k === 'ai' && is_array($v)) {
+                    $old = setting('ai', []) ?: [];
+                    if (($v['key'] ?? '') === '' && empty($v['clearKey'])) $v['key'] = $old['key'] ?? '';
+                    unset($v['hasKey'], $v['clearKey']);
+                    $v += $old; // réglages techniques (adresse de l'API) conservés
                 }
                 if ($k === 'peppolap' && is_array($v)) {
                     $old = setting('peppolap', []) ?: [];
@@ -451,6 +459,59 @@ switch ($seg[0] ?? '') {
             if ($to && !q('SELECT id FROM companies WHERE id = ?', [$to])->fetch()) fail(404, 'Firme introuvable.');
             if (!$to || $to === $me['company_id']) unset($_SESSION['cid']); else $_SESSION['cid'] = $to;
             out(['ok' => true]);
+        }
+        fail(404, 'Route inconnue');
+
+    // ------------------------------------------------------------ Assistant IA
+    case 'ai':
+        $me = require_user();
+        db()->exec('CREATE TABLE IF NOT EXISTS ai_convs (id INT AUTO_INCREMENT PRIMARY KEY, company_id INT NOT NULL, user_id INT NOT NULL, title VARCHAR(190) NOT NULL, turns LONGTEXT NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, KEY owner (company_id, user_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+        $act = $seg[1] ?? '';
+        $id = isset($seg[2]) ? (int)$seg[2] : 0;
+        if ($act === 'convs' && $method === 'GET') {
+            out(q('SELECT id, title, updated_at FROM ai_convs WHERE company_id = ? AND user_id = ? ORDER BY updated_at DESC LIMIT 50', [cid(), $me['id']])->fetchAll());
+        }
+        if ($act === 'conv' && $id && $method === 'GET') {
+            $c = ai_conv_load($id, $me); if (!$c) fail(404, 'Conversation introuvable');
+            out(['id' => $c['id'], 'title' => $c['title'], 'messages' => ai_conv_view($c)]);
+        }
+        if ($act === 'conv' && $id && $method === 'DELETE') {
+            q('DELETE FROM ai_convs WHERE id = ? AND company_id = ? AND user_id = ?', [$id, cid(), $me['id']]);
+            out(['ok' => true]);
+        }
+        if ($act === 'chat' && $method === 'POST') {
+            if (PHP_VERSION_ID < 80100) fail(503, "L'assistant IA demande PHP 8.1 ou plus récent (cPanel › Sélectionner la version PHP).");
+            if (!is_file(__DIR__ . '/vendor/autoload.php')) fail(503, "Le dossier vendor/ manque : téléversez l'archive complète de l'application.");
+            if (ai_key() === '') fail(503, "Assistant IA non configuré : ajoutez une clé API Anthropic dans Paramètres › Assistant IA.");
+            $b = body();
+            $text = trim((string)($b['text'] ?? ''));
+            if ($text === '' || mb_strlen($text) > 20000) fail(400, 'Message vide ou trop long.');
+            try {
+                out(ai_chat($me, !empty($b['conv_id']) ? (int)$b['conv_id'] : null, $text, is_array($b['context'] ?? null) ? $b['context'] : []));
+            } catch (\Anthropic\Core\Exceptions\AuthenticationException $e) {
+                fail(502, 'Clé API Anthropic refusée : vérifiez-la dans Paramètres › Assistant IA.');
+            } catch (\Anthropic\Core\Exceptions\RateLimitException $e) {
+                fail(502, 'Trop de demandes à l\'assistant : réessayez dans une minute.');
+            } catch (\Anthropic\Core\Exceptions\InternalServerException $e) {
+                fail(502, 'Le service IA est momentanément indisponible, réessayez.');
+            } catch (\Anthropic\Core\Exceptions\APIStatusException $e) {
+                error_log('[batipro ai] ' . $e->getMessage());
+                $msg = is_array($e->body ?? null) ? (string)($e->body['error']['message'] ?? '') : '';
+                fail(502, 'Erreur IA (' . ($e->status ?? '?') . ') : ' . ($msg ?: 'requête refusée'));
+            } catch (\Anthropic\Core\Exceptions\APITimeoutException $e) {
+                fail(504, 'L\'assistant a mis trop de temps à répondre : simplifiez la demande ou réessayez.');
+            } catch (\Anthropic\Core\Exceptions\APIConnectionException $e) {
+                fail(502, 'Service IA injoignable depuis le serveur : ' . $e->getMessage());
+            }
+        }
+        if ($act === 'test' && $method === 'POST') {
+            require_admin();
+            if (!ai_ready()) fail(503, 'Clé manquante ou PHP / vendor non disponible.');
+            require_once __DIR__ . '/vendor/autoload.php';
+            try {
+                $r = (new \Anthropic\Client(apiKey: ai_key(), baseUrl: ai_base_url()))->messages->create(maxTokens: 64, messages: [['role' => 'user', 'content' => 'Réponds juste : OK']], model: AI_MODEL, outputConfig: ['effort' => 'low']);
+                out(['ok' => true, 'model' => $r->model]);
+            } catch (Throwable $e) { fail(502, 'Test impossible : ' . $e->getMessage()); }
         }
         fail(404, 'Route inconnue');
 
