@@ -12,6 +12,7 @@ Toți utilizatorii conectați văd toate proiectele firmei, iar fiecare element 
 - **Fiches techniques** et **dossiers de fin de chantier**.
 - **Commandes** fournisseurs / sous-traitants, générées depuis le devis (une commande par fournisseur).
 - **Chantiers** avec onglets : Aperçu financier (budget, déboursé prévu, coût réel, engagé, facturé, encaissé, marge), Devis, Commandes, Factures, Achats, Heures, Planning, **Plans, Points, PV de réunion, Formulaires, Journal, Documents** (partie Aproplan).
+- **Peppol (facturation électronique)**: export UBL Peppol BIS Billing 3.0 des factures et notes de crédit (validé contre les règles officielles EN 16931 + Peppol et le schéma UBL 2.1), contrôles avant envoi, identifiant Peppol des clients (0208 + n° d'entreprise) avec vérification dans l'annuaire Peppol, import des factures fournisseurs reçues (XML avec PDF intégré) dans les achats.
 - **Factures**: facture, acompte %, état d'avancement (% cumulé par ligne, déduction des acomptes), facture de solde, note de crédit, numérotation définitive à la validation, communication structurée belge, paiements, export comptable.
 - **Interventions** (rapport, photos, signature client, facturation) et **Installations** (contrats d'entretien, prochaines échéances).
 - **Tâches**, **Planning des chantiers** (Gantt) et **Planning des équipes** (semaine, glisser-déposer).

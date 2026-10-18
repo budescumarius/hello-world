@@ -7,6 +7,7 @@ const contactFields = (kind) => [
   { name: 'firstname', label: 'Prénom' },
   { name: 'name', label: 'Nom' },
   { name: 'vat', label: 'N° TVA / entreprise' },
+  { name: 'peppolId', label: 'Identifiant Peppol', placeholder: 'auto : 0208 + n° d\'entreprise', hint: '<button type="button" class="link-btn" data-peppol>Vérifier sur Peppol</button><span data-peppolres></span>' },
   { name: 'trade', label: 'Corps de métier', list: 'trades', hint: kind === 'client' ? '' : 'Pour fournisseurs et sous-traitants' },
   { name: 'email', label: 'Email', type: 'email' },
   { name: 'phone', label: 'Téléphone', type: 'tel' },
@@ -37,6 +38,15 @@ function editContact(c, preset = {}) {
       },
       onDelete: c ? async () => { await db.del('contact', c.id); saved = null; go('#/contacts/all'); } : null,
       onClose: () => res(saved),
+      after: (form) => {
+        $('[data-peppol]', form).onclick = () => {
+          const d = { vat: form.elements.vat.value, peppolId: form.elements.peppolId.value };
+          const id = peppolIdOf(d, countryCode(form.elements.country.value));
+          if (!id) return toast('Indiquez le n° de TVA ou l\'identifiant Peppol');
+          if (!d.peppolId) form.elements.peppolId.placeholder = id;
+          peppolLookupInto($('[data-peppolres]', form), id);
+        };
+      },
     });
   });
 }

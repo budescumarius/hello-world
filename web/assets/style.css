@@ -489,3 +489,12 @@ table.lines { width: 100%; border-collapse: collapse; min-width: 760px; }
   .dash-grid { grid-template-columns: 1fr; }
   .search { min-width: 0; flex: 1; }
 }
+
+/* ---------- Peppol */
+.alert.ok { background: #e9f7ef; color: #1e7a46; }
+.alert ul { margin: 6px 0 0; padding-left: 20px; }
+.kv-list > div { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.kv-list > div > span:first-child { color: var(--muted); font-size: 13px; min-width: 140px; }
+.peppol-st { margin-bottom: 10px; }
+.steps { padding-left: 20px; line-height: 1.7; margin: 0; }
+.link-btn { border: 0; background: none; color: var(--primary); padding: 0; cursor: pointer; font-weight: 600; margin-right: 8px; }

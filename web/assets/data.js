@@ -48,10 +48,11 @@ function totals(doc) {
     else { const c = num(l.qty) * num(l.cost); cost += c; costBy[l.type || 'divers'] = (costBy[l.type || 'divers'] || 0) + c; }
   }
   net = r2(net);
-  const discount = r2(net * d);
-  const base = r2(net - discount);
+  // la remise est calculée par taux de TVA (règles EN 16931 / Peppol : total = somme des remises par taux)
   const vats = Object.keys(by).map(Number).sort((a, b) => b - a)
-    .map((rate) => { const b = r2(by[rate] * (1 - d)); return { rate, base: b, vat: doc.reverse ? 0 : r2(b * rate / 100) }; }).filter((v) => v.base);
+    .map((rate) => { const lines = r2(by[rate]); const allowance = r2(lines * d); const b = r2(lines - allowance); return { rate, lines, allowance, base: b, vat: doc.reverse ? 0 : r2(b * rate / 100) }; }).filter((v) => v.lines);
+  const discount = r2(vats.reduce((s, v) => s + v.allowance, 0));
+  const base = r2(net - discount);
   const vat = r2(vats.reduce((s, v) => s + v.vat, 0));
   return { net, discount, base, vats, vat, total: r2(base + vat), cost: r2(cost), costBy, margin: r2(base - cost) };
 }

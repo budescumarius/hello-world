@@ -251,6 +251,29 @@ switch ($seg[0] ?? '') {
         }
         fail(404, 'Route inconnue');
 
+    // ------------------------------------------------------------ Annuaire Peppol (participant enregistré ?)
+    case 'peppol':
+        require_user();
+        $id = trim((string)($_GET['id'] ?? ''));
+        if (($seg[1] ?? '') !== 'lookup' || !preg_match('/^\d{4}:[A-Za-z0-9.\-]{2,50}$/', $id)) fail(400, 'Identifiant Peppol invalide (format 0208:0123456789)');
+        $url = 'https://directory.peppol.eu/search/1.0/json?participant=' . rawurlencode('iso6523-actorid-upis::' . $id);
+        $ctx = stream_context_create(['http' => ['timeout' => 12, 'header' => "Accept: application/json\r\nUser-Agent: BatiPro\r\n"]]);
+        $raw = @file_get_contents($url, false, $ctx);
+        if ($raw === false && function_exists('curl_init')) {
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 12, CURLOPT_HTTPHEADER => ['Accept: application/json']]);
+            $raw = curl_exec($ch);
+            curl_close($ch);
+        }
+        if ($raw === false || $raw === null) fail(502, 'Annuaire Peppol injoignable depuis le serveur');
+        // un résultat vide (corps vide ou 0 résultat) signifie « non enregistré »
+        $j = json_decode((string)$raw, true) ?: [];
+        $matches = $j['matches'] ?? [];
+        $ent = $matches[0]['entities'][0] ?? [];
+        $name = $ent['name'] ?? null;
+        if (is_array($name)) $name = $name[0]['name'] ?? ($name['name'] ?? null);
+        out(['registered' => (int)($j['total-result-count'] ?? 0) > 0 || count($matches) > 0, 'name' => is_string($name) ? $name : null, 'country' => $ent['countryCode'] ?? null]);
+
     // ------------------------------------------------------------ Historique des actions
     case 'activity':
         require_user();

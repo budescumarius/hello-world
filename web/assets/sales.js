@@ -459,8 +459,8 @@ route('invoice', async (id) => {
   const locked = d.status === 'emise';
   const save = debounce(async () => { try { await persist('invoice', it, { silent: true }); $('[data-saved]').textContent = 'Enregistré'; } catch (e) { toast('Erreur : ' + e.message); } }, 800);
   const page = layout({ active: 'finances', icon: 'coins', title: `${IKIND[d.kind] || 'Facture'} ${it.number || '(brouillon)'}`, back: pr ? `#/project/${pr.id}/invoices` : '#/invoices',
-    sub: `${st(IST, s.s)} <span class="muted" data-saved></span>`,
-    actions: `<a class="btn" href="#/print/invoice/${it.id}">${I.print} PDF</a>${!locked ? `<button class="btn primary" data-act="emit">Valider et numéroter</button>` : ''}<button class="btn" data-act="more">${I.more} Actions</button>` });
+    sub: `${st(IST, s.s)}${d.peppol && d.peppol.sentAt ? ` ${badge('Peppol ✓', '#0c8599')}` : ''} <span class="muted" data-saved></span>`,
+    actions: `<a class="btn" href="#/print/invoice/${it.id}">${I.print} PDF</a>${locked ? `<button class="btn" data-act="peppol">Peppol</button>` : ''}${!locked ? `<button class="btn primary" data-act="emit">Valider et numéroter</button>` : ''}<button class="btn" data-act="more">${I.more} Actions</button>` });
   page.innerHTML = `<div class="card doc-head" data-act="head">
       <div><small class="muted">Client</small><b>${c ? `<a href="#/contact/${c.id}">${esc(contactName(c))}</a>` : '<span class="late">À définir</span>'}</b></div>
       <div><small class="muted">Chantier</small><b>${pr ? `<a href="#/project/${pr.id}">${esc(pr.data.name)}</a>` : '—'}</b></div>
@@ -511,10 +511,12 @@ route('invoice', async (id) => {
     });
   };
   const pb = $('[data-act=pay]'); if (pb) pb.onclick = () => editPay(null);
+  const pp = $('[data-act=peppol]'); if (pp) pp.onclick = () => peppolInvoice(it);
   $$('[data-pay]').forEach((b) => { b.onclick = () => editPay(+b.dataset.pay); });
   $('[data-act=more]').onclick = () => menuSheet('Facture', [
     ...(!locked ? [{ label: 'Modifier l\'en-tête', icon: 'edit', run: head }] : []),
     { label: 'Envoyer par email', icon: 'mail', run: () => { location.href = `mailto:${encodeURIComponent((c && c.data.email) || '')}?subject=${encodeURIComponent(`${IKIND[d.kind]} ${it.number || ''}`)}&body=${encodeURIComponent(`Bonjour,\n\nVeuillez trouver ci-joint notre ${(IKIND[d.kind] || 'facture').toLowerCase()} ${it.number || ''} d'un montant de ${money(s.t.total)} TVAC, payable avant le ${fmtDate(d.due)}${company().iban ? ` sur le compte ${company().iban} avec la communication ${d.communication || it.number}` : ''}.\n\nCordialement,\n${S.me.name}\n${company().name || ''}`)}`; } },
+    ...(locked ? [{ label: 'Peppol – facture électronique', icon: 'file', primary: true, run: () => peppolInvoice(it) }] : []),
     ...(locked && d.kind !== 'avoir' ? [{ label: 'Créer une note de crédit', icon: 'copy', run: () => newInvoice({ project_id: it.project_id, data: { kind: 'avoir', clientId: d.clientId, quoteId: d.quoteId, reverse: d.reverse, discount: d.discount, title: `Annulation facture ${it.number}`, refInvoice: it.number, lines: d.lines.map((l) => (l.kind === 'item' ? { ...l, id: lid(), qty: -num(l.qty) } : { ...l, id: lid() })) } }) }] : []),
     ...(d.quoteId ? [{ label: 'Ouvrir le devis', icon: 'calc', run: () => go(`#/quote/${d.quoteId}`) }] : []),
     ...(!locked ? [{ sep: true }, { label: 'Supprimer le brouillon', danger: true, icon: 'trash', run: async () => { if (confirm('Supprimer ce brouillon ?')) { await db.del('invoice', it.id); go(pr ? `#/project/${pr.id}/invoices` : '#/invoices'); } } }] : []),

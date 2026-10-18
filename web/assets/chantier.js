@@ -244,7 +244,7 @@ function expensesTable(el, rows, contacts, projects, showProject) {
     search: (e) => [e.data.desc, e.data.ref, contactName(byId(contacts, e.data.supplierId))].join(' '),
     filters: { def: '', options: [['', 'Tout'], ...Object.entries(TYPES).map(([k, l]) => [k, l, TYPE_COLORS[k]])], match: (e, f) => e.data.category === f },
     columns: [
-      { l: 'Date', v: (e) => fmtDate(e.data.date), sort: (e) => e.data.date }, { l: 'Description', v: (e) => `<b>${esc(e.data.desc)}</b>${e.data.ref ? `<br><small class="muted">${esc(e.data.ref)}</small>` : ''}` },
+      { l: 'Date', v: (e) => fmtDate(e.data.date), sort: (e) => e.data.date }, { l: 'Description', v: (e) => `<b>${esc(e.data.desc)}</b>${e.data.peppol ? ` ${badge('Peppol', '#0c8599')}` : ''}${e.data.ref ? `<br><small class="muted">${esc(e.data.ref)}</small>` : ''}` },
       { l: 'Fournisseur', v: (e) => esc(contactName(byId(contacts, e.data.supplierId))) },
       ...(showProject ? [{ l: 'Chantier', v: (e) => esc((byId(projects, e.project_id) || { data: { name: 'Frais généraux' } }).data.name) }] : []),
       { l: 'Type', v: (e) => `<i class="tdot" style="--c:${TYPE_COLORS[e.data.category] || '#999'}"></i>${esc(TYPES[e.data.category] || '')}` },
@@ -258,15 +258,17 @@ function expensesTable(el, rows, contacts, projects, showProject) {
 }
 async function tabPExpenses(p, el, contacts) {
   const rows = await db.list('expense', { project: p.id });
-  el.innerHTML = `<div class="toolbar"><span class="grow"></span><button class="btn primary" data-act="ne">${I.plus} Nouvel achat</button></div><div id="tbl"></div>`;
+  el.innerHTML = `<div class="toolbar"><span class="grow"></span><button class="btn" data-act="peppol">Importer Peppol (XML)</button><button class="btn primary" data-act="ne">${I.plus} Nouvel achat</button></div><div id="tbl"></div>`;
+  $('[data-act=peppol]', el).onclick = () => importPeppolPurchase(p.id);
   expensesTable($('#tbl', el), rows, contacts, [], false);
   $('[data-act=ne]', el).onclick = () => editExpense(null, { project_id: p.id });
 }
 route('expenses', async () => {
   const [rows, contacts, projects] = await Promise.all([db.list('expense'), db.list('contact'), db.list('project')]);
-  const page = layout({ active: 'finances', icon: 'coins', title: 'Achats & dépenses', actions: `<button class="btn" data-act="csv">Export CSV</button><button class="btn primary" data-act="ne">${I.plus} Nouvel achat</button>` });
+  const page = layout({ active: 'finances', icon: 'coins', title: 'Achats & dépenses', actions: `<button class="btn" data-act="csv">Export CSV</button><button class="btn" data-act="peppol">Importer Peppol (XML)</button><button class="btn primary" data-act="ne">${I.plus} Nouvel achat</button>` });
+  $('[data-act=peppol]').onclick = () => importPeppolPurchase();
   const unpaid = rows.filter((e) => !e.data.paid);
-  page.innerHTML = `<div class="kpis">${kpi('Achats ce mois-ci HT', money(rows.filter((e) => (e.data.date || '').startsWith(today().slice(0, 7))).reduce((a, e) => a + num(e.data.amount), 0)))}${kpi('Factures fournisseurs à payer', money(unpaid.reduce((a, e) => a + num(e.data.amount) * (1 + num(e.data.vat) / 100), 0)), { sub: `${unpaid.length} facture(s) TVAC`, cls: unpaid.some((e) => e.data.due && e.data.due < today()) ? 'bad' : '' })}</div><div id="tbl"></div>`;
+  page.innerHTML = `<div class="kpis">${kpi('Achats ce mois-ci HT', money(rows.filter((e) => (e.data.date || '').startsWith(today().slice(0, 7))).reduce((a, e) => a + num(e.data.amount), 0)))}${kpi('Factures fournisseurs à payer', money(unpaid.reduce((a, e) => a + num(e.data.amount) + (e.data.vatAmount != null ? num(e.data.vatAmount) : num(e.data.amount) * num(e.data.vat) / 100), 0)), { sub: `${unpaid.length} facture(s) TVAC`, cls: unpaid.some((e) => e.data.due && e.data.due < today()) ? 'bad' : '' })}</div><div id="tbl"></div>`;
   expensesTable($('#tbl'), rows, contacts, projects, true);
   $('[data-act=ne]').onclick = () => editExpense();
   $('[data-act=csv]').onclick = () => downloadCSV('achats.csv', [['Date', 'Description', 'Ref', 'Fournisseur', 'Chantier', 'Type', 'HT', 'TVA %', 'Payee'],
