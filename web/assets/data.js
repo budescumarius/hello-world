@@ -311,6 +311,7 @@ async function makePdf() {
   holder.style.cssText = `position:fixed;left:-20000px;top:0;width:${W}px;background:#fff;`;
   holder.innerHTML = page.innerHTML;
   holder.querySelectorAll('.no-print').forEach((x) => x.remove());
+  holder.querySelectorAll('.pdf-break').forEach((x) => { x.style.borderTop = '0'; x.style.marginTop = '0'; });
   const docEl = holder.querySelector('.doc') || holder;
   docEl.style.cssText += ';max-width:none;width:' + W + 'px;margin:0;box-shadow:none;border-radius:0;';
   document.body.appendChild(holder);
@@ -320,9 +321,10 @@ async function makePdf() {
     // points de coupure possibles : bas de chaque ligne / bloc (évite de couper une ligne ou le bloc des totaux en deux)
     // mesurés dans la copie rendue par html2canvas (même largeur, mêmes règles CSS que le PDF)
     const ATOM = '.vz-bottom, .vz-recap, .vz-mention, .vz-sign, .d-tot, .d-sign';
-    const cuts = [];
+    const cuts = []; const forced = [];
     const measure = (root) => {
       const top = root.getBoundingClientRect().top;
+      root.querySelectorAll('.pdf-break').forEach((el) => forced.push(el.getBoundingClientRect().top - top));
       root.querySelectorAll('tr, .vz-info, .vz-head, .d-pt, .d-sec, .d-head, .d-parties, p, h2, .pre, img, ' + ATOM).forEach((el) => {
         const r = el.getBoundingClientRect();
         if (el.matches(ATOM)) cuts.push(r.top - top, r.bottom - top);
@@ -358,6 +360,8 @@ async function makePdf() {
     const breaks = []; let y = 0;
     while (y < canvas.height - 2) {
       let next = y + pageH;
+      const f = forced.map((v) => v * k).find((v) => v > y + 2 && v < Math.min(next, canvas.height));
+      if (f != null) { breaks.push([y, f]); y = f; continue; }
       if (next < canvas.height) { const c = cuts.map((v) => v * k).filter((v) => v > y + pageH * 0.5 && v <= next); if (c.length) next = c[c.length - 1]; } else next = canvas.height;
       breaks.push([y, next]); y = next;
     }

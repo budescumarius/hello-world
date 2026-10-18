@@ -11,6 +11,7 @@ const TPL_DEF = {
   payText: 'Merci de faire le virement sur le compte {societe}', payTerms: '{jours} jour(s) Après date de facturation',
   mention6: MENTION_6, mention12: '', mentionAL: MENTION_AL, mentionsOnQuote: true,
   recap: true, footer: '', css: '',
+  cgvTitle: 'Conditions générales', cgv: '', cgvInvoice: true, cgvQuote: true, cgvOrder: false, cgvCols: true,
 };
 const tpl = () => ({ ...TPL_DEF, ...(S.settings.template || {}) });
 const fill = (s, vars) => String(s || '').replace(/\{(\w+)\}/g, (m, k) => (vars[k] != null ? vars[k] : m));
@@ -144,6 +145,26 @@ function totalsBlock(kind, it, t, paid) {
   return `<div class="vz-bottom">${left}<table class="vz-tot">${rows}</table></div>`;
 }
 
+// Conditions générales : sur une nouvelle page (page 2 du PDF), texte libre ; **gras** et titres « Article … » mis en évidence
+function cgvBlock(kind, t) {
+  const on = { invoice: t.cgvInvoice, quote: t.cgvQuote, order: t.cgvOrder }[kind];
+  if (!on || !String(t.cgv || '').trim()) return '';
+  const body = String(t.cgv).trim().split(/\n{2,}/).map((para) => {
+    const h = esc(para).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+    return /^(article|art\.|\d+[.)]\s|[IVX]+[.)]\s)/i.test(para) && para.split('\n')[0].length < 90 ? `<p><b>${h.replace(/<br>/, '</b><br>')}${h.includes('<br>') ? '' : '</b>'}</p>` : `<p>${h}</p>`;
+  }).join('');
+  return `<div class="vz-cgv pdf-break ${t.cgvCols ? 'cols' : ''}"><h3>${esc(t.cgvTitle || 'Conditions générales')}</h3><div class="vz-cgv-body">${body}</div></div>`;
+}
+// Coordonnées de l'entreprise ou du client manquantes : avertissement à l'écran (non imprimé)
+function coMissing(kind, c) {
+  const co = company(); const s = sellerInfo();
+  const miss = [!s.street && 'adresse', !s.zip && 'code postal', !s.city && 'localité', !co.vat && 'n° de TVA', kind !== 'quote' && !co.iban && 'IBAN', !co.email && 'e-mail', !co.phone && 'téléphone'].filter(Boolean);
+  const out = [];
+  if (miss.length) out.push(`Coordonnées de l'entreprise à compléter pour qu'elles apparaissent sur le document : <b>${miss.join(', ')}</b>.${isAdmin() ? ' <a href="#/settings/company">Paramètres → Entreprise</a>' : ''}`);
+  if (!c) out.push(`Aucun ${kind === 'order' ? 'fournisseur' : 'client'} choisi : le cadre de l'adresse reste vide.`);
+  return out.length ? `<div class="vz-warn no-print">${out.map((x) => `<div>⚠ ${x}</div>`).join('')}</div>` : '';
+}
+
 // Mentions légales obligatoires selon les taux utilisés
 function mentionsBlock(kind, d, t) {
   if (kind === 'order') return '';
@@ -175,7 +196,7 @@ async function docHtml(kind, id) {
   const paid = kind === 'invoice' ? invState(it).paid : 0;
   const isProg = kind === 'invoice' && d.kind === 'situation' && (d.progressRows || []).length;
   const html = `<style>${docCSS(t)}</style><div class="doc vz">
-    ${head}${info}
+    ${coMissing(kind, c)}${head}${info}
     ${d.intro ? `<p class="pre vz-intro">${esc(d.intro)}</p>` : ''}
     ${isProg ? progressTable(d, t) : linesTable(d, t)}
     ${totalsBlock(kind, it, t, paid)}
@@ -185,6 +206,7 @@ async function docHtml(kind, id) {
     ${d.notes ? `<div class="vz-notes pre">${esc(d.notes)}</div>` : ''}
     ${kind === 'quote' ? `${co.terms ? `<div class="vz-terms pre">${esc(co.terms)}</div>` : ''}<div class="vz-sign"><div>Pour ${esc(co.name || "l'entreprise")}</div><div>Pour accord, le client<br><small>Date, nom et signature précédés de la mention « Bon pour accord »</small></div></div>` : ''}
     ${t.footer || co.footer ? `<div class="vz-foot">${esc(t.footer || co.footer)}</div>` : ''}
+    ${cgvBlock(kind, t)}
   </div>`;
   return { it, d, c, project, title, html, typ, co };
 }
@@ -241,6 +263,10 @@ function templateSettings(page) {
     { name: 'mention12', label: 'Mention TVA 12 % (facultatif)', type: 'textarea', rows: 3, cls: 'full' },
     { name: 'mentionAL', label: 'Mention autoliquidation', type: 'textarea', rows: 3, cls: 'full' },
     { name: 'mentionsOnQuote', label: 'Imprimer aussi ces mentions sur les devis', type: 'check' },
+    { name: 'h6', type: 'html', cls: 'full', html: '<div class="section-t">Conditions générales (nouvelle page)</div><small class="muted">Imprimées sur une page à part, après le document (page 2 du PDF). Un paragraphe par article, séparés par une ligne vide ; **texte** = gras.</small>' },
+    { name: 'cgvTitle', label: 'Titre' }, { name: 'cgvCols', label: 'Sur deux colonnes (petit texte)', type: 'check' },
+    { name: 'cgv', label: 'Texte des conditions générales', type: 'textarea', rows: 12, cls: 'full', placeholder: 'Article 1 – Champ d\'application\nLes présentes conditions…\n\nArticle 2 – Prix\n…' },
+    { name: 'cgvInvoice', label: 'Sur les factures', type: 'check' }, { name: 'cgvQuote', label: 'Sur les devis', type: 'check' }, { name: 'cgvOrder', label: 'Sur les bons de commande', type: 'check' },
     { name: 'h5', type: 'html', cls: 'full', html: '<div class="section-t">Avancé</div>' },
     { name: 'footer', label: 'Pied de page', cls: 'full' },
     { name: 'css', label: 'CSS personnalisé (modifie librement la mise en page des documents)', type: 'textarea', rows: 5, cls: 'full', hint: 'Classes : .vz-head, .vz-co, .vz-client, .vz-lines, .vz-l1, .vz-l2, .vz-tot, .vz-red, .vz-blue, .vz-mention' },
