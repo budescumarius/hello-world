@@ -95,6 +95,11 @@ function ubl_parse(string $xml): array {
         'tax' => $tax * $sign,
         'total' => $num($txt($root, 'LegalMonetaryTotal', 'TaxInclusiveAmount')) * $sign,
         'lines' => $lines, 'attachments' => $atts,
+        'vatLines' => array_map(fn($st) => ['rate' => $num($txt($st, 'TaxCategory', 'Percent')), 'amount' => round($num($txt($st, 'TaxAmount')) * $sign, 2)],
+            array_merge(...array_map(fn($t) => $kids($t, 'TaxSubtotal'), $kids($root, 'TaxTotal')) ?: [[]])),
+        'iban' => preg_replace('/\s+/', '', $txt($root, 'PaymentMeans', 'PayeeFinancialAccount', 'ID')),
+        'bic' => $txt($root, 'PaymentMeans', 'PayeeFinancialAccount', 'FinancialInstitutionBranch', 'ID'),
+        'payId' => $txt($root, 'PaymentMeans', 'PaymentID'),
     ];
 }
 
@@ -155,6 +160,10 @@ function pap_import(string $msgId, string $xml, ?int $uid): array {
         'date' => $u['date'] ?: date('Y-m-d'), 'due' => $u['due'], 'ref' => $u['number'],
         'amount' => round($u['base'], 2), 'vat' => abs($near - $rate) < 0.3 ? $near : $rate, 'vatAmount' => round($u['tax'], 2), 'paid' => false,
         'fileId' => $fileId, 'fileName' => $fileName, 'xmlFileId' => $xmlId, 'peppol' => true, 'peppolMsg' => $msgId, 'toCheck' => true,
+        'status' => 'avalider', 'source' => 'peppol', 'ttc' => round($u['total'], 2),
+        'vatLines' => $u['vatLines'] ?: [['rate' => abs($near - $rate) < 0.3 ? $near : $rate, 'amount' => round($u['tax'], 2)]],
+        'iban' => $u['iban'], 'bic' => $u['bic'], 'communication' => preg_replace('/\D/', '', $u['payId']) !== '' && strlen(preg_replace('/\D/', '', $u['payId'])) === 12 ? preg_replace('/\D/', '', $u['payId']) : $u['payId'],
+        'structured' => strlen(preg_replace('/\D/', '', $u['payId'])) === 12,
     ], $uid);
     return ['id' => $id, 'label' => $label . ' – ' . $u['supplier']['name']];
 }

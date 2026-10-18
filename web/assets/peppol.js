@@ -215,6 +215,10 @@ function parseUBL(xmlText) {
     base: base * sign, tax: tax * sign, total: num(txt(root, 'LegalMonetaryTotal', 'TaxInclusiveAmount')) * sign, payable: num(txt(root, 'LegalMonetaryTotal', 'PayableAmount')) * sign,
     lines: [...kids(root, 'InvoiceLine'), ...kids(root, 'CreditNoteLine')].map((l) => txt(l, 'Item', 'Name')).filter(Boolean),
     attachments,
+    // TVA par taux, coordonnées de paiement
+    vatLines: kids(root, 'TaxTotal').flatMap((t) => kids(t, 'TaxSubtotal')).map((st) => ({ rate: num(txt(st, 'TaxCategory', 'Percent')), base: num(txt(st, 'TaxableAmount')) * sign, amount: num(txt(st, 'TaxAmount')) * sign })),
+    iban: txt(root, 'PaymentMeans', 'PayeeFinancialAccount', 'ID').replace(/\s/g, ''), bic: txt(root, 'PaymentMeans', 'PayeeFinancialAccount', 'FinancialInstitutionBranch', 'ID'),
+    payId: txt(root, 'PaymentMeans', 'PaymentID'),
   };
 }
 // ---------------------------------------------------------------- Paramètres Peppol

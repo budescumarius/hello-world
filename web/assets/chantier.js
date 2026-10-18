@@ -204,111 +204,31 @@ async function tabPInvoices(p, el, contacts) {
 }
 
 // ---------------------------------------------------------------- Achats & dépenses
-async function editExpense(e, preset = {}) {
-  const [contacts, projects] = await Promise.all([db.list('contact'), db.list('project')]);
-  const d = e ? e.data : { date: today(), category: 'mat', vat: defVat(), ...preset };
-  let fileId = d.fileId; let fileName = d.fileName;
-  const alloc = (d.alloc || []).map((x) => ({ ...x }));
-  let guess = !d.supplierId ? d.supplierGuess : null;
-  let getAlloc = () => null;
-  const note = e ? (d.toCheck ? (d.peppol ? 'Reçue via Peppol : choisissez le chantier puis enregistrez.' : 'À vérifier.') : '') : d.readNote;
-  formModal({
-    title: e ? 'Achat / dépense' : 'Nouvel achat', wide: true, values: { ...d, project_id: e ? e.project_id : preset.project_id },
-    fields: [
-      ...(note ? [{ name: 'note', type: 'html', cls: 'full', html: `<div class="hint-box">${esc(note)}</div>` }] : []),
-      { name: 'desc', label: 'Description', required: true, cls: 'full', placeholder: 'ex. Facture blocs béton' },
-      { name: 'supplierId', label: 'Fournisseur', type: 'contact', contacts, kinds: ['fournisseur', 'soustraitant', 'autre'] },
-      ...(guess ? [{ name: 'guess', type: 'html', cls: 'full', html: `<div class="hint-box" data-guess>Fournisseur lu sur la facture : <b>${esc(guess.name || '?')}</b>${guess.vat ? ` (TVA ${esc(guess.vat)})` : ''} <button type="button" class="btn sm" data-mksup>${I.plus} Créer ce fournisseur</button></div>` }] : []),
-      { name: 'date', label: 'Date', type: 'date' }, { name: 'ref', label: 'N° facture fournisseur' },
-      { name: 'amount', label: 'Montant HT', type: 'money', required: true }, { name: 'vat', label: 'TVA', type: 'select', options: vatOptions(d.vat) },
-      { name: 'due', label: 'Échéance', type: 'date' }, { name: 'paid', label: 'Payée', type: 'check' },
-      { name: 'project_id', label: 'Chantier', type: 'select', options: [['', '— frais généraux —'], ...projects.map((p) => [p.id, `${p.number} · ${p.data.name}`])] },
-      { name: 'category', label: 'Type de coût', type: 'select', options: optsOf(TYPES) },
-      { name: 'alloc', type: 'html', cls: 'full', html: `<div class="alloc" data-alloc><label class="chk"><input type="checkbox" data-split ${alloc.length > 1 ? 'checked' : ''}><span>Répartir sur plusieurs chantiers (suivi de chaque chantier)</span></label><div data-rows></div><div class="alloc-foot"><button type="button" class="btn sm" data-addrow>${I.plus} Chantier</button><span class="grow"></span><b data-restinfo></b></div></div>` },
-      { name: 'file', type: 'html', cls: 'full', html: `<span class="lbl">Pièce jointe (photo ou PDF)</span><div class="file-pick"><span data-fn>${fileId ? `<a href="${fileUrl(fileId)}" target="_blank">${esc(fileName)}</a>` : '<span class="muted">Aucune</span>'}</span><button type="button" class="btn sm" data-up>${I.camera} Joindre</button></div>` },
-    ],
-    after: (form) => {
-      getAlloc = allocEditor(form, { projects, alloc, amountField: form.elements.amount, projectField: form.elements.project_id, category: () => form.elements.category.value });
-      const mk = $('[data-mksup]', form);
-      if (mk) mk.onclick = async () => {
-        const c = await editContact(null, { kind: 'fournisseur', company: guess.name || '', vat: guess.vat || '', peppolId: guess.peppolId || '', address: guess.address || '', zip: guess.zip || '', city: guess.city || '', email: guess.email || '' });
-        if (!c) return;
-        const sel = form.elements.supplierId;
-        sel.insertAdjacentHTML('afterbegin', `<option value="${c.id}">${esc(contactName(c))}</option>`); sel.value = c.id;
-        $('[data-guess]', form).remove(); guess = null;
-      };
-      $('[data-up]', form).onclick = async () => {
-        const [file] = await pickFile('image/*,application/pdf'); if (!file) return;
-        toast('Envoi…', 10000);
-        const pid = form.elements.project_id.value;
-        const r = file.type.startsWith('image/') ? await uploadPhoto(file, pid) : await upload(file, pid);
-        fileId = r.id; fileName = r.name; $('[data-fn]', form).innerHTML = `<a href="${fileUrl(fileId)}" target="_blank">${esc(fileName)}</a>`; toast('Fichier joint');
-      };
-    },
-    async onSave(v) {
-      const rows = getAlloc();
-      await resolveContact(v, 'supplierId', 'fournisseur');
-      const it = e || { data: {} };
-      delete v.note; delete v.guess; delete v.alloc; delete v.file;
-      if (rows && rows.length > 1) { it.project_id = null; v.alloc = rows; v.category = rows[0].category; }
-      else if (rows && rows.length === 1) { it.project_id = rows[0].pid; v.category = rows[0].category; v.alloc = null; }
-      else { it.project_id = v.project_id ? +v.project_id : null; v.alloc = null; }
-      delete v.project_id;
-      it.data = { ...it.data, ...v, amount: num(v.amount), vat: num(v.vat), fileId, fileName, toCheck: false };
-      delete it.data.readNote; delete it.data.supplierGuess;
-      if (!it.data.alloc) delete it.data.alloc;
-      await persist('expense', it); render();
-    },
-    onDelete: e ? async () => { await delFile(d.fileId); if (d.xmlFileId) await delFile(d.xmlFileId); await db.del('expense', e.id); render(); } : null,
-  });
-}
-// pid : tableau d'un chantier (montants = part de ce chantier)
-function expensesTable(el, rows, contacts, projects, showProject, pid) {
-  const amt = (e) => (pid ? expenseAmountFor(e, pid) : num(e.data.amount));
-  const cat = (e) => (pid ? (expenseFor(e, pid)[0] || {}).category : e.data.category);
-  const where = (e) => {
-    if (isSplit(e)) return `${badge('Ventilé', '#7048e8')} <small class="muted">${expenseParts(e).map((x) => esc(x.pid ? (byId(projects, x.pid) || { data: { name: '?' } }).data.name : 'Frais généraux')).join(', ')}</small>`;
-    return esc((byId(projects, e.project_id) || { data: { name: 'Frais généraux' } }).data.name);
-  };
-  dataTable(el, {
-    rows, state: { sort: -1 },
-    search: (e) => [e.data.desc, e.data.ref, contactName(byId(contacts, e.data.supplierId))].join(' '),
-    filters: { def: '', options: [['', 'Tout'], ['check', 'À vérifier', '#e8590c'], ...Object.entries(TYPES).map(([k, l]) => [k, l, TYPE_COLORS[k]])], match: (e, f) => (f === 'check' ? !!e.data.toCheck : cat(e) === f) },
-    columns: [
-      { l: 'Date', v: (e) => fmtDate(e.data.date), sort: (e) => e.data.date }, { l: 'Description', v: (e) => `<b>${esc(e.data.desc)}</b>${e.data.peppol ? ` ${badge('Peppol', '#0c8599')}` : ''}${e.data.toCheck ? ` ${badge('À vérifier', '#e8590c')}` : ''}${pid && isSplit(e) ? ` ${badge('Ventilé', '#7048e8')}` : ''}${e.data.ref ? `<br><small class="muted">${esc(e.data.ref)}</small>` : ''}` },
-      { l: 'Fournisseur', v: (e) => esc(contactName(byId(contacts, e.data.supplierId))) },
-      ...(showProject ? [{ l: 'Chantier', v: where }] : []),
-      { l: 'Type', v: (e) => `<i class="tdot" style="--c:${TYPE_COLORS[cat(e)] || '#999'}"></i>${esc(TYPES[cat(e)] || '')}` },
-      { l: 'Pièce', v: (e) => (e.data.fileId ? `<a href="${fileUrl(e.data.fileId)}" target="_blank">${I.file}</a>` : '') },
-      { l: 'Payée', v: (e) => (e.data.paid ? badge('Payée', '#2f9e44') : (e.data.due && e.data.due < today() ? badge('En retard', '#e5484d') : badge('À payer', '#f08c00'))) },
-      { l: pid ? 'HT (part du chantier)' : 'HT', cls: 'r', v: (e) => `<b>${money(amt(e))}</b>${pid && isSplit(e) ? `<br><small class="muted">sur ${money(e.data.amount)}</small>` : ''}`, sort: amt },
-    ],
-    onRow: (e) => editExpense(e), empty: 'Aucun achat enregistré',
-    footer: (l) => `<tr><td colspan="${showProject ? 7 : 6}">Total</td><td class="r"><b>${money(l.reduce((a, e) => a + amt(e), 0))}</b></td></tr>`,
-  });
-}
 async function tabPExpenses(p, el, contacts) {
   const [all, projects] = await Promise.all([db.list('expense'), db.list('project')]);
   const rows = all.filter((e) => expenseFor(e, p.id).length);
-  el.innerHTML = `<div class="toolbar"><span class="grow"></span><button class="btn" data-act="imp">${I.file} Importer une facture (PDF / XML)</button><button class="btn primary" data-act="ne">${I.plus} Nouvel achat</button></div><div id="tbl"></div>`;
+  el.innerHTML = `<div class="toolbar"><span class="grow"></span><button class="btn" data-act="imp">${I.upload} Importer une facture</button><button class="btn primary" data-act="ne">${I.plus} Saisie manuelle</button></div><div id="tbl"></div>`;
   $('[data-act=imp]', el).onclick = () => importPurchase(p.id);
   expensesTable($('#tbl', el), rows, contacts, projects, false, p.id);
   $('[data-act=ne]', el).onclick = () => editExpense(null, { project_id: p.id });
 }
 route('expenses', async () => {
   const [rows, contacts, projects] = await Promise.all([db.list('expense'), db.list('contact'), db.list('project')]);
-  const page = layout({ active: 'finances', icon: 'coins', title: 'Achats & dépenses', actions: `<button class="btn" data-act="csv">Export CSV</button>${peppolApOn() ? `<button class="btn" data-act="sync">Recevoir (Peppol)</button>` : ''}<button class="btn" data-act="imp">${I.file} Importer une facture</button><button class="btn primary" data-act="ne">${I.plus} Nouvel achat</button>` });
-  $('[data-act=imp]').onclick = () => importPurchase();
+  const page = layout({ active: 'finances', icon: 'coins', title: 'Factures fournisseurs', actions: `<button class="btn" data-act="csv">Export CSV</button>${peppolApOn() ? `<button class="btn" data-act="sync">Recevoir (Peppol)</button>` : ''}<button class="btn primary" data-act="new">${I.plus} Nouveau</button>` });
   const sy = $('[data-act=sync]'); if (sy) sy.onclick = async () => { sy.disabled = true; const r = await peppolSync({ force: true, quiet: false }); sy.disabled = false; if (r && r.created.length) render(); };
-  const unpaid = rows.filter((e) => !e.data.paid);
-  const toCheck = rows.filter((e) => e.data.toCheck);
-  page.innerHTML = `${toCheck.length ? `<div class="hint-box warn">${toCheck.length} facture(s) reçue(s) à vérifier : choisissez le chantier (ou répartissez entre plusieurs) puis enregistrez. <a href="#" data-chk>Afficher</a></div>` : ''}
-    <div class="kpis">${kpi('Achats ce mois-ci HT', money(rows.filter((e) => (e.data.date || '').startsWith(today().slice(0, 7))).reduce((a, e) => a + num(e.data.amount), 0)))}${kpi('Factures fournisseurs à payer', money(unpaid.reduce((a, e) => a + num(e.data.amount) + (e.data.vatAmount != null ? num(e.data.vatAmount) : num(e.data.amount) * num(e.data.vat) / 100), 0)), { sub: `${unpaid.length} facture(s) TVAC`, cls: unpaid.some((e) => e.data.due && e.data.due < today()) ? 'bad' : '' })}</div><div id="tbl"></div>`;
+  $('[data-act=new]').onclick = () => menuSheet('Nouvelle facture fournisseur', [
+    { label: 'Importer la facture (PDF, XML, photo)', icon: 'upload', primary: true, run: () => importPurchase() },
+    { label: 'Saisie manuelle', icon: 'edit', run: () => editExpense() },
+  ]);
+  const by = (s) => rows.filter((e) => purchState(e) === s);
+  const ttcSum = (l) => l.reduce((a, e) => a + purchTtc(e.data), 0);
+  page.innerHTML = `${by('avalider').length ? `<div class="hint-box warn">${by('avalider').length} facture(s) à valider : vérifiez les montants, liez-les aux chantiers puis « Soumettre ». <a href="#" data-chk>Afficher</a></div>` : ''}
+    <div class="kpis">${kpi('À valider', by('avalider').length, { cls: by('avalider').length ? 'warn' : '' })}${kpi('À payer TVAC', money(ttcSum([...by('apayer'), ...by('retard')])), { sub: `${by('apayer').length + by('retard').length} facture(s)` })}
+      ${kpi('En retard', money(ttcSum(by('retard'))), { cls: by('retard').length ? 'bad' : '', sub: `${by('retard').length} facture(s)` })}${kpi('Achats ce mois-ci HT', money(rows.filter((e) => (e.data.date || '').startsWith(today().slice(0, 7))).reduce((a, e) => a + num(e.data.amount), 0)))}</div><div id="tbl"></div>`;
   expensesTable($('#tbl'), rows, contacts, projects, true);
-  const ck = $('[data-chk]'); if (ck) ck.onclick = (ev) => { ev.preventDefault(); const chip = $('#tbl [data-f="check"]'); if (chip) chip.click(); };
-  $('[data-act=ne]').onclick = () => editExpense();
-  $('[data-act=csv]').onclick = () => downloadCSV('achats.csv', [['Date', 'Description', 'Ref', 'Fournisseur', 'Chantier', 'Type', 'HT', 'TVA %', 'Payee'],
-    ...rows.flatMap((e) => expenseParts(e).map((x) => [fmtDate(e.data.date), e.data.desc, e.data.ref, contactName(byId(contacts, e.data.supplierId)), x.pid ? (byId(projects, x.pid) || { data: {} }).data.name : 'Frais généraux', TYPES[x.category], fnum(x.amount), e.data.vat, e.data.paid ? 'oui' : 'non']))]);
+  const ck = $('[data-chk]'); if (ck) ck.onclick = (ev) => { ev.preventDefault(); const chip = $('#tbl [data-f="avalider"]'); if (chip) chip.click(); };
+  $('[data-act=csv]').onclick = () => downloadCSV('factures-fournisseurs.csv', [['Date', 'Reference', 'Fournisseur', 'Chantier', 'Type', 'HT', 'TVA', 'TTC', 'Echeance', 'Statut', 'IBAN', 'Communication'],
+    ...rows.flatMap((e) => expenseParts(e).map((x) => [fmtDate(e.data.date), e.data.ref, contactName(byId(contacts, e.data.supplierId)), x.pid ? (byId(projects, x.pid) || { data: {} }).data.name : 'Frais généraux', TYPES[x.category], fnum(x.amount), fnum(num(e.data.vatAmount)), fnum(purchTtc(e.data)), fmtDate(e.data.due), PURCH_ST[purchState(e)][0], e.data.iban || '', e.data.structured ? commFmt(e.data.communication || '') : (e.data.communication || '')]))]);
   if (peppolApOn()) peppolSync().then((r) => { if (r && r.created.length && location.hash.startsWith('#/expenses')) render(); });
 });
 

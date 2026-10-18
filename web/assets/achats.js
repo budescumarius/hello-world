@@ -12,64 +12,23 @@ const expenseFor = (e, pid) => expenseParts(e).filter((x) => x.pid === pid);
 const expenseAmountFor = (e, pid) => expenseFor(e, pid).reduce((a, x) => a + x.amount, 0);
 const isSplit = (e) => Array.isArray(e.data.alloc) && e.data.alloc.length > 1;
 
-// Éditeur de répartition dans la fiche d'achat
-function allocEditor(form, { projects, alloc, amountField, projectField, category }) {
-  const box = $('[data-alloc]', form);
-  const pOpts = (sel) => `<option value="">— frais généraux —</option>${projects.map((p) => `<option value="${p.id}" ${+sel === p.id ? 'selected' : ''}>${esc(`${p.number} · ${p.data.name}`)}</option>`).join('')}`;
-  const tOpts = (sel) => Object.entries(TYPES).map(([k, l]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${esc(l)}</option>`).join('');
-  const total = () => num(amountField.value);
-  const draw = () => {
-    const on = $('[data-split]', box).checked;
-    projectField.closest('.field').style.display = on ? 'none' : '';
-    $('[data-rows]', box).innerHTML = on ? alloc.map((a, i) => `<div class="alloc-row" data-i="${i}">
-      <select data-k="pid" aria-label="Chantier">${pOpts(a.pid)}</select>
-      <input data-k="amount" inputmode="decimal" placeholder="Montant HT" value="${a.amount === '' || a.amount == null ? '' : fnum(num(a.amount))}" aria-label="Montant HT">
-      <select data-k="category" aria-label="Type de coût">${tOpts(a.category || category())}</select>
-      <button type="button" class="btn sm" data-rest="${i}" title="Mettre le reste ici">= reste</button>
-      <button type="button" class="icon-btn sm" data-rm="${i}" aria-label="Retirer">✕</button></div>`).join('') : '';
-    $('[data-addrow]', box).hidden = !on;
-    rest();
-    $$('.alloc-row', box).forEach((row) => {
-      const i = +row.dataset.i;
-      $$('[data-k]', row).forEach((inp) => { inp.oninput = inp.onchange = () => { alloc[i][inp.dataset.k] = inp.dataset.k === 'amount' ? inp.value : inp.value; rest(); }; });
-      $('[data-rm]', row).onclick = () => { alloc.splice(i, 1); if (!alloc.length) $('[data-split]', box).checked = false; draw(); };
-      $('[data-rest]', row).onclick = () => { const r = total() - alloc.reduce((s, a, j) => s + (j === i ? 0 : num(a.amount)), 0); alloc[i].amount = r2(r); draw(); };
-    });
-  };
-  const rest = () => {
-    const el = $('[data-restinfo]', box);
-    if (!$('[data-split]', box).checked) { el.textContent = ''; return; }
-    const r = r2(total() - alloc.reduce((s, a) => s + num(a.amount), 0));
-    el.className = Math.abs(r) < 0.01 ? 'good' : 'late';
-    el.textContent = Math.abs(r) < 0.01 ? `Réparti : ${money(total())} ✓` : `Reste à répartir : ${money(r)}`;
-  };
-  $('[data-split]', box).onchange = () => {
-    if ($('[data-split]', box).checked && !alloc.length) alloc.push({ pid: projectField.value, amount: total() || '', category: category() }, { pid: '', amount: '', category: category() });
-    draw();
-  };
-  $('[data-addrow]', box).onclick = () => { alloc.push({ pid: '', amount: '', category: category() }); draw(); };
-  amountField.addEventListener('input', rest);
-  draw();
-  // valeur finale (lève une erreur si la répartition ne tombe pas juste)
-  return () => {
-    if (!$('[data-split]', box).checked) return null;
-    const rows = alloc.filter((a) => num(a.amount) !== 0).map((a) => ({ pid: a.pid ? +a.pid : null, amount: r2(num(a.amount)), category: a.category || category() }));
-    const r = r2(total() - rows.reduce((s, a) => s + a.amount, 0));
-    if (Math.abs(r) >= 0.01) throw new Error(`la répartition ne correspond pas au montant HT (reste ${money(r)})`);
-    return rows;
-  };
-}
-
 // ---------------------------------------------------------------- Import d'une facture fournisseur : PDF, XML (UBL / Peppol) ou photo
+// Chaque fichier devient une facture « À valider » (comme une facture reçue via Peppol), puis s'ouvre pour vérification
 async function importPurchase(projectId) {
-  const [file] = await pickFile('.pdf,.xml,application/pdf,application/xml,text/xml,image/*');
-  if (!file) return;
-  toast('Lecture de la facture…', 20000);
-  try {
-    const preset = await purchasePreset(file, projectId);
-    toast(preset.readNote ? 'Facture lue – vérifiez les montants' : 'Fichier joint', 2500);
-    editExpense(null, preset);
-  } catch (e) { console.error(e); toast('Lecture impossible : ' + e.message, 6000); }
+  const files = await pickFile('.pdf,.xml,application/pdf,application/xml,text/xml,image/*', true);
+  if (!files.length) return;
+  const made = [];
+  for (const [i, file] of files.entries()) {
+    toast(`Lecture de la facture${files.length > 1 ? ` ${i + 1}/${files.length}` : ''}…`, 30000);
+    try {
+      const pr = await purchasePreset(file, projectId);
+      const pid = pr.project_id ? +pr.project_id : null; delete pr.project_id;
+      made.push(await persist('expense', { project_id: pid, data: { ...pr, status: 'avalider', toCheck: true } }));
+    } catch (e) { console.error(e); toast(`${file.name} : lecture impossible (${e.message})`, 6000); }
+  }
+  if (!made.length) return;
+  toast(made.length > 1 ? `${made.length} factures ajoutées « À valider »` : 'Facture lue – vérifiez et soumettez', 3000);
+  if (made.length === 1) go(`#/purchase/${made[0].id}`); else render();
 }
 
 async function purchasePreset(file, projectId) {
@@ -78,7 +37,7 @@ async function purchasePreset(file, projectId) {
   const isPdf = /\.pdf$/i.test(file.name) || file.type === 'application/pdf';
   if (isXml) {
     const u = parseUBL(await file.text());
-    return { ...base, ...(await presetFromUBL(u, null, projectId)), readNote: `Facture électronique ${u.number} lue (Peppol / UBL).` };
+    return { ...base, ...(await presetFromUBL(u, null, projectId)), source: 'xml', readNote: `Facture électronique ${u.number} lue (Peppol / UBL).` };
   }
   if (isPdf) {
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -101,11 +60,13 @@ async function purchasePreset(file, projectId) {
     const hasTxt = text.replace(/\s/g, '').length > 30;
     return { ...base, fileId: up.id, fileName: up.name, desc: g.ref ? `Facture ${g.ref}` : file.name.replace(/\.pdf$/i, ''), ref: g.ref || '', date: g.date || today(), due: g.due || '',
       ...(g.base != null ? { amount: g.base } : {}), ...(g.rate != null ? { vat: g.rate } : {}), ...(g.tax != null ? { vatAmount: g.tax } : {}),
+      ...(g.total != null ? { ttc: g.total } : {}), ...(g.tax != null ? { vatLines: [{ rate: g.rate != null ? g.rate : defVat(), amount: g.tax }] } : {}),
+      iban: g.iban || '', communication: g.comm || '', structured: !!g.comm && g.comm.length === 12, source: 'pdf',
       supplierId: sup ? sup.id : '', supplierGuess: !sup && (g.name || g.vat) ? { name: g.name, vat: g.vatRaw } : null,
       readNote: hasTxt ? `Lu dans le PDF : ${[g.ref && 'n° ' + g.ref, g.date && 'date', g.total != null && 'total ' + money(g.total), g.vatRaw && 'TVA ' + g.vatRaw].filter(Boolean).join(' · ') || 'peu d\'informations reconnues'}. Vérifiez les montants.` : 'PDF scanné (image) : complétez les montants à la main.' };
   }
   const up = file.type.startsWith('image/') ? await uploadPhoto(file, projectId) : await upload(file, projectId);
-  return { ...base, fileId: up.id, fileName: up.name, desc: '', readNote: '' };
+  return { ...base, fileId: up.id, fileName: up.name, desc: file.name.replace(/\.\w+$/, ''), source: 'photo', readNote: '' };
 }
 
 const digitsOf = (v) => String(v || '').replace(/\D/g, '').replace(/^0+(?=\d{9}$)/, '');
@@ -125,7 +86,9 @@ async function presetFromUBL(u, uploaded, projectId) {
   const near = vatList().reduce((best, x) => (Math.abs(x - rate) < Math.abs(best - rate) ? x : best), vatList()[0]);
   return {
     desc: `${u.kind === 'CreditNote' ? 'Note de crédit' : 'Facture'} ${u.number}${u.lines[0] ? ' – ' + u.lines[0] : ''}`, ref: u.number, date: u.date || today(), due: u.due || '',
-    amount: r2(u.base), vat: Math.abs(near - rate) < 0.3 ? near : rate, vatAmount: r2(u.tax), peppol: true, fileId, fileName,
+    amount: r2(u.base), vat: Math.abs(near - rate) < 0.3 ? near : rate, vatAmount: r2(u.tax), peppol: true, fileId, fileName, ttc: r2(u.total),
+    vatLines: (u.vatLines || []).length ? u.vatLines.map((x) => ({ rate: x.rate, amount: r2(x.amount) })) : [{ rate: Math.abs(near - rate) < 0.3 ? near : rate, amount: r2(u.tax) }],
+    iban: u.iban || '', bic: u.bic || '', communication: (u.payId || '').replace(/\D/g, '').length === 12 ? u.payId.replace(/\D/g, '') : (u.payId || ''), structured: (u.payId || '').replace(/\D/g, '').length === 12,
     supplierId: sup ? sup.id : '',
     supplierGuess: sup ? null : { name: u.supplier.name, vat: u.supplier.vat, peppolId: u.supplier.endpoint, address: u.supplier.street, zip: u.supplier.zip, city: u.supplier.city, email: u.supplier.email },
   };
@@ -202,7 +165,13 @@ function parseInvoiceText(text) {
   // nom probable du fournisseur : première ligne « société » du document
   const coName = (company().name || '').toLowerCase();
   const name = lines.slice(0, 12).find((l) => /[a-z]{3}/i.test(l) && l.length <= 60 && !/factu|invoice|date|page|tél|tel\b|@|www|^\d|iban|tva|btw|vat|rue|straat|avenue|chaussée|^n[°º]/i.test(l) && (!coName || !l.toLowerCase().includes(coName))) || '';
-  return { total, base, tax, rate, date, due, ref, vat, vatRaw, name, vatLine };
+  // IBAN du fournisseur (pas le nôtre) et communication structurée +++123/4567/89012+++
+  const ownIban = String(company().iban || '').replace(/\s/g, '').toUpperCase();
+  let iban = null;
+  for (const m of String(text).toUpperCase().matchAll(/\b([A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}(?:[ ]?[A-Z0-9]{1,4})?)\b/g)) { const v = m[1].replace(/\s/g, ''); if (/^(BE\d{14}|LU\d{18}|NL\d{2}[A-Z]{4}\d{10}|FR\d{12}[A-Z0-9]{11}\d{2}|DE\d{20})$/.test(v) && v !== ownIban) { iban = v; break; } }
+  const cm = String(text).match(/\+{3}\s*(\d{3})\s*\/\s*(\d{4})\s*\/\s*(\d{5})\s*\+{3}/) || String(text).match(/\*{3}\s*(\d{3})\s*\/\s*(\d{4})\s*\/\s*(\d{5})\s*\*{3}/);
+  const comm = cm ? cm[1] + cm[2] + cm[3] : null;
+  return { total, base, tax, rate, date, due, ref, vat, vatRaw, name, vatLine, iban, comm };
 }
 
 // ---------------------------------------------------------------- Réception Peppol automatique (point d'accès Peppyrus)
