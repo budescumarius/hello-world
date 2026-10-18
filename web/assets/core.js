@@ -101,9 +101,11 @@ const delFile = (id) => (id ? api('DELETE', `files/${id}`).catch(() => {}) : nul
 
 function pickFile(accept, multiple = false) {
   return new Promise((res) => {
+    // l'élément reste dans la page le temps de la lecture : certains navigateurs perdent l'accès au fichier sinon
     const inp = document.createElement('input');
-    inp.type = 'file'; inp.accept = accept; inp.multiple = multiple;
-    inp.onchange = () => res([...inp.files]);
+    inp.type = 'file'; inp.accept = accept; inp.multiple = multiple; inp.hidden = true;
+    document.body.appendChild(inp);
+    inp.onchange = () => { res([...inp.files]); setTimeout(() => inp.remove(), 120000); };
     inp.click();
   });
 }

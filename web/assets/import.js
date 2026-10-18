@@ -13,9 +13,18 @@ function loadXLSX() {
   return xlsxP;
 }
 // Renvoie { feuille: lignes[][] }
-async function readSheets(file) {
+// Lit le contenu du fichier tout de suite (avant tout chargement), avec FileReader en secours
+function readBytes(file) {
+  const viaReader = () => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsArrayBuffer(file); });
+  return file.arrayBuffer().catch(viaReader).catch((e) => {
+    const err = new Error("le navigateur n'a pas pu lire le fichier. Fermez-le dans Excel, ou s'il se trouve dans OneDrive / iCloud / Google Drive, copiez-le d'abord sur le Bureau (ou dans Téléchargements), puis réessayez.");
+    err.cause = e; throw err;
+  });
+}
+async function readSheets(file, bytes) {
+  const buf = bytes || await readBytes(file);
   const X = await loadXLSX();
-  const wb = X.read(await file.arrayBuffer(), { type: 'array', cellDates: false });
+  const wb = X.read(buf, { type: 'array', cellDates: false });
   const out = {};
   for (const name of wb.SheetNames) {
     const rows = X.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '', blankrows: false });
@@ -36,9 +45,10 @@ function xnum(v) {
 const has = (v) => v !== '' && v != null && !(typeof v === 'number' && isNaN(v));
 
 // Assistant : choix de la feuille, de la ligne d'en-tête et des colonnes. fields : [{ key, label, syn: [...] }]
-async function importWizard({ title, fields, file }) {
+async function importWizard({ title, fields, file, bytes }) {
+  const bytesP = bytes || readBytes(file);
   let sheets;
-  try { toast('Lecture du fichier…', 15000); sheets = await readSheets(file); toast('Fichier lu', 800); } catch (e) { toast('Lecture impossible : ' + e.message, 5000); return null; }
+  try { toast('Lecture du fichier…', 15000); sheets = await readSheets(file, await bytesP); toast('Fichier lu', 800); } catch (e) { toast('Lecture impossible : ' + e.message, 9000); return null; }
   const names = Object.keys(sheets).filter((n) => sheets[n].length);
   if (!names.length) { toast('Le fichier est vide'); return null; }
   const score = (row) => fields.reduce((a, f) => a + (row.some((c) => f.syn.includes(normKey(c))) ? 1 : 0), 0);
@@ -112,7 +122,9 @@ function classifyRows(rows) {
 async function importLinesExcel(onLines) {
   const [file] = await pickFile('.xlsx,.xls,.xlsm,.ods,.csv');
   if (!file) return;
-  const res = await importWizard({ title: `Importer des lignes – ${file.name}`, fields: QUOTE_FIELDS, file });
+  const bytes = readBytes(file);
+  bytes.catch(() => {});
+  const res = await importWizard({ title: `Importer des lignes – ${file.name}`, fields: QUOTE_FIELDS, file, bytes });
   if (!res) return;
   const cls = classifyRows(res.rows).filter((x) => x.kind !== 'skip' || x.desc);
   if (!cls.length) return toast('Aucune ligne reconnue');
@@ -171,8 +183,8 @@ async function importContacts(defKind = 'client') {
   const [file] = await pickFile('.xlsx,.xls,.ods,.csv,.vcf');
   if (!file) return;
   let rows;
-  if (/\.vcf$/i.test(file.name)) rows = parseVCards(await file.text());
-  else { const res = await importWizard({ title: `Importer des contacts – ${file.name}`, fields: CONTACT_IMPORT, file }); if (!res) return; rows = res.rows; }
+  if (/\.vcf$/i.test(file.name)) { try { rows = parseVCards(new TextDecoder().decode(await readBytes(file))); } catch (e) { return toast('Lecture impossible : ' + e.message, 9000); } }
+  else { const bytes = readBytes(file); bytes.catch(() => {}); const res = await importWizard({ title: `Importer des contacts – ${file.name}`, fields: CONTACT_IMPORT, file, bytes }); if (!res) return; rows = res.rows; }
   const existing = await db.list('contact');
   const clean = (s) => String(s ?? '').trim();
   const kindOf = (s) => { const k = normKey(s); if (!k) return defKind; return Object.keys(CONTACT_KINDS).find((x) => k.startsWith(normKey(x).slice(0, 5)) || normKey(CONTACT_KINDS[x]).startsWith(k.slice(0, 5))) || ({ leverancier: 'fournisseur', supplier: 'fournisseur', furnizor: 'fournisseur', klant: 'client', customer: 'client', onderaannemer: 'soustraitant' }[k]) || defKind; };

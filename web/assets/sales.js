@@ -119,7 +119,8 @@ async function importLibrary(existing) {
   const [file] = await pickFile('.csv,text/csv,.xlsx,.xls,.ods');
   if (!file) return;
   try {
-    const rows = /\.csv$/i.test(file.name) ? parseCSV(await file.text()) : Object.values(await readSheets(file))[0].map((r) => r.map((c) => String(c ?? '')));
+    const bytes = await readBytes(file);
+    const rows = /\.csv$/i.test(file.name) ? parseCSV(new TextDecoder().decode(bytes)) : Object.values(await readSheets(file, bytes))[0].map((r) => r.map((c) => String(c ?? '')));
     const h = rows[0].map(normKey);
     const col = (...n) => h.findIndex((x) => n.includes(x));
     const ix = { code: col('code', 'ref', 'reference'), name: col('designation', 'nom', 'libelle', 'name'), kind: col('type'), category: col('categorie', 'famille'), unit: col('unite', 'unit', 'u'),
