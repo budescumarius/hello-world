@@ -32,16 +32,19 @@ function editContact(c, preset = {}, opts = {}) {
     formModal({
       title: c ? contactName(c) : 'Nouveau contact', values, fields: contactFields(values.kind), wide: true, side: !!opts.side,
       extra: `<datalist id="trades">${TRADES.map((t) => `<option value="${t}">`).join('')}</datalist><datalist id="sources">${['Site web', 'Bouche-à-oreille', 'Recommandation', 'Salon', 'Réseaux sociaux', 'Architecte', 'Ancien client'].map((t) => `<option value="${t}">`).join('')}</datalist>`,
-      async onSave(v) {
+      async onSave(v, m) {
         if (!v.company && !v.name) throw new Error('Indiquez une société ou un nom');
         const it = c || { data: {} };
         it.data = { ...it.data, ...v };
+        const form = $('form', m.el); // dernier contrôle TVA (VIES) gardé sur la fiche
+        try { const vc = form && form.dataset.vatcheck && JSON.parse(form.dataset.vatcheck); if (vc && vc.vat.replace(/\D/g, '') === String(v.vat || '').replace(/\D/g, '')) it.data.vatCheck = vc; } catch (e) { /* pas de contrôle */ }
         saved = await persist('contact', it);
       },
       onDelete: c ? async () => { await db.del('contact', c.id); saved = null; go('#/contacts/all'); } : null,
       onClose: () => res(saved),
       after: (form, m) => {
         if (opts.side) opts.side($('[data-side]', m.el), form);
+        vatAutofill(form, { name: 'company', street: 'address', zip: 'zip', city: 'city', country: 'country' });
         $('[data-peppol]', form).onclick = () => {
           const d = { vat: form.elements.vat.value, peppolId: form.elements.peppolId.value };
           const id = peppolIdOf(d, countryCode(form.elements.country.value));

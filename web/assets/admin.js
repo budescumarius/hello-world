@@ -179,6 +179,7 @@ route('settings', async (tab = 'company') => {
   const form = $('form', page);
   const up = $('[data-uplogo]', form);
   if (up) up.onclick = async () => { const [f] = await pickFile('image/*'); if (!f) return; const r = await resizeImage(await blobToImg(f), 600, 'image/png'); const res = await upload(new File([r.blob], 'logo.png', { type: 'image/png' })); co.logoId = res.id; $('[data-logo]', form).innerHTML = `<img src="${fileUrl(res.id)}" style="max-height:60px">`; };
+  if (tab === 'company') vatAutofill(form, { name: 'name', street: 'street', zip: 'zip', city: 'city', country: 'country' }, { countryCode: true });
   form.onsubmit = async (e) => {
     e.preventDefault();
     const v = readFields(form, fields);
@@ -263,18 +264,20 @@ route('platform', async () => {
       <li>Chaque firme a ses propres données (clients, devis, factures, chantiers, achats, paramètres, Peppol) : les autres firmes ne les voient jamais.</li>
       <li>« Nouvelle firme » crée la firme et son premier <b>administrateur</b>. Communiquez-lui l'adresse de l'application, son email et son mot de passe.</li>
       <li>L'administrateur d'une firme crée lui-même ses collègues dans <b>Paramètres › Utilisateurs</b> (rôle Administrateur ou Utilisateur). Vous pouvez aussi le faire : « Entrer » dans la firme, puis Paramètres › Utilisateurs.</li>
-      <li>Une firme suspendue ne peut plus se connecter ; ses données sont conservées.</li>
+      <li>Une firme suspendue ne peut plus se connecter ; ses données sont conservées. La corbeille la supprime définitivement avec toutes ses données.</li>
     </ol></div>`;
   const edit = (c) => formModal({
     title: c ? c.name : 'Nouvelle firme', values: c ? { name: c.name } : { country: 'BE' },
     fields: c ? [{ name: 'name', label: 'Nom de la firme', required: true, cls: 'full' }] : [
-      { name: 'name', label: 'Nom de la firme', required: true }, { name: 'vat', label: 'N° TVA', placeholder: 'BE0123456789' },
+      { name: 'vat', label: 'N° TVA', placeholder: 'BE0123456789', hint: 'Vérifié automatiquement : nom et adresse remplis' }, { name: 'name', label: 'Nom de la firme', required: true },
       { name: 'country', label: 'Pays', type: 'select', options: [['BE', 'Belgique'], ['FR', 'France'], ['LU', 'Luxembourg'], ['CH', 'Suisse'], ['RO', 'Roumanie']] },
+      { name: 'street', label: 'Rue et numéro' }, { name: 'zip', label: 'Code postal' }, { name: 'city', label: 'Localité' },
       { name: 'html', type: 'html', cls: 'full', html: '<div class="section-t">Premier administrateur de la firme</div>' },
       { name: 'admin', label: 'Nom', required: true }, { name: 'email', label: 'Email (identifiant)', type: 'email', required: true },
       { name: 'password', label: 'Mot de passe (8 caractères min.)', type: 'text', required: true, hint: 'Communiquez-le à l\'administrateur ; il pourra le changer dans son profil.' },
     ],
     saveLabel: c ? 'Enregistrer' : 'Créer la firme',
+    after: (form) => { if (!c) vatAutofill(form, { name: 'name', street: 'street', zip: 'zip', city: 'city', country: 'country' }, { countryCode: true }); },
     async onSave(v) {
       if (c) await api('PUT', `platform/companies/${c.id}`, { name: v.name });
       else { await api('POST', 'platform/companies', v); toast(`Firme créée – ${v.email} peut se connecter`, 4000); }
@@ -290,13 +293,25 @@ route('platform', async () => {
       { l: 'Chantiers', cls: 'r', v: (c) => c.projects },
       { l: 'Dernière connexion', v: (c) => fmtDT(c.last_login) },
       { l: 'Statut', v: (c) => (c.active ? badge('Active', '#2f9e44') : badge('Suspendue', '#e5484d')) },
-      { l: '', v: (c) => `<span class="nowrap"><button class="btn sm primary" data-in="${c.id}">Entrer</button> <button class="btn sm" data-ed="${c.id}">${I.edit}</button>${c.id === S.me.company_id ? '' : ` <button class="btn sm" data-tg="${c.id}">${c.active ? 'Suspendre' : 'Réactiver'}</button>`}</span>` },
+      { l: '', v: (c) => `<span class="nowrap"><button class="btn sm primary" data-in="${c.id}">Entrer</button> <button class="btn sm" data-ed="${c.id}">${I.edit}</button>${c.id === S.me.company_id ? '' : ` <button class="btn sm" data-tg="${c.id}">${c.active ? 'Suspendre' : 'Réactiver'}</button> <button class="btn sm danger ghost" data-del="${c.id}" title="Supprimer la firme">${I.trash}</button>`}</span>` },
     ],
     empty: 'Aucune firme',
   });
   const byC = (id) => rows.find((c) => c.id === +id);
   page.addEventListener('click', async (e) => {
-    const b = e.target.closest('[data-in],[data-ed],[data-tg]'); if (!b) return;
+    const b = e.target.closest('[data-in],[data-ed],[data-tg],[data-del]'); if (!b) return;
+    if (b.dataset.del) {
+      const c = byC(b.dataset.del);
+      return formModal({
+        title: `Supprimer « ${c.name} »`, saveLabel: 'Supprimer définitivement',
+        fields: [{ name: 'w', type: 'html', cls: 'full', html: `<div class="hint-box warn">Suppression <b>définitive</b> de la firme, de ses ${c.users} utilisateur(s), de ses ${c.projects} chantier(s) et de toutes ses données (clients, devis, factures, achats, fichiers, paramètres, Peppol). Impossible d'annuler.<br>Pour garder les données, utilisez plutôt « Suspendre ».</div>` },
+          { name: 'confirm', label: `Tapez le nom de la firme pour confirmer : ${c.name}`, required: true, cls: 'full' }],
+        async onSave(v) {
+          if (v.confirm.trim().toLowerCase() !== c.name.trim().toLowerCase()) throw new Error('Le nom ne correspond pas');
+          await api('DELETE', `platform/companies/${c.id}`, { confirm: v.confirm }); toast(`Firme « ${c.name} » supprimée`, 3000); render();
+        },
+      });
+    }
     if (b.dataset.in) return switchFirm(+b.dataset.in === S.me.company_id ? 0 : +b.dataset.in);
     if (b.dataset.ed) return edit(byC(b.dataset.ed));
     const c = byC(b.dataset.tg);

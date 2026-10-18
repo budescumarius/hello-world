@@ -781,3 +781,16 @@ body:has(.pi-bar) .ai-fab { bottom: calc(84px + env(safe-area-inset-bottom)); }
 .vz-cgv.cgv-cols .vz-cgv-body { column-count: 2; column-gap: 26px; font-size: .95em; }
 @media screen and (max-width: 860px) { .vz-sheet { min-height: 0; padding: 22px 18px 40px; } .vz-pgno { right: 18px; } .vz-cgv.cgv-cols .vz-cgv-body { column-count: 1; } }
 @media print { .doc.vz.vz-paper { max-width: none; } .vz-sheet { min-height: 0; box-shadow: none; padding: 0; } .vz-sheet + .vz-sheet { margin-top: 0; break-before: page; page-break-before: always; } }
+
+/* TVA (VIES), obligations sociales */
+.vat-res { margin-top: 6px; font-size: 12.5px; line-height: 1.4; }
+.vat-ok { color: #2b8a3e; } .vat-ok b { color: #1b5e20; }
+.vat-bad { color: #c92a2a; }
+.soc-row { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--border); }
+.soc-row:first-of-type { border-top: 0; }
+.copy-rows { display: grid; gap: 4px; margin: 6px 0 12px; }
+.copy-rows > div { display: grid; grid-template-columns: minmax(120px, 210px) minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 10px; background: var(--surface-2); border-radius: 8px; }
+.copy-rows b { overflow-wrap: anywhere; font-weight: 600; }
+.soc-res { margin: 8px 0; }
+[data-ret] .btns { margin-top: 12px; }
+@media (max-width: 600px) { .copy-rows > div { grid-template-columns: minmax(0, 1fr) auto; } .copy-rows > div > span { grid-column: 1 / -1; } }

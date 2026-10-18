@@ -361,7 +361,13 @@ switch ($seg[0] ?? '') {
         if (is_array($name)) $name = $name[0]['name'] ?? ($name['name'] ?? null);
         out(['registered' => (int)($j['total-result-count'] ?? 0) > 0 || count($matches) > 0, 'name' => is_string($name) ? $name : null, 'country' => $ent['countryCode'] ?? null]);
 
-    // ------------------------------------------------------------ Envoi d'un document par email (PV, rapport de points…)
+    // ------------------------------------------------------------ Numéro de TVA : vérification VIES (actif ?) + nom et adresse officiels
+    case 'vat':
+        require_user();
+        if (($seg[1] ?? '') !== 'lookup') fail(404, 'Route inconnue');
+        out(vat_lookup((string)($_GET['vat'] ?? ''), (string)($_GET['cc'] ?? 'BE')));
+
+
     case 'mail':
         $me = require_user();
         if ($method !== 'POST') fail(404, 'Route inconnue');
@@ -440,11 +446,30 @@ switch ($seg[0] ?? '') {
             $cid = (int)db()->lastInsertId();
             $country = in_array($b['country'] ?? 'BE', ['BE', 'FR', 'LU', 'CH', 'RO'], true) ? $b['country'] : 'BE';
             set_setting('company', ['name' => $name, 'currency' => 'EUR', 'vatRates' => [21, 12, 6, 0], 'defaultVat' => 21, 'country' => $country,
-                'vat' => trim((string)($b['vat'] ?? ''))], $cid);
+                'vat' => trim((string)($b['vat'] ?? '')), 'street' => trim((string)($b['street'] ?? '')), 'zip' => trim((string)($b['zip'] ?? '')), 'city' => trim((string)($b['city'] ?? '')),
+                'address' => trim(trim((string)($b['street'] ?? '')) . "\n" . trim(trim((string)($b['zip'] ?? '')) . ' ' . trim((string)($b['city'] ?? ''))))], $cid);
             q('INSERT INTO users (company_id, name, email, pass, role, color, created_at) VALUES (?,?,?,?,?,?,?)',
               [$cid, trim((string)($b['admin'] ?? '')) ?: $email, $email, password_hash((string)$b['password'], PASSWORD_DEFAULT), 'admin', '#3b5bdb', now()]);
             db()->commit();
             out(['id' => $cid]);
+        }
+        // suppression définitive d'une firme (jamais la sienne) : données, fichiers, utilisateurs, paramètres
+        if ($act === 'companies' && $method === 'DELETE' && $id) {
+            $c = q('SELECT * FROM companies WHERE id = ?', [$id])->fetch();
+            if (!$c) fail(404, 'Firme introuvable');
+            if ($id === (int)$me['company_id']) fail(400, 'Vous ne pouvez pas supprimer votre propre firme.');
+            if (q('SELECT id FROM users WHERE company_id = ? AND super = 1', [$id])->fetch()) fail(400, 'Cette firme contient un administrateur de la plateforme.');
+            if (mb_strtolower(trim((string)(body()['confirm'] ?? ''))) !== mb_strtolower(trim((string)$c['name']))) fail(400, 'Tapez exactement le nom de la firme pour confirmer.');
+            $paths = q('SELECT path FROM files WHERE company_id = ?', [$id])->fetchAll();
+            db()->beginTransaction();
+            foreach (['items', 'files', 'counters', 'settings', 'activity', 'users'] as $t) q("DELETE FROM $t WHERE company_id = ?", [$id]);
+            try { q('DELETE FROM ai_convs WHERE company_id = ?', [$id]); } catch (Throwable $e) { /* table absente */ }
+            q('DELETE FROM companies WHERE id = ?', [$id]);
+            db()->commit();
+            foreach ($paths as $f) @unlink(__DIR__ . '/uploads/' . $f['path']);
+            if ((int)($_SESSION['cid'] ?? 0) === $id) unset($_SESSION['cid']);
+            log_activity($me['id'], 'delete', 'company', $id, null, 'Firme supprimée : ' . $c['name']);
+            out(['ok' => true]);
         }
         if ($act === 'companies' && $method === 'PUT' && $id) {
             $b = body();

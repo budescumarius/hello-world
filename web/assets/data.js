@@ -393,3 +393,49 @@ async function sharePdf(title) {
   if (sh) sh.onclick = async () => { try { await navigator.share({ files: [file], title }); m.close(); } catch (e) { if (e.name !== 'AbortError') toast('Partage impossible : ' + e.message, 4000); } };
   setTimeout(() => URL.revokeObjectURL(url), 10 * 60 * 1000);
 }
+
+// ---------------------------------------------------------------- N° de TVA : vérification VIES et remplissage automatique
+// map : { name: 'company', street: 'address', zip: 'zip', city: 'city', country: 'country' } (champs du formulaire à remplir)
+// opts.address : champ unique (textarea) qui reçoit « rue \n cp ville » ; opts.countryCode : le champ pays contient un code (BE)
+function vatAutofill(form, map = {}, opts = {}) {
+  const E = (n) => (form.elements ? form.elements[n] : form.querySelector(`[name="${n}"]`));
+  const inp = E(opts.field || 'vat'); if (!inp) return;
+  const host = inp.closest('label, .field') || inp.parentElement;
+  let box = $('.vat-res', host); if (!box) { box = document.createElement('div'); box.className = 'vat-res'; host.appendChild(box); }
+  let last = '';
+  const ccOf = () => { const c = map.country && E(map.country) ? E(map.country).value : ''; return /^[A-Z]{2}$/.test(c) ? c : countryCode(c || 'Belgique', 'BE'); };
+  const values = (r) => {
+    const out = {};
+    if (map.name) out[map.name] = r.name;
+    if (opts.address) out[opts.address] = [r.street, [r.zip, r.city].filter(Boolean).join(' ')].filter(Boolean).join('\n');
+    if (map.street) out[map.street] = r.street;
+    if (map.zip) out[map.zip] = r.zip;
+    if (map.city) out[map.city] = r.city;
+    if (map.country && E(map.country)) out[map.country] = opts.countryCode ? r.cc : r.country;
+    return Object.fromEntries(Object.entries(out).filter(([k, v]) => v && E(k)));
+  };
+  const put = (vals, force) => { let n = 0; for (const [k, v] of Object.entries(vals)) { const el = E(k); if (force || !el.value.trim() || (el.tagName === 'SELECT')) { if (el.value !== v) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); n++; } } } return n; };
+  const check = async (force) => {
+    const v = inp.value.replace(/[\s.\-]/g, '').toUpperCase();
+    if (v.replace(/^[A-Z]{2}/, '').length < 8) { box.innerHTML = ''; return; }
+    if (v === last && !force) return; last = v;
+    box.innerHTML = '<span class="muted">Vérification du n° de TVA (VIES)…</span>';
+    try {
+      const r = await api('GET', `vat/lookup&vat=${encodeURIComponent(v)}&cc=${ccOf()}`);
+      form.dataset.vatcheck = JSON.stringify({ valid: r.valid, vat: r.vat, name: r.name || '', date: today() });
+      if (!r.valid) { box.innerHTML = `<div class="vat-bad">✗ ${esc(r.error || 'Ce numéro n\'est pas actif à la TVA (VIES)')} </div>`; return; }
+      if (opts.normalize !== false && inp.value !== r.vat) inp.value = r.vat;
+      const vals = values(r);
+      const filled = put(vals, false);
+      const differ = Object.entries(vals).some(([k, x]) => E(k).value !== x);
+      box.innerHTML = `<div class="vat-ok">✓ TVA active${r.name ? ` – <b>${esc(r.name)}</b>` : ''}${r.street ? `<br><small>${esc([r.street, [r.zip, r.city].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</small>` : ''}
+        <small class="muted"> · vérifié VIES le ${fmtDate(today())}${filled ? ` · ${filled} champ(s) rempli(s)` : ''}</small>${differ ? ' <button type="button" class="link-btn" data-vatfill>Remplacer par ces données</button>' : ''}</div>`;
+      const b = $('[data-vatfill]', box); if (b) b.onclick = () => { put(vals, true); b.remove(); };
+    } catch (e) { last = ''; box.innerHTML = `<div class="vat-bad">${/invalide/i.test(e.message) ? '✗ ' : 'Vérification impossible : '}${esc(e.message)} <button type="button" class="link-btn" data-vatretry>Réessayer</button></div>`; const b = $('[data-vatretry]', box); if (b) b.onclick = () => check(true); }
+  };
+  inp.addEventListener('change', () => check(false));
+  inp.addEventListener('blur', () => check(false));
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); check(true); } });
+  if (opts.now && inp.value.trim()) check(false);
+  return { check };
+}

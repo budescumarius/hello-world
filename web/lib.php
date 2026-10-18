@@ -269,3 +269,48 @@ function smtp_send(array $cfg, string $from, array $rcpt, string $data): void {
         fclose($fp);
     }
 }
+
+// ---------------------------------------------------------------- TVA : service VIES de la Commission européenne
+// Renvoie { valid, vat, cc, name, street, zip, city, country, checked } ; nom / adresse vides si le pays ne les publie pas
+function vat_lookup(string $raw, string $defCc = 'BE'): array {
+    $v = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $raw));
+    $cc = preg_match('/^([A-Z]{2})(.+)$/', $v, $m) ? $m[1] : strtoupper($defCc);
+    $num = preg_match('/^[A-Z]{2}(.+)$/', $v, $m) ? $m[1] : $v;
+    if ($cc === 'GR') $cc = 'EL';
+    if ($cc === 'BE' && preg_match('/^\d{9}$/', $num)) $num = '0' . $num; // ancien format à 9 chiffres
+    if ($cc === 'BE' && !preg_match('/^[01]\d{9}$/', $num)) fail(400, 'Numéro de TVA belge invalide : 10 chiffres (ex. BE0693697280)');
+    if (!preg_match('/^[A-Z]{2}$/', $cc) || !preg_match('/^[A-Z0-9]{4,14}$/', $num)) fail(400, 'Numéro de TVA invalide');
+    if ($cc === 'BE' && (97 - ((int)substr($num, 0, 8) % 97)) !== (int)substr($num, 8, 2)) {
+        return ['valid' => false, 'vat' => $cc . $num, 'cc' => $cc, 'error' => 'Numéro incorrect (chiffres de contrôle) : vérifiez la saisie.'];
+    }
+    $base = defined('VIES_URL') ? VIES_URL : 'https://ec.europa.eu/taxation_customs/vies/rest-api';
+    $url = rtrim($base, '/') . '/ms/' . $cc . '/vat/' . rawurlencode($num);
+    $raw = false; $code = 0;
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15, CURLOPT_HTTPHEADER => ['Accept: application/json', 'User-Agent: BatiPro']]);
+        $raw = curl_exec($ch); $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+    } else {
+        $raw = @file_get_contents($url, false, stream_context_create(['http' => ['timeout' => 15, 'header' => "Accept: application/json\r\n"]]));
+        $code = $raw === false ? 0 : 200;
+    }
+    if ($raw === false || $raw === '' || $code >= 500) fail(502, 'Service VIES (Commission européenne) injoignable, réessayez plus tard');
+    $j = json_decode((string)$raw, true);
+    if (!is_array($j)) fail(502, 'Réponse VIES illisible');
+    $err = (string)($j['userError'] ?? '');
+    if ($err !== '' && !in_array($err, ['VALID', 'INVALID'], true)) fail(502, 'VIES indisponible pour ce pays (' . $err . '), réessayez plus tard');
+    $valid = (bool)($j['isValid'] ?? $j['valid'] ?? false);
+    $clean = fn($x) => trim(preg_replace('/\s+/', ' ', (string)$x)) === '---' ? '' : trim((string)$x);
+    $name = $clean($j['name'] ?? '');
+    $addr = preg_split('/\r?\n/', $clean($j['address'] ?? ''));
+    $addr = array_values(array_filter(array_map('trim', $addr), 'strlen'));
+    $street = $addr[0] ?? ''; $zip = ''; $city = '';
+    $last = count($addr) > 1 ? $addr[count($addr) - 1] : '';
+    if (preg_match('/^(?:[A-Z]{1,2}-)?(\d{4,5})\s+(.+)$/u', $last, $m)) { $zip = $m[1]; $city = $m[2]; }
+    elseif (count($addr) === 1 && preg_match('/^(.*?),?\s+(\d{4,5})\s+(.+)$/u', $street, $m)) { $street = $m[1]; $zip = $m[2]; $city = $m[3]; }
+    elseif ($last !== '') $city = $last;
+    $countries = ['BE' => 'Belgique', 'FR' => 'France', 'LU' => 'Luxembourg', 'NL' => 'Pays-Bas', 'DE' => 'Allemagne', 'RO' => 'Roumanie', 'IT' => 'Italie', 'ES' => 'Espagne', 'PT' => 'Portugal', 'PL' => 'Pologne'];
+    return ['valid' => $valid, 'vat' => $cc . $num, 'cc' => $cc, 'name' => $name, 'street' => $street, 'zip' => $zip, 'city' => $city,
+        'country' => $countries[$cc] ?? $cc, 'checked' => date('Y-m-d H:i')];
+}

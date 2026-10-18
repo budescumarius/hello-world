@@ -195,6 +195,7 @@ route('invoice', async (id, tab = 'informations') => {
       changed();
     });
     body.addEventListener('input', (ev) => { const n = ev.target.name; if (!locked && ['title', 'billName', 'billAddress', 'billVat', 'orderRef', 'contractRef', 'buyerRef'].includes(n)) { d[n] = ev.target.value; changed(); } });
+    if (!locked) vatAutofill($('[data-bill]', body), { name: 'billName' }, { field: 'billVat', address: 'billAddress' });
     const num0 = body.querySelector('[name=number]'); if (num0) num0.readOnly = true;
     const av = $('[data-applyvat]', body);
     if (av) av.onclick = () => { const r = num(val('defaultVat')); d.defaultVat = r; d.lines.forEach((l) => { if (l.kind === 'item') l.vat = r; }); changed(); toast(`TVA ${fnum(r)} % appliquée à toutes les lignes`); };

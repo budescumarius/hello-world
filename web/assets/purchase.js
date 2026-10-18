@@ -55,6 +55,7 @@ function expensesTable(el, rows, contacts, projects, showProject, pid) {
     if (isSplit(e) || (Array.isArray(e.data.alloc) && e.data.alloc.length)) return `${badge('Ventilé', '#7048e8')} <small class="muted">${expenseParts(e).map((x) => esc(x.pid ? (byId(projects, x.pid) || { data: { name: '?' } }).data.name : 'Frais généraux')).join(', ')}</small>`;
     return e.project_id ? esc((byId(projects, e.project_id) || { data: { name: '?' } }).data.name) : '<span class="muted">—</span>';
   };
+  S.purchSupKind = Object.fromEntries(contacts.map((c) => [c.id, c.data.kind]));
   const key = `exp_${pid || 'all'}`;
   const st = ui[key] || (ui[key] = { sort: 7 });
   const sel = st.sel || (st.sel = new Set());
@@ -134,13 +135,22 @@ function purchPayment(e, i = null, after) {
   if (d.paid && !d.payments.length) d.payments.push({ date: d.paidDate || today(), amount: purchTtc(d), method: 'Virement' });
   if (purchState(e) === 'avalider') return toast('Validez d\'abord la facture', 3000);
   const rest = purchRest(d);
+  // sous-traitant : retenues ONSS / SPF Finances et vérification du jour
+  const rt = d.retention || {}; const rk = typeof retentionCalc === 'function' ? retentionCalc(d) : null;
+  const retPaid = (m) => (d.payments || []).filter((x) => x.method === m).reduce((a, x) => a + num(x.amount), 0);
+  const retChips = rk && rt.result && rt.result !== 'none' ? [
+    ...(rk.social && !retPaid('Retenue ONSS') ? [['Retenue ONSS', rk.social]] : []), ...(rk.fiscal && !retPaid('Retenue SPF Finances') ? [['Retenue SPF Finances', rk.fiscal]] : []),
+    ['Virement', Math.min(rest, r2(rk.toSupplier - (d.payments || []).filter((x) => !/^Retenue/.test(x.method)).reduce((a, x) => a + num(x.amount), 0)))]].filter(([, v]) => v > 0.009) : [];
+  const retWarn = d.retention !== undefined || (S.purchSupKind && S.purchSupKind[d.supplierId] === 'soustraitant')
+    ? (!rt.result ? 'Sous-traitant : vérifiez l\'obligation de retenue avant de payer.' : rt.date !== today() ? `Obligation de retenue vérifiée le ${fmtDate(rt.date)} : à refaire le jour du paiement.` : '') : '';
   const p = i == null ? { date: today(), amount: famt(rest), method: 'Virement' } : { ...d.payments[i], amount: famt(d.payments[i].amount) };
   formModal({
     title: i == null ? `Ajouter un paiement – ${d.ref || 'facture'}` : 'Paiement', values: p, saveLabel: 'Enregistrer le paiement',
     extra: `<div class="pay-info"><div><span>Montant TTC</span><b>${money(purchTtc(d))}</b></div><div><span>Déjà payé</span><b>${money(purchPaid(d) - (i == null ? 0 : num(d.payments[i].amount)))}</b></div><div class="dark"><span>Reste à payer</span><b>${money(i == null ? rest : rest + num(d.payments[i].amount))}</b></div></div>
-      <div class="pay-quick">${i == null ? `<button type="button" class="chip" data-pq="1">Tout (${money(rest)})</button><button type="button" class="chip" data-pq="0.5">50 %</button>` : ''}</div>`,
-    fields: [{ name: 'amount', label: 'Montant payé', required: true }, { name: 'date', label: 'Date du paiement', type: 'date', required: true }, { name: 'method', label: 'Mode', type: 'select', options: PAY_METHODS.map((x) => [x, x]) }, { name: 'note', label: 'Remarque', cls: 'full', placeholder: 'ex. 2e tranche' }],
-    after: (form) => { $$('[data-pq]', form).forEach((b) => { b.onclick = () => { form.elements.amount.value = famt(r2(rest * +b.dataset.pq)); }; }); },
+      <div class="pay-quick">${i == null ? (retChips.length ? retChips.map(([m, v], j) => `<button type="button" class="chip" data-rc="${j}">${esc(m === 'Virement' ? 'Au sous-traitant' : m)} (${money(v)})</button>`).join('') : `<button type="button" class="chip" data-pq="1">Tout (${money(rest)})</button><button type="button" class="chip" data-pq="0.5">50 %</button>`) : ''}</div>
+      ${retWarn && i == null ? `<div class="hint-box warn">${esc(retWarn)}</div>` : ''}`,
+    fields: [{ name: 'amount', label: 'Montant payé', required: true }, { name: 'date', label: 'Date du paiement', type: 'date', required: true }, { name: 'method', label: 'Mode', type: 'select', options: [...PAY_METHODS, 'Retenue ONSS', 'Retenue SPF Finances'].map((x) => [x, x]) }, { name: 'note', label: 'Remarque', cls: 'full', placeholder: 'ex. 2e tranche' }],
+    after: (form) => { $$('[data-rc]', form).forEach((b) => { b.onclick = () => { const [m, v] = retChips[+b.dataset.rc]; form.elements.amount.value = famt(v); form.elements.method.value = m; }; }); $$('[data-pq]', form).forEach((b) => { b.onclick = () => { form.elements.amount.value = famt(r2(rest * +b.dataset.pq)); }; }); },
     async onSave(v) {
       const amount = r2(num(v.amount)); const max = i == null ? rest : r2(rest + num(d.payments[i].amount));
       if (!amount) throw new Error('Indiquez le montant payé');
@@ -232,6 +242,7 @@ route('purchase', async (id) => {
   S.purchaseDraft = null;
   const [contacts, projects, all] = await Promise.all([db.list('contact'), db.list('project'), db.list('expense')]);
   const d = JSON.parse(JSON.stringify(e.data));
+  S.purchSupKind = Object.fromEntries(contacts.map((c) => [c.id, c.data.kind]));
   // même fournisseur et même n° de facture déjà encodé : probablement un doublon
   const dup = d.ref && d.supplierId ? all.find((x) => x.id !== e.id && x.data.ref === d.ref && +x.data.supplierId === +d.supplierId) : null;
   const vat = purchVat(d); let ttc = purchTtc(d); let manualVat = vat.length > 1;
@@ -279,7 +290,7 @@ route('purchase', async (id) => {
       </div>
     </section>
     <section class="card"><div class="card-h"><h3>Lier la facture à un chantier</h3></div><div class="pi-alloc" data-alloc></div></section>
-    ${isNew ? '' : '<section class="card" data-pays></section>'}
+    ${isNew ? '' : '<section class="card" data-ret hidden></section><section class="card" data-pays></section>'}
   </div>
   <div class="pi-bar"><span class="grow"></span><button class="btn" data-cancel>Annuler</button><span class="btn-split"><button class="btn primary" data-submit>Soumettre</button><button class="btn primary" data-moresub aria-label="Autres actions">${I.chevron}</button></span></div>`;
   const form = $('.pi-form', page);
@@ -416,6 +427,14 @@ route('purchase', async (id) => {
     $$('[data-pi]', box).forEach((tr) => { tr.onclick = () => purchPayment(e, +tr.dataset.pi, drawPays); });
   };
   drawPays();
+  // --- sous-traitant : obligation de retenue
+  const drawRet = () => {
+    const box = $('[data-ret]', page); if (!box) return;
+    const sup = byId(contacts, F('supplierId').value);
+    const show = (sup && sup.data.kind === 'soustraitant') || F('category').value === 'st' || alloc.some((a) => a.category === 'st');
+    box.hidden = !show; if (show) retentionBox(box, e, sup, drawPays);
+  };
+  drawRet(); F('supplierId').addEventListener('change', drawRet); F('category').addEventListener('change', drawRet);
 
   drawVat(); drawAlloc();
 

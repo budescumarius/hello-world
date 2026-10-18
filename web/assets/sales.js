@@ -293,10 +293,11 @@ route('quote', async (id) => {
       <button class="btn sm">${I.edit} Modifier</button></div>
     <div class="status-bar">${Object.entries(QST).map(([k, [l, col]]) => `<button class="${d.status === k ? 'on' : ''}" data-st="${k}" style="--c:${col}">${l}</button>`).join('')}</div>
     <div id="lines"></div>
-    <div class="cols-2"><div>${inv.length ? `<div class="card"><div class="card-h"><h3>Factures liées</h3></div><div class="rows">${inv.map((i) => { const s = invState(i); return `<a class="row" href="#/invoice/${i.id}"><span class="grow"><b>${esc(i.number || 'Brouillon')}</b> · ${esc(IKIND[i.data.kind])}</span>${st(IST, s.s)}<b>${money(s.t.base)}</b></a>`; }).join('')}</div></div>` : ''}</div><div id="tot"></div></div>`;
+    <div class="cols-2"><div>${d.status === 'accepte' ? socialQuoteCard(q, c, pr) : ''}${inv.length ? `<div class="card"><div class="card-h"><h3>Factures liées</h3></div><div class="rows">${inv.map((i) => { const s = invState(i); return `<a class="row" href="#/invoice/${i.id}"><span class="grow"><b>${esc(i.number || 'Brouillon')}</b> · ${esc(IKIND[i.data.kind])}</span>${st(IST, s.s)}<b>${money(s.t.base)}</b></a>`; }).join('')}</div></div>` : ''}</div><div id="tot"></div></div>`;
   const drawTot = () => { $('#tot').innerHTML = totalsBox(totals(d), d, true); };
   linesEditor($('#lines'), d, { showCost: true, onChange: () => { drawTot(); $('[data-saved]').textContent = 'Modification…'; save(); } });
   drawTot();
+  bindSocialQuote(page, q, c, pr, () => render());
   $('[data-act=head]').onclick = (e) => { if (!e.target.closest('a')) quoteHead(q, contacts, projects, render); };
   $$('[data-st]').forEach((b) => {
     b.onclick = async () => {
