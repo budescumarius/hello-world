@@ -265,10 +265,10 @@ document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.
 
 // ---------------------------------------------------------------- Fenêtres modales
 const openModals = new Set();
-function modal(html, { wide = false, full = false, onClose } = {}) {
+function modal(html, { wide = false, full = false, split = false, onClose } = {}) {
   const ov = document.createElement('div');
   ov.className = 'overlay';
-  ov.innerHTML = `<div class="modal ${wide ? 'wide' : ''} ${full ? 'full' : ''}" role="dialog" aria-modal="true">${html}</div>`;
+  ov.innerHTML = `<div class="modal ${wide ? 'wide' : ''} ${full ? 'full' : ''} ${split ? 'split' : ''}" role="dialog" aria-modal="true">${html}</div>`;
   document.body.appendChild(ov);
   requestAnimationFrame(() => ov.classList.add('show'));
   let closed = false;
@@ -359,9 +359,11 @@ function readFields(root, fields) {
 function fieldsGrid(fields, values) {
   return `<div class="grid-form">${fields.map((f) => fieldHTML(f, values[f.name])).join('')}</div>`;
 }
-function formModal({ title, fields, values = {}, onSave, onDelete, onClose, extra = '', wide = false, saveLabel = 'Enregistrer', after }) {
-  const m = modal(`${mhead(title)}<form class="m-body">${fieldsGrid(fields, values)}${extra}<button type="submit" hidden></button></form>
-    <div class="m-foot">${onDelete ? `<button class="btn danger ghost" data-del>${I.trash} Supprimer</button>` : ''}<span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-save>${esc(saveLabel)}</button></div>`, { wide, onClose });
+// side : panneau à côté du formulaire (ex. la facture à recopier), rempli dans after(form, m) via $('[data-side]', m.el)
+function formModal({ title, fields, values = {}, onSave, onDelete, onClose, extra = '', wide = false, saveLabel = 'Enregistrer', after, side = false }) {
+  const body = `<form class="m-body">${fieldsGrid(fields, values)}${extra}<button type="submit" hidden></button></form>`;
+  const m = modal(`${mhead(title)}${side ? `<div class="m-split"><aside class="m-side" data-side></aside>${body}</div>` : body}
+    <div class="m-foot">${onDelete ? `<button class="btn danger ghost" data-del>${I.trash} Supprimer</button>` : ''}<span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-save>${esc(saveLabel)}</button></div>`, { wide, split: side, onClose });
   const form = $('form', m.el);
   $$('[data-close]', m.el).forEach((b) => { b.onclick = () => m.close(); });
   const submit = async () => {

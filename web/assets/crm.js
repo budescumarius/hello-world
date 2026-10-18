@@ -24,12 +24,13 @@ const contactFields = (kind) => [
 const TRADES = ['Gros œuvre', 'Maçonnerie', 'Charpente', 'Toiture', 'Menuiserie', 'Électricité', 'Plomberie', 'Chauffage', 'HVAC', 'Plafonnage', 'Carrelage', 'Peinture', 'Isolation', 'Façade', 'Terrassement', 'Matériaux', 'Location de matériel'];
 
 // Ouvre la fiche d'édition ; renvoie le contact enregistré (ou null)
-function editContact(c, preset = {}) {
+// opts.side(box, form) : panneau affiché à côté de la fiche (ex. la facture du fournisseur)
+function editContact(c, preset = {}, opts = {}) {
   return new Promise((res) => {
     let saved = null;
     const values = c ? c.data : { kind: 'client', country: company().country === 'FR' ? 'France' : 'Belgique', ...preset };
     formModal({
-      title: c ? contactName(c) : 'Nouveau contact', values, fields: contactFields(values.kind), wide: true,
+      title: c ? contactName(c) : 'Nouveau contact', values, fields: contactFields(values.kind), wide: true, side: !!opts.side,
       extra: `<datalist id="trades">${TRADES.map((t) => `<option value="${t}">`).join('')}</datalist><datalist id="sources">${['Site web', 'Bouche-à-oreille', 'Recommandation', 'Salon', 'Réseaux sociaux', 'Architecte', 'Ancien client'].map((t) => `<option value="${t}">`).join('')}</datalist>`,
       async onSave(v) {
         if (!v.company && !v.name) throw new Error('Indiquez une société ou un nom');
@@ -39,7 +40,8 @@ function editContact(c, preset = {}) {
       },
       onDelete: c ? async () => { await db.del('contact', c.id); saved = null; go('#/contacts/all'); } : null,
       onClose: () => res(saved),
-      after: (form) => {
+      after: (form, m) => {
+        if (opts.side) opts.side($('[data-side]', m.el), form);
         $('[data-peppol]', form).onclick = () => {
           const d = { vat: form.elements.vat.value, peppolId: form.elements.peppolId.value };
           const id = peppolIdOf(d, countryCode(form.elements.country.value));

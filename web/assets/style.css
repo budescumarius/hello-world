@@ -729,3 +729,25 @@ body:has(.pi-bar) .ai-fab { bottom: calc(84px + env(safe-area-inset-bottom)); }
 .tabs a svg { width: 16px; height: 16px; vertical-align: -3px; margin-right: 4px; }
 @media (max-width: 900px) { .inv-2col { grid-template-columns: minmax(0, 1fr); gap: 8px; } .inv-2col > div + div { border-left: 0; padding-left: 0; } .inv-vis { grid-template-columns: minmax(0, 1fr); } .inv-tot { justify-content: space-between; gap: 12px; } .inv-tot > div { flex: 1 1 40%; } }
 .inv-vis-doc { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+
+/* Fiche avec la facture à côté (création d'un fournisseur depuis une facture) */
+.modal.split { max-width: 1280px; height: calc(100vh - 40px); }
+.m-split { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); flex: 1; min-height: 0; }
+.m-split > .m-body { min-height: 0; }
+.m-side { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: #eef0f4; }
+.m-side-tabs { display: flex; gap: 4px; padding: 8px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.m-side-tabs button { flex: 1; border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 7px 8px; font: inherit; font-size: 13px; cursor: pointer; }
+.m-side-tabs button.on { background: var(--primary); border-color: var(--primary); color: #fff; }
+.m-side-body { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; }
+.m-side-body .pi-doc { max-height: none; }
+.m-side-body [data-up], .m-side-body [data-rm] { display: none; }
+.m-side-hint { margin: 10px 12px 4px; font-size: 12px; }
+.m-lines { padding: 4px 8px 12px; }
+.m-line { display: flex; gap: 8px; align-items: center; justify-content: space-between; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; margin-top: 4px; font-size: 13px; user-select: text; -webkit-user-select: text; }
+.m-line span { min-width: 0; overflow-wrap: anywhere; }
+.m-line .link-btn { flex: none; font-size: 12px; }
+@media (max-width: 900px) {
+  .modal.split { height: calc(100dvh - 20px); }
+  .m-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: 42% minmax(0, 1fr); }
+  .m-side { border-right: 0; border-bottom: 1px solid var(--border); }
+}

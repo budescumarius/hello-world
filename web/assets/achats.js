@@ -52,7 +52,7 @@ async function purchasePreset(file, projectId) {
         if (!/\.xml$/i.test(a.filename || '')) continue;
         try { const u = parseUBL(new TextDecoder().decode(a.content)); return { ...base, ...(await presetFromUBL(u, up, projectId)), readNote: `Facture électronique intégrée au PDF (${a.filename}) lue.` }; } catch (e) { /* pas de l'UBL */ }
       }
-      for (let i = 1; i <= Math.min(doc.numPages, 4); i++) text += pdfLines(await (await doc.getPage(i)).getTextContent()) + '\n';
+      text = await pdfDocText(doc);
     } catch (e) { console.warn('pdf', e); }
     const g = parseInvoiceText(text);
     const contacts = await db.list('contact');
@@ -62,7 +62,7 @@ async function purchasePreset(file, projectId) {
       ...(g.base != null ? { amount: g.base } : {}), ...(g.rate != null ? { vat: g.rate } : {}), ...(g.tax != null ? { vatAmount: g.tax } : {}),
       ...(g.total != null ? { ttc: g.total } : {}), ...(g.tax != null ? { vatLines: [{ rate: g.rate != null ? g.rate : defVat(), amount: g.tax }] } : {}),
       iban: g.iban || '', bic: g.bic || '', communication: g.comm || '', structured: !!g.comm && g.comm.length === 12, source: 'pdf',
-      supplierId: sup ? sup.id : '', supplierGuess: !sup && (g.name || g.vat) ? { name: g.name, vat: g.vatRaw } : null,
+      supplierId: sup ? sup.id : '', supplierGuess: !sup && (g.name || g.vat) ? supplierGuessOf(g) : null,
       readNote: hasTxt ? `Lu dans le PDF : ${[g.ref && 'n° ' + g.ref, g.date && 'date', g.total != null && 'total ' + money(g.total), g.vatRaw && 'TVA ' + g.vatRaw].filter(Boolean).join(' · ') || 'peu d\'informations reconnues'}. Vérifiez les montants.` : 'PDF scanné (image) : complétez les montants à la main.' };
   }
   const up = file.type.startsWith('image/') ? await uploadPhoto(file, projectId) : await upload(file, projectId);
@@ -113,12 +113,28 @@ function pdfLines(tc) {
 }
 
 // Reconnaissance des informations principales d'une facture (FR / NL / EN)
+// texte des premières pages d'un PDF (document pdf.js ou fichier stocké)
+async function pdfDocText(doc) {
+  let text = '';
+  for (let i = 1; i <= Math.min(doc.numPages, 4); i++) text += pdfLines(await (await doc.getPage(i)).getTextContent()) + '\n';
+  return text;
+}
+async function pdfFileText(fileId) {
+  const pdfjs = await loadPdfJs();
+  const bytes = new Uint8Array(await (await fetch(fileUrl(fileId), { credentials: 'same-origin' })).arrayBuffer());
+  return pdfDocText(await pdfjs.getDocument({ data: bytes }).promise);
+}
+const supplierGuessOf = (g) => ({ name: g.name || '', vat: g.vatRaw || '', address: g.address || '', zip: g.zip || '', city: g.city || '', email: g.email || '', phone: g.phone || '', iban: g.iban || '', bic: g.bic || '' });
+
+// lignes du texte d'une facture, nettoyées
+const invoiceTextLines = (text) => String(text || '').replace(/ | /g, ' ')
+  .replace(/\b((?:19|20)\d) (\d)\b/g, '$1$2') // « 202 6 » → « 2026 »
+  .split('\n').map((s) => s.trim()).filter(Boolean)
+  // texte espacé lettre par lettre (« B r u x e l l e s , 6 j a n v i e r ») : on recolle (les espaces doubles séparent les mots)
+  .map((l) => { const tk = l.split(' '); return tk.length >= 6 && tk.filter((x) => x.length === 1).length >= tk.length * 0.7 ? l.split(/\s{2,}/).map((w) => w.replace(/ /g, '').replace(/([,;:])(?=\S)/g, '$1 ').replace(/(\d)(?=[A-Za-zÀ-ÿ])|([A-Za-zÀ-ÿ])(?=\d)/g, '$1$2 ')).join(' ') : l; });
+
 function parseInvoiceText(text) {
-  const lines = String(text || '').replace(/ | /g, ' ')
-    .replace(/\b((?:19|20)\d) (\d)\b/g, '$1$2') // « 202 6 » → « 2026 »
-    .split('\n').map((s) => s.trim()).filter(Boolean)
-    // texte espacé lettre par lettre (« B r u x e l l e s , 6 j a n v i e r ») : on recolle
-    .map((l) => { const tk = l.split(' '); return tk.length >= 6 && tk.filter((x) => x.length === 1).length >= tk.length * 0.7 ? tk.join('') : l; });
+  const lines = invoiceTextLines(text);
   const RE_TOTAL = /(total|totaal|montant|net)\s*(t\.?t\.?c|tvac|t\.v\.a\.c|incl|à\s*payer|a\s*payer|te\s*betalen|g[ée]n[ée]ral|due|ttc)|net\s*à\s*payer|à\s*payer|a\s*payer|te\s*betalen|amount\s*due|total\s*due|^\s*total\s*:?\s*[\d€]|^\s*total\s*$/i;
   const RE_BASE = /(total|totaal|montant|sous[- ]?total|subtotaal|subtotal|base|maatstaf|net)\s*(h\.?\s?t\.?\s?v?\.?a?\.?\b|hors\s*t|htva|excl|imposable|van\s*heffing|maatstaf|net\b)|sous[- ]?total|subtotaal|subtotal|total\s*net/i;
   const RE_TAX = /\b(t\.?v\.?a\.?|btw|vat|mwst)\b(?!\s*(n[°º]|nr|num|number|nummer|:?\s*[a-z]{2}\s?[.\-]?\s?\d{3}))/i;
@@ -211,7 +227,23 @@ function parseInvoiceText(text) {
   const cm = String(text).match(/\+{3}\s*(\d{3})\s*\/\s*(\d{4})\s*\/\s*(\d{5})\s*\+{3}/) || String(text).match(/\*{3}\s*(\d{3})\s*\/\s*(\d{4})\s*\/\s*(\d{5})\s*\*{3}/);
   const comm = cm ? cm[1] + cm[2] + cm[3] : null;
   const bicM = String(text).match(/\b(?:BIC|SWIFT)\s*:?\s*([A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?)\b/i);
-  return { total, base, tax, rate, date, due, ref, vat, vatRaw, name, vatLine, iban, comm, bic: bicM ? bicM[1].toUpperCase() : null };
+  // coordonnées du fournisseur : au plus près de sa ligne TVA, jamais dans notre bloc « client »
+  const order = lines.map((l, i) => i).filter((i) => !ownBlock.has(i)).sort((a, b) => (vatLine >= 0 ? Math.abs(a - vatLine) - Math.abs(b - vatLine) : a - b));
+  const near = (fn) => { for (const i of order) { const r = fn(lines[i], i); if (r) return r; } return null; };
+  const ownMail = String(co.email || '').toLowerCase();
+  const email = near((l) => { const m = l.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/); return m && m[0].toLowerCase() !== ownMail ? m[0] : null; });
+  const phone = near((l) => { const m = l.match(/(?:t[ée]l(?:[ée]phone)?|tel|phone|gsm|mobile|t)\.?\s*:?\s*(\+?\d[\d\s\/.()-]{7,17}\d)/i); return m && !/iban|tva|btw|vat/i.test(l.slice(0, m.index)) ? m[1].trim() : null; });
+  const STREET = /\b(rue|avenue|av\.|chauss[ée]e|place|boulevard|bd|chemin|all[ée]e|quai|square|route|impasse|straat|laan|lei|steenweg|weg|plein|dreef|kaai|str\.)\b|straat\b|laan\b/i;
+  const where = near((l, i) => {
+    if (/€|\beur\b|total|tva\s*\d|%/i.test(l)) return null;
+    const m = l.match(/(?:^|[\s,·•|–-])(?:[A-Z]{1,2}-)?(\d{4,5})\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'. -]{2,28}?)(?=$|\s*[·•|–,]|\s-\s|\s{2}|\s+(?:TVA|BTW|VAT|T[ée]l|Tel|T\b|GSM|www|E-?mail|IBAN|BCE|RPM))/);
+    if (!m || /^(eur|pcs|x|tva|btw)\b/i.test(m[2])) return null;
+    const before = l.slice(0, m.index).split(/\s[·•|–-](?:\s|$)/).map((x) => x.replace(/[\s,;·•\-–]+$/, '').trim()).filter(Boolean);
+    let street = before.reverse().find((x) => STREET.test(x) || (/\d/.test(x) && /[a-z]{3}/i.test(x) && !/tva|btw|vat|iban/i.test(x))) || '';
+    if (!street && i > 0 && !ownBlock.has(i - 1) && (STREET.test(lines[i - 1]) || /^[A-Za-zÀ-ÿ' .-]{4,} \d+\w?\b/.test(lines[i - 1])) && !dateIn(lines[i - 1])) street = lines[i - 1].split(/\s[·•|–]\s|\s-\s/).pop().trim();
+    return { zip: m[1], city: m[2].trim(), address: street.replace(/[\s,;\-–]+$/, '') };
+  }) || {};
+  return { total, base, tax, rate, date, due, ref, vat, vatRaw, name, vatLine, iban, comm, bic: bicM ? bicM[1].toUpperCase() : null, email, phone, address: where.address || '', zip: where.zip || '', city: where.city || '' };
 }
 
 // ---------------------------------------------------------------- Réception Peppol automatique (point d'accès Peppyrus)

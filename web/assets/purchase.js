@@ -119,7 +119,7 @@ route('purchase', async (id) => {
   const vatOpts = (r) => [...new Set([...vatList(), num(r)])].sort((a, b) => b - a).map((x) => `<option value="${x}" ${num(r) === x ? 'selected' : ''}>${fnum(x)} %</option>`).join('');
   page.innerHTML = `<div class="pi">
     <section class="card"><div class="card-h"><h3>Informations générales</h3></div>
-      ${d.readNote && st === 'avalider' ? `<div class="hint-box">${esc(d.readNote)}</div>` : ''}
+      ${d.readNote && st === 'avalider' ? `<div class="hint-box">${esc(d.readNote)}${/\.pdf$/i.test(d.fileName || '') ? ` <button type="button" class="link-btn" data-reread>Relire la facture</button>` : ''}</div>` : ''}
       ${dup ? `<div class="hint-box warn">⚠ Doublon probable : la facture ${esc(d.ref)} de ce fournisseur existe déjà (${fmtDate(dup.data.date)}, ${money(dup.data.amount)} HT). <a href="#/purchase/${dup.id}">Ouvrir l'autre</a></div>` : ''}
       <div class="pi-grid">
         <form class="pi-form" autocomplete="off" onsubmit="return false">
@@ -131,7 +131,7 @@ route('purchase', async (id) => {
           ], d)}
           <div class="section-t">Coordonnées du fournisseur</div>
           ${fieldsGrid([{ name: 'supplierId', label: 'Fournisseur *', type: 'contact', contacts: supOpts, cls: 'full' }], d)}
-          ${guess ? `<div class="hint-box" data-guess>Fournisseur lu sur la facture : <b>${esc(guess.name || '?')}</b>${guess.vat ? ` (TVA ${esc(guess.vat)})` : ''} <button type="button" class="btn sm" data-mksup>${I.plus} Créer ce fournisseur</button></div>` : ''}
+          <div data-guessbox></div>
           <div class="pi-amt">
             <label class="field"><span>Montant TTC *</span><input name="ttc" inputmode="decimal" class="r" value="${ttc ? famt(ttc) : ''}"></label>
             <label class="field"><span>Montant HT</span><input name="ht" class="r" readonly tabindex="-1"></label>
@@ -180,14 +180,56 @@ route('purchase', async (id) => {
   F('communication').addEventListener('blur', () => { if (F('structured').checked && F('communication').value.replace(/\D/g, '').length === 12) F('communication').value = commFmt(F('communication').value); commCheck(); });
   F('communication').addEventListener('input', commCheck); F('structured').onchange = commCheck; commCheck();
 
-  // --- fournisseur détecté
-  const mk = $('[data-mksup]', page);
-  if (mk) mk.onclick = async () => {
-    const c = await editContact(null, { kind: 'fournisseur', company: guess.name || '', vat: guess.vat || '', peppolId: guess.peppolId || '', address: guess.address || '', zip: guess.zip || '', city: guess.city || '', email: guess.email || '', iban: F('iban').value });
+  // --- fournisseur détecté : relu dans le PDF (les anciens imports gardaient une lecture erronée)
+  const isPdfFile = () => /\.pdf$/i.test(fileName || '');
+  let pdfText = null;
+  const readPdf = async () => { if (pdfText == null && fileId && isPdfFile()) { try { pdfText = await pdfFileText(fileId); } catch (err) { pdfText = ''; } } return pdfText || ''; };
+  const drawGuess = () => {
+    const box = $('[data-guessbox]', page);
+    box.innerHTML = guess && !F('supplierId').value ? `<div class="hint-box" data-guess>Fournisseur lu sur la facture : <b>${esc(guess.name || '?')}</b>${guess.vat ? ` (TVA ${esc(guess.vat)})` : ''} <button type="button" class="btn sm" data-mksup>${I.plus} Créer ce fournisseur</button></div>` : '';
+    const mk = $('[data-mksup]', box); if (mk) mk.onclick = createSupplier;
+  };
+  // fournisseur déjà connu (même n° de TVA) : sélectionné directement
+  const applyGuess = (g) => {
+    const dg = digitsOf(g.vat || '');
+    const known = dg ? contacts.find((c) => digitsOf(c.data.vat) === dg) : null;
+    if (known && !F('supplierId').value) {
+      if (!$(`option[value="${known.id}"]`, F('supplierId'))) F('supplierId').insertAdjacentHTML('afterbegin', `<option value="${known.id}">${esc(contactName(known))}</option>`);
+      F('supplierId').value = known.id; guess = null;
+    } else if (!known) guess = g;
+    drawGuess();
+  };
+  const refreshGuess = async () => {
+    if (F('supplierId').value || !isPdfFile()) return;
+    const g = parseInvoiceText(await readPdf());
+    if (g.name || g.vat) applyGuess(supplierGuessOf(g));
+  };
+  F('supplierId').addEventListener('change', drawGuess);
+  async function createSupplier() {
+    const g = guess || {};
+    const c = await editContact(null, { kind: 'fournisseur', company: g.name || '', vat: g.vat || '', peppolId: g.peppolId || '', address: g.address || '', zip: g.zip || '', city: g.city || '', email: g.email || '', phone: g.phone || '', iban: F('iban').value || g.iban || '' },
+      { side: fileId ? (box, cform) => invoiceSide(box, cform, () => ({ fileId, fileName }), readPdf) : null });
     if (!c) return;
     F('supplierId').insertAdjacentHTML('afterbegin', `<option value="${c.id}">${esc(contactName(c))}</option>`); F('supplierId').value = c.id;
-    $('[data-guess]', page).remove(); guess = null;
+    contacts.push(c); guess = null; drawGuess();
+  }
+  drawGuess(); refreshGuess();
+  // relecture complète du PDF (factures importées avant une amélioration de la lecture)
+  const reread = async () => {
+    if (!fileId || !isPdfFile()) return toast('Pas de PDF joint');
+    toast('Lecture de la facture…', 8000); pdfText = null;
+    const g = parseInvoiceText(await readPdf());
+    if (g.ref) F('ref').value = g.ref; if (g.date) F('date').value = g.date; if (g.due) F('due').value = g.due;
+    if (g.iban) F('iban').value = g.iban; if (g.bic) F('bic').value = g.bic;
+    if (g.comm) { F('communication').value = commFmt(g.comm); F('structured').checked = g.comm.length === 12; commCheck(); }
+    if (g.total != null) {
+      F('ttc').value = famt(g.total);
+      vat.length = 0; vat.push({ rate: g.rate != null ? g.rate : defVat(), amount: g.tax != null ? g.tax : 0 }); manualVat = g.tax != null; if (!manualVat) autoVat(); drawVat();
+    }
+    if (g.name || g.vat) { if (!F('supplierId').value) applyGuess(supplierGuessOf(g)); }
+    toast(`Relu : ${[g.ref && 'n° ' + g.ref, g.date && fmtDate(g.date), g.total != null && 'total ' + money(g.total), g.name].filter(Boolean).join(' · ') || 'peu d\'informations reconnues'}`, 4000);
   };
+  const rr = $('[data-reread]', page); if (rr) rr.onclick = reread;
 
   // --- liaison aux chantiers
   const pOpts = (sel) => `<option value="">— choisir un chantier —</option>${projects.map((p) => `<option value="${p.id}" ${+sel === p.id ? 'selected' : ''}>${esc(`${p.number} · ${p.data.name}`)}</option>`).join('')}`;
@@ -225,7 +267,7 @@ route('purchase', async (id) => {
     const [file] = await pickFile('application/pdf,image/*'); if (!file) return;
     toast('Envoi…', 15000);
     const r = file.type.startsWith('image/') ? await uploadPhoto(file) : await upload(file);
-    fileId = r.id; fileName = r.name; toast('Facture jointe', 1500); viewer.draw();
+    fileId = r.id; fileName = r.name; pdfText = null; toast('Facture jointe', 1500); viewer.draw();
   });
 
   drawVat(); drawAlloc();
@@ -265,9 +307,38 @@ route('purchase', async (id) => {
   $('[data-moresub]', page).onclick = () => menuSheet('Enregistrer', [
     { label: 'Soumettre et marquer payée', icon: 'coins', run: () => save('paid') },
     { label: 'Enregistrer sans valider (reste « À valider »)', icon: 'file', run: () => save('draft') },
+    ...(fileId && isPdfFile() ? [{ label: 'Relire la facture (PDF)', icon: 'eye', run: reread }] : []),
     ...(isNew ? [] : [{ sep: true }, { label: 'Supprimer la facture', icon: 'trash', danger: true, run: async () => { if (!confirm('Supprimer cette facture fournisseur ?')) return; await delFile(d.fileId); if (d.xmlFileId) await delFile(d.xmlFileId); await db.del('expense', e.id); go('#/expenses'); } }]),
   ]);
 });
+
+// Panneau « facture » à côté d'une fiche : aperçu + texte du PDF ; un rang du texte se copie dans le champ actif
+function invoiceSide(box, form, getFile, readText) {
+  let field = form.elements.company; let tab = 'doc';
+  form.addEventListener('focusin', (e) => { if (e.target.matches('input:not([type=checkbox]),textarea')) field = e.target; });
+  const labelOf = (el) => { const l = el.closest('label'); return l ? ($('span', l) || l).textContent.trim() : el.name; };
+  box.innerHTML = `<div class="m-side-tabs"><button type="button" class="on" data-t="doc">Facture</button><button type="button" data-t="txt">Texte à copier</button></div><div class="m-side-body" data-sb></div>`;
+  const sb = $('[data-sb]', box);
+  const draw = async () => {
+    $$('[data-t]', box).forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
+    if (tab === 'doc') { sb.innerHTML = ''; purchViewer(sb, getFile, () => {}); return; }
+    sb.innerHTML = '<p class="muted pi-load">Lecture…</p>';
+    const lines = invoiceTextLines(await readText());
+    if (tab !== 'txt') return;
+    sb.innerHTML = lines.length ? `<p class="muted m-side-hint">Touchez un champ de la fiche, puis une ligne : elle y est copiée. Le texte peut aussi être sélectionné.</p>
+      <div class="m-lines">${lines.map((l, i) => `<div class="m-line"><span>${esc(l)}</span><button type="button" class="link-btn" data-l="${i}">→ champ</button></div>`).join('')}</div>`
+      : '<p class="muted pi-load">Aucun texte dans ce PDF (document scanné).</p>';
+    $$('[data-l]', sb).forEach((b) => { b.onclick = () => {
+      const v = lines[+b.dataset.l];
+      if (!field) return navigator.clipboard && navigator.clipboard.writeText(v).then(() => toast('Copié'));
+      field.value = field.value && field.tagName === 'TEXTAREA' ? `${field.value}\n${v}` : v;
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      toast(`Copié dans « ${labelOf(field)} »`, 1500);
+    }; });
+  };
+  $$('[data-t]', box).forEach((b) => { b.onclick = () => { tab = b.dataset.t; draw(); }; });
+  draw();
+}
 
 // Visionneuse de la facture : PDF (toutes les pages) ou photo, avec zoom, remplacement, retrait et téléchargement
 function purchViewer(box, getFile, onAction) {
