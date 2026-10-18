@@ -156,7 +156,7 @@ route('settings', async (tab = 'company') => {
   const fields = tab === 'company' ? [
     { name: 'name', label: 'Raison sociale', required: true }, { name: 'appName', label: 'Nom affiché dans l\'application' },
     { name: 'vat', label: 'N° TVA' }, { name: 'rpm', label: 'RPM / RCS / registre' },
-    { name: 'address', label: 'Adresse (plusieurs lignes)', type: 'textarea', cls: 'full' },
+    { name: 'street', label: 'Rue et numéro', cls: 'full' }, { name: 'zip', label: 'Code postal' }, { name: 'city', label: 'Localité' },
     { name: 'phone', label: 'Téléphone' }, { name: 'email', label: 'Email' }, { name: 'website', label: 'Site web' },
     { name: 'iban', label: 'IBAN' }, { name: 'bic', label: 'BIC' },
     { name: 'country', label: 'Pays', type: 'select', options: [['BE', 'Belgique'], ['FR', 'France'], ['LU', 'Luxembourg'], ['CH', 'Suisse'], ['RO', 'Roumanie']] },
@@ -167,12 +167,14 @@ route('settings', async (tab = 'company') => {
     { name: 'quoteValidity', label: 'Validité des devis (jours)', type: 'number' }, { name: 'paymentDays', label: 'Délai de paiement (jours)', type: 'number' },
     { name: 'p_quote', label: 'Préfixe devis' }, { name: 'p_invoice', label: 'Préfixe factures' }, { name: 'p_avoir', label: 'Préfixe notes de crédit' }, { name: 'p_order', label: 'Préfixe commandes' },
     { name: 'p_project', label: 'Préfixe chantiers' }, { name: 'p_intervention', label: 'Préfixe interventions' },
-    { name: 'quoteNotes', label: 'Mentions par défaut sur les devis', type: 'textarea', cls: 'full' }, { name: 'terms', label: 'Conditions générales (imprimées sous le devis)', type: 'textarea', rows: 6, cls: 'full' },
+    { name: 'quoteNotes', label: 'Mentions par défaut sur les devis', type: 'textarea', cls: 'full' }, { name: 'terms', label: 'Conditions générales', type: 'textarea', rows: 6, cls: 'full', hint: 'Imprimées sur une page à part (page 2) des devis et factures : choix dans Paramètres → Modèles de documents.' },
     { name: 'invoiceNotes', label: 'Mentions par défaut sur les factures', type: 'textarea', cls: 'full' },
     { name: 'footer', label: 'Pied de page des documents', cls: 'full' },
   ];
   const pre = S.settings.prefixes || {};
-  const values = { ...co, vatRates: vatList().join('; '), defaultVat: defVat(), p_quote: pre.quote ?? 'DEV', p_invoice: pre.invoice ?? 'FAC', p_avoir: pre.avoir ?? 'NC', p_order: pre.order ?? 'BC', p_project: pre.project ?? 'CH', p_intervention: pre.intervention ?? 'INT' };
+  // ancienne adresse sur plusieurs lignes : découpée en rue / code postal / localité
+  const a0 = splitAddress(co.address);
+  const values = { ...co, street: co.street || a0.street, zip: co.zip || a0.zip, city: co.city || a0.city, vatRates: vatList().join('; '), defaultVat: defVat(), p_quote: pre.quote ?? 'DEV', p_invoice: pre.invoice ?? 'FAC', p_avoir: pre.avoir ?? 'NC', p_order: pre.order ?? 'BC', p_project: pre.project ?? 'CH', p_intervention: pre.intervention ?? 'INT' };
   page.innerHTML = `<div class="card"><form>${fieldsGrid(fields, values)}<div class="btns"><button class="btn primary" type="submit">Enregistrer</button></div></form></div>`;
   const form = $('form', page);
   const up = $('[data-uplogo]', form);
@@ -180,7 +182,7 @@ route('settings', async (tab = 'company') => {
   form.onsubmit = async (e) => {
     e.preventDefault();
     const v = readFields(form, fields);
-    if (tab === 'company') { Object.assign(co, v); delete co.logo; await api('PUT', 'settings', { company: co }); S.settings.company = co; } else {
+    if (tab === 'company') { Object.assign(co, v); delete co.logo; co.address = [v.street, [v.zip, v.city].filter(Boolean).join(' ')].filter(Boolean).join('\n'); await api('PUT', 'settings', { company: co }); S.settings.company = co; } else {
       const rates = String(v.vatRates).split(/[;\s]+/).map((x) => parseFloat(x.replace(',', '.'))).filter((x) => !isNaN(x));
       Object.assign(co, { vatRates: rates.length ? rates : [21, 6, 0], defaultVat: num(v.defaultVat), quoteValidity: num(v.quoteValidity), paymentDays: num(v.paymentDays), quoteNotes: v.quoteNotes, terms: v.terms, invoiceNotes: v.invoiceNotes, footer: v.footer });
       const prefixes = { quote: v.p_quote, invoice: v.p_invoice, avoir: v.p_avoir, order: v.p_order, project: v.p_project, intervention: v.p_intervention };

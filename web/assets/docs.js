@@ -84,6 +84,7 @@ function linesTable(d, t) {
   const tm = t.showTM;
   return `<table class="vz-lines"><thead><tr><th class="c-no">N°</th><th>Description</th>${tm ? `<th class="c-tm">${esc(t.tmLabel)}</th>` : ''}<th class="r">Qte.</th><th class="c-u">U</th><th class="r">PU(€)</th><th class="r">TOTAL</th></tr></thead><tbody>
     ${lines.map((l, i) => {
+      if (l.kind === 'title' && !String(l.desc || '').trim()) return '';
       if (l.kind === 'title') return `<tr class="${tlevel(l) === 2 ? 'vz-l2' : 'vz-l1'}"><td>${nos[i]}</td><td colspan="${tm ? 5 : 4}">${esc(l.desc)}</td><td class="r">${dmoney(st[l.id], t)}</td></tr>`;
       if (l.kind === 'text') return `<tr class="vz-txt"><td></td><td colspan="${tm ? 6 : 5}" class="pre">${esc(l.desc)}</td></tr>`;
       return `<tr class="${l.option ? 'opt' : ''}"><td>${nos[i]}</td><td class="pre">${esc(l.desc)}${l.option ? '<br><i>(en option, non comprise dans le total)</i>' : ''}</td>${tm ? `<td class="c-tm">${esc(l.tm || '')}</td>` : ''}<td class="r">${dnum2(l.qty)}</td><td class="c-u">${esc(l.unit)}</td><td class="r">${dmoney(l.price, t)}</td><td class="r">${dmoney(num(l.qty) * num(l.price), t)}</td></tr>`;
@@ -148,8 +149,9 @@ function totalsBlock(kind, it, t, paid) {
 // Conditions générales : sur une nouvelle page (page 2 du PDF), texte libre ; **gras** et titres « Article … » mis en évidence
 function cgvBlock(kind, t) {
   const on = { invoice: t.cgvInvoice, quote: t.cgvQuote, order: t.cgvOrder }[kind];
-  if (!on || !String(t.cgv || '').trim()) return '';
-  const body = String(t.cgv).trim().split(/\n{2,}/).map((para) => {
+  const txt = String(t.cgv || company().terms || '').trim();
+  if (!on || !txt) return '';
+  const body = txt.split(/\n{2,}/).map((para) => {
     const h = esc(para).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
     return /^(article|art\.|\d+[.)]\s|[IVX]+[.)]\s)/i.test(para) && para.split('\n')[0].length < 90 ? `<p><b>${h.replace(/<br>/, '</b><br>')}${h.includes('<br>') ? '' : '</b>'}</p>` : `<p>${h}</p>`;
   }).join('');
@@ -204,7 +206,7 @@ async function docHtml(kind, id) {
     ${d.reverse && c && !(c.data || {}).vat ? '<p class="vz-warn no-print">⚠ Autoliquidation : le numéro de TVA du client doit figurer sur la facture.</p>' : ''}
     ${mentionsBlock(kind, d, t)}
     ${d.notes ? `<div class="vz-notes pre">${esc(d.notes)}</div>` : ''}
-    ${kind === 'quote' ? `${co.terms ? `<div class="vz-terms pre">${esc(co.terms)}</div>` : ''}<div class="vz-sign"><div>Pour ${esc(co.name || "l'entreprise")}</div><div>Pour accord, le client<br><small>Date, nom et signature précédés de la mention « Bon pour accord »</small></div></div>` : ''}
+    ${kind === 'quote' ? `${co.terms && !t.cgvQuote ? `<div class="vz-terms pre">${esc(co.terms)}</div>` : ''}<div class="vz-sign"><div>Pour ${esc(co.name || "l'entreprise")}</div><div>Pour accord, le client<br><small>Date, nom et signature précédés de la mention « Bon pour accord »</small></div></div>` : ''}
     ${t.footer || co.footer ? `<div class="vz-foot">${esc(t.footer || co.footer)}</div>` : ''}
     ${cgvBlock(kind, t)}
   </div>`;

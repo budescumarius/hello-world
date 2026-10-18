@@ -29,7 +29,10 @@ function splitAddress(text) {
   const out = { street: lines[0] || '', zip: '', city: '' };
   const last = lines.length > 1 ? lines[lines.length - 1] : '';
   const m = last.match(/^(?:[A-Z]{1,2}[-\s]?)?(\d{4,5})\s+(.+)$/);
-  if (m) { out.zip = m[1]; out.city = m[2]; }
+  if (m) { out.zip = m[1]; out.city = m[2]; return out; }
+  // tout sur une ligne : « Nerviersstraat 152, 1730 Asse » ou « Rue X 5 - B-1000 Bruxelles »
+  const one = (lines[0] || '').match(/^(.*?\S)\s*(?:,|-|–)?\s+(?:[A-Z]{1,2}[-\s])?(\d{4,5})\s+([^\d,]+?)(?:\s*,\s*[^,]*)?$/);
+  if (one && lines.length === 1) { out.street = one[1].replace(/[,\s]+$/, ''); out.zip = one[2]; out.city = one[3].trim(); }
   return out;
 }
 function sellerInfo() {
