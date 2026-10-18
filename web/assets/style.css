@@ -562,3 +562,32 @@ table.lines { width: 100%; border-collapse: collapse; min-width: 760px; }
 .dt.imp tbody tr { cursor: default; }
 .map-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 860px) { .map-grid { grid-template-columns: 1fr; } }
+
+/* ---------- Téléphone : hauteurs iOS, pas de zoom à la saisie, cibles tactiles */
+@supports (height: 100dvh) {
+  .side { height: 100dvh; }
+  .modal { max-height: calc(100dvh - 20px); }
+  .modal.full { height: calc(100dvh - 20px); }
+}
+@media (max-width: 860px) {
+  input, select, textarea, .lines .in, .search input, .dt input.pct, .pick-row .qty, .comp-row input, .comp-row select, .wf input { font-size: 16px !important; }
+  .top-actions .btn { height: 36px; padding: 0 10px; font-size: 14px; }
+  .top-actions { gap: 6px; }
+  .m-foot { flex-wrap: wrap; padding-bottom: calc(env(safe-area-inset-bottom) + 12px); }
+  .m-foot .btn { flex: 1 1 auto; }
+  .m-foot .grow { display: none; }
+  .modal { border-radius: 14px 14px 0 0; }
+  .overlay { padding: 0; }
+  .modal, .modal.wide, .modal.full { max-width: 100%; }
+  .status-bar button { flex: 1 1 auto; }
+  .btns .btn { flex: 1 1 auto; }
+  .doc-head > .btn { margin-left: 0; }
+  .print-page { padding: 8px; }
+  .lines-add .btn { flex: 1 1 45%; }
+  .kanban { scroll-snap-type: x mandatory; } .k-col { scroll-snap-align: start; flex-basis: 85vw; }
+  .viewer-wrap .top-actions { width: auto; }
+  .viewer-wrap .top-actions .btn span, .viewer-wrap .top { flex-wrap: nowrap; }
+  .draw-bar .db-row { flex-wrap: wrap; }
+  #toast { bottom: calc(env(safe-area-inset-bottom) + 20px); }
+}
+.pdf-acts { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; } .pdf-acts .btn { justify-content: center; min-height: 44px; }

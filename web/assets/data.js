@@ -283,7 +283,100 @@ function totalsBox(t, doc, internal) {
 
 // ---------------------------------------------------------------- Page d'impression (documents : voir docs.js)
 function printPage(title, html, back) {
+  const standalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
   app.innerHTML = `<div class="print-shell"><header class="top no-print"><a class="icon-btn" href="${back}" aria-label="Retour">${I.back}</a><div class="top-title"><h1>${esc(title)}</h1></div>
-    <div class="top-actions"><button class="btn primary" data-act="print">${I.print} Imprimer / PDF</button></div></header><div class="print-page">${html}</div></div>`;
-  $('[data-act=print]').onclick = () => { const old = document.title; document.title = title.replace(/[^\w\- ]+/g, '').trim(); window.print(); setTimeout(() => { document.title = old; }, 800); };
+    <div class="top-actions"><button class="btn primary" data-act="pdf">${I.file} PDF / Partager</button>${standalone ? '' : `<button class="btn" data-act="print">${I.print} Imprimer</button>`}</div></header><div class="print-page">${html}</div></div>`;
+  const pr = $('[data-act=print]');
+  if (pr) pr.onclick = () => { const old = document.title; document.title = fileTitle(title); window.print(); setTimeout(() => { document.title = old; }, 800); };
+  $('[data-act=pdf]').onclick = async (e) => {
+    const btn = e.currentTarget; btn.disabled = true;
+    try { await sharePdf(title); } catch (err) { console.error(err); toast('PDF impossible : ' + err.message, 5000); } finally { btn.disabled = false; }
+  };
+}
+const fileTitle = (t) => String(t).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'document';
+const scriptCache = {};
+function loadScript(src) {
+  if (!scriptCache[src]) scriptCache[src] = new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => { delete scriptCache[src]; rej(new Error('chargement impossible')); }; document.head.appendChild(s); });
+  return scriptCache[src];
+}
+// Génère un vrai PDF A4 dans le navigateur (fonctionne aussi sur iPhone, où l'impression est bloquée dans l'app installée)
+async function makePdf() {
+  toast('Création du PDF…', 60000);
+  await Promise.all([loadScript('assets/vendor/html2canvas-1.4.1.min.js'), loadScript('assets/vendor/jspdf-2.5.1.umd.min.js')]);
+  const page = $('.print-page');
+  const W = 794; // largeur A4 à 96 dpi
+  const holder = document.createElement('div');
+  holder.style.cssText = `position:fixed;left:-20000px;top:0;width:${W}px;background:#fff;`;
+  holder.innerHTML = page.innerHTML;
+  holder.querySelectorAll('.no-print').forEach((x) => x.remove());
+  const docEl = holder.querySelector('.doc') || holder;
+  docEl.style.cssText += ';max-width:none;width:' + W + 'px;margin:0;box-shadow:none;border-radius:0;';
+  document.body.appendChild(holder);
+  try {
+    await Promise.all([...holder.querySelectorAll('img')].map((im) => (im.complete ? 0 : new Promise((r) => { im.onload = im.onerror = r; }))));
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    // points de coupure possibles : bas de chaque ligne / bloc (évite de couper une ligne en deux)
+    const top = docEl.getBoundingClientRect().top;
+    const ATOM = '.vz-bottom, .vz-recap, .vz-mention, .vz-sign, .d-tot, .d-sign';
+    const cuts = [];
+    docEl.querySelectorAll('tr, .vz-info, .vz-head, .d-pt, .d-sec, .d-head, .d-parties, p, h2, .pre, img, ' + ATOM).forEach((el) => {
+      const r = el.getBoundingClientRect();
+      if (el.matches(ATOM)) cuts.push(r.top - top, r.bottom - top);
+      else if (!el.parentElement || !el.parentElement.closest(ATOM)) cuts.push(r.bottom - top);
+    });
+    cuts.sort((a, b) => a - b);
+    const scale = Math.min(2, window.devicePixelRatio > 1 ? 2 : 1.6);
+    // html2canvas ne connaît pas les couleurs « color(srgb …) » produites par color-mix() : conversion en rgba
+    const toRgb = (v) => v.replace(/color\(srgb ([\d.e-]+) ([\d.e-]+) ([\d.e-]+)(?: \/ ([\d.e-]+))?\)/g, (m0, r, g, bl, a) => `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(bl * 255)}, ${a ?? 1})`);
+    const onclone = (cdoc) => {
+      const win = cdoc.defaultView;
+      cdoc.querySelectorAll('*').forEach((el) => {
+        const cs = win.getComputedStyle(el);
+        for (const prop of ['color', 'background-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'outline-color', 'text-decoration-color']) {
+          const v = cs.getPropertyValue(prop);
+          if (v && v.includes('color(')) el.style.setProperty(prop, toRgb(v));
+        }
+        const bg = cs.getPropertyValue('background-image');
+        if (bg && bg.includes('color(')) el.style.setProperty('background-image', toRgb(bg));
+      });
+    };
+    const canvas = await window.html2canvas(docEl, { scale, backgroundColor: '#ffffff', useCORS: true, logging: false, windowWidth: W + 40, onclone });
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    const m = 8; const pw = 210 - 2 * m; const ph = 297 - 2 * m - 6;
+    const k = canvas.width / docEl.offsetWidth; // px canvas par px CSS
+    const pageH = ph * (canvas.width / pw);
+    const breaks = []; let y = 0;
+    while (y < canvas.height - 2) {
+      let next = y + pageH;
+      if (next < canvas.height) { const c = cuts.map((v) => v * k).filter((v) => v > y + pageH * 0.5 && v <= next); if (c.length) next = c[c.length - 1]; } else next = canvas.height;
+      breaks.push([y, next]); y = next;
+    }
+    breaks.forEach(([a, b], i) => {
+      const part = document.createElement('canvas'); part.width = canvas.width; part.height = Math.ceil(b - a);
+      const ctx = part.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, part.width, part.height); ctx.drawImage(canvas, 0, -a);
+      if (i) pdf.addPage();
+      pdf.addImage(part.toDataURL('image/jpeg', 0.9), 'JPEG', m, m, pw, (b - a) * pw / canvas.width);
+      pdf.setFontSize(8); pdf.setTextColor(120); pdf.text(`Page ${i + 1}/${breaks.length}`, 210 - m, 297 - 5, { align: 'right' });
+    });
+    return pdf.output('blob');
+  } finally { holder.remove(); }
+}
+async function sharePdf(title) {
+  const blob = await makePdf();
+  const name = fileTitle(title) + '.pdf';
+  const file = new File([blob], name, { type: 'application/pdf' });
+  const canShare = navigator.canShare && navigator.canShare({ files: [file] });
+  if (canShare) {
+    try { await navigator.share({ files: [file], title }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  // le geste de l'utilisateur a expiré pendant la génération (iPhone) : nouvelle fenêtre avec boutons
+  const url = URL.createObjectURL(blob);
+  const m = modal(`${mhead('PDF prêt')}<div class="m-body"><p class="muted">${esc(name)} · ${Math.round(blob.size / 1024)} Ko</p>
+    <div class="pdf-acts">${canShare ? `<button class="btn primary" data-act="share">${I.file} Partager / Enregistrer</button>` : ''}
+    <a class="btn ${canShare ? '' : 'primary'}" href="${url}" target="_blank" rel="noopener">Ouvrir le PDF</a>
+    <a class="btn" href="${url}" download="${esc(name)}">Télécharger</a></div></div>`);
+  const sh = $('[data-act=share]', m.el);
+  if (sh) sh.onclick = async () => { try { await navigator.share({ files: [file], title }); m.close(); } catch (e) { if (e.name !== 'AbortError') toast('Partage impossible : ' + e.message, 4000); } };
+  setTimeout(() => URL.revokeObjectURL(url), 10 * 60 * 1000);
 }

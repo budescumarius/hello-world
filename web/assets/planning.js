@@ -170,7 +170,13 @@ async function teamPlanning() {
   });
   $$('[data-asg]', page).forEach((el) => {
     el.ondragstart = (e) => e.dataTransfer.setData('text', el.dataset.asg);
-    el.onclick = () => { const x = week.find((y) => y.id === +el.dataset.asg); menuSheet('Affectation', [{ label: 'Ouvrir le chantier', run: () => go(`#/project/${x.project_id}`) }, { label: 'Supprimer l\'affectation', danger: true, run: async () => { await db.del('assign', x.id); render(); } }]); };
+    el.onclick = () => { const x = week.find((y) => y.id === +el.dataset.asg); menuSheet('Affectation', [
+      { label: 'Ouvrir le chantier', run: () => go(`#/project/${x.project_id}`) },
+      // sur téléphone le glisser-déposer n'existe pas : déplacement par formulaire
+      { label: 'Déplacer / modifier…', run: () => formModal({ title: 'Déplacer l\'affectation', values: { employeeId: x.data.employeeId, date: x.data.date, half: x.data.half || 'day', project_id: x.project_id, note: x.data.note },
+        fields: [{ name: 'employeeId', label: 'Ouvrier', type: 'select', options: people.map((s) => [s.id, s.data.name]) }, { name: 'date', label: 'Date', type: 'date' }, { name: 'project_id', label: 'Chantier', type: 'select', options: active.map((pp) => [pp.id, pp.data.name]) }, { name: 'half', label: 'Période', type: 'select', options: [['day', 'Journée'], ['am', 'Matin'], ['pm', 'Après-midi']] }, { name: 'note', label: 'Remarque', cls: 'full' }],
+        async onSave(v) { x.project_id = +v.project_id; Object.assign(x.data, { employeeId: +v.employeeId, date: v.date, half: v.half, note: v.note }); await persist('assign', x, { silent: true }); render(); } }) },
+      { label: 'Supprimer l\'affectation', danger: true, run: async () => { await db.del('assign', x.id); render(); } }]); };
   });
   $('[data-act=copy]').onclick = async () => {
     const prev = assigns.filter((x) => x.data.date >= addDays(days[0], -7) && x.data.date <= addDays(days[6], -7));
