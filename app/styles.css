@@ -323,3 +323,84 @@ button.chip.on { outline: 2px solid var(--c, var(--primary)); }
   .doc { box-shadow: none; padding: 0; max-width: none; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* ---------------------------------------------------------------- Gestiune: devize, facturi, costuri, planning */
+.amt { flex: 0 0 auto; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; }
+.amt small { font-weight: 500; }
+.row .t.tw { white-space: normal; overflow: visible; }
+.lno { flex: 0 0 auto; min-width: 30px; color: var(--muted); font-weight: 700; font-size: 13px; }
+.row.line-title { background: var(--surface-2); }
+.row.picked { background: color-mix(in srgb, #2f9e44 16%, var(--surface)); }
+.head-card { width: 100%; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.search { width: 100%; height: 42px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); }
+.prow input { width: 64px; height: 36px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); text-align: right; flex: 0 0 auto; }
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; box-shadow: var(--shadow); min-width: 0; }
+.kpi small { display: block; color: var(--muted); font-size: 12px; font-weight: 600; }
+.kpi b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.kpi.good b { color: #2f9e44; }
+.kpi.bad b { color: var(--danger); }
+.meter { height: 7px; background: var(--surface-2); border-radius: 99px; overflow: hidden; margin-top: 6px; }
+.meter i { display: block; height: 100%; background: var(--c, var(--primary)); border-radius: 99px; }
+
+.totals { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; box-shadow: var(--shadow); }
+.totals .tr { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-variant-numeric: tabular-nums; }
+.totals .tr.big { font-size: 18px; font-weight: 800; border-top: 1px solid var(--border); margin-top: 6px; padding-top: 8px; }
+.totals .tr.int { color: var(--muted); font-size: 14px; }
+.totals .tr.big + .tr.int { margin-top: 6px; }
+
+/* Gantt */
+.gantt { --nw: 160px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; box-shadow: var(--shadow); -webkit-overflow-scrolling: touch; }
+@media (max-width: 520px) { .gantt { --nw: 116px; } }
+.g-inner { position: relative; min-width: 100%; }
+.g-row { display: flex; height: 48px; border-bottom: 1px solid var(--border); }
+.g-row:last-child { border-bottom: 0; }
+.g-name {
+  position: sticky; left: 0; z-index: 3; flex: 0 0 var(--nw); width: var(--nw); background: var(--surface);
+  border: 0; border-right: 1px solid var(--border); padding: 4px 8px; text-align: left; font: inherit; color: inherit;
+  display: flex; flex-direction: column; justify-content: center; overflow: hidden; cursor: pointer;
+}
+.g-name b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.g-name small { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.g-track { position: relative; flex: 0 0 auto; }
+.g-head { height: 44px; }
+.g-head .g-name { cursor: default; }
+.g-m { position: absolute; top: 0; height: 22px; font-size: 12px; font-weight: 700; padding: 3px 6px; border-left: 1px solid var(--border); white-space: nowrap; overflow: hidden; }
+.g-d { position: absolute; top: 22px; height: 22px; line-height: 22px; font-size: 11px; color: var(--muted); text-align: center; }
+.g-d.we { color: var(--danger); }
+.g-group { height: 36px; background: var(--surface-2); }
+.g-group .g-name { background: var(--surface-2); }
+.g-over { position: absolute; top: 0; bottom: 0; left: var(--nw); pointer-events: none; z-index: 1; }
+.g-we { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--muted) 10%, transparent); }
+.g-today { position: absolute; top: 0; bottom: 0; width: 2px; background: #e5484d; }
+.g-bar {
+  position: absolute; top: 11px; height: 26px; min-width: 8px; border-radius: 7px; border: 0; padding: 0; z-index: 2; cursor: pointer;
+  background: color-mix(in srgb, var(--c) 35%, var(--surface)); overflow: hidden; text-align: left;
+}
+.g-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--c); }
+.g-lbl { position: relative; font-size: 11px; font-weight: 700; padding: 0 6px; line-height: 26px; color: #fff; white-space: nowrap; text-shadow: 0 0 3px rgba(0, 0, 0, .55); }
+
+/* Deviz / factură tipărite */
+.doc.fin { font-size: 12.5px; }
+.doc .fhead { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.doc .fhead .logo { max-height: 64px; max-width: 200px; display: block; margin-bottom: 6px; }
+.doc .fhead .meta { text-align: right; }
+.doc .fhead h1 { text-transform: uppercase; letter-spacing: .03em; color: #1f4fd8; }
+.doc .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+.doc .box { border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; break-inside: avoid; }
+.doc .box small { display: block; color: #666; text-transform: uppercase; font-size: 10px; font-weight: 700; letter-spacing: .05em; margin-bottom: 2px; }
+.doc td.r, .doc th.r { text-align: right; white-space: nowrap; }
+.doc .flines thead { display: table-header-group; }
+.doc .flines tr { break-inside: avoid; page-break-inside: avoid; }
+.doc tr.sec td { background: #f3f5fa; }
+.doc .ftot { margin: 10px 0 0 auto; width: min(360px, 100%); break-inside: avoid; }
+.doc .ftot td { border: 0; border-bottom: 1px solid #e3e3e3; }
+.doc .ftot tr.big td { font-size: 14px; font-weight: 800; border-top: 2px solid #111; }
+@media (max-width: 600px) {
+  .doc .parties { grid-template-columns: 1fr; }
+  .doc .fhead { flex-direction: column; }
+  .doc .fhead .meta { text-align: left; }
+  .doc .ftot { display: table; }
+}
+@media print { .doc .flines, .doc .ftot { display: table !important; } }

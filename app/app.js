@@ -25,11 +25,11 @@ const I = {
 };
 
 // ---------------------------------------------------------------- IndexedDB
-const STORES = ['projects', 'plans', 'points', 'companies', 'meetings', 'blobs'];
+const STORES = ['projects', 'plans', 'points', 'companies', 'meetings', 'blobs', 'clients', 'catalog', 'quotes', 'invoices', 'costs', 'tasks', 'meta'];
 let _db;
 function openDB() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open('santier', 1);
+    const r = indexedDB.open('santier', 2);
     r.onupgradeneeded = () => {
       STORES.forEach((s) => { if (!r.result.objectStoreNames.contains(s)) r.result.createObjectStore(s, { keyPath: 'id' }); });
     };
@@ -200,14 +200,20 @@ function field(f, val = '') {
   let input;
   if (f.type === 'textarea') input = `<textarea name="${f.name}" id="${id}" rows="${f.rows || 4}" placeholder="${esc(f.placeholder || '')}">${esc(val)}</textarea>`;
   else if (f.type === 'select') input = `<select name="${f.name}" id="${id}">${f.options.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(val) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
-  else input = `<input name="${f.name}" id="${id}" type="${f.type || 'text'}" value="${esc(val)}" placeholder="${esc(f.placeholder || '')}" ${f.list ? `list="${f.list}"` : ''} autocomplete="off">`;
+  else input = `<input name="${f.name}" id="${id}" type="${f.type || 'text'}" value="${esc(val)}" placeholder="${esc(f.placeholder || '')}" ${f.list ? `list="${f.list}"` : ''} ${f.mode ? `inputmode="${f.mode}"` : ''} autocomplete="off">`;
   return `<label class="field"><span>${esc(f.label)}${f.required ? ' *' : ''}</span>${input}</label>`;
 }
 
-function formSheet({ title, fields, values = {}, onSave, onDelete, extra = '' }) {
+function formSheet({ title, fields, values = {}, onSave, onDelete, onClose, extra = '' }) {
+  // câmpurile consecutive marcate `half` se afișează câte două pe rând
+  const parts = [];
+  for (let i = 0; i < fields.length; i++) {
+    const f = fields[i]; const g = fields[i + 1];
+    if (f.half && g && g.half) { parts.push(`<div class="row2">${field(f, values[f.name])}${field(g, values[g.name])}</div>`); i++; } else parts.push(field(f, values[f.name]));
+  }
   const s = sheet(`<div class="sheet-head"><button class="link" data-close>Anulează</button><h2>${esc(title)}</h2><button class="link strong" data-save>Salvează</button></div>
-    <form class="sheet-body form">${fields.map((f) => field(f, values[f.name])).join('')}${extra}
-    ${onDelete ? '<button type="button" class="btn danger block" data-del>Șterge</button>' : ''}<button type="submit" hidden></button></form>`);
+    <form class="sheet-body form">${parts.join('')}${extra}
+    ${onDelete ? '<button type="button" class="btn danger block" data-del>Șterge</button>' : ''}<button type="submit" hidden></button></form>`, { onClose });
   const form = $('form', s.el);
   const submit = async () => {
     const v = {};
@@ -233,6 +239,11 @@ async function render() {
   if (cleanupView) { cleanupView(); cleanupView = null; }
   const p = location.hash.replace(/^#\/?/, '').split('/');
   try {
+    await loadSettings();
+    if (p[0] === 'g') return await viewGlobal(p[1]);
+    if (p[0] === 'q' && p[1]) return await viewQuote(p[1]);
+    if (p[0] === 'i' && p[1]) return await viewInvoice(p[1]);
+    if (p[0] === 'doc' && p[2]) return await viewDoc(p[1], p[2]);
     if (p[0] === 'p' && p[1]) {
       const project = await db.get('projects', p[1]);
       if (!project) return go('#/');
@@ -253,6 +264,7 @@ async function viewProjects() {
   const projects = (await db.all('projects')).sort((a, b) => b.created - a.created);
   const points = await db.all('points');
   app.innerHTML = `${bar({ title: 'Șantier', sub: 'Proiectele mele', right: `<button class="icon-btn" data-act="menu" aria-label="Meniu">${I.more}</button>` })}
+  ${homeNav('')}
   <main class="content">
     ${projects.length ? `<div class="cards">${projects.map((pr) => {
       const pts = points.filter((x) => x.projectId === pr.id);
@@ -272,22 +284,31 @@ async function viewProjects() {
   $('[data-act=menu]').onclick = appMenu;
 }
 
-function editProject(pr) {
+async function editProject(pr) {
+  const clients = (await db.all('clients')).sort((a, b) => a.name.localeCompare(b.name, 'ro'));
   formSheet({
     title: pr ? 'Editează proiectul' : 'Proiect nou',
     values: pr || {},
     fields: [
       { name: 'name', label: 'Nume proiect', required: true, placeholder: 'ex. Bloc rezidențial A' },
-      { name: 'client', label: 'Beneficiar' },
+      { name: 'clientId', label: 'Client (pentru devize și facturi)', type: 'select', options: clientOptions(clients) },
+      { name: 'client', label: 'Beneficiar (text pe rapoarte)', placeholder: 'implicit: numele clientului' },
       { name: 'address', label: 'Adresă șantier' },
       { name: 'manager', label: 'Responsabil / diriginte' },
       { name: 'start', label: 'Data începerii', type: 'date' },
     ],
     async onSave(v) {
       const isNew = !pr;
+      const newClient = v.clientId === '__new';
+      if (newClient) v.clientId = '';
+      const cl = clients.find((c) => c.id === v.clientId);
+      if (cl && !v.client) v.client = cl.name;
       const o = Object.assign(pr || { id: uid(), created: Date.now() }, v);
       await db.put('projects', o);
-      if (isNew) go(`#/p/${o.id}/plans`); else render();
+      const done = () => (isNew ? go(`#/p/${o.id}/plans`) : render());
+      if (newClient) {
+        editClient(null, async (c) => { o.clientId = c.id; o.client = o.client || c.name; await db.put('projects', o); done(); });
+      } else done();
     },
     onDelete: pr ? async () => { await deleteProject(pr.id); go('#/'); } : null,
   });
@@ -298,11 +319,14 @@ async function deleteProject(pid) {
   for (const pt of await db.where('points', pid)) { for (const b of pt.photos || []) await delBlob(b); await db.del('points', pt.id); }
   for (const c of await db.where('companies', pid)) await db.del('companies', c.id);
   for (const m of await db.where('meetings', pid)) await db.del('meetings', m.id);
+  for (const s of ['quotes', 'invoices', 'tasks']) for (const o of await db.where(s, pid)) await db.del(s, o.id);
+  for (const c of await db.where('costs', pid)) { await delBlob(c.photoId); await db.del('costs', c.id); }
   await db.del('projects', pid);
 }
 
 function appMenu() {
   actionSheet('Meniu', [
+    { label: 'Datele firmei și setări (TVA, monedă, numerotare)', run: editSettings },
     { label: 'Exportă backup (toate datele)', run: exportBackup },
     { label: 'Importă backup', run: importBackup },
     { label: 'Spațiu de stocare', run: storageInfo },
@@ -361,7 +385,7 @@ async function importBackup() {
 }
 
 // ---------------------------------------------------------------- Proiect (taburi)
-const TABS = [['plans', 'Planuri'], ['points', 'Puncte'], ['companies', 'Firme'], ['meetings', 'Ședințe'], ['reports', 'Rapoarte']];
+const TABS = [['plans', 'Planuri'], ['points', 'Puncte'], ['planning', 'Planning'], ['quotes', 'Devize'], ['invoices', 'Facturi'], ['costs', 'Costuri'], ['companies', 'Firme'], ['meetings', 'Ședințe'], ['reports', 'Rapoarte']];
 
 async function viewProject(pr, tab) {
   if (!TABS.some(([k]) => k === tab)) tab = 'plans';
@@ -370,7 +394,10 @@ async function viewProject(pr, tab) {
     <main class="content" id="tab"></main>`;
   $('[data-act=edit]').onclick = () => editProject(pr);
   const el = $('#tab');
-  await ({ plans: tabPlans, points: tabPoints, companies: tabCompanies, meetings: tabMeetings, reports: tabReports })[tab](pr, el);
+  await ({
+    plans: tabPlans, points: tabPoints, companies: tabCompanies, meetings: tabMeetings, reports: tabReports,
+    planning: tabPlanning, quotes: tabQuotes, invoices: tabInvoices, costs: tabCosts,
+  })[tab](pr, el);
 }
 
 // ---- Planuri
