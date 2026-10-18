@@ -404,3 +404,33 @@ button.chip.on { outline: 2px solid var(--c, var(--primary)); }
   .doc .ftot { display: table; }
 }
 @media print { .doc .flines, .doc .ftot { display: table !important; } }
+
+/* ---------------------------------------------------------------- Teren: formulare, jurnal, desen pe plan */
+.fi { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.fi-l { display: flex; gap: 6px; font-weight: 600; }
+.fi input[type=text], .fi textarea { width: 100%; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); }
+.seg.seg3 { grid-template-columns: repeat(3, 1fr); }
+.fi .photos { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); }
+.fi .photos:empty { display: none; }
+.sig-box { position: relative; background: #fff; border: 1px dashed var(--border); border-radius: 10px; overflow: hidden; }
+.sig-box canvas, .sig-box img { display: block; width: 100%; aspect-ratio: 3 / 1; }
+.sig-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #98a2b3; pointer-events: none; }
+.checks input.wf { width: 64px; height: 34px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); text-align: right; }
+.doc tr.sec td { background: #f3f5fa; }
+.doc td .ph { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.doc td .ph img { width: 90px; height: 68px; object-fit: cover; border: 1px solid #ccc; }
+
+.markups { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.draw-layer { position: absolute; inset: 0; z-index: 8; touch-action: none; cursor: crosshair; }
+.draw-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px calc(var(--safe-bottom) + 10px); background: var(--surface); border-top: 1px solid var(--border); box-shadow: 0 -4px 16px rgba(0, 0, 0, .12);
+}
+.db-row { display: flex; gap: 8px; align-items: center; overflow-x: auto; scrollbar-width: none; }
+.db-row::-webkit-scrollbar { display: none; }
+.db-row .chip { flex: 0 0 auto; padding: 7px 12px; font-size: 14px; }
+.db-row .chip.on { background: var(--primary); color: var(--primary-ink); }
+.db-row .btn { flex: 0 0 auto; }
+.swatch { flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--surface); background: var(--c); box-shadow: 0 0 0 1px var(--border); cursor: pointer; }
+.swatch.on { box-shadow: 0 0 0 3px var(--primary); }
+.viewer-tools:has(~ .draw-layer) { bottom: calc(var(--safe-bottom) + 120px); }
