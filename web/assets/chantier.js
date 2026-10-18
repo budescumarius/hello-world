@@ -81,7 +81,7 @@ function projectFinance(p, all) {
   const est = qt.reduce((a, t) => a + t.cost, 0);
   const estBy = {}; qt.forEach((t) => Object.entries(t.costBy).forEach(([k, v]) => { const kk = k === 'ouvrage' ? 'divers' : k; estBy[kk] = (estBy[kk] || 0) + v; }));
   const realBy = {};
-  for (const e of all.expense) realBy[e.data.category || 'divers'] = (realBy[e.data.category || 'divers'] || 0) + num(e.data.amount);
+  for (const e of all.expense) for (const x of expenseFor(e, p.id)) realBy[x.category] = (realBy[x.category] || 0) + x.amount;
   for (const h of all.timesheet) realBy.mo = (realBy.mo || 0) + num(h.data.hours) * num(h.data.rate);
   const real = Object.values(realBy).reduce((a, v) => a + v, 0);
   const engaged = all.order.filter((o) => !['facturee', 'annulee'].includes(o.data.status)).reduce((a, o) => a + totals(o.data).base, 0);
@@ -122,7 +122,8 @@ route('project', async (id, tab = 'overview', sub) => {
 });
 
 async function tabOverview(p, el, contacts) {
-  const all = await db.many(['quote', 'invoice', 'order', 'expense', 'timesheet', 'point', 'phase', 'task'], p.id);
+  const all = await db.many(['quote', 'invoice', 'order', 'timesheet', 'point', 'phase', 'task'], p.id);
+  all.expense = await db.list('expense'); // achats ventilés sur plusieurs chantiers inclus
   const f = projectFinance(p, all);
   const act = await api('GET', `activity&project=${p.id}&limit=15`).catch(() => []);
   const openPts = all.point.filter((x) => ['open', 'progress'].includes(x.data.status));
@@ -207,19 +208,35 @@ async function editExpense(e, preset = {}) {
   const [contacts, projects] = await Promise.all([db.list('contact'), db.list('project')]);
   const d = e ? e.data : { date: today(), category: 'mat', vat: defVat(), ...preset };
   let fileId = d.fileId; let fileName = d.fileName;
+  const alloc = (d.alloc || []).map((x) => ({ ...x }));
+  let guess = !d.supplierId ? d.supplierGuess : null;
+  let getAlloc = () => null;
+  const note = e ? (d.toCheck ? (d.peppol ? 'Reçue via Peppol : choisissez le chantier puis enregistrez.' : 'À vérifier.') : '') : d.readNote;
   formModal({
     title: e ? 'Achat / dépense' : 'Nouvel achat', wide: true, values: { ...d, project_id: e ? e.project_id : preset.project_id },
     fields: [
+      ...(note ? [{ name: 'note', type: 'html', cls: 'full', html: `<div class="hint-box">${esc(note)}</div>` }] : []),
       { name: 'desc', label: 'Description', required: true, cls: 'full', placeholder: 'ex. Facture blocs béton' },
-      { name: 'project_id', label: 'Chantier', type: 'select', options: [['', '— frais généraux —'], ...projects.map((p) => [p.id, `${p.number} · ${p.data.name}`])] },
       { name: 'supplierId', label: 'Fournisseur', type: 'contact', contacts, kinds: ['fournisseur', 'soustraitant', 'autre'] },
-      { name: 'category', label: 'Type de coût', type: 'select', options: optsOf(TYPES) },
+      ...(guess ? [{ name: 'guess', type: 'html', cls: 'full', html: `<div class="hint-box" data-guess>Fournisseur lu sur la facture : <b>${esc(guess.name || '?')}</b>${guess.vat ? ` (TVA ${esc(guess.vat)})` : ''} <button type="button" class="btn sm" data-mksup>${I.plus} Créer ce fournisseur</button></div>` }] : []),
       { name: 'date', label: 'Date', type: 'date' }, { name: 'ref', label: 'N° facture fournisseur' },
       { name: 'amount', label: 'Montant HT', type: 'money', required: true }, { name: 'vat', label: 'TVA', type: 'select', options: vatOptions(d.vat) },
       { name: 'due', label: 'Échéance', type: 'date' }, { name: 'paid', label: 'Payée', type: 'check' },
+      { name: 'project_id', label: 'Chantier', type: 'select', options: [['', '— frais généraux —'], ...projects.map((p) => [p.id, `${p.number} · ${p.data.name}`])] },
+      { name: 'category', label: 'Type de coût', type: 'select', options: optsOf(TYPES) },
+      { name: 'alloc', type: 'html', cls: 'full', html: `<div class="alloc" data-alloc><label class="chk"><input type="checkbox" data-split ${alloc.length > 1 ? 'checked' : ''}><span>Répartir sur plusieurs chantiers (suivi de chaque chantier)</span></label><div data-rows></div><div class="alloc-foot"><button type="button" class="btn sm" data-addrow>${I.plus} Chantier</button><span class="grow"></span><b data-restinfo></b></div></div>` },
       { name: 'file', type: 'html', cls: 'full', html: `<span class="lbl">Pièce jointe (photo ou PDF)</span><div class="file-pick"><span data-fn>${fileId ? `<a href="${fileUrl(fileId)}" target="_blank">${esc(fileName)}</a>` : '<span class="muted">Aucune</span>'}</span><button type="button" class="btn sm" data-up>${I.camera} Joindre</button></div>` },
     ],
     after: (form) => {
+      getAlloc = allocEditor(form, { projects, alloc, amountField: form.elements.amount, projectField: form.elements.project_id, category: () => form.elements.category.value });
+      const mk = $('[data-mksup]', form);
+      if (mk) mk.onclick = async () => {
+        const c = await editContact(null, { kind: 'fournisseur', company: guess.name || '', vat: guess.vat || '', peppolId: guess.peppolId || '', address: guess.address || '', zip: guess.zip || '', city: guess.city || '', email: guess.email || '' });
+        if (!c) return;
+        const sel = form.elements.supplierId;
+        sel.insertAdjacentHTML('afterbegin', `<option value="${c.id}">${esc(contactName(c))}</option>`); sel.value = c.id;
+        $('[data-guess]', form).remove(); guess = null;
+      };
       $('[data-up]', form).onclick = async () => {
         const [file] = await pickFile('image/*,application/pdf'); if (!file) return;
         toast('Envoi…', 10000);
@@ -229,50 +246,70 @@ async function editExpense(e, preset = {}) {
       };
     },
     async onSave(v) {
+      const rows = getAlloc();
       await resolveContact(v, 'supplierId', 'fournisseur');
       const it = e || { data: {} };
-      it.project_id = v.project_id ? +v.project_id : null; delete v.project_id;
-      it.data = { ...it.data, ...v, amount: num(v.amount), vat: num(v.vat), fileId, fileName };
+      delete v.note; delete v.guess; delete v.alloc; delete v.file;
+      if (rows && rows.length > 1) { it.project_id = null; v.alloc = rows; v.category = rows[0].category; }
+      else if (rows && rows.length === 1) { it.project_id = rows[0].pid; v.category = rows[0].category; v.alloc = null; }
+      else { it.project_id = v.project_id ? +v.project_id : null; v.alloc = null; }
+      delete v.project_id;
+      it.data = { ...it.data, ...v, amount: num(v.amount), vat: num(v.vat), fileId, fileName, toCheck: false };
+      delete it.data.readNote; delete it.data.supplierGuess;
+      if (!it.data.alloc) delete it.data.alloc;
       await persist('expense', it); render();
     },
-    onDelete: e ? async () => { await delFile(d.fileId); await db.del('expense', e.id); render(); } : null,
+    onDelete: e ? async () => { await delFile(d.fileId); if (d.xmlFileId) await delFile(d.xmlFileId); await db.del('expense', e.id); render(); } : null,
   });
 }
-function expensesTable(el, rows, contacts, projects, showProject) {
+// pid : tableau d'un chantier (montants = part de ce chantier)
+function expensesTable(el, rows, contacts, projects, showProject, pid) {
+  const amt = (e) => (pid ? expenseAmountFor(e, pid) : num(e.data.amount));
+  const cat = (e) => (pid ? (expenseFor(e, pid)[0] || {}).category : e.data.category);
+  const where = (e) => {
+    if (isSplit(e)) return `${badge('Ventilé', '#7048e8')} <small class="muted">${expenseParts(e).map((x) => esc(x.pid ? (byId(projects, x.pid) || { data: { name: '?' } }).data.name : 'Frais généraux')).join(', ')}</small>`;
+    return esc((byId(projects, e.project_id) || { data: { name: 'Frais généraux' } }).data.name);
+  };
   dataTable(el, {
     rows, state: { sort: -1 },
     search: (e) => [e.data.desc, e.data.ref, contactName(byId(contacts, e.data.supplierId))].join(' '),
-    filters: { def: '', options: [['', 'Tout'], ...Object.entries(TYPES).map(([k, l]) => [k, l, TYPE_COLORS[k]])], match: (e, f) => e.data.category === f },
+    filters: { def: '', options: [['', 'Tout'], ['check', 'À vérifier', '#e8590c'], ...Object.entries(TYPES).map(([k, l]) => [k, l, TYPE_COLORS[k]])], match: (e, f) => (f === 'check' ? !!e.data.toCheck : cat(e) === f) },
     columns: [
-      { l: 'Date', v: (e) => fmtDate(e.data.date), sort: (e) => e.data.date }, { l: 'Description', v: (e) => `<b>${esc(e.data.desc)}</b>${e.data.peppol ? ` ${badge('Peppol', '#0c8599')}` : ''}${e.data.ref ? `<br><small class="muted">${esc(e.data.ref)}</small>` : ''}` },
+      { l: 'Date', v: (e) => fmtDate(e.data.date), sort: (e) => e.data.date }, { l: 'Description', v: (e) => `<b>${esc(e.data.desc)}</b>${e.data.peppol ? ` ${badge('Peppol', '#0c8599')}` : ''}${e.data.toCheck ? ` ${badge('À vérifier', '#e8590c')}` : ''}${pid && isSplit(e) ? ` ${badge('Ventilé', '#7048e8')}` : ''}${e.data.ref ? `<br><small class="muted">${esc(e.data.ref)}</small>` : ''}` },
       { l: 'Fournisseur', v: (e) => esc(contactName(byId(contacts, e.data.supplierId))) },
-      ...(showProject ? [{ l: 'Chantier', v: (e) => esc((byId(projects, e.project_id) || { data: { name: 'Frais généraux' } }).data.name) }] : []),
-      { l: 'Type', v: (e) => `<i class="tdot" style="--c:${TYPE_COLORS[e.data.category] || '#999'}"></i>${esc(TYPES[e.data.category] || '')}` },
+      ...(showProject ? [{ l: 'Chantier', v: where }] : []),
+      { l: 'Type', v: (e) => `<i class="tdot" style="--c:${TYPE_COLORS[cat(e)] || '#999'}"></i>${esc(TYPES[cat(e)] || '')}` },
       { l: 'Pièce', v: (e) => (e.data.fileId ? `<a href="${fileUrl(e.data.fileId)}" target="_blank">${I.file}</a>` : '') },
       { l: 'Payée', v: (e) => (e.data.paid ? badge('Payée', '#2f9e44') : (e.data.due && e.data.due < today() ? badge('En retard', '#e5484d') : badge('À payer', '#f08c00'))) },
-      { l: 'HT', cls: 'r', v: (e) => `<b>${money(e.data.amount)}</b>`, sort: (e) => num(e.data.amount) },
+      { l: pid ? 'HT (part du chantier)' : 'HT', cls: 'r', v: (e) => `<b>${money(amt(e))}</b>${pid && isSplit(e) ? `<br><small class="muted">sur ${money(e.data.amount)}</small>` : ''}`, sort: amt },
     ],
     onRow: (e) => editExpense(e), empty: 'Aucun achat enregistré',
-    footer: (l) => `<tr><td colspan="${showProject ? 7 : 6}">Total</td><td class="r"><b>${money(l.reduce((a, e) => a + num(e.data.amount), 0))}</b></td></tr>`,
+    footer: (l) => `<tr><td colspan="${showProject ? 7 : 6}">Total</td><td class="r"><b>${money(l.reduce((a, e) => a + amt(e), 0))}</b></td></tr>`,
   });
 }
 async function tabPExpenses(p, el, contacts) {
-  const rows = await db.list('expense', { project: p.id });
-  el.innerHTML = `<div class="toolbar"><span class="grow"></span><button class="btn" data-act="peppol">Importer Peppol (XML)</button><button class="btn primary" data-act="ne">${I.plus} Nouvel achat</button></div><div id="tbl"></div>`;
-  $('[data-act=peppol]', el).onclick = () => importPeppolPurchase(p.id);
-  expensesTable($('#tbl', el), rows, contacts, [], false);
+  const [all, projects] = await Promise.all([db.list('expense'), db.list('project')]);
+  const rows = all.filter((e) => expenseFor(e, p.id).length);
+  el.innerHTML = `<div class="toolbar"><span class="grow"></span><button class="btn" data-act="imp">${I.file} Importer une facture (PDF / XML)</button><button class="btn primary" data-act="ne">${I.plus} Nouvel achat</button></div><div id="tbl"></div>`;
+  $('[data-act=imp]', el).onclick = () => importPurchase(p.id);
+  expensesTable($('#tbl', el), rows, contacts, projects, false, p.id);
   $('[data-act=ne]', el).onclick = () => editExpense(null, { project_id: p.id });
 }
 route('expenses', async () => {
   const [rows, contacts, projects] = await Promise.all([db.list('expense'), db.list('contact'), db.list('project')]);
-  const page = layout({ active: 'finances', icon: 'coins', title: 'Achats & dépenses', actions: `<button class="btn" data-act="csv">Export CSV</button><button class="btn" data-act="peppol">Importer Peppol (XML)</button><button class="btn primary" data-act="ne">${I.plus} Nouvel achat</button>` });
-  $('[data-act=peppol]').onclick = () => importPeppolPurchase();
+  const page = layout({ active: 'finances', icon: 'coins', title: 'Achats & dépenses', actions: `<button class="btn" data-act="csv">Export CSV</button>${peppolApOn() ? `<button class="btn" data-act="sync">Recevoir (Peppol)</button>` : ''}<button class="btn" data-act="imp">${I.file} Importer une facture</button><button class="btn primary" data-act="ne">${I.plus} Nouvel achat</button>` });
+  $('[data-act=imp]').onclick = () => importPurchase();
+  const sy = $('[data-act=sync]'); if (sy) sy.onclick = async () => { sy.disabled = true; const r = await peppolSync({ force: true, quiet: false }); sy.disabled = false; if (r && r.created.length) render(); };
   const unpaid = rows.filter((e) => !e.data.paid);
-  page.innerHTML = `<div class="kpis">${kpi('Achats ce mois-ci HT', money(rows.filter((e) => (e.data.date || '').startsWith(today().slice(0, 7))).reduce((a, e) => a + num(e.data.amount), 0)))}${kpi('Factures fournisseurs à payer', money(unpaid.reduce((a, e) => a + num(e.data.amount) + (e.data.vatAmount != null ? num(e.data.vatAmount) : num(e.data.amount) * num(e.data.vat) / 100), 0)), { sub: `${unpaid.length} facture(s) TVAC`, cls: unpaid.some((e) => e.data.due && e.data.due < today()) ? 'bad' : '' })}</div><div id="tbl"></div>`;
+  const toCheck = rows.filter((e) => e.data.toCheck);
+  page.innerHTML = `${toCheck.length ? `<div class="hint-box warn">${toCheck.length} facture(s) reçue(s) à vérifier : choisissez le chantier (ou répartissez entre plusieurs) puis enregistrez. <a href="#" data-chk>Afficher</a></div>` : ''}
+    <div class="kpis">${kpi('Achats ce mois-ci HT', money(rows.filter((e) => (e.data.date || '').startsWith(today().slice(0, 7))).reduce((a, e) => a + num(e.data.amount), 0)))}${kpi('Factures fournisseurs à payer', money(unpaid.reduce((a, e) => a + num(e.data.amount) + (e.data.vatAmount != null ? num(e.data.vatAmount) : num(e.data.amount) * num(e.data.vat) / 100), 0)), { sub: `${unpaid.length} facture(s) TVAC`, cls: unpaid.some((e) => e.data.due && e.data.due < today()) ? 'bad' : '' })}</div><div id="tbl"></div>`;
   expensesTable($('#tbl'), rows, contacts, projects, true);
+  const ck = $('[data-chk]'); if (ck) ck.onclick = (ev) => { ev.preventDefault(); const chip = $('#tbl [data-f="check"]'); if (chip) chip.click(); };
   $('[data-act=ne]').onclick = () => editExpense();
   $('[data-act=csv]').onclick = () => downloadCSV('achats.csv', [['Date', 'Description', 'Ref', 'Fournisseur', 'Chantier', 'Type', 'HT', 'TVA %', 'Payee'],
-    ...rows.map((e) => [fmtDate(e.data.date), e.data.desc, e.data.ref, contactName(byId(contacts, e.data.supplierId)), (byId(projects, e.project_id) || { data: {} }).data.name, TYPES[e.data.category], fnum(num(e.data.amount)), e.data.vat, e.data.paid ? 'oui' : 'non'])]);
+    ...rows.flatMap((e) => expenseParts(e).map((x) => [fmtDate(e.data.date), e.data.desc, e.data.ref, contactName(byId(contacts, e.data.supplierId)), x.pid ? (byId(projects, x.pid) || { data: {} }).data.name : 'Frais généraux', TYPES[x.category], fnum(x.amount), e.data.vat, e.data.paid ? 'oui' : 'non']))]);
+  if (peppolApOn()) peppolSync().then((r) => { if (r && r.created.length && location.hash.startsWith('#/expenses')) render(); });
 });
 
 // ---------------------------------------------------------------- Heures prestées (pointage)

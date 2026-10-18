@@ -117,7 +117,7 @@ route('stats', async () => {
   const ML = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
   const projRows = all.project.map((p) => {
     const by = (t) => all[t].filter((x) => x.project_id === p.id);
-    const f = projectFinance(p, { quote: by('quote'), invoice: by('invoice'), order: by('order'), expense: by('expense'), timesheet: by('timesheet') });
+    const f = projectFinance(p, { quote: by('quote'), invoice: by('invoice'), order: by('order'), expense: all.expense, timesheet: by('timesheet') });
     return { p, f };
   }).filter((r) => r.f.budget || r.f.real);
   const funnel = OPP_STAGES.map(([k, l, c]) => ({ l, c, n: all.opportunity.filter((o) => o.data.stage === k).length, v: all.opportunity.filter((o) => o.data.stage === k).reduce((a, o) => a + num(o.data.amount), 0) }));

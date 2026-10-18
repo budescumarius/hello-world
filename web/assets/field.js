@@ -11,8 +11,8 @@ let pdfjsP;
 function loadPdfJs() {
   if (!pdfjsP) pdfjsP = new Promise((res, rej) => {
     const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-    s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; res(window.pdfjsLib); };
+    s.src = 'assets/vendor/pdf-3.11.174.min.js';
+    s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'assets/vendor/pdf.worker-3.11.174.min.js'; res(window.pdfjsLib); };
     s.onerror = () => { pdfjsP = null; rej(new Error('Impossible de charger le lecteur PDF')); };
     document.head.appendChild(s);
   });

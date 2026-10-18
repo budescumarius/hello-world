@@ -2,6 +2,7 @@
 // API JSON de l'application. Route passée dans ?r=/chemin (fonctionne sans mod_rewrite).
 declare(strict_types=1);
 require __DIR__ . '/lib.php';
+require __DIR__ . '/peppol_ap.php';
 
 set_exception_handler(function (Throwable $e) {
     error_log('[batipro] ' . $e);
@@ -70,6 +71,7 @@ switch ($seg[0] ?? '') {
         foreach (q('SELECT k, v FROM settings')->fetchAll() as $r) $settings[$r['k']] = json_decode($r['v'], true);
         // le mot de passe SMTP ne quitte jamais le serveur
         if (isset($settings['smtp']) && is_array($settings['smtp'])) { $settings['smtp']['hasPass'] = !empty($settings['smtp']['pass']); unset($settings['smtp']['pass']); }
+        if (isset($settings['peppolap']) && is_array($settings['peppolap'])) { $settings['peppolap']['hasKey'] = !empty($settings['peppolap']['key']); unset($settings['peppolap']['key']); }
         out(['user' => $u, 'users' => $users, 'settings' => $settings, 'version' => APP_VERSION]);
 
     // ------------------------------------------------------------ Utilisateurs
@@ -121,6 +123,11 @@ switch ($seg[0] ?? '') {
                     $old = setting('smtp', []) ?: [];
                     if (($v['pass'] ?? '') === '' && empty($v['clearPass'])) $v['pass'] = $old['pass'] ?? '';
                     unset($v['hasPass'], $v['clearPass']);
+                }
+                if ($k === 'peppolap' && is_array($v)) {
+                    $old = setting('peppolap', []) ?: [];
+                    if (($v['key'] ?? '') === '' && empty($v['clearKey'])) $v['key'] = $old['key'] ?? '';
+                    unset($v['hasKey'], $v['clearKey']);
                 }
                 set_setting($k, $v);
             }
@@ -281,7 +288,35 @@ switch ($seg[0] ?? '') {
 
     // ------------------------------------------------------------ Annuaire Peppol (participant enregistré ?)
     case 'peppol':
-        require_user();
+        $me = require_user();
+        $act = $seg[1] ?? '';
+        if ($act === 'sync' && $method === 'POST') {
+            try { $r = pap_sync($me['id']); } catch (Throwable $e) { fail(502, $e->getMessage()); }
+            foreach ($r['created'] as $c) log_activity($me['id'], 'create', 'expense', $c['id'], null, 'Reçu via Peppol : ' . $c['label']);
+            out($r);
+        }
+        if ($act === 'test' && $method === 'POST') {
+            require_admin();
+            try { $l = pap_req('GET', 'message/list?folder=INBOX&confirmed=false&perPage=1'); } catch (Throwable $e) { fail(502, $e->getMessage()); }
+            out(['ok' => true, 'waiting' => (int)($l['meta']['total'] ?? count($l['items'] ?? []))]);
+        }
+        if ($act === 'send' && $method === 'POST') {
+            $b = body();
+            $xml = (string)($b['xml'] ?? '');
+            $rcpt = trim((string)($b['recipient'] ?? ''));
+            $co = setting('company', []) ?: [];
+            $sender = trim((string)($co['peppolId'] ?? ''));
+            if (!preg_match('/^\d{4}:[A-Za-z0-9.\-]{2,50}$/', $rcpt)) fail(400, 'Identifiant Peppol du client invalide.');
+            if (!preg_match('/^\d{4}:[A-Za-z0-9.\-]{2,50}$/', $sender)) fail(400, 'Votre identifiant Peppol manque (Paramètres › Peppol).');
+            if ($xml === '' || strlen($xml) > 15 * 1024 * 1024) fail(400, 'Fichier UBL manquant ou trop lourd.');
+            try {
+                $r = pap_req('POST', 'message', ['sender' => $sender, 'recipient' => $rcpt, 'processType' => PAP_PROCESS,
+                    'documentType' => !empty($b['credit']) ? PAP_DOC_CREDIT : PAP_DOC_INVOICE, 'fileContent' => base64_encode($xml)]);
+            } catch (Throwable $e) { fail(502, $e->getMessage()); }
+            $iid = isset($b['invoice_id']) ? (int)$b['invoice_id'] : null;
+            log_activity($me['id'], 'mail', 'invoice', $iid, null, 'Envoyée via Peppol à ' . $rcpt);
+            out(['ok' => true, 'id' => $r['id'] ?? null]);
+        }
         $id = trim((string)($_GET['id'] ?? ''));
         if (($seg[1] ?? '') !== 'lookup' || !preg_match('/^\d{4}:[A-Za-z0-9.\-]{2,50}$/', $id)) fail(400, 'Identifiant Peppol invalide (format 0208:0123456789)');
         $url = 'https://directory.peppol.eu/search/1.0/json?participant=' . rawurlencode('iso6523-actorid-upis::' . $id);

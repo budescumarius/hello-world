@@ -453,6 +453,8 @@ async function boot() {
     document.title = (S.settings.company || {}).appName || (S.settings.company || {}).name || 'BâtiPro';
     if (!location.hash) location.hash = '#/dashboard';
     render();
+    // relève des factures reçues via Peppol (toutes les 10 min au plus)
+    if (typeof peppolSync === 'function') setTimeout(() => peppolSync(), 1500);
   } catch (e) {
     if (e.status === 401) showLogin();
     else if (e.status === 503) app.innerHTML = `<div class="login"><div class="login-box"><h1>Installation requise</h1><p>${esc(e.message)}</p><a class="btn primary" href="install.php">Installer</a></div></div>`;
