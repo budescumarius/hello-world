@@ -21,6 +21,12 @@ Aplicație web instalabilă (PWA) pentru urmărirea șantierelor: planuri, punct
 - **Setări**: datele firmei, logo, monedă, cote TVA, prefixe și numerotare pentru devize și facturi.
 - **Backup / restaurare** a tuturor datelor într-un fișier JSON (îl poți salva în iCloud Drive / Fișiere).
 
+### Asistent AI (Claude)
+- **Pilot automat**: o dată pe zi, la deschiderea aplicației, asistentul analizează facturile neîncasate, ofertele fără răspuns, costurile față de buget, sarcinile întârziate și punctele restante, apoi îți pregătește lista de acțiuni pentru azi, cu **emailuri gata redactate** (reminder de plată, follow-up la ofertă). Le verifici, apeși „Trimite pe email” și le marchezi ca rezolvate. Reminderele trimise sunt ținute minte, iar următorul mesaj devine mai ferm.
+- **Deviz cu AI**: în deviz → ⋯ → „Completează devizul cu AI”, descrii lucrarea în câteva cuvinte și primești capitole și articole cu cantități și prețuri (din catalogul tău, unde se potrivesc).
+- **Întreabă asistentul**: întrebări libere despre afacere („Cine îmi datorează cei mai mulți bani?”).
+- Activare: tabul **Asistent AI** → Setări → cheia API de pe console.anthropic.com. Cheia stă doar pe dispozitiv și nu intră în backup. Asistentul are nevoie de internet; către Anthropic se trimite doar un rezumat al datelor (fără fotografii sau planuri).
+
 ## Publicare
 1. Pe GitHub: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 2. La fiecare push pe `master`, workflow-ul `.github/workflows/pages.yml` publică folderul `app/`.

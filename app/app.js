@@ -327,6 +327,7 @@ async function deleteProject(pid) {
 function appMenu() {
   actionSheet('Meniu', [
     { label: 'Datele firmei și setări (TVA, monedă, numerotare)', run: editSettings },
+    { label: 'Asistent AI', run: () => go('#/g/ai') },
     { label: 'Exportă backup (toate datele)', run: exportBackup },
     { label: 'Importă backup', run: importBackup },
     { label: 'Spațiu de stocare', run: storageInfo },
@@ -359,6 +360,7 @@ async function exportBackup() {
   toast('Se pregătește backup-ul…', 10000);
   const data = {};
   for (const s of STORES.filter((x) => x !== 'blobs')) data[s] = await db.all(s);
+  data.meta = data.meta.filter((m) => m.id !== 'ai'); // cheia API nu pleacă de pe dispozitiv
   const blobs = [];
   for (const b of await db.all('blobs')) blobs.push({ id: b.id, data: await blobToDataURL(b.blob) });
   const json = JSON.stringify({ app: 'santier', version: 1, exported: new Date().toISOString(), data, blobs });
@@ -374,7 +376,11 @@ async function importBackup() {
     if (obj.app !== 'santier' || !obj.data) throw new Error('Fișierul nu este un backup Șantier');
     const mode = confirm('Înlocuiești TOATE datele existente cu cele din backup?\n\nOK = înlocuiește\nAnulează = adaugă/actualizează peste datele existente');
     toast('Se importă…', 20000);
-    if (mode) { for (const s of STORES) await db.clear(s); urlCache.clear(); }
+    if (mode) {
+      const ai = await db.get('meta', 'ai'); // setările AI (cheia API) rămân pe dispozitiv
+      for (const s of STORES) await db.clear(s); urlCache.clear();
+      if (ai) await db.put('meta', ai);
+    }
     for (const s of Object.keys(obj.data)) if (STORES.includes(s)) for (const o of obj.data[s]) await db.put(s, o);
     for (const b of obj.blobs || []) await db.put('blobs', { id: b.id, blob: await dataURLToBlob(b.data) });
     toast('Backup importat cu succes');
@@ -1258,5 +1264,7 @@ async function viewPrint(pr) {
   }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  // gestiune.js și ai.js se încarcă după app.js – așteptăm toate scripturile înainte de prima afișare
+  if (document.readyState === 'loading') await new Promise((r) => document.addEventListener('DOMContentLoaded', r, { once: true }));
   render();
 }());

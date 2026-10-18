@@ -146,7 +146,7 @@ const catPrice = (c) => (num(c.cost) > 0 ? r2(num(c.cost) * (1 + num(c.margin) /
 const fromCatalog = (c) => ({ id: uid(), kind: 'item', catalogId: c.id, desc: c.name, unit: c.unit || 'buc', qty: 1, cost: num(c.cost), price: num(c.price) || catPrice(c), vat: c.vat === '' || c.vat == null ? num(settings.defaultVat) : num(c.vat), type: c.type || 'material' });
 
 // ---------------------------------------------------------------- Pagina principală (tab-uri globale)
-const HOME_TABS = [['', 'Proiecte'], ['quotes', 'Devize'], ['invoices', 'Facturi'], ['planning', 'Planning'], ['clients', 'Clienți'], ['catalog', 'Catalog']];
+const HOME_TABS = [['', 'Proiecte'], ['quotes', 'Devize'], ['invoices', 'Facturi'], ['planning', 'Planning'], ['clients', 'Clienți'], ['catalog', 'Catalog'], ['ai', 'Asistent AI']];
 function homeNav(on) {
   return `<nav class="tabs">${HOME_TABS.map(([k, l]) => `<a href="#/${k ? 'g/' + k : ''}" class="${k === on ? 'on' : ''}">${l}</a>`).join('')}</nav>`;
 }
@@ -157,7 +157,7 @@ async function viewGlobal(tab) {
   app.innerHTML = `${bar({ title: 'Șantier', sub: t[1], right: `<button class="icon-btn" data-act="settings" aria-label="Setări">${I.gear}</button>` })}
     ${homeNav(tab)}<main class="content" id="tab"></main>`;
   $('[data-act=settings]').onclick = editSettings;
-  await ({ quotes: gQuotes, invoices: gInvoices, planning: gPlanning, clients: gClients, catalog: gCatalog })[tab]($('#tab'));
+  await ({ quotes: gQuotes, invoices: gInvoices, planning: gPlanning, clients: gClients, catalog: gCatalog, ai: gAI })[tab]($('#tab'));
 }
 
 // Alege proiectul pentru un document nou creat din lista globală
@@ -677,6 +677,7 @@ async function viewQuote(id) {
   $('[data-add=item]').onclick = () => editLine(q, -1, save, 'item', true);
   $('[data-add=cat]').onclick = () => pickFromCatalog((ci) => q.lines.push(fromCatalog(ci)), save);
   $('[data-act=more]').onclick = () => actionSheet(`Deviz ${q.number}`, [
+    { label: 'Completează devizul cu AI (din descriere)…', run: () => aiQuote(q, save) },
     { label: 'Creează factură din deviz…', run: () => invoiceFromQuote(q) },
     { label: 'Generează planning din capitole', run: () => planFromQuote(q) },
     { label: 'Editează datele devizului', run: () => editHead(q, true, clients, save) },
