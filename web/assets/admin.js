@@ -140,7 +140,7 @@ route('stats', async () => {
 
 // ---------------------------------------------------------------- Paramètres
 route('settings', async (tab = 'company') => {
-  if (S.me.role !== 'admin') return go('#/dashboard');
+  if (!isAdmin()) return go('#/dashboard');
   const page = layout({ active: '', icon: 'gear', title: 'Paramètres', tabs: [['company', 'Entreprise'], ['docs', 'Documents & numérotation'], ['templates', 'Modèles de documents'], ['peppol', 'Peppol'], ['mail', 'Email'], ['users', 'Utilisateurs'], ['activity', 'Journal d\'activité']].map(([k, l]) => `<a href="#/settings/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
   const co = { ...company() };
   if (tab === 'users') return settingsUsers(page);
@@ -199,7 +199,7 @@ async function settingsUsers(page) {
     async onSave(v) { if (u) await api('PUT', `users/${u.id}`, v); else await api('POST', 'users', v); toast(u ? 'Utilisateur modifié' : 'Utilisateur créé – communiquez-lui son email et son mot de passe'); render(); },
   });
   dataTable(page, {
-    rows: S.users, toolbar: `<button class="btn primary" data-act="new">${I.plus} Nouvel utilisateur</button>`,
+    rows: S.users.filter((u) => S.firm.own !== false || u.id !== S.me.id), toolbar: `<button class="btn primary" data-act="new">${I.plus} Nouvel utilisateur</button>`,
     columns: [{ l: '', v: (u) => avatar(u.id) }, { l: 'Nom', v: (u) => `<b>${esc(u.name)}</b>` }, { l: 'Email', v: (u) => esc(u.email) }, { l: 'Rôle', v: (u) => (u.role === 'admin' ? badge('Administrateur', '#7048e8') : badge('Utilisateur', '#3b5bdb')) },
       { l: 'Statut', v: (u) => (u.active ? badge('Actif', '#2f9e44') : badge('Désactivé', '#868e96')) }, { l: 'Dernière connexion', v: (u) => fmtDT(u.last_login) }],
     onRow: edit,
@@ -248,4 +248,58 @@ async function quickSearch() {
   draw(); inp.focus();
 }
 
+
+// ---------------------------------------------------------------- Plateforme : firmes clientes (super-administrateur)
+route('platform', async () => {
+  if (!S.me.super) return go('#/dashboard');
+  const rows = await api('GET', 'platform/companies');
+  const page = layout({ active: '', icon: 'people', title: 'Plateforme – firmes', actions: `<button class="btn primary" data-act="new">${I.plus} Nouvelle firme</button>` });
+  page.innerHTML = `<div class="kpis">${kpi('Firmes', rows.length, { sub: `${rows.filter((c) => c.active).length} active(s)` })}${kpi('Utilisateurs', rows.reduce((a, c) => a + c.users_active, 0))}${kpi('Chantiers', rows.reduce((a, c) => a + c.projects, 0))}</div>
+    <div id="tbl"></div>
+    <div class="card"><div class="card-h"><h3>Comment ça marche</h3></div><ol class="steps">
+      <li>Chaque firme a ses propres données (clients, devis, factures, chantiers, achats, paramètres, Peppol) : les autres firmes ne les voient jamais.</li>
+      <li>« Nouvelle firme » crée la firme et son premier <b>administrateur</b>. Communiquez-lui l'adresse de l'application, son email et son mot de passe.</li>
+      <li>L'administrateur d'une firme crée lui-même ses collègues dans <b>Paramètres › Utilisateurs</b> (rôle Administrateur ou Utilisateur). Vous pouvez aussi le faire : « Entrer » dans la firme, puis Paramètres › Utilisateurs.</li>
+      <li>Une firme suspendue ne peut plus se connecter ; ses données sont conservées.</li>
+    </ol></div>`;
+  const edit = (c) => formModal({
+    title: c ? c.name : 'Nouvelle firme', values: c ? { name: c.name } : { country: 'BE' },
+    fields: c ? [{ name: 'name', label: 'Nom de la firme', required: true, cls: 'full' }] : [
+      { name: 'name', label: 'Nom de la firme', required: true }, { name: 'vat', label: 'N° TVA', placeholder: 'BE0123456789' },
+      { name: 'country', label: 'Pays', type: 'select', options: [['BE', 'Belgique'], ['FR', 'France'], ['LU', 'Luxembourg'], ['CH', 'Suisse'], ['RO', 'Roumanie']] },
+      { name: 'html', type: 'html', cls: 'full', html: '<div class="section-t">Premier administrateur de la firme</div>' },
+      { name: 'admin', label: 'Nom', required: true }, { name: 'email', label: 'Email (identifiant)', type: 'email', required: true },
+      { name: 'password', label: 'Mot de passe (8 caractères min.)', type: 'text', required: true, hint: 'Communiquez-le à l\'administrateur ; il pourra le changer dans son profil.' },
+    ],
+    saveLabel: c ? 'Enregistrer' : 'Créer la firme',
+    async onSave(v) {
+      if (c) await api('PUT', `platform/companies/${c.id}`, { name: v.name });
+      else { await api('POST', 'platform/companies', v); toast(`Firme créée – ${v.email} peut se connecter`, 4000); }
+      render();
+    },
+  });
+  dataTable($('#tbl', page), {
+    rows,
+    search: (c) => [c.name, c.admins].join(' '),
+    columns: [
+      { l: 'Firme', v: (c) => `<b>${esc(c.name)}</b>${c.id === S.me.company_id ? ` ${badge('Votre firme', '#3b5bdb')}` : ''}<br><small class="muted">${esc(c.admins || '')}</small>` },
+      { l: 'Utilisateurs', cls: 'r', v: (c) => `${c.users_active}${c.users !== c.users_active ? ` <small class="muted">/ ${c.users}</small>` : ''}` },
+      { l: 'Chantiers', cls: 'r', v: (c) => c.projects },
+      { l: 'Dernière connexion', v: (c) => fmtDT(c.last_login) },
+      { l: 'Statut', v: (c) => (c.active ? badge('Active', '#2f9e44') : badge('Suspendue', '#e5484d')) },
+      { l: '', v: (c) => `<span class="nowrap"><button class="btn sm primary" data-in="${c.id}">Entrer</button> <button class="btn sm" data-ed="${c.id}">${I.edit}</button>${c.id === S.me.company_id ? '' : ` <button class="btn sm" data-tg="${c.id}">${c.active ? 'Suspendre' : 'Réactiver'}</button>`}</span>` },
+    ],
+    empty: 'Aucune firme',
+  });
+  const byC = (id) => rows.find((c) => c.id === +id);
+  page.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-in],[data-ed],[data-tg]'); if (!b) return;
+    if (b.dataset.in) return switchFirm(+b.dataset.in === S.me.company_id ? 0 : +b.dataset.in);
+    if (b.dataset.ed) return edit(byC(b.dataset.ed));
+    const c = byC(b.dataset.tg);
+    if (c.active && !confirm(`Suspendre « ${c.name} » ? Ses utilisateurs ne pourront plus se connecter (les données sont conservées).`)) return;
+    await api('PUT', `platform/companies/${c.id}`, { active: !c.active }); render();
+  });
+  $('[data-act=new]').onclick = () => edit(null);
+});
 boot();

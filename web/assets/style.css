@@ -608,3 +608,5 @@ table.lines { width: 100%; border-collapse: collapse; min-width: 760px; }
 .alloc-foot { display: flex; align-items: center; gap: 8px; }
 .alloc-foot .good { color: #2f9e44; } .alloc-foot .late { color: #e5484d; }
 @media (max-width: 700px) { .alloc-row { grid-template-columns: minmax(0, 1fr) 110px; padding-bottom: 8px; border-bottom: 1px dashed var(--border); } .alloc-row select[data-k=pid] { grid-column: 1 / -1; } }
+.firm-band { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: #fff4e6; color: #8a4b08; border-bottom: 1px solid #ffd8a8; padding: 8px 16px; font-size: 14px; }
+.firm-band .btn { margin-left: auto; }

@@ -17,10 +17,12 @@ if (!$done && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo = new PDO("mysql:host={$p('db_host')};dbname={$p('db_name')};charset=utf8mb4", $p('db_user'), $_POST['db_pass'] ?? '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
         foreach (array_filter(array_map('trim', explode(';', file_get_contents(__DIR__ . '/schema.sql')))) as $sql) $pdo->exec($sql);
         $now = date('Y-m-d H:i:s');
-        $st = $pdo->prepare('INSERT INTO users (name, email, pass, role, color, created_at) VALUES (?,?,?,?,?,?)');
+        $pdo->prepare('INSERT INTO companies (id, name, active, created_at) VALUES (1, ?, 1, ?) ON DUPLICATE KEY UPDATE name = VALUES(name)')->execute([$p('company'), $now]);
+        // le premier compte gère la plateforme (création des autres firmes)
+        $st = $pdo->prepare('INSERT INTO users (company_id, super, name, email, pass, role, color, created_at) VALUES (1,1,?,?,?,?,?,?)');
         $st->execute([$p('name') ?: 'Administrateur', mb_strtolower($p('email')), password_hash($p('password'), PASSWORD_DEFAULT), 'admin', '#3b5bdb', $now]);
         $company = ['name' => $p('company'), 'currency' => 'EUR', 'vatRates' => [21, 12, 6, 0], 'defaultVat' => 21, 'country' => 'BE'];
-        $pdo->prepare('INSERT INTO settings (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)')->execute(['company', json_encode($company, JSON_UNESCAPED_UNICODE)]);
+        $pdo->prepare('INSERT INTO settings (company_id, k, v) VALUES (1, ?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)')->execute(['company', json_encode($company, JSON_UNESCAPED_UNICODE)]);
         $config = "<?php\n// Généré par install.php le $now\nreturn " . var_export([
             'db' => ['host' => $p('db_host'), 'name' => $p('db_name'), 'user' => $p('db_user'), 'pass' => $_POST['db_pass'] ?? ''],
         ], true) . ";\n";

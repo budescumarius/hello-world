@@ -15,6 +15,7 @@ $seg = $path === '' ? [] : explode('/', $path);
 
 // Les requêtes qui modifient des données doivent venir de l'application (protection CSRF avec le cookie SameSite)
 if ($method !== 'GET' && ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') !== 'batipro') fail(403, 'Requête refusée');
+migrate();
 
 $TYPE_RE = '/^[a-z_]{2,32}$/';
 
@@ -34,9 +35,11 @@ switch ($seg[0] ?? '') {
                 usleep(600000);
                 fail(401, 'Email ou mot de passe incorrect.');
             }
+            if (!$u['super'] && !(int)q('SELECT active FROM companies WHERE id = ?', [$u['company_id']])->fetchColumn()) fail(403, 'Le compte de votre entreprise est suspendu. Contactez le gestionnaire de la plateforme.');
             start_session();
             session_regenerate_id(true);
             $_SESSION['uid'] = (int)$u['id'];
+            unset($_SESSION['cid']);
             q('UPDATE users SET last_login = ? WHERE id = ?', [now(), $u['id']]);
             q('DELETE FROM logins WHERE ip = ?', [$ip]);
             out(['ok' => true]);
@@ -65,14 +68,19 @@ switch ($seg[0] ?? '') {
     // ------------------------------------------------------------ Données de départ
     case 'bootstrap':
         $u = require_user();
-        $users = q('SELECT id, name, email, role, active, color, last_login FROM users ORDER BY name')->fetchAll();
+        $users = q('SELECT id, name, email, role, active, color, last_login FROM users WHERE company_id = ? ORDER BY name', [cid()])->fetchAll();
         foreach ($users as &$x) { $x['id'] = (int)$x['id']; $x['active'] = (int)$x['active']; }
+        unset($x);
+        // le super-administrateur entré dans une autre firme apparaît aussi (auteur de ses modifications)
+        if (!in_array($u['id'], array_column($users, 'id'), true)) $users[] = ['id' => $u['id'], 'name' => $u['name'], 'email' => $u['email'], 'role' => 'admin', 'active' => 0, 'color' => $u['color'], 'last_login' => null];
         $settings = [];
-        foreach (q('SELECT k, v FROM settings')->fetchAll() as $r) $settings[$r['k']] = json_decode($r['v'], true);
+        foreach (q('SELECT k, v FROM settings WHERE company_id = ?', [cid()])->fetchAll() as $r) $settings[$r['k']] = json_decode($r['v'], true);
         // le mot de passe SMTP ne quitte jamais le serveur
         if (isset($settings['smtp']) && is_array($settings['smtp'])) { $settings['smtp']['hasPass'] = !empty($settings['smtp']['pass']); unset($settings['smtp']['pass']); }
         if (isset($settings['peppolap']) && is_array($settings['peppolap'])) { $settings['peppolap']['hasKey'] = !empty($settings['peppolap']['key']); unset($settings['peppolap']['key']); }
-        out(['user' => $u, 'users' => $users, 'settings' => $settings, 'version' => APP_VERSION]);
+        $firm = q('SELECT id, name FROM companies WHERE id = ?', [cid()])->fetch() ?: ['id' => cid(), 'name' => ''];
+        out(['user' => $u, 'users' => $users, 'settings' => $settings, 'version' => APP_VERSION,
+            'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => cid() === $u['company_id']]]);
 
     // ------------------------------------------------------------ Utilisateurs
     case 'users':
@@ -84,7 +92,7 @@ switch ($seg[0] ?? '') {
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) fail(400, 'Email invalide.');
             if (mb_strlen((string)($b['password'] ?? '')) < 8) fail(400, 'Le mot de passe doit contenir au moins 8 caractères.');
             if (q('SELECT id FROM users WHERE email = ?', [$email])->fetch()) fail(400, 'Cet email est déjà utilisé.');
-            q('INSERT INTO users (name, email, pass, role, color, created_at) VALUES (?,?,?,?,?,?)', [
+            q('INSERT INTO users (company_id, name, email, pass, role, color, created_at) VALUES (?,?,?,?,?,?,?)', [cid(),
                 trim((string)($b['name'] ?? $email)), $email, password_hash($b['password'], PASSWORD_DEFAULT),
                 ($b['role'] ?? '') === 'admin' ? 'admin' : 'user', (string)($b['color'] ?? '#3b5bdb'), now()]);
             $nid = (int)db()->lastInsertId();
@@ -94,12 +102,20 @@ switch ($seg[0] ?? '') {
         if ($method === 'PUT' && $id) {
             $me = require_user();
             $b = body();
-            if ($me['role'] !== 'admin' && $me['id'] !== $id) fail(403, 'Réservé aux administrateurs.');
+            $isAdmin = $me['role'] === 'admin' || $me['super'];
+            if (!$isAdmin && $me['id'] !== $id) fail(403, 'Réservé aux administrateurs.');
+            // un administrateur ne gère que les utilisateurs de sa firme
+            if ($me['id'] !== $id && !q('SELECT id FROM users WHERE id = ? AND company_id = ?', [$id, cid()])->fetch()) fail(404, 'Utilisateur introuvable.');
             $fields = []; $args = [];
             if (isset($b['name'])) { $fields[] = 'name = ?'; $args[] = trim((string)$b['name']); }
             if (isset($b['color'])) { $fields[] = 'color = ?'; $args[] = (string)$b['color']; }
-            if ($me['role'] === 'admin') {
-                if (isset($b['email'])) { $fields[] = 'email = ?'; $args[] = mb_strtolower(trim((string)$b['email'])); }
+            if ($isAdmin) {
+                if (isset($b['email'])) {
+                    $em = mb_strtolower(trim((string)$b['email']));
+                    if (!filter_var($em, FILTER_VALIDATE_EMAIL)) fail(400, 'Email invalide.');
+                    if (q('SELECT id FROM users WHERE email = ? AND id <> ?', [$em, $id])->fetch()) fail(400, 'Cet email est déjà utilisé.');
+                    $fields[] = 'email = ?'; $args[] = $em;
+                }
                 if (isset($b['role']) && $id !== $me['id']) { $fields[] = 'role = ?'; $args[] = $b['role'] === 'admin' ? 'admin' : 'user'; }
                 if (isset($b['active']) && $id !== $me['id']) { $fields[] = 'active = ?'; $args[] = $b['active'] ? 1 : 0; }
                 if (!empty($b['password'])) {
@@ -156,8 +172,8 @@ switch ($seg[0] ?? '') {
             // plusieurs types en une requête : ?types=a,b&project=ID
             $types = array_values(array_filter(explode(',', (string)($_GET['types'] ?? '')), fn($t) => preg_match($TYPE_RE, $t)));
             if (!$types) out([]);
-            $sql = 'SELECT * FROM items WHERE type IN (' . implode(',', array_fill(0, count($types), '?')) . ')';
-            $args = $types;
+            $sql = 'SELECT * FROM items WHERE company_id = ? AND type IN (' . implode(',', array_fill(0, count($types), '?')) . ')';
+            $args = array_merge([cid()], $types);
             if (isset($_GET['project'])) { $sql .= ' AND project_id = ?'; $args[] = (int)$_GET['project']; }
             $res = array_fill_keys($types, []);
             foreach (q($sql . ' ORDER BY id', $args)->fetchAll() as $r) $res[$r['type']][] = row_out($r);
@@ -166,13 +182,13 @@ switch ($seg[0] ?? '') {
         if (!preg_match($TYPE_RE, $type)) fail(400, 'Type invalide');
 
         if ($method === 'GET' && !$id) {
-            $sql = 'SELECT * FROM items WHERE type = ?'; $args = [$type];
+            $sql = 'SELECT * FROM items WHERE company_id = ? AND type = ?'; $args = [cid(), $type];
             if (isset($_GET['project'])) { $sql .= ' AND project_id = ?'; $args[] = (int)$_GET['project']; }
             if (isset($_GET['parent'])) { $sql .= ' AND parent_id = ?'; $args[] = (int)$_GET['parent']; }
             out(array_map('row_out', q($sql . ' ORDER BY id', $args)->fetchAll()));
         }
         if ($method === 'GET') {
-            $r = q('SELECT * FROM items WHERE id = ? AND type = ?', [$id, $type])->fetch();
+            $r = q('SELECT * FROM items WHERE id = ? AND type = ? AND company_id = ?', [$id, $type, cid()])->fetch();
             if (!$r) fail(404, 'Élément introuvable (supprimé ?)');
             out(row_out($r));
         }
@@ -185,8 +201,8 @@ switch ($seg[0] ?? '') {
             $number = null;
             if (isset(NUMBERED[$type])) $number = make_number($type);
             if ($type === 'point' && $pid) $number = (string)next_counter("point-$pid");
-            q('INSERT INTO items (type, project_id, parent_id, number, data, version, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,1,?,?,?,?)',
-              [$type, $pid, $parent, $number, json_encode($data, JSON_UNESCAPED_UNICODE), $me['id'], $me['id'], now(), now()]);
+            q('INSERT INTO items (company_id, type, project_id, parent_id, number, data, version, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,1,?,?,?,?)',
+              [cid(), $type, $pid, $parent, $number, json_encode($data, JSON_UNESCAPED_UNICODE), $me['id'], $me['id'], now(), now()]);
             $nid = (int)db()->lastInsertId();
             db()->commit();
             log_activity($me['id'], 'create', $type, $nid, $pid ?? ($type === 'project' ? $nid : null), $data['name'] ?? $data['title'] ?? $number);
@@ -194,7 +210,7 @@ switch ($seg[0] ?? '') {
         }
         if ($method === 'PUT' && $id) {
             $b = body();
-            $cur = q('SELECT * FROM items WHERE id = ? AND type = ?', [$id, $type])->fetch();
+            $cur = q('SELECT * FROM items WHERE id = ? AND type = ? AND company_id = ?', [$id, $type, cid()])->fetch();
             if (!$cur) fail(404, 'Élément introuvable (supprimé ?)');
             if (isset($b['version']) && (int)$b['version'] !== (int)$cur['version'] && empty($b['force'])) {
                 out(['error' => 'Cet élément a été modifié par un autre utilisateur entre-temps.', 'conflict' => row_out($cur)], 409);
@@ -209,17 +225,17 @@ switch ($seg[0] ?? '') {
             out(row_out(q('SELECT * FROM items WHERE id = ?', [$id])->fetch()));
         }
         if ($method === 'DELETE' && $id) {
-            $cur = q('SELECT * FROM items WHERE id = ? AND type = ?', [$id, $type])->fetch();
+            $cur = q('SELECT * FROM items WHERE id = ? AND type = ? AND company_id = ?', [$id, $type, cid()])->fetch();
             if (!$cur) out(['ok' => true]);
             $d = json_decode($cur['data'], true) ?: [];
             db()->beginTransaction();
             if ($type === 'project') {
                 // un chantier supprimé emporte tout son contenu et ses fichiers
-                foreach (q('SELECT path FROM files WHERE project_id = ?', [$id])->fetchAll() as $f) @unlink(__DIR__ . '/uploads/' . $f['path']);
-                q('DELETE FROM files WHERE project_id = ?', [$id]);
-                q('DELETE FROM items WHERE project_id = ?', [$id]);
+                foreach (q('SELECT path FROM files WHERE project_id = ? AND company_id = ?', [$id, cid()])->fetchAll() as $f) @unlink(__DIR__ . '/uploads/' . $f['path']);
+                q('DELETE FROM files WHERE project_id = ? AND company_id = ?', [$id, cid()]);
+                q('DELETE FROM items WHERE project_id = ? AND company_id = ?', [$id, cid()]);
             }
-            q('DELETE FROM items WHERE id = ?', [$id]);
+            q('DELETE FROM items WHERE id = ? AND company_id = ?', [$id, cid()]);
             db()->commit();
             log_activity($me['id'], 'delete', $type, $id, $cur['project_id'] !== null ? (int)$cur['project_id'] : null, $d['name'] ?? $d['title'] ?? $cur['number']);
             out(['ok' => true]);
@@ -247,11 +263,11 @@ switch ($seg[0] ?? '') {
             $rel = "$dir/" . bin2hex(random_bytes(16)) . ".$ext";
             if (!move_uploaded_file($f['tmp_name'], __DIR__ . "/uploads/$rel")) fail(500, 'Impossible d\'enregistrer le fichier (droits du dossier uploads ?).');
             $pid = isset($_POST['project_id']) && $_POST['project_id'] !== '' ? (int)$_POST['project_id'] : null;
-            q('INSERT INTO files (project_id, name, mime, size, path, created_by, created_at) VALUES (?,?,?,?,?,?,?)', [$pid, $name, $mime, (int)$f['size'], $rel, $me['id'], now()]);
+            q('INSERT INTO files (company_id, project_id, name, mime, size, path, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)', [cid(), $pid, $name, $mime, (int)$f['size'], $rel, $me['id'], now()]);
             out(['id' => (int)db()->lastInsertId(), 'name' => $name, 'mime' => $mime, 'size' => (int)$f['size']]);
         }
         if ($method === 'GET' && $id) {
-            $f = q('SELECT * FROM files WHERE id = ?', [$id])->fetch();
+            $f = q('SELECT * FROM files WHERE id = ? AND company_id = ?', [$id, cid()])->fetch();
             if (!$f || !is_file(__DIR__ . '/uploads/' . $f['path'])) { http_response_code(404); exit('Fichier introuvable'); }
             $inline = preg_match('#^(image/|application/pdf)#', $f['mime']) && !isset($_GET['download']);
             header('Content-Type: ' . $f['mime']);
@@ -263,7 +279,7 @@ switch ($seg[0] ?? '') {
             exit;
         }
         if ($method === 'DELETE' && $id) {
-            $f = q('SELECT * FROM files WHERE id = ?', [$id])->fetch();
+            $f = q('SELECT * FROM files WHERE id = ? AND company_id = ?', [$id, cid()])->fetch();
             if ($f) { @unlink(__DIR__ . '/uploads/' . $f['path']); q('DELETE FROM files WHERE id = ?', [$id]); }
             out(['ok' => true]);
         }
@@ -273,13 +289,13 @@ switch ($seg[0] ?? '') {
     case 'counters':
         if ($method === 'GET') {
             require_user();
-            out((object)array_map('intval', array_column(q('SELECT k, n FROM counters')->fetchAll(), 'n', 'k')));
+            out((object)array_map('intval', array_column(q('SELECT k, n FROM counters WHERE company_id = ?', [cid()])->fetchAll(), 'n', 'k')));
         }
         if ($method === 'PUT') {
             $me = require_admin();
             foreach (body() as $k => $n) {
                 if (!preg_match('/^[a-z_]{2,32}-\d{4}$/', (string)$k)) continue;
-                q('INSERT INTO counters (k, n) VALUES (?, ?) ON DUPLICATE KEY UPDATE n = VALUES(n)', [$k, max(0, (int)$n)]);
+                q('INSERT INTO counters (company_id, k, n) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE n = VALUES(n)', [cid(), $k, max(0, (int)$n)]);
             }
             log_activity($me['id'], 'update', 'settings', null, null, 'Numérotation');
             out(['ok' => true]);
@@ -387,11 +403,62 @@ switch ($seg[0] ?? '') {
         log_activity($me['id'], 'mail', $rtype, $rid, $pid, mb_substr($subject . ' → ' . implode(', ', array_column(array_merge($to, $cc), 'email')), 0, 250));
         out(['ok' => true, 'sent' => count($to) + count($cc)]);
 
+    // ------------------------------------------------------------ Plateforme : firmes clientes (super-administrateur)
+    case 'platform':
+        $me = require_super();
+        $act = $seg[1] ?? '';
+        $id = isset($seg[2]) ? (int)$seg[2] : 0;
+        if ($act === 'companies' && $method === 'GET') {
+            $rows = q("SELECT c.*, (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id) AS users,
+                (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id AND u.active = 1) AS users_active,
+                (SELECT COUNT(*) FROM items i WHERE i.company_id = c.id AND i.type = 'project') AS projects,
+                (SELECT MAX(u.last_login) FROM users u WHERE u.company_id = c.id) AS last_login,
+                (SELECT GROUP_CONCAT(u.email ORDER BY u.id SEPARATOR ', ') FROM users u WHERE u.company_id = c.id AND u.role = 'admin') AS admins
+                FROM companies c ORDER BY c.name")->fetchAll();
+            foreach ($rows as &$r) foreach (['id', 'active', 'users', 'users_active', 'projects'] as $k) $r[$k] = (int)$r[$k];
+            unset($r);
+            out($rows);
+        }
+        if ($act === 'companies' && $method === 'POST' && !$id) {
+            $b = body();
+            $name = trim((string)($b['name'] ?? ''));
+            $email = mb_strtolower(trim((string)($b['email'] ?? '')));
+            if ($name === '') fail(400, 'Nom de la firme manquant.');
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) fail(400, 'Email de l\'administrateur invalide.');
+            if (mb_strlen((string)($b['password'] ?? '')) < 8) fail(400, 'Le mot de passe doit contenir au moins 8 caractères.');
+            if (q('SELECT id FROM users WHERE email = ?', [$email])->fetch()) fail(400, 'Cet email est déjà utilisé (un email = un seul compte).');
+            db()->beginTransaction();
+            q('INSERT INTO companies (name, active, created_at) VALUES (?, 1, ?)', [$name, now()]);
+            $cid = (int)db()->lastInsertId();
+            $country = in_array($b['country'] ?? 'BE', ['BE', 'FR', 'LU', 'CH', 'RO'], true) ? $b['country'] : 'BE';
+            set_setting('company', ['name' => $name, 'currency' => 'EUR', 'vatRates' => [21, 12, 6, 0], 'defaultVat' => 21, 'country' => $country,
+                'vat' => trim((string)($b['vat'] ?? ''))], $cid);
+            q('INSERT INTO users (company_id, name, email, pass, role, color, created_at) VALUES (?,?,?,?,?,?,?)',
+              [$cid, trim((string)($b['admin'] ?? '')) ?: $email, $email, password_hash((string)$b['password'], PASSWORD_DEFAULT), 'admin', '#3b5bdb', now()]);
+            db()->commit();
+            out(['id' => $cid]);
+        }
+        if ($act === 'companies' && $method === 'PUT' && $id) {
+            $b = body();
+            if ($id === $me['company_id'] && array_key_exists('active', $b) && !$b['active']) fail(400, 'Vous ne pouvez pas suspendre votre propre firme.');
+            if (isset($b['name']) && trim((string)$b['name']) !== '') q('UPDATE companies SET name = ? WHERE id = ?', [trim((string)$b['name']), $id]);
+            if (array_key_exists('active', $b)) q('UPDATE companies SET active = ? WHERE id = ?', [$b['active'] ? 1 : 0, $id]);
+            out(['ok' => true]);
+        }
+        if ($act === 'switch' && $method === 'POST') {
+            $b = body();
+            $to = (int)($b['company_id'] ?? 0);
+            if ($to && !q('SELECT id FROM companies WHERE id = ?', [$to])->fetch()) fail(404, 'Firme introuvable.');
+            if (!$to || $to === $me['company_id']) unset($_SESSION['cid']); else $_SESSION['cid'] = $to;
+            out(['ok' => true]);
+        }
+        fail(404, 'Route inconnue');
+
     // ------------------------------------------------------------ Historique des actions
     case 'activity':
         require_user();
-        $args = []; $sql = 'SELECT a.*, u.name AS user_name FROM activity a LEFT JOIN users u ON u.id = a.user_id';
-        if (isset($_GET['project'])) { $sql .= ' WHERE a.project_id = ?'; $args[] = (int)$_GET['project']; }
+        $args = [cid()]; $sql = 'SELECT a.*, u.name AS user_name FROM activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.company_id = ?';
+        if (isset($_GET['project'])) { $sql .= ' AND a.project_id = ?'; $args[] = (int)$_GET['project']; }
         $limit = max(1, min(200, (int)($_GET['limit'] ?? 50)));
         out(q($sql . " ORDER BY a.id DESC LIMIT $limit", $args)->fetchAll());
 

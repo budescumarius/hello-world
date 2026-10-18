@@ -29,6 +29,7 @@ function money(x) {
   }
   return _fmt.format(r2(x) || 0);
 }
+const isAdmin = () => S.me && (S.me.role === 'admin' || !!S.me.super);
 const userName = (id) => (S.users.find((u) => u.id === id) || {}).name || '—';
 const initials = (n) => String(n || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 const avatar = (id) => { const u = S.users.find((x) => x.id === id); return u ? `<span class="avatar" style="--c:${esc(u.color)}" title="${esc(u.name)}">${esc(initials(u.name))}</span>` : ''; };
@@ -205,7 +206,8 @@ function sidebar(active) {
     }).join('')}</nav>
     <div class="side-foot">
       <button class="icon-btn" data-act="profile" title="Mon profil">${avatar(S.me.id)}</button>
-      ${S.me.role === 'admin' ? `<a class="icon-btn" href="#/settings" title="Paramètres">${I.gear}</a>` : ''}
+      ${isAdmin() ? `<a class="icon-btn" href="#/settings" title="Paramètres">${I.gear}</a>` : ''}
+      ${S.me.super ? `<a class="icon-btn" href="#/platform" title="Plateforme (firmes)">${I.people}</a>` : ''}
       <button class="icon-btn" data-act="logout" title="Se déconnecter">${I.logout}</button>
     </div>
   </aside>`;
@@ -217,6 +219,7 @@ function layout(p) {
     ${sidebar(p.active)}
     <div class="side-scrim" data-act="closeside"></div>
     <main class="main">
+      ${S.firm && S.firm.own === false ? `<div class="firm-band">Vous travaillez dans la firme <b>${esc(S.firm.name)}</b><button class="btn sm" data-act="firmback">Revenir à ma firme</button></div>` : ''}
       <header class="top">
         <button class="icon-btn only-mobile" data-act="openside" aria-label="Menu">${I.menu}</button>
         ${p.back ? `<a class="icon-btn" href="${p.back}" aria-label="Retour">${I.back}</a>` : ''}
@@ -242,6 +245,7 @@ function bindShell() {
   });
   $('[data-act=logout]').onclick = async () => { await api('POST', 'auth/logout').catch(() => {}); S.ready = false; showLogin(); };
   $('[data-act=profile]').onclick = () => editProfile();
+  const fb = $('[data-act=firmback]'); if (fb) fb.onclick = () => switchFirm(0);
   $('[data-act=search]').onclick = () => quickSearch();
   $('[data-act=openside]').onclick = () => document.body.classList.add('side-open');
   $('[data-act=closeside]').onclick = () => document.body.classList.remove('side-open');
@@ -446,10 +450,16 @@ function showLogin(msg = '') {
   setTimeout(() => f.email.focus(), 50);
 }
 
+// super-administrateur : entrer dans une firme cliente (0 = revenir à la sienne)
+async function switchFirm(id) {
+  await api('POST', 'platform/switch', { company_id: id });
+  location.hash = id ? '#/dashboard' : '#/platform';
+  location.reload();
+}
 async function boot() {
   try {
     const b = await api('GET', 'bootstrap');
-    Object.assign(S, { me: b.user, users: b.users, settings: b.settings || {}, ready: true });
+    Object.assign(S, { me: b.user, users: b.users, settings: b.settings || {}, firm: b.firm || {}, ready: true });
     document.title = (S.settings.company || {}).appName || (S.settings.company || {}).name || 'BâtiPro';
     if (!location.hash) location.hash = '#/dashboard';
     render();

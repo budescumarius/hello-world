@@ -45,6 +45,15 @@ Toți utilizatorii conectați văd toate proiectele firmei, iar fiecare element 
 
 **Cerințe:** PHP 7.4+ (recomandat 8.1+) cu PDO MySQL, MySQL 5.7+ sau MariaDB 10.3+ și HTTPS (certificatul gratuit AutoSSL din cPanel). Fișierele încărcate stau în `uploads/` și sunt servite numai utilizatorilor conectați.
 
+## Mai multe firme pe aceeași instalare
+
+- Primul cont creat la instalare (sau, la o actualizare, primul administrator) este **gestionarul platformei**: în meniul de jos are iconița *Plateforme*.
+- *Plateforme › Nouvelle firme* creează o firmă nouă cu primul ei administrator (nume, email, parolă). Datele fiecărei firme (clienți, devize, facturi, șantiere, achiziții, setări, Peppol, email) sunt complet separate.
+- Administratorul unei firme își creează singur colegii în *Paramètres › Utilisateurs*, cu rolul **Administrateur** sau **Utilisateur**. Gestionarul platformei poate face același lucru: *Entrer* în firmă → *Paramètres › Utilisateurs*, apoi *Revenir à ma firme*.
+- *Suspendre* blochează conectarea unei firme fără să-i șteargă datele.
+- Fiecare firmă are propriul identificator Peppol (numărul ei de întreprindere), deci propriul cont Peppyrus și propria cheie API. Serverul de email al platformei e folosit pentru firmele care nu și-au configurat unul.
+- La actualizarea unei instalări existente, baza de date se transformă automat la prima deschidere (datele existente devin firma n° 1).
+
 ## Backup
 - cPanel → *Sauvegarde*: descarcă baza de date.
 - Păstrează și o copie a dosarului `uploads/`.

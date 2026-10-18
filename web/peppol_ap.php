@@ -106,13 +106,13 @@ function store_file(string $name, string $mime, string $data, ?int $uid): int {
     if (!is_dir(__DIR__ . "/uploads/$dir")) mkdir(__DIR__ . "/uploads/$dir", 0755, true);
     $rel = "$dir/" . bin2hex(random_bytes(16)) . ".$ext";
     if (file_put_contents(__DIR__ . "/uploads/$rel", $data) === false) throw new RuntimeException('Impossible d\'enregistrer le fichier (droits du dossier uploads ?)');
-    q('INSERT INTO files (project_id, name, mime, size, path, created_by, created_at) VALUES (?,?,?,?,?,?,?)', [null, $name, $mime, strlen($data), $rel, $uid, now()]);
+    q('INSERT INTO files (company_id, project_id, name, mime, size, path, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)', [cid(), null, $name, $mime, strlen($data), $rel, $uid, now()]);
     return (int)db()->lastInsertId();
 }
 
 function insert_item(string $type, array $data, ?int $uid, ?int $pid = null): int {
-    q('INSERT INTO items (type, project_id, parent_id, number, data, version, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,1,?,?,?,?)',
-      [$type, $pid, null, null, json_encode($data, JSON_UNESCAPED_UNICODE), $uid, $uid, now(), now()]);
+    q('INSERT INTO items (company_id, type, project_id, parent_id, number, data, version, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,1,?,?,?,?)',
+      [cid(), $type, $pid, null, null, json_encode($data, JSON_UNESCAPED_UNICODE), $uid, $uid, now(), now()]);
     return (int)db()->lastInsertId();
 }
 
@@ -126,7 +126,7 @@ function pap_import(string $msgId, string $xml, ?int $uid): array {
     }
     $digits = fn($v) => ltrim(preg_replace('/\D/', '', (string)$v), '0');
     $sup = null;
-    foreach (q("SELECT id, data FROM items WHERE type = 'contact'")->fetchAll() as $c) {
+    foreach (q("SELECT id, data FROM items WHERE company_id = ? AND type = 'contact'", [cid()])->fetchAll() as $c) {
         $d = json_decode($c['data'], true) ?: [];
         if (($u['supplier']['vat'] !== '' && strlen($digits($u['supplier']['vat'])) >= 8 && $digits($d['vat'] ?? '') === $digits($u['supplier']['vat']))
             || ($u['supplier']['endpoint'] !== '' && ($d['peppolId'] ?? '') === $u['supplier']['endpoint'])) { $sup = (int)$c['id']; break; }
@@ -162,7 +162,7 @@ function pap_import(string $msgId, string $xml, ?int $uid): array {
 // Relève la boîte de réception du point d'accès ; renvoie les achats créés
 function pap_sync(?int $uid): array {
     pap_cfg();
-    if ((int)q("SELECT GET_LOCK('batipro_peppol_sync', 0)")->fetchColumn() !== 1) return ['created' => [], 'busy' => true];
+    if ((int)q('SELECT GET_LOCK(?, 0)', ['batipro_peppol_' . cid()])->fetchColumn() !== 1) return ['created' => [], 'busy' => true];
     $created = []; $errors = [];
     try {
         for ($page = 1; $page <= 5; $page++) {
@@ -172,7 +172,7 @@ function pap_sync(?int $uid): array {
                 $id = (string)($m['id'] ?? '');
                 if ($id === '' || !preg_match('/^[A-Za-z0-9_\-]{1,80}$/', $id)) continue;
                 try {
-                    $exists = q("SELECT id FROM items WHERE type = 'expense' AND data LIKE ?", ['%"peppolMsg":"' . $id . '"%'])->fetch();
+                    $exists = q("SELECT id FROM items WHERE company_id = ? AND type = 'expense' AND data LIKE ?", [cid(), '%"peppolMsg":"' . $id . '"%'])->fetch();
                     if (!$exists) {
                         $full = pap_req('GET', 'message/' . rawurlencode($id));
                         $xml = base64_decode((string)($full['fileContent'] ?? ''), true);
@@ -187,7 +187,7 @@ function pap_sync(?int $uid): array {
         }
     } finally {
         set_setting('peppol_sync', ['at' => now(), 'created' => count($created), 'errors' => array_slice($errors, 0, 5)]);
-        q("SELECT RELEASE_LOCK('batipro_peppol_sync')");
+        q('SELECT RELEASE_LOCK(?)', ['batipro_peppol_' . cid()]);
     }
     return ['created' => $created, 'errors' => $errors];
 }

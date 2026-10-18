@@ -555,7 +555,7 @@ async function templates() {
   let list = await db.list('formtpl');
   if (!list.length && !(S.settings.flags || {}).tplSeeded) {
     for (const [name, txt] of DEF_TPL) list.push(await persist('formtpl', { data: { name, items: parseTpl(txt) } }, { silent: true }));
-    if (S.me.role === 'admin') { S.settings.flags = { ...(S.settings.flags || {}), tplSeeded: true }; api('PUT', 'settings', { flags: S.settings.flags }).catch(() => {}); }
+    if (isAdmin()) { S.settings.flags = { ...(S.settings.flags || {}), tplSeeded: true }; api('PUT', 'settings', { flags: S.settings.flags }).catch(() => {}); }
   }
   return list;
 }

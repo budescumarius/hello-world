@@ -71,12 +71,20 @@ function current_user(): ?array {
     if (empty($_SESSION['uid'])) return null;
     static $u = false;
     if ($u === false) {
-        $u = q('SELECT id, name, email, role, active, color FROM users WHERE id = ?', [$_SESSION['uid']])->fetch() ?: null;
-        if ($u && !$u['active']) $u = null;
-        if ($u) { $u['id'] = (int)$u['id']; $u['active'] = (int)$u['active']; }
+        $u = q('SELECT u.id, u.name, u.email, u.role, u.active, u.color, u.company_id, u.super, c.active AS company_active FROM users u LEFT JOIN companies c ON c.id = u.company_id WHERE u.id = ?', [$_SESSION['uid']])->fetch() ?: null;
+        if ($u && (!$u['active'] || (!$u['super'] && !(int)$u['company_active']))) $u = null;
+        if ($u) {
+            foreach (['id', 'active', 'company_id', 'super'] as $k) $u[$k] = (int)$u[$k];
+            unset($u['company_active']);
+            // le super-administrateur peut travailler dans une autre firme
+            $GLOBALS['BP_CID'] = $u['super'] && !empty($_SESSION['cid']) ? (int)$_SESSION['cid'] : $u['company_id'];
+        }
     }
     return $u;
 }
+
+// Firme dans laquelle on travaille (toutes les données sont séparées par firme)
+function cid(): int { return (int)($GLOBALS['BP_CID'] ?? 1); }
 
 function require_user(): array {
     $u = current_user();
@@ -86,26 +94,50 @@ function require_user(): array {
 
 function require_admin(): array {
     $u = require_user();
-    if ($u['role'] !== 'admin') fail(403, 'Réservé aux administrateurs.');
+    if ($u['role'] !== 'admin' && !$u['super']) fail(403, 'Réservé aux administrateurs.');
     return $u;
+}
+
+function require_super(): array {
+    $u = require_user();
+    if (!$u['super']) fail(403, 'Réservé au gestionnaire de la plateforme.');
+    return $u;
+}
+
+// Mise à jour d'une installation mono-entreprise vers la version multi-firmes (une seule fois)
+function migrate(): void {
+    if (q("SHOW TABLES LIKE 'companies'")->fetch()) return;
+    $pdo = db();
+    $pdo->exec("CREATE TABLE IF NOT EXISTS companies (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(190) NOT NULL, active TINYINT NOT NULL DEFAULT 1, created_at DATETIME NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $co = q("SELECT v FROM settings WHERE k = 'company'")->fetch();
+    $name = $co ? ((json_decode($co['v'], true) ?: [])['name'] ?? 'Ma firme') : 'Ma firme';
+    q('INSERT INTO companies (id, name, active, created_at) VALUES (1, ?, 1, ?)', [$name ?: 'Ma firme', now()]);
+    $pdo->exec('ALTER TABLE users ADD company_id INT NOT NULL DEFAULT 1, ADD super TINYINT NOT NULL DEFAULT 0');
+    $first = q("SELECT MIN(id) FROM users WHERE role = 'admin'")->fetchColumn();
+    if ($first) q('UPDATE users SET super = 1 WHERE id = ?', [$first]);
+    $pdo->exec('ALTER TABLE items ADD company_id INT NOT NULL DEFAULT 1, ADD KEY company_type (company_id, type)');
+    $pdo->exec('ALTER TABLE files ADD company_id INT NOT NULL DEFAULT 1');
+    $pdo->exec('ALTER TABLE activity ADD company_id INT NOT NULL DEFAULT 1, ADD KEY company (company_id)');
+    $pdo->exec('ALTER TABLE settings ADD company_id INT NOT NULL DEFAULT 1, DROP PRIMARY KEY, ADD PRIMARY KEY (company_id, k)');
+    $pdo->exec('ALTER TABLE counters ADD company_id INT NOT NULL DEFAULT 1, DROP PRIMARY KEY, ADD PRIMARY KEY (company_id, k)');
 }
 
 function client_ip(): string { return substr($_SERVER['REMOTE_ADDR'] ?? '?', 0, 64); }
 
-function setting(string $k, $default = null) {
-    $r = q('SELECT v FROM settings WHERE k = ?', [$k])->fetch();
+function setting(string $k, $default = null, ?int $company = null) {
+    $r = q('SELECT v FROM settings WHERE company_id = ? AND k = ?', [$company ?? cid(), $k])->fetch();
     return $r ? json_decode($r['v'], true) : $default;
 }
 
-function set_setting(string $k, $v): void {
-    q('INSERT INTO settings (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)', [$k, json_encode($v, JSON_UNESCAPED_UNICODE)]);
+function set_setting(string $k, $v, ?int $company = null): void {
+    q('INSERT INTO settings (company_id, k, v) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)', [$company ?? cid(), $k, json_encode($v, JSON_UNESCAPED_UNICODE)]);
 }
 
 // Compteur atomique (à appeler dans une transaction)
 function next_counter(string $key): int {
-    q('INSERT INTO counters (k, n) VALUES (?, 0) ON DUPLICATE KEY UPDATE n = n', [$key]);
-    $n = (int)q('SELECT n FROM counters WHERE k = ? FOR UPDATE', [$key])->fetchColumn() + 1;
-    q('UPDATE counters SET n = ? WHERE k = ?', [$n, $key]);
+    q('INSERT INTO counters (company_id, k, n) VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE n = n', [cid(), $key]);
+    $n = (int)q('SELECT n FROM counters WHERE company_id = ? AND k = ? FOR UPDATE', [cid(), $key])->fetchColumn() + 1;
+    q('UPDATE counters SET n = ? WHERE company_id = ? AND k = ?', [$n, cid(), $key]);
     return $n;
 }
 
@@ -119,9 +151,9 @@ function make_number(string $kind): string {
     return ($prefix !== '' ? $prefix . '-' : '') . $y . '-' . str_pad((string)$n, $pad, '0', STR_PAD_LEFT);
 }
 
-function log_activity(int $uid, string $action, string $type, ?int $id, ?int $pid, ?string $label): void {
-    q('INSERT INTO activity (user_id, action, type, item_id, project_id, label, created_at) VALUES (?,?,?,?,?,?,?)',
-      [$uid, $action, $type, $id, $pid, $label !== null ? mb_substr($label, 0, 250) : null, now()]);
+function log_activity(?int $uid, string $action, string $type, ?int $id, ?int $pid, ?string $label): void {
+    q('INSERT INTO activity (company_id, user_id, action, type, item_id, project_id, label, created_at) VALUES (?,?,?,?,?,?,?,?)',
+      [cid(), $uid, $action, $type, $id, $pid, $label !== null ? mb_substr($label, 0, 250) : null, now()]);
 }
 
 function row_out(array $r): array {
@@ -149,6 +181,7 @@ function mail_addr(string $email, string $name = ''): string {
 // $atts : [['name' => ..., 'mime' => ..., 'data' => contenu binaire], ...]
 function send_mail(array $to, array $cc, string $subject, string $text, array $atts, array $replyTo = []): void {
     $cfg = setting('smtp', []) ?: [];
+    if (empty($cfg['host']) && cid() !== 1 && ($pf = setting('smtp', [], 1)) && !empty($pf['host'])) $cfg = ['fromName' => ''] + $pf; // serveur de la plateforme, au nom de la firme
     $co = setting('company', []) ?: [];
     $host = preg_replace('/^www\./', '', strtolower((string)($_SERVER['HTTP_HOST'] ?? 'localhost')));
     $host = preg_replace('/:\d+$/', '', $host);
