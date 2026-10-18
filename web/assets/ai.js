@@ -8,7 +8,7 @@ const AI_SUGGEST = [
   ['Commande fournisseur', 'Prépare une commande pour le chantier '],
   ['Question technique', 'Comment réaliser '],
 ];
-const aiState = { conv: null, msgs: [], busy: false };
+const aiState = { conv: null, msgs: [], busy: false, photos: [] }; // photos : [{ blob, url }] en attente d'envoi
 const aiKey = () => `ai_conv_${(S.firm && S.firm.id) || 1}`;
 
 // Markdown simple (titres, gras, listes, tableaux, code, liens) – le texte est échappé d'abord
@@ -54,7 +54,7 @@ function aiDraw() {
   } else {
     let n = 0; const acts = [];
     box.innerHTML = aiState.msgs.map((m) => {
-      if (m.role === 'user') return `<div class="ai-msg me"><div class="ai-bub">${esc(m.text).replace(/\n/g, '<br>')}</div></div>`;
+      if (m.role === 'user') return `<div class="ai-msg me"><div class="ai-bub">${(m.photos || []).length ? `<div class="ai-pics">${m.photos.map((p) => `<a href="${typeof p === 'number' ? fileUrl(p) : p}" target="_blank"><img src="${typeof p === 'number' ? fileUrl(p) : p}" alt=""></a>`).join('')}</div>` : ''}${esc(m.text).replace(/\n/g, '<br>')}</div></div>`;
       const a = (m.actions || []).map((x) => { acts.push(x); return aiActionHtml(x, n++); }).join('');
       return `<div class="ai-msg bot"><div class="ai-bub">${m.error ? `<p class="late">${esc(m.text)}</p>` : aiMd(m.text)}${a}</div></div>`;
     }).join('') + (aiState.busy ? `<div class="ai-msg bot"><div class="ai-bub ai-wait"><span class="dots"><i></i><i></i><i></i></span> L'assistant réfléchit… <small class="muted">(calculs et recherches : jusqu'à une minute)</small></div></div>` : '');
@@ -74,17 +74,45 @@ function aiMail(a) {
 }
 
 async function aiSend(text) {
-  text = text.trim(); if (!text || aiState.busy) return;
-  aiState.msgs.push({ role: 'user', text }); aiState.busy = true; aiDraw();
+  text = text.trim();
+  const photos = aiState.photos.splice(0);
+  if ((!text && !photos.length) || aiState.busy) { aiState.photos.push(...photos); return; }
+  if (!text) text = 'Voici des photos.';
+  aiState.msgs.push({ role: 'user', text, photos: photos.map((p) => p.url) }); aiState.busy = true; aiPhotosDraw(); aiDraw();
   const h1 = $('.top-title h1');
+  const context = { page: location.hash, label: h1 ? h1.textContent.trim() : '' };
   try {
-    const r = await api('POST', 'ai/chat', { conv_id: aiState.conv, text, context: { page: location.hash, label: h1 ? h1.textContent.trim() : '' } });
+    let body = { conv_id: aiState.conv, text, context };
+    if (photos.length) {
+      body = new FormData();
+      body.append('text', text); body.append('context', JSON.stringify(context));
+      if (aiState.conv) body.append('conv_id', aiState.conv);
+      photos.forEach((p, i) => body.append('img[]', p.blob, `photo-${i + 1}.jpg`));
+    }
+    const r = await api('POST', 'ai/chat', body);
     aiState.conv = r.conv_id; try { localStorage.setItem(aiKey(), r.conv_id); } catch (e) { /* stockage indisponible */ }
     aiState.msgs.push({ role: 'assistant', text: r.reply, actions: r.actions });
     $('#ai-title').textContent = r.title || 'Assistant';
   } catch (e) {
     aiState.msgs.push({ role: 'assistant', text: e.message, error: true });
   } finally { aiState.busy = false; aiDraw(); }
+}
+
+// Photos jointes : réduites à 1600 px (JPEG) avant l'envoi, aperçu au-dessus de la zone de saisie
+async function aiAddPhotos() {
+  const files = await pickFile('image/*', true);
+  for (const f of files.slice(0, 6 - aiState.photos.length)) {
+    try { const r = await resizeImage(await blobToImg(f), 1600); aiState.photos.push({ blob: r.blob, url: URL.createObjectURL(r.blob) }); }
+    catch (e) { toast('Photo illisible : ' + f.name, 4000); }
+  }
+  if (files.length > 6) toast('Maximum 6 photos par message', 3000);
+  aiPhotosDraw();
+}
+function aiPhotosDraw() {
+  const box = $('#ai-pics'); if (!box) return;
+  box.hidden = !aiState.photos.length;
+  box.innerHTML = aiState.photos.map((p, i) => `<span class="ai-pic"><img src="${p.url}" alt=""><button type="button" data-rmpic="${i}" aria-label="Retirer">✕</button></span>`).join('');
+  $$('[data-rmpic]', box).forEach((b) => { b.onclick = () => { aiState.photos.splice(+b.dataset.rmpic, 1); aiPhotosDraw(); }; });
 }
 
 async function aiOpenConv(id) {
@@ -117,7 +145,9 @@ function aiMount() {
     <aside id="ai-panel" class="ai-panel" aria-label="Assistant IA"><header class="ai-head"><span class="ai-logo">${I.spark}</span><b id="ai-title" class="grow">Assistant</b>
       <button class="icon-btn" data-ai="hist" title="Conversations">${I.hist}</button><button class="icon-btn" data-ai="new" title="Nouvelle conversation">${I.plus}</button><button class="icon-btn" data-ai="close" aria-label="Fermer">✕</button></header>
       <div id="ai-msgs" class="ai-msgs"></div>
-      <form class="ai-foot" id="ai-form"><textarea id="ai-in" rows="2" placeholder="Ex. : dalle de 30 m² en 15 cm, combien de béton et quel prix ?"></textarea><button class="btn primary" type="submit" aria-label="Envoyer">${I.send}</button></form></aside>`);
+      <div id="ai-pics" class="ai-pics-in" hidden></div>
+      <form class="ai-foot" id="ai-form"><button class="btn" type="button" data-ai="photo" aria-label="Joindre des photos" title="Joindre des photos">${I.camera}</button><textarea id="ai-in" rows="2" placeholder="Ex. : devis pour la cliente Diana, rénovation de cette pièce (joignez des photos)"></textarea><button class="btn primary" type="submit" aria-label="Envoyer">${I.send}</button></form></aside>`);
+  $('[data-ai=photo]').onclick = () => aiAddPhotos();
   $('#ai-fab').onclick = () => aiToggle(true);
   $('[data-ai=close]').onclick = () => aiToggle(false);
   $('[data-ai=new]').onclick = () => aiOpenConv(null);

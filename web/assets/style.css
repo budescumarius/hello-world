@@ -649,3 +649,10 @@ body.ai-open .ai-fab { display: none; }
 .ai-hist .link-btn { text-align: left; background: none; border: 0; padding: 0; cursor: pointer; color: inherit; font: inherit; }
 @media (max-width: 860px) { .ai-fab span { display: none; } .ai-fab { padding: 14px; } .ai-panel { width: 100vw; } }
 @media print { .ai-fab, .ai-panel { display: none !important; } }
+.ai-pics { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.ai-pics img { width: 84px; height: 84px; object-fit: cover; border-radius: 8px; display: block; border: 2px solid rgba(255, 255, 255, .6); }
+.ai-pics-in { display: flex; gap: 8px; padding: 8px 10px 0; overflow-x: auto; background: var(--surface); border-top: 1px solid var(--border); }
+.ai-pic { position: relative; flex: 0 0 auto; }
+.ai-pic img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; display: block; }
+.ai-pic button { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: #16203a; color: #fff; font-size: 12px; cursor: pointer; }
+.ai-foot .btn:first-child { padding: 0 12px; }

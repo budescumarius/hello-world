@@ -483,11 +483,30 @@ switch ($seg[0] ?? '') {
             if (PHP_VERSION_ID < 80100) fail(503, "L'assistant IA demande PHP 8.1 ou plus récent (cPanel › Sélectionner la version PHP).");
             if (!is_file(__DIR__ . '/vendor/autoload.php')) fail(503, "Le dossier vendor/ manque : téléversez l'archive complète de l'application.");
             if (ai_key() === '') fail(503, "Assistant IA non configuré : ajoutez une clé API Anthropic dans Paramètres › Assistant IA.");
-            $b = body();
+            // JSON, ou formulaire multipart quand des photos sont jointes
+            $multi = !empty($_FILES['img']);
+            $b = $multi ? ['text' => $_POST['text'] ?? '', 'conv_id' => $_POST['conv_id'] ?? null, 'context' => json_decode((string)($_POST['context'] ?? '[]'), true)] : body();
             $text = trim((string)($b['text'] ?? ''));
+            if ($multi && $text === '') $text = 'Voici des photos.';
             if ($text === '' || mb_strlen($text) > 20000) fail(400, 'Message vide ou trop long.');
+            $photos = [];
+            if ($multi) {
+                $f = $_FILES['img'];
+                $n = is_array($f['name']) ? count($f['name']) : 1;
+                if ($n > 6) fail(400, 'Maximum 6 photos par message.');
+                for ($i = 0; $i < $n; $i++) {
+                    $err = is_array($f['error']) ? $f['error'][$i] : $f['error'];
+                    $tmp = is_array($f['tmp_name']) ? $f['tmp_name'][$i] : $f['tmp_name'];
+                    if ($err !== UPLOAD_ERR_OK) fail(400, 'Photo non reçue (trop lourde ?).');
+                    if (filesize($tmp) > 8 * 1024 * 1024) fail(400, 'Photo trop lourde (max. 8 Mo).');
+                    $info = @getimagesize($tmp);
+                    $mime = $info['mime'] ?? '';
+                    if (!in_array($mime, ['image/jpeg', 'image/png', 'image/webp', 'image/gif'], true)) fail(400, 'Format de photo non pris en charge (JPEG, PNG, WebP).');
+                    $photos[] = store_file('photo-assistant-' . ($i + 1) . '.' . ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'jpg', 'image/gif' => 'png'][$mime], $mime, file_get_contents($tmp), $me['id']);
+                }
+            }
             try {
-                out(ai_chat($me, !empty($b['conv_id']) ? (int)$b['conv_id'] : null, $text, is_array($b['context'] ?? null) ? $b['context'] : []));
+                out(ai_chat($me, !empty($b['conv_id']) ? (int)$b['conv_id'] : null, $text, is_array($b['context'] ?? null) ? $b['context'] : [], $photos));
             } catch (\Anthropic\Core\Exceptions\AuthenticationException $e) {
                 fail(502, 'Clé API Anthropic refusée : vérifiez-la dans Paramètres › Assistant IA.');
             } catch (\Anthropic\Core\Exceptions\RateLimitException $e) {

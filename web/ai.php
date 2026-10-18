@@ -3,6 +3,8 @@
 // Il crée des brouillons (devis, commandes, emails) mais n'envoie jamais rien lui-même.
 declare(strict_types=1);
 
+use Anthropic\Beta\Messages\BetaBase64ImageSource;
+use Anthropic\Beta\Messages\BetaImageBlockParam;
 use Anthropic\Beta\Messages\BetaMessage;
 use Anthropic\Beta\Messages\BetaWebSearchTool20260209;
 use Anthropic\Client;
@@ -39,6 +41,8 @@ Ce que tu fais :
 - Calculs de quantités de matériaux (surfaces, volumes, nombre de blocs, sacs, m³ de béton, chutes et pertes) et de prix (déboursé, marge, prix de vente, TVA). Montre le calcul de façon courte et vérifiable, avec les hypothèses.
 - Préparation de devis : utilise d'abord les articles de la bibliothèque de l'entreprise (search_catalog) pour les prix ; si un prix manque, propose une estimation clairement indiquée comme telle (« prix estimé – à vérifier »). Structure en chapitres. Crée le devis avec create_quote seulement quand l'utilisateur le demande ou le confirme.
 - Commandes fournisseurs et demandes de prix : trouve le fournisseur (search_contacts), crée la commande avec create_order si demandé, et rédige l'email avec draft_email (il sera relu et envoyé par l'utilisateur).
+- Photos : quand l'utilisateur joint des photos (pièce à rénover, façade, toiture, dégâts…), décris brièvement ce que tu vois (surfaces, matériaux, état, éléments à démonter) et déduis-en les postes de travaux. Sans dimensions données, estime-les d'après les repères visibles (portes ≈ 2,10 m, carrelage, prises…), écris clairement les quantités supposées et ajoute dans le devis une ligne texte « Quantités estimées d'après photos – à vérifier sur place ». Si l'utilisateur demande le devis, crée-le quand même avec ces estimations plutôt que de bloquer, puis indique quelles mesures prendre pour l'ajuster.
+- Client : quand un client est nommé (« la cliente Diana »), retrouve-le avec search_contacts et utilise son id dans le devis ; s'il y a plusieurs résultats possibles, demande lequel.
 - Questions techniques de construction (mise en œuvre, normes et bonnes pratiques belges, PEB, dosages, temps de séchage, épaisseurs, ordre des travaux).
 - Tu peux chercher sur le web (prix publics, fiches techniques) quand c'est utile ; cite la source.
 
@@ -271,16 +275,32 @@ function ai_conv_load(int $id, array $me): ?array {
     return ['id' => (int)$r['id'], 'title' => $r['title'], 'turns' => json_decode($r['turns'], true) ?: []];
 }
 
+// Contenu d'un message utilisateur avec photos : les photos sont gardées comme fichiers et relues à l'identique à chaque envoi
+function ai_user_content(array $blocks): array {
+    $out = [];
+    foreach ($blocks as $b) {
+        if (($b['type'] ?? '') === 'img') {
+            $f = q('SELECT path, mime FROM files WHERE id = ? AND company_id = ?', [(int)$b['fileId'], cid()])->fetch();
+            $raw = $f ? @file_get_contents(__DIR__ . '/uploads/' . $f['path']) : false;
+            $out[] = $raw !== false && $raw !== ''
+                ? BetaImageBlockParam::with(source: BetaBase64ImageSource::with(data: base64_encode($raw), mediaType: $f['mime']))
+                : ['type' => 'text', 'text' => '[photo indisponible]'];
+        } else $out[] = $b;
+    }
+    return $out;
+}
+
 function ai_messages(array $turns): array {
     $out = [];
     foreach ($turns as $t) {
         if ($t['role'] === 'assistant') $out[] = ['role' => 'assistant', 'content' => BetaMessage::fromArray($t['msg'])->content];
+        elseif (!empty($t['photos'])) $out[] = ['role' => 'user', 'content' => ai_user_content($t['content'])];
         else $out[] = ['role' => 'user', 'content' => $t['content']];
     }
     return $out;
 }
 
-function ai_chat(array $me, ?int $convId, string $text, array $ctx): array {
+function ai_chat(array $me, ?int $convId, string $text, array $ctx, array $photos = []): array {
     require_once __DIR__ . '/vendor/autoload.php';
     @set_time_limit(300);
     $conv = $convId ? ai_conv_load($convId, $me) : null;
@@ -289,7 +309,10 @@ function ai_chat(array $me, ?int $convId, string $text, array $ctx): array {
     $note = [];
     if (!empty($ctx['page'])) $note[] = 'Page ouverte : ' . mb_substr((string)$ctx['page'], 0, 120);
     if (!empty($ctx['label'])) $note[] = 'Élément affiché : ' . mb_substr((string)$ctx['label'], 0, 200);
-    $turns[] = ['role' => 'user', 'content' => $text . ($note ? "\n\n[Contexte : " . implode(' · ', $note) . ' · date du jour ' . date('Y-m-d') . ']' : '')];
+    $full = $text . ($note ? "\n\n[Contexte : " . implode(' · ', $note) . ' · date du jour ' . date('Y-m-d') . ']' : '');
+    $turns[] = $photos
+        ? ['role' => 'user', 'photos' => true, 'content' => array_merge(array_map(fn($id) => ['type' => 'img', 'fileId' => $id], $photos), [['type' => 'text', 'text' => $full]])]
+        : ['role' => 'user', 'content' => $full];
 
     $client = new Client(apiKey: ai_key(), baseUrl: ai_base_url());
     $actions = []; $steps = [];
@@ -345,6 +368,11 @@ function ai_conv_view(array $conv): array {
     $out = [];
     foreach ($conv['turns'] as $t) {
         if ($t['role'] === 'user' && is_string($t['content'])) $out[] = ['role' => 'user', 'text' => preg_replace('/\n\n\[Contexte : [^\]]*\]$/u', '', $t['content'])];
+        elseif ($t['role'] === 'user' && !empty($t['photos'])) {
+            $txt = ''; $imgs = [];
+            foreach ($t['content'] as $b) { if (($b['type'] ?? '') === 'img') $imgs[] = (int)$b['fileId']; elseif (($b['type'] ?? '') === 'text') $txt .= $b['text']; }
+            $out[] = ['role' => 'user', 'text' => preg_replace('/\n\n\[Contexte : [^\]]*\]$/u', '', $txt), 'photos' => $imgs];
+        }
         elseif ($t['role'] === 'assistant' && isset($t['display'])) {
             $txt = '';
             foreach ($t['msg']['content'] ?? [] as $b) if (($b['type'] ?? '') === 'text') $txt .= $b['text'];
