@@ -315,16 +315,20 @@ async function makePdf() {
   try {
     await Promise.all([...holder.querySelectorAll('img')].map((im) => (im.complete ? 0 : new Promise((r) => { im.onload = im.onerror = r; }))));
     if (document.fonts && document.fonts.ready) await document.fonts.ready;
-    // points de coupure possibles : bas de chaque ligne / bloc (évite de couper une ligne en deux)
-    const top = docEl.getBoundingClientRect().top;
+    // points de coupure possibles : bas de chaque ligne / bloc (évite de couper une ligne ou le bloc des totaux en deux)
+    // mesurés dans la copie rendue par html2canvas (même largeur, mêmes règles CSS que le PDF)
     const ATOM = '.vz-bottom, .vz-recap, .vz-mention, .vz-sign, .d-tot, .d-sign';
     const cuts = [];
-    docEl.querySelectorAll('tr, .vz-info, .vz-head, .d-pt, .d-sec, .d-head, .d-parties, p, h2, .pre, img, ' + ATOM).forEach((el) => {
-      const r = el.getBoundingClientRect();
-      if (el.matches(ATOM)) cuts.push(r.top - top, r.bottom - top);
-      else if (!el.parentElement || !el.parentElement.closest(ATOM)) cuts.push(r.bottom - top);
-    });
-    cuts.sort((a, b) => a - b);
+    const measure = (root) => {
+      const top = root.getBoundingClientRect().top;
+      root.querySelectorAll('tr, .vz-info, .vz-head, .d-pt, .d-sec, .d-head, .d-parties, p, h2, .pre, img, ' + ATOM).forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (el.matches(ATOM)) cuts.push(r.top - top, r.bottom - top);
+        else if (!el.parentElement || !el.parentElement.closest(ATOM)) cuts.push(r.bottom - top);
+      });
+      cuts.sort((a, b) => a - b);
+    };
+    docEl.setAttribute('data-pdf-root', '1');
     const scale = Math.min(2, window.devicePixelRatio > 1 ? 2 : 1.6);
     // html2canvas ne connaît pas les couleurs « color(srgb …) » produites par color-mix() : conversion en rgba
     const toRgb = (v) => v.replace(/color\(srgb ([\d.e-]+) ([\d.e-]+) ([\d.e-]+)(?: \/ ([\d.e-]+))?\)/g, (m0, r, g, bl, a) => `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(bl * 255)}, ${a ?? 1})`);
@@ -339,11 +343,14 @@ async function makePdf() {
         const bg = cs.getPropertyValue('background-image');
         if (bg && bg.includes('color(')) el.style.setProperty('background-image', toRgb(bg));
       });
+      const root = cdoc.querySelector('[data-pdf-root]');
+      if (root) measure(root);
     };
     const canvas = await window.html2canvas(docEl, { scale, backgroundColor: '#ffffff', useCORS: true, logging: false, windowWidth: W + 40, onclone });
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
     const m = 8; const pw = 210 - 2 * m; const ph = 297 - 2 * m - 6;
+    if (!cuts.length) measure(docEl);
     const k = canvas.width / docEl.offsetWidth; // px canvas par px CSS
     const pageH = ph * (canvas.width / pw);
     const breaks = []; let y = 0;
@@ -360,7 +367,7 @@ async function makePdf() {
       pdf.setFontSize(8); pdf.setTextColor(120); pdf.text(`Page ${i + 1}/${breaks.length}`, 210 - m, 297 - 5, { align: 'right' });
     });
     return pdf.output('blob');
-  } finally { holder.remove(); }
+  } finally { holder.remove(); const t = $('#toast'); if (t) t.classList.remove('show'); }
 }
 async function sharePdf(title) {
   const blob = await makePdf();
