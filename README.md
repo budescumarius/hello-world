@@ -11,6 +11,14 @@ Aplicație web instalabilă (PWA) pentru urmărirea șantierelor: planuri, punct
 - **Ședințe de șantier**: participanți, discuții, puncte urmărite → **proces-verbal PDF** cu loc de semnături.
 - **Rapoarte PDF** cu planurile și pinii, un extras de plan la fiecare punct și fotografiile. **Export CSV** pentru Excel.
 
+### Teren (în stilul Aproplan)
+- **Desen pe planuri**: creion, săgeată, dreptunghi, nor de revizie, text și radieră, în 5 culori. Desenele apar și în rapoartele PDF.
+- **Versiuni de plan**: încarci o versiune nouă (imagine sau o pagină dintr-un PDF), iar punctele rămân pe poziții. Ai istoric, poți vedea o versiune veche și o poți restaura.
+- **Formulare / checklist-uri**: șabloane editabile (recepție, SSM, turnare beton incluse). Fiecare element se bifează Conform / Neconform / N.A. și poate avea observație și poze. Din orice neconformitate creezi un punct de remediere. Formularul are semnătură cu degetul și se exportă PDF.
+- **Jurnal de șantier**: vremea (preluată automat după locație), efective pe firme, lucrări, livrări, vizitatori, incidente și poze. PDF pe o zi sau pe o perioadă.
+- **Trimitere către firme**: punctele deschise ale unei firme pleacă pe email sau WhatsApp, ori ca raport PDF. Un punct se trimite cu tot cu poze.
+- **Lucru în echipă fără server**: butonul de partajare din proiect creează un pachet, pe care colegul îl importă din meniu. Datele se unesc automat: se păstrează varianta cea mai nouă, iar numerele de puncte duplicate se renumerotează.
+
 ### Gestiune (devize, facturi, costuri, planning)
 - **Clienți**: firme sau persoane fizice, cu CUI/TVA, adresă și sold de încasat.
 - **Catalog de prețuri**: materiale, manoperă, utilaje și subcontractări, cu cost, marjă și preț calculat automat. Import/export CSV, actualizare procentuală a prețurilor.

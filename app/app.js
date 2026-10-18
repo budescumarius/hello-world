@@ -25,11 +25,11 @@ const I = {
 };
 
 // ---------------------------------------------------------------- IndexedDB
-const STORES = ['projects', 'plans', 'points', 'companies', 'meetings', 'blobs', 'clients', 'catalog', 'quotes', 'invoices', 'costs', 'tasks', 'meta'];
+const STORES = ['projects', 'plans', 'points', 'companies', 'meetings', 'blobs', 'clients', 'catalog', 'quotes', 'invoices', 'costs', 'tasks', 'meta', 'templates', 'forms', 'diary'];
 let _db;
 function openDB() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open('santier', 2);
+    const r = indexedDB.open('santier', 3);
     r.onupgradeneeded = () => {
       STORES.forEach((s) => { if (!r.result.objectStoreNames.contains(s)) r.result.createObjectStore(s, { keyPath: 'id' }); });
     };
@@ -50,7 +50,8 @@ function tx(store, mode, fn) {
 }
 const db = {
   get: (s, id) => tx(s, 'readonly', (st) => st.get(id)),
-  put: (s, o) => tx(s, 'readwrite', (st) => st.put(o)).then(() => o),
+  // `updated` permite unirea pachetelor de proiect primite de la colegi; la import (db.raw) se păstrează valoarea originală
+  put: (s, o) => { if (!db.raw && s !== 'blobs' && s !== 'meta') o.updated = Date.now(); return tx(s, 'readwrite', (st) => st.put(o)).then(() => o); },
   del: (s, id) => tx(s, 'readwrite', (st) => st.delete(id)),
   all: (s) => tx(s, 'readonly', (st) => st.getAll()),
   clear: (s) => tx(s, 'readwrite', (st) => st.clear()),
@@ -315,11 +316,19 @@ async function editProject(pr) {
 }
 
 async function deleteProject(pid) {
-  for (const pl of await db.where('plans', pid)) { await delBlob(pl.blobId); await delBlob(pl.thumbId); await db.del('plans', pl.id); }
+  for (const pl of await db.where('plans', pid)) {
+    for (const v of [pl, ...(pl.versions || [])]) { await delBlob(v.blobId); await delBlob(v.thumbId); }
+    await db.del('plans', pl.id);
+  }
   for (const pt of await db.where('points', pid)) { for (const b of pt.photos || []) await delBlob(b); await db.del('points', pt.id); }
   for (const c of await db.where('companies', pid)) await db.del('companies', c.id);
   for (const m of await db.where('meetings', pid)) await db.del('meetings', m.id);
   for (const s of ['quotes', 'invoices', 'tasks']) for (const o of await db.where(s, pid)) await db.del(s, o.id);
+  for (const f of await db.where('forms', pid)) {
+    for (const a of Object.values(f.answers || {})) for (const b of a.photos || []) await delBlob(b);
+    await delBlob(f.signatureId); await db.del('forms', f.id);
+  }
+  for (const d of await db.where('diary', pid)) { for (const b of d.photos || []) await delBlob(b); await db.del('diary', d.id); }
   for (const c of await db.where('costs', pid)) { await delBlob(c.photoId); await db.del('costs', c.id); }
   await db.del('projects', pid);
 }
@@ -329,6 +338,7 @@ function appMenu() {
     { label: 'Datele firmei și setări (TVA, monedă, numerotare)', run: editSettings },
     { label: 'Exportă backup (toate datele)', run: exportBackup },
     { label: 'Importă backup', run: importBackup },
+    { label: 'Importă pachet de proiect (de la un coleg)', run: importProjectPackage },
     { label: 'Spațiu de stocare', run: storageInfo },
     { label: 'Cum instalez pe iPhone / iPad', run: installHelp },
   ]);
@@ -375,8 +385,11 @@ async function importBackup() {
     const mode = confirm('Înlocuiești TOATE datele existente cu cele din backup?\n\nOK = înlocuiește\nAnulează = adaugă/actualizează peste datele existente');
     toast('Se importă…', 20000);
     if (mode) { for (const s of STORES) await db.clear(s); urlCache.clear(); }
-    for (const s of Object.keys(obj.data)) if (STORES.includes(s)) for (const o of obj.data[s]) await db.put(s, o);
-    for (const b of obj.blobs || []) await db.put('blobs', { id: b.id, blob: await dataURLToBlob(b.data) });
+    db.raw = true;
+    try {
+      for (const s of Object.keys(obj.data)) if (STORES.includes(s)) for (const o of obj.data[s]) await db.put(s, o);
+      for (const b of obj.blobs || []) await db.put('blobs', { id: b.id, blob: await dataURLToBlob(b.data) });
+    } finally { db.raw = false; }
     toast('Backup importat cu succes');
     go('#/');
   } catch (e) {
@@ -385,18 +398,19 @@ async function importBackup() {
 }
 
 // ---------------------------------------------------------------- Proiect (taburi)
-const TABS = [['plans', 'Planuri'], ['points', 'Puncte'], ['planning', 'Planning'], ['quotes', 'Devize'], ['invoices', 'Facturi'], ['costs', 'Costuri'], ['companies', 'Firme'], ['meetings', 'Ședințe'], ['reports', 'Rapoarte']];
+const TABS = [['plans', 'Planuri'], ['points', 'Puncte'], ['forms', 'Formulare'], ['diary', 'Jurnal'], ['planning', 'Planning'], ['quotes', 'Devize'], ['invoices', 'Facturi'], ['costs', 'Costuri'], ['companies', 'Firme'], ['meetings', 'Ședințe'], ['reports', 'Rapoarte']];
 
 async function viewProject(pr, tab) {
   if (!TABS.some(([k]) => k === tab)) tab = 'plans';
-  app.innerHTML = `${bar({ back: '#/', title: pr.name, sub: [pr.client, pr.address].filter(Boolean).join(' · '), right: `<button class="icon-btn" data-act="edit" aria-label="Editează proiectul">${I.edit}</button>` })}
+  app.innerHTML = `${bar({ back: '#/', title: pr.name, sub: [pr.client, pr.address].filter(Boolean).join(' · '), right: `<button class="icon-btn" data-act="share" aria-label="Trimite proiectul unui coleg">${I.share}</button><button class="icon-btn" data-act="edit" aria-label="Editează proiectul">${I.edit}</button>` })}
     <nav class="tabs">${TABS.map(([k, l]) => `<a href="#/p/${pr.id}/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('')}</nav>
     <main class="content" id="tab"></main>`;
   $('[data-act=edit]').onclick = () => editProject(pr);
+  $('[data-act=share]').onclick = () => exportProjectPackage(pr);
   const el = $('#tab');
   await ({
     plans: tabPlans, points: tabPoints, companies: tabCompanies, meetings: tabMeetings, reports: tabReports,
-    planning: tabPlanning, quotes: tabQuotes, invoices: tabInvoices, costs: tabCosts,
+    planning: tabPlanning, quotes: tabQuotes, invoices: tabInvoices, costs: tabCosts, forms: tabForms, diary: tabDiary,
   })[tab](pr, el);
 }
 
@@ -409,7 +423,7 @@ async function tabPlans(pr, el) {
     const pts = points.filter((x) => x.planId === p.id);
     const act = pts.filter(isActive).length;
     return `<div class="plan-card"><a href="#/p/${pr.id}/plan/${p.id}"><img src="${thumbs[i]}" alt="" loading="lazy">
-      <div class="meta"><span class="name">${esc(p.name)}</span>${act ? `<span class="chip"><span class="dot" style="--c:${STATUS.open.color}"></span>${act}</span>` : ''}<span class="chip">${pts.length}</span></div></a>
+      <div class="meta"><span class="name">${esc(p.name)}</span>${(p.version || 1) > 1 ? `<span class="chip">v${p.version}</span>` : ''}${act ? `<span class="chip"><span class="dot" style="--c:${STATUS.open.color}"></span>${act}</span>` : ''}<span class="chip">${pts.length}</span></div></a>
       <button class="icon-btn more" data-plan="${p.id}" aria-label="Opțiuni plan">${I.more}</button></div>`;
   }).join('')}</div>` : empty('Niciun plan', 'Adaugă planuri ale clădirii (PDF – toate paginile – sau fotografii/imagini). Apoi atinge planul pentru a plasa puncte.');
   el.insertAdjacentHTML('beforeend', `<button class="fab" data-act="addplan">${I.plus}<span>Adaugă plan</span></button>`);
@@ -417,18 +431,26 @@ async function tabPlans(pr, el) {
   $$('[data-plan]', el).forEach((b) => {
     b.onclick = () => {
       const p = plans.find((x) => x.id === b.dataset.plan);
-      formSheet({
-        title: 'Plan', values: p,
-        fields: [{ name: 'name', label: 'Nume plan', required: true }, { name: 'level', label: 'Nivel / zonă', placeholder: 'ex. Parter, Etaj 1, Fațadă N' }],
-        async onSave(v) { Object.assign(p, v); await db.put('plans', p); render(); },
-        async onDelete() {
-          await delBlob(p.blobId); await delBlob(p.thumbId); await db.del('plans', p.id);
-          for (const pt of points.filter((x) => x.planId === p.id)) { pt.planId = null; pt.x = pt.y = null; await db.put('points', pt); }
-          render();
-        },
-      });
+      actionSheet(p.name, [
+        { label: 'Redenumește / șterge', run: () => editPlanMeta(p) },
+        { label: `Încarcă o versiune nouă (acum v${p.version || 1})`, run: () => newPlanVersion(p) },
+        { label: `Istoric versiuni (${(p.versions || []).length} anterioare)`, run: () => planHistory(p) },
+      ]);
     };
   });
+  function editPlanMeta(p) {
+    formSheet({
+      title: 'Plan', values: p,
+      fields: [{ name: 'name', label: 'Nume plan', required: true }, { name: 'level', label: 'Nivel / zonă', placeholder: 'ex. Parter, Etaj 1, Fațadă N' }],
+      async onSave(v) { Object.assign(p, v); await db.put('plans', p); render(); },
+      async onDelete() {
+        for (const v of [p, ...(p.versions || [])]) { await delBlob(v.blobId); await delBlob(v.thumbId); }
+        await db.del('plans', p.id);
+        for (const pt of points.filter((x) => x.planId === p.id)) { pt.planId = null; pt.x = pt.y = null; await db.put('points', pt); }
+        render();
+      },
+    });
+  }
 }
 
 let pdfjsPromise;
@@ -448,6 +470,23 @@ function loadPdfJs() {
   return pdfjsPromise;
 }
 
+async function pdfPageImage(doc, i) {
+  const page = await doc.getPage(i);
+  const vp1 = page.getViewport({ scale: 1 });
+  // max ~3600px pe latura lungă și sub limita de suprafață canvas din iOS
+  let scale = 3600 / Math.max(vp1.width, vp1.height);
+  scale = Math.min(scale, Math.sqrt(14e6 / (vp1.width * vp1.height)));
+  const vp = page.getViewport({ scale });
+  const c = document.createElement('canvas');
+  c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  const out = { blob: await canvasToBlob(c, 'image/jpeg', 0.9), w: c.width, h: c.height };
+  c.width = c.height = 0;
+  return out;
+}
+
 async function addPlans(pr) {
   const files = await pickFile('image/*,application/pdf,.pdf', true);
   if (!files.length) return;
@@ -462,20 +501,8 @@ async function addPlans(pr) {
         const n = Math.min(doc.numPages, 50);
         for (let i = 1; i <= n; i++) {
           toast(`Se importă pagina ${i} din ${n}…`, 30000);
-          const page = await doc.getPage(i);
-          const vp1 = page.getViewport({ scale: 1 });
-          // max ~3600px pe latura lungă și sub limita de suprafață canvas din iOS
-          let scale = 3600 / Math.max(vp1.width, vp1.height);
-          scale = Math.min(scale, Math.sqrt(14e6 / (vp1.width * vp1.height)));
-          const vp = page.getViewport({ scale });
-          const c = document.createElement('canvas');
-          c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
-          const ctx = c.getContext('2d');
-          ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
-          await page.render({ canvasContext: ctx, viewport: vp }).promise;
-          const blob = await canvasToBlob(c, 'image/jpeg', 0.9);
-          await savePlan(pr.id, n > 1 ? `${base} – p. ${i}` : base, blob, c.width, c.height);
-          c.width = c.height = 0;
+          const img = await pdfPageImage(doc, i);
+          await savePlan(pr.id, n > 1 ? `${base} – p. ${i}` : base, img.blob, img.w, img.h);
           count++;
         }
       } else {
@@ -606,7 +633,7 @@ async function tabCompanies(pr, el) {
     } : null,
   });
   $('[data-act=addc]', el).onclick = () => edit();
-  $$('[data-c]', el).forEach((b) => { b.onclick = () => edit(companies.find((c) => c.id === b.dataset.c)); });
+  $$('[data-c]', el).forEach((b) => { b.onclick = () => companyActions(pr, companies.find((c) => c.id === b.dataset.c), edit); });
 }
 
 // ---- Ședințe
@@ -742,7 +769,7 @@ async function editPoint(pt, { onDone } = {}) {
     </div>
     <div class="field"><span>Istoric și comentarii</span><div class="history" id="hist"></div>
       <div class="comment-row"><input type="text" id="cmt" placeholder="Adaugă un comentariu…" enterkeyhint="send"><button type="button" class="btn small" data-cmt>Adaugă</button></div></div>
-    ${!isNew ? `<div class="muted">Creat: ${fmtTime(d.created)} · Actualizat: ${fmtTime(d.updated)}</div><button type="button" class="btn danger block" data-del>Șterge punctul</button>` : ''}
+    ${!isNew ? `<div class="muted">Creat: ${fmtTime(d.created)} · Actualizat: ${fmtTime(d.updated)}</div><button type="button" class="btn block" data-share>${I.share} Trimite punctul (WhatsApp, email…)</button><button type="button" class="btn danger block" data-del>Șterge punctul</button>` : ''}
   </form>`, { full: true, onClose: () => { if (!saved) added.forEach(delBlob); } });
   const form = $('form', s.el);
   form.onsubmit = (e) => e.preventDefault();
@@ -865,6 +892,8 @@ async function editPoint(pt, { onDone } = {}) {
     $('[data-show]', form).onclick = showOnPlan;
     form.elements.planId.onchange = () => { collect(); drawMini(); };
   }
+  const shareBtn = $('[data-share]', form);
+  if (shareBtn) shareBtn.onclick = () => { collect(); sharePoint(d, companies, plans); };
   const del = $('[data-del]', form);
   if (del) {
     del.onclick = async () => {
@@ -962,12 +991,13 @@ async function viewPlan(pr, planId) {
   app.innerHTML = `<div class="viewer-wrap">
     ${bar({ back: `#/p/${pr.id}/plans`, title: plan.name, sub: pr.name, right: `<button class="icon-btn" data-act="filter" aria-label="Filtru">${I.filter}</button>` })}
     <div class="viewer" id="vp">
-      <div class="plan-inner" id="inner" style="width:${plan.w}px;height:${plan.h}px"><img src="${src}" alt="" draggable="false"><div id="pins"></div></div>
+      <div class="plan-inner" id="inner" style="width:${plan.w}px;height:${plan.h}px"><img src="${src}" alt="" draggable="false"><svg class="markups" id="mk" viewBox="0 0 ${plan.w} ${plan.h}" preserveAspectRatio="none"></svg><div id="pins"></div></div>
       <div class="banner" id="banner" hidden></div>
       <div class="viewer-tools">
         <button class="icon-btn" data-z="in" aria-label="Mărește">${I.plus}</button>
         <button class="icon-btn" data-z="out" aria-label="Micșorează">${I.minus}</button>
         <button class="icon-btn" data-z="fit" aria-label="Încadrează">${I.fit}</button>
+        <button class="icon-btn" data-act="draw" aria-label="Desenează pe plan">${I.pencil}</button>
       </div>
     </div>
     <button class="fab" id="addbtn">${I.plus}<span>Punct</span></button>
@@ -1119,6 +1149,9 @@ async function viewPlan(pr, planId) {
   document.addEventListener('gesturestart', noGesture);
   cleanupView = () => { window.removeEventListener('resize', onResize); document.removeEventListener('gesturestart', noGesture); };
 
+  const markup = initMarkup({ plan, vp, inner, svg: $('#mk'), button: $('[data-act=draw]') });
+  const prevCleanup = cleanupView;
+  cleanupView = () => { prevCleanup(); markup.close(); };
   fit();
   drawPins(intent && intent.highlight);
   if (intent && intent.highlight) {
@@ -1156,6 +1189,7 @@ async function planWithPins(plan, pts, maxW = 2000) {
   c.width = Math.round(plan.w * k); c.height = Math.round(plan.h * k);
   const ctx = c.getContext('2d');
   ctx.drawImage(img, 0, 0, c.width, c.height);
+  ctx.save(); ctx.scale(k, k); drawMarkups(ctx, plan); ctx.restore();
   const r = Math.max(10, Math.min(c.width, c.height) / 55);
   [...pts].sort((a, b) => a.y - b.y).forEach((p) => drawPin(ctx, p.x * c.width, p.y * c.height, r, STATUS[p.status].color, p.number));
   return c.toDataURL('image/jpeg', 0.85);
@@ -1173,6 +1207,7 @@ async function cropPlan(plan, p, outW = 300, outH = 300) {
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, outW, outH);
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+  ctx.save(); ctx.setTransform(outW / sw, 0, 0, outH / sh, -sx * outW / sw, -sy * outH / sh); drawMarkups(ctx, plan); ctx.restore();
   drawPin(ctx, (p.x * plan.w - sx) * outW / sw, (p.y * plan.h - sy) * outH / sh, Math.max(10, outW / 22), STATUS[p.status].color, p.number);
   return c.toDataURL('image/jpeg', 0.85);
 }
@@ -1181,6 +1216,7 @@ async function cropPlan(plan, p, outW = 300, outH = 300) {
 async function viewPrint(pr) {
   const job = printJob;
   if (!job) return go(`#/p/${pr.id}/reports`);
+  if (job.type === 'form' || job.type === 'diary') return printField(pr, job);
   app.innerHTML = `${bar({ back: job.back, title: job.type === 'meeting' ? 'Proces-verbal' : 'Raport', sub: pr.name, right: `<button class="btn small primary" data-act="print" disabled>${I.print} PDF</button>` })}
     <main class="content"><div class="doc" id="doc"><p>Se generează documentul…</p></div></main>`;
   const [plans, points, companies] = await Promise.all([db.where('plans', pr.id), db.where('points', pr.id), db.where('companies', pr.id)]);
