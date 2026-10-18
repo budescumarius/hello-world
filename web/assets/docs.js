@@ -178,7 +178,27 @@ async function printDoc(kind, id) {
     ${kind === 'quote' ? `${co.terms ? `<div class="vz-terms pre">${esc(co.terms)}</div>` : ''}<div class="vz-sign"><div>Pour ${esc(co.name || "l'entreprise")}</div><div>Pour accord, le client<br><small>Date, nom et signature précédés de la mention « Bon pour accord »</small></div></div>` : ''}
     ${t.footer || co.footer ? `<div class="vz-foot">${esc(t.footer || co.footer)}</div>` : ''}
   </div>`;
-  printPage(title, html, { quote: `#/quote/${id}`, invoice: `#/invoice/${id}`, order: `#/order/${id}` }[kind]);
+  const mailDoc = () => {
+    const tot = money(totals(d).total);
+    const site = project ? ` – ${project.data.name}` : '';
+    const label = kind === 'invoice' ? (IKIND[d.kind] || 'Facture') : kind === 'quote' ? 'Devis' : 'Bon de commande';
+    const body = kind === 'quote' ? `Bonjour,\n\nVeuillez trouver ci-joint notre devis ${it.number}${d.title ? ` « ${d.title} »` : ''} d'un montant de ${tot} TVAC.\n\nNous restons à votre disposition pour toute question.\n\n${mailSign()}`
+      : kind === 'invoice' ? `Bonjour,\n\nVeuillez trouver ci-joint notre ${label.toLowerCase()} ${it.number || ''} d'un montant de ${tot} TVAC${d.due ? `, payable avant le ${fmtDate(d.due)}` : ''}${co.iban ? ` sur le compte ${co.iban} avec la communication ${d.communication || it.number}` : ''}.\n\n${mailSign()}`
+      : `Bonjour,\n\nVeuillez trouver ci-joint notre bon de commande ${it.number}${d.deliveryDate ? `, livraison souhaitée le ${fmtDate(d.deliveryDate)}` : ''}${project ? ` sur le chantier ${project.data.name} (${[project.data.address, project.data.city].filter(Boolean).join(', ')})` : ''}.\n\nMerci de nous confirmer la bonne réception.\n\n${mailSign()}`;
+    sendMailDialog({
+      subject: `${label} ${it.number || ''}${site}`.trim(), body,
+      recipients: [...(c ? [contactRcpt(c, kind === 'order' ? 'Fournisseur' : 'Client', true)] : []), ...S.users.filter((u) => u.active && u.id !== S.me.id).map((u) => userRcpt(u, 'Notre équipe', false))],
+      ref: { type: typ, id: it.id }, projectId: it.project_id, pdfName: `${fileTitle(title)}.pdf`,
+      onSent: (to) => {
+        d.sent = [...(d.sent || []), { t: new Date().toISOString(), to, by: S.me.id }];
+        if (kind === 'quote' && d.status === 'brouillon') { d.status = 'envoye'; d.sentAt = today(); }
+        if (kind === 'order' && d.status === 'brouillon') d.status = 'envoyee';
+        persist(typ, it).catch(() => {});
+      },
+    });
+  };
+  printPage(title, html, { quote: `#/quote/${id}`, invoice: `#/invoice/${id}`, order: `#/order/${id}` }[kind], mailDoc);
+  if (new URLSearchParams(location.hash.split('?')[1] || '').has('mail')) mailDoc();
 }
 route('print', (kind, id) => printDoc(kind, +id));
 

@@ -141,14 +141,15 @@ route('stats', async () => {
 // ---------------------------------------------------------------- Paramètres
 route('settings', async (tab = 'company') => {
   if (S.me.role !== 'admin') return go('#/dashboard');
-  const page = layout({ active: '', icon: 'gear', title: 'Paramètres', tabs: [['company', 'Entreprise'], ['docs', 'Documents & numérotation'], ['templates', 'Modèles de documents'], ['peppol', 'Peppol'], ['users', 'Utilisateurs'], ['activity', 'Journal d\'activité']].map(([k, l]) => `<a href="#/settings/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
+  const page = layout({ active: '', icon: 'gear', title: 'Paramètres', tabs: [['company', 'Entreprise'], ['docs', 'Documents & numérotation'], ['templates', 'Modèles de documents'], ['peppol', 'Peppol'], ['mail', 'Email'], ['users', 'Utilisateurs'], ['activity', 'Journal d\'activité']].map(([k, l]) => `<a href="#/settings/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
   const co = { ...company() };
   if (tab === 'users') return settingsUsers(page);
   if (tab === 'peppol') return peppolSettings(page);
+  if (tab === 'mail') return mailSettings(page);
   if (tab === 'templates') return templateSettings(page);
   if (tab === 'activity') {
     const act = await api('GET', 'activity&limit=200');
-    page.innerHTML = `<div class="card"><div class="feed">${act.map((a) => `<div><b>${esc(a.user_name || '')}</b> ${{ create: 'a créé', update: 'a modifié', delete: 'a supprimé' }[a.action] || a.action} <span class="muted">${esc(TYPE_LABELS[a.type] || a.type)}</span> ${esc(a.label || '')}<small class="muted">${fmtDT(a.created_at)}</small></div>`).join('')}</div></div>`;
+    page.innerHTML = `<div class="card"><div class="feed">${act.map((a) => `<div><b>${esc(a.user_name || '')}</b> ${{ create: 'a créé', update: 'a modifié', delete: 'a supprimé', mail: 'a envoyé par email' }[a.action] || a.action} <span class="muted">${esc(TYPE_LABELS[a.type] || a.type)}</span> ${esc(a.label || '')}<small class="muted">${fmtDT(a.created_at)}</small></div>`).join('')}</div></div>`;
     return;
   }
   const fields = tab === 'company' ? [

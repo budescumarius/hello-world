@@ -363,7 +363,7 @@ async function editPoint(p, pt, preset = {}, onDone) {
   const place = $('[data-place]', m.el); if (place) place.onclick = async () => { const r = await save(); if (!r) return; if (!r.data.planId) return toast('Choisissez d\'abord un plan'); planIntent = { move: r.id }; m.close(); go(`#/project/${p.id}/plan/${r.data.planId}`); };
   const show = $('[data-show]', m.el); if (show) show.onclick = () => { planIntent = { highlight: pt.id }; m.close(); go(`#/project/${p.id}/plan/${d.planId}`); };
   const del = $('[data-del]', m.el); if (del) del.onclick = async () => { if (!confirm(`Supprimer le point n° ${pt.number} ?`)) return; for (const f of d.photos) await delFile(f); await db.del('point', pt.id); saved = true; m.close(); if (onDone) onDone(); else render(); };
-  const share = $('[data-share]', m.el); if (share) share.onclick = () => { const c = byId(contacts, d.companyId); location.href = `mailto:${encodeURIComponent((c && c.data.email) || '')}?subject=${encodeURIComponent(`${p.data.name} – point n° ${pt.number} : ${d.title}`)}&body=${encodeURIComponent(pointText([pt], plans, p))}`; };
+  const share = $('[data-share]', m.el); if (share) share.onclick = () => { m.close(); pointsReport(p, { title: `Point n° ${pt.number} – ${pt.data.title}`, statuses: Object.keys(PTS), ids: [pt.id], plans: false, crop: true, photos: true, hist: true, mail: true }); };
 }
 function pointText(pts, plans, p) {
   return `Bonjour,\n\nChantier : ${p.data.name}${p.data.address ? ' (' + [p.data.address, p.data.city].filter(Boolean).join(', ') + ')' : ''}\n\n` + pts.map((x) => {
@@ -399,7 +399,10 @@ async function tabPoints(p, el) {
     const byCo = new Map();
     points.filter(isOpenPt).forEach((x) => { if (x.data.companyId) { if (!byCo.has(+x.data.companyId)) byCo.set(+x.data.companyId, []); byCo.get(+x.data.companyId).push(x); } });
     if (!byCo.size) return toast('Aucun point ouvert attribué à un intervenant');
-    menuSheet('Envoyer les points ouverts à…', [...byCo].map(([cid, list]) => { const c = byId(contacts, cid); return { label: `${contactName(c)} (${list.length} point(s))${c && c.data.email ? '' : ' – sans email'}`, run: () => { location.href = `mailto:${encodeURIComponent((c && c.data.email) || '')}?subject=${encodeURIComponent(`${p.data.name} – ${list.length} point(s) à lever`)}&body=${encodeURIComponent(pointText(list, plans, p))}`; } }; }));
+    menuSheet('Envoyer les points à lever à…', [
+      { label: `Tous les intervenants concernés (${byCo.size})`, primary: true, run: () => pointsReport(p, { title: 'Points à lever', statuses: ['open', 'progress'], plans: true, crop: true, photos: true, mail: true }) },
+      ...[...byCo].map(([cid, list]) => { const c = byId(contacts, cid); return { label: `${contactName(c)} (${list.length} point(s))${c && c.data.email ? '' : ' – sans email'}`, run: () => pointsReport(p, { title: `Points à lever – ${contactName(c)}`, statuses: ['open', 'progress'], companyId: cid, plans: true, crop: true, photos: true, mail: true }) }; }),
+    ]);
   };
 }
 
@@ -420,7 +423,7 @@ function pointsReportDialog(p, contacts, plans) {
 async function pointsReport(p, o) {
   const [points, contacts, plans] = await Promise.all([db.list('point', { project: p.id }), db.list('contact'), db.list('plan', { project: p.id })]);
   printPage(o.title, '<p>Génération du rapport…</p>', `#/project/${p.id}/points`);
-  const list = points.filter((x) => o.statuses.includes(x.data.status) && (!o.companyId || +x.data.companyId === +o.companyId) && (!o.planId || +x.data.planId === +o.planId)).sort((a, b) => +a.number - +b.number);
+  const list = points.filter((x) => (!o.ids || o.ids.includes(x.id)) && o.statuses.includes(x.data.status) && (!o.companyId || +x.data.companyId === +o.companyId) && (!o.planId || +x.data.planId === +o.planId)).sort((a, b) => +a.number - +b.number);
   let html = `${fieldHead(p, o.title)}<table class="d-lines"><tr><th>Total</th>${Object.values(PTS).map(([l]) => `<th>${l}</th>`).join('')}<th>En retard</th></tr><tr><td><b>${list.length}</b></td>${Object.keys(PTS).map((k) => `<td>${list.filter((x) => x.data.status === k).length}</td>`).join('')}<td>${list.filter(isLatePt).length}</td></tr></table>`;
   if (o.plans) for (const pl of plans) { const pts = list.filter((x) => +x.data.planId === pl.id && x.data.x != null); if (pts.length) html += `<div class="d-sec"><h2>Plan : ${esc(pl.data.name)} (${pts.length})</h2><img class="d-plan" src="${await planWithPins(pl, pts)}" alt=""></div>`; }
   html += `<h2>Points (${list.length})</h2>`;
@@ -435,6 +438,25 @@ async function pointsReport(p, o) {
       ${o.photos && (x.data.photos || []).length ? `<div class="d-photos">${x.data.photos.map((f) => `<img src="${fileUrl(f)}" alt="">`).join('')}</div>` : ''}</div></div>`;
   }
   $('.print-page').innerHTML = `<div class="doc">${html}</div>`;
+  const mailRep = () => {
+    const client = byId(contacts, p.data.clientId);
+    const cos = [...new Set(list.map((x) => +x.data.companyId).filter(Boolean))].map((id) => byId(contacts, id)).filter(Boolean);
+    const open = list.filter(isOpenPt);
+    const nb = (c) => open.filter((x) => +x.data.companyId === c.id).length;
+    sendMailDialog({
+      subject: `${o.title} – ${p.data.name}`,
+      body: `Bonjour,\n\nVeuillez trouver ci-joint le rapport « ${o.title} » du chantier ${p.data.name}${p.data.address || p.data.city ? ' (' + [p.data.address, p.data.city].filter(Boolean).join(', ') + ')' : ''} : ${list.length} point(s), dont ${open.length} à lever.\n\n${open.length ? 'Merci de lever les points qui vous concernent avant leur échéance et de nous confirmer leur levée.\n\n' : ''}${mailSign()}`,
+      recipients: [
+        ...cos.map((c) => contactRcpt(c, 'Intervenants concernés', o.companyId ? +o.companyId === c.id : nb(c) > 0, nb(c) ? `${nb(c)} point(s) à lever` : 'aucun point ouvert')),
+        ...(client && !cos.some((c) => c.id === client.id) ? [contactRcpt(client, 'Autres', false, 'Client / maître d\'ouvrage')] : []),
+        ...S.users.filter((u) => u.active && u.id !== S.me.id).map((u) => userRcpt(u, 'Notre équipe', false)),
+      ],
+      ref: { type: 'point', id: null }, projectId: p.id, pdfName: `${fileTitle(`${o.title} ${p.data.name}`)}.pdf`,
+    });
+  };
+  const btn = document.createElement('button'); btn.className = 'btn primary'; btn.dataset.act = 'mail'; btn.innerHTML = `${I.mail} Envoyer`; btn.onclick = mailRep;
+  const pdfBtn = $('.print-shell [data-act=pdf]'); if (pdfBtn) { pdfBtn.classList.remove('primary'); pdfBtn.before(btn); }
+  if (o.mail) mailRep();
 }
 function fieldHead(p, title) {
   const co = company();
@@ -469,7 +491,9 @@ async function tabMeetings(p, el) {
   el.innerHTML = `<div class="toolbar"><span class="grow"></span><button class="btn primary" data-act="new">${I.plus} Nouveau PV</button></div><div id="tbl"></div>`;
   dataTable($('#tbl', el), {
     rows: meetings, columns: [{ l: 'Réunion', v: (x) => `<b>${esc(x.data.title)}</b>` }, { l: 'Date', v: (x) => fmtDate(x.data.date) }, { l: 'Présents', v: (x) => (x.data.users || []).length + (x.data.attendees || []).length },
-      { l: 'Points', v: (x) => (x.data.pointIds || []).length }, { l: '', v: (x) => `<a class="btn sm" href="#/pv/${x.id}">${I.print} PV</a>` }],
+      { l: 'Points', v: (x) => (x.data.pointIds || []).length },
+      { l: 'Envoi', v: (x) => ((x.data.sent || []).length ? `<small class="muted">${esc(sentLine(x.data))}</small>` : '<small class="muted">Non envoyé</small>') },
+      { l: '', v: (x) => `<span class="nowrap"><a class="btn sm" href="#/pv/${x.id}">${I.print} PV</a> <a class="btn sm" href="#/pv/${x.id}?mail=1">${I.mail} Envoyer</a></span>` }],
     onRow: (x) => editMeeting(p, x), empty: 'Aucun PV de réunion',
   });
   $('[data-act=new]', el).onclick = () => editMeeting(p, null);
@@ -491,7 +515,26 @@ route('pv', async (id) => {
     ${d.next ? `<p><b>Prochaine réunion :</b> ${fmtDate(d.next)}</p>` : ''}
     <p class="muted sm">Sans remarque écrite dans les 8 jours, le présent procès-verbal est considéré comme approuvé.</p>
     <div class="d-sign">${att.slice(0, 6).map((c) => `<div>${esc(contactName(c))}</div>`).join('')}<div>${esc(company().name || '')}</div></div></div>`;
-  printPage(`PV – ${d.title}`, html, `#/project/${p.id}/meetings`);
+  const mailPv = () => {
+    const client = byId(contacts, p.data.clientId);
+    const attIds = att.map((c) => c.id);
+    const concerned = [...new Set(pts.filter(isOpenPt).map((x) => +x.data.companyId).filter((id) => id && !attIds.includes(id)))].map((id) => byId(contacts, id)).filter(Boolean);
+    const nb = (c) => pts.filter((x) => isOpenPt(x) && +x.data.companyId === c.id).length;
+    sendMailDialog({
+      subject: `PV – ${d.title} – ${p.data.name}`,
+      body: `Bonjour,\n\nVeuillez trouver ci-joint le procès-verbal de la réunion du ${fmtDate(d.date)} sur le chantier ${p.data.name}${p.data.address || p.data.city ? ' (' + [p.data.address, p.data.city].filter(Boolean).join(', ') + ')' : ''}.\n${pts.filter(isOpenPt).length ? `\n${pts.filter(isOpenPt).length} point(s) restent à lever : merci de vérifier ceux qui vous concernent.\n` : ''}${d.next ? `\nProchaine réunion : ${fmtDate(d.next)}.\n` : ''}\nSans remarque écrite de votre part dans les 8 jours, ce procès-verbal sera considéré comme approuvé.\n\n${mailSign()}`,
+      recipients: [
+        ...att.map((c) => contactRcpt(c, 'Présents à la réunion', true, nb(c) ? `${nb(c)} point(s) à lever` : '')),
+        ...(d.users || []).map((u) => S.users.find((y) => y.id === +u)).filter((u) => u && u.id !== S.me.id).map((u) => userRcpt(u, 'Présents à la réunion', true)),
+        ...concerned.map((c) => contactRcpt(c, 'Intervenants avec des points à lever', true, `${nb(c)} point(s) à lever`)),
+        ...(client && !attIds.includes(client.id) ? [contactRcpt(client, 'Autres', false, 'Client / maître d\'ouvrage')] : []),
+      ],
+      ref: { type: 'meeting', id: mt.id }, projectId: p.id, pdfName: `${fileTitle(`PV ${d.title}`)}.pdf`,
+      onSent: (to) => { d.sent = [...(d.sent || []), { t: new Date().toISOString(), to, by: S.me.id }]; persist('meeting', mt).catch(() => {}); },
+    });
+  };
+  printPage(`PV – ${d.title}`, html, `#/project/${p.id}/meetings`, mailPv);
+  if (new URLSearchParams(location.hash.split('?')[1] || '').has('mail')) mailPv();
 });
 
 // ---------------------------------------------------------------- Formulaires (checklists)

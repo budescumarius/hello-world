@@ -317,7 +317,7 @@ route('quote', async (id) => {
     { label: 'Créer une facture…', icon: 'coins', run: async () => { await save.flush(); invoiceFromQuote(q); } },
     { label: 'Créer les commandes fournisseurs / sous-traitants', icon: 'truck', run: async () => { await save.flush(); ordersFromQuote(q); } },
     ...(!q.project_id ? [{ label: 'Créer le chantier', icon: 'crane', run: async () => { await save.flush(); createProjectFromQuote(q); } }] : []),
-    { label: 'Envoyer par email', icon: 'mail', run: () => { const cd = c ? c.data : {}; location.href = `mailto:${encodeURIComponent(cd.email || '')}?subject=${encodeURIComponent(`Devis ${q.number} – ${d.title || ''}`)}&body=${encodeURIComponent(`Bonjour,\n\nVeuillez trouver ci-joint notre devis ${q.number} d'un montant de ${money(totals(d).total)} TVAC.\n\nNous restons à votre disposition pour toute question.\n\nCordialement,\n${S.me.name}\n${company().name || ''}`)}`; if (d.status === 'brouillon') { d.status = 'envoye'; d.sentAt = today(); persist('quote', q); } } },
+    { label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/quote/${q.id}?mail=1`) },
     { label: 'Dupliquer (nouvelle version)', icon: 'copy', run: async () => { await save.flush(); const n = await persist('quote', { project_id: q.project_id, data: { ...JSON.parse(JSON.stringify(d)), status: 'brouillon', date: today(), valid: addDays(today(), num(company().quoteValidity) || 30), acceptedAt: null, sentAt: null, title: d.title } }); go(`#/quote/${n.id}`); } },
     { sep: true },
     { label: 'Supprimer le devis', danger: true, icon: 'trash', run: async () => { if (confirm(`Supprimer le devis ${q.number} ?`)) { await db.del('quote', q.id); go('#/quotes'); } } },
@@ -599,7 +599,7 @@ route('invoice', async (id) => {
   $$('[data-pay]').forEach((b) => { b.onclick = () => editPay(+b.dataset.pay); });
   $('[data-act=more]').onclick = () => menuSheet('Facture', [
     ...(!locked ? [{ label: 'Modifier l\'en-tête', icon: 'edit', run: head }] : []),
-    { label: 'Envoyer par email', icon: 'mail', run: () => { location.href = `mailto:${encodeURIComponent((c && c.data.email) || '')}?subject=${encodeURIComponent(`${IKIND[d.kind]} ${it.number || ''}`)}&body=${encodeURIComponent(`Bonjour,\n\nVeuillez trouver ci-joint notre ${(IKIND[d.kind] || 'facture').toLowerCase()} ${it.number || ''} d'un montant de ${money(s.t.total)} TVAC, payable avant le ${fmtDate(d.due)}${company().iban ? ` sur le compte ${company().iban} avec la communication ${d.communication || it.number}` : ''}.\n\nCordialement,\n${S.me.name}\n${company().name || ''}`)}`; } },
+    { label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/invoice/${it.id}?mail=1`) },
     ...(!locked && d.kind === 'situation' && d.quoteId ? [{ label: 'Modifier l\'état d\'avancement', icon: 'edit', run: editProg }] : []),
     ...(locked ? [{ label: 'Peppol – facture électronique', icon: 'file', primary: true, run: () => peppolInvoice(it) }] : []),
     ...(locked && d.kind !== 'avoir' ? [{ label: 'Créer une note de crédit', icon: 'copy', run: () => newInvoice({ project_id: it.project_id, data: { kind: 'avoir', clientId: d.clientId, quoteId: d.quoteId, reverse: d.reverse, discount: d.discount, title: `Annulation facture ${it.number}`, refInvoice: it.number, lines: d.lines.map((l) => (l.kind === 'item' ? { ...l, id: lid(), qty: -num(l.qty) } : { ...l, id: lid() })) } }) }] : []),
@@ -711,7 +711,7 @@ route('order', async (id) => {
   $('[data-act=head]').onclick = (e) => { if (!e.target.closest('a')) head(); };
   $$('[data-st]').forEach((b) => { b.onclick = async () => { await save.flush(); d.status = b.dataset.st; await persist('order', it); render(); }; });
   $('[data-act=more]').onclick = () => menuSheet('Commande', [
-    { label: 'Envoyer par email', icon: 'mail', run: () => { location.href = `mailto:${encodeURIComponent((sup && sup.data.email) || '')}?subject=${encodeURIComponent(`Commande ${it.number}${pr ? ' – ' + pr.data.name : ''}`)}&body=${encodeURIComponent(`Bonjour,\n\nVeuillez trouver ci-joint notre bon de commande ${it.number}${d.deliveryDate ? `, livraison souhaitée le ${fmtDate(d.deliveryDate)}` : ''}${pr ? ` sur le chantier ${pr.data.name} (${[pr.data.address, pr.data.city].filter(Boolean).join(', ')})` : ''}.\n\nMerci de nous confirmer la bonne réception.\n\nCordialement,\n${S.me.name}`)}`; if (d.status === 'brouillon') { d.status = 'envoyee'; persist('order', it); } } },
+    { label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/order/${it.id}?mail=1`) },
     { label: 'Enregistrer la facture fournisseur (achat)', icon: 'coins', run: () => editExpense(null, { project_id: it.project_id, supplierId: d.supplierId, orderId: it.id, amount: totals(d).base, category: d.kind === 'soustraitant' ? 'st' : 'mat', desc: `Commande ${it.number}` }) },
     { sep: true },
     { label: 'Supprimer', danger: true, icon: 'trash', run: async () => { if (confirm('Supprimer cette commande ?')) { await db.del('order', it.id); go(pr ? `#/project/${pr.id}/orders` : '#/orders/fournisseur'); } } },

@@ -282,10 +282,12 @@ function totalsBox(t, doc, internal) {
 }
 
 // ---------------------------------------------------------------- Page d'impression (documents : voir docs.js)
-function printPage(title, html, back) {
+// mail : fonction qui ouvre la fenêtre d'envoi par email (bouton « Envoyer » affiché si présent)
+function printPage(title, html, back, mail) {
   const standalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
   app.innerHTML = `<div class="print-shell"><header class="top no-print"><a class="icon-btn" href="${back}" aria-label="Retour">${I.back}</a><div class="top-title"><h1>${esc(title)}</h1></div>
-    <div class="top-actions"><button class="btn primary" data-act="pdf">${I.file} PDF / Partager</button>${standalone ? '' : `<button class="btn" data-act="print">${I.print} Imprimer</button>`}</div></header><div class="print-page">${html}</div></div>`;
+    <div class="top-actions">${mail ? `<button class="btn primary" data-act="mail">${I.mail} Envoyer</button>` : ''}<button class="btn ${mail ? '' : 'primary'}" data-act="pdf">${I.file} PDF / Partager</button>${standalone ? '' : `<button class="btn" data-act="print">${I.print} Imprimer</button>`}</div></header><div class="print-page">${html}</div></div>`;
+  if (mail) $('[data-act=mail]').onclick = () => mail();
   const pr = $('[data-act=print]');
   if (pr) pr.onclick = () => { const old = document.title; document.title = fileTitle(title); window.print(); setTimeout(() => { document.title = old; }, 800); };
   $('[data-act=pdf]').onclick = async (e) => {

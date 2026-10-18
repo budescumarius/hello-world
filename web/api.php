@@ -68,6 +68,8 @@ switch ($seg[0] ?? '') {
         foreach ($users as &$x) { $x['id'] = (int)$x['id']; $x['active'] = (int)$x['active']; }
         $settings = [];
         foreach (q('SELECT k, v FROM settings')->fetchAll() as $r) $settings[$r['k']] = json_decode($r['v'], true);
+        // le mot de passe SMTP ne quitte jamais le serveur
+        if (isset($settings['smtp']) && is_array($settings['smtp'])) { $settings['smtp']['hasPass'] = !empty($settings['smtp']['pass']); unset($settings['smtp']['pass']); }
         out(['user' => $u, 'users' => $users, 'settings' => $settings, 'version' => APP_VERSION]);
 
     // ------------------------------------------------------------ Utilisateurs
@@ -112,7 +114,16 @@ switch ($seg[0] ?? '') {
     case 'settings':
         if ($method === 'PUT') {
             $me = require_admin();
-            foreach (body() as $k => $v) if (preg_match('/^[a-z_]{2,40}$/', (string)$k)) set_setting($k, $v);
+            foreach (body() as $k => $v) {
+                if (!preg_match('/^[a-z_]{2,40}$/', (string)$k)) continue;
+                if ($k === 'smtp' && is_array($v)) {
+                    // mot de passe vide = conserver l'ancien
+                    $old = setting('smtp', []) ?: [];
+                    if (($v['pass'] ?? '') === '' && empty($v['clearPass'])) $v['pass'] = $old['pass'] ?? '';
+                    unset($v['hasPass'], $v['clearPass']);
+                }
+                set_setting($k, $v);
+            }
             log_activity($me['id'], 'update', 'settings', null, null, 'Paramètres');
             out(['ok' => true]);
         }
@@ -290,6 +301,56 @@ switch ($seg[0] ?? '') {
         $name = $ent['name'] ?? null;
         if (is_array($name)) $name = $name[0]['name'] ?? ($name['name'] ?? null);
         out(['registered' => (int)($j['total-result-count'] ?? 0) > 0 || count($matches) > 0, 'name' => is_string($name) ? $name : null, 'country' => $ent['countryCode'] ?? null]);
+
+    // ------------------------------------------------------------ Envoi d'un document par email (PV, rapport de points…)
+    case 'mail':
+        $me = require_user();
+        if ($method !== 'POST') fail(404, 'Route inconnue');
+        $parse = function ($v): array {
+            $list = is_array($v) ? $v : (json_decode((string)$v, true) ?: []);
+            $outl = [];
+            foreach ($list as $a) {
+                $e = mb_strtolower(trim((string)(is_array($a) ? ($a['email'] ?? '') : $a)));
+                if ($e === '') continue;
+                if (!filter_var($e, FILTER_VALIDATE_EMAIL)) fail(400, "Adresse email invalide : $e");
+                $outl[$e] = ['email' => $e, 'name' => is_array($a) ? (string)($a['name'] ?? '') : ''];
+            }
+            return array_values($outl);
+        };
+        if (($seg[1] ?? '') === 'test') {
+            require_admin();
+            try { send_mail([['email' => $me['email'], 'name' => $me['name']]], [], 'Test d\'envoi BâtiPro', "Bonjour,\n\nCet email de test confirme que l'envoi depuis BâtiPro fonctionne.\n", []); }
+            catch (Throwable $e) { fail(502, $e->getMessage()); }
+            out(['ok' => true, 'to' => $me['email']]);
+        }
+        $to = $parse($_POST['to'] ?? '[]');
+        $cc = $parse($_POST['cc'] ?? '[]');
+        $cc = array_values(array_filter($cc, fn($a) => !in_array($a['email'], array_column($to, 'email'), true)));
+        if (!$to) fail(400, 'Choisissez au moins un destinataire.');
+        if (count($to) + count($cc) > 40) fail(400, 'Maximum 40 destinataires.');
+        $subject = trim(preg_replace('/[\r\n]+/', ' ', (string)($_POST['subject'] ?? '')));
+        if ($subject === '') fail(400, 'Objet manquant.');
+        $text = (string)($_POST['body'] ?? '');
+        $atts = []; $total = 0;
+        if (!empty($_FILES['att'])) {
+            $f = $_FILES['att'];
+            $n = is_array($f['name']) ? count($f['name']) : 1;
+            for ($i = 0; $i < $n; $i++) {
+                $err = is_array($f['error']) ? $f['error'][$i] : $f['error'];
+                if ($err !== UPLOAD_ERR_OK) fail(400, $err === UPLOAD_ERR_INI_SIZE ? 'Pièce jointe trop volumineuse pour le serveur.' : 'Pièce jointe non reçue.');
+                $tmp = is_array($f['tmp_name']) ? $f['tmp_name'][$i] : $f['tmp_name'];
+                $total += filesize($tmp);
+                $atts[] = ['name' => is_array($f['name']) ? $f['name'][$i] : $f['name'], 'mime' => (is_array($f['type']) ? $f['type'][$i] : $f['type']) ?: 'application/octet-stream', 'data' => file_get_contents($tmp)];
+            }
+        }
+        if ($total > 20 * 1024 * 1024) fail(400, 'Pièces jointes trop lourdes (max. 20 Mo).');
+        try { send_mail($to, $cc, $subject, $text, $atts, ['email' => $me['email'], 'name' => $me['name']]); }
+        catch (Throwable $e) { error_log('[batipro mail] ' . $e->getMessage()); fail(502, 'Envoi impossible : ' . $e->getMessage()); }
+        $pid = isset($_POST['project_id']) && $_POST['project_id'] !== '' ? (int)$_POST['project_id'] : null;
+        $rtype = preg_match($TYPE_RE, (string)($_POST['ref_type'] ?? '')) ? (string)$_POST['ref_type'] : 'mail';
+        $rid = isset($_POST['ref_id']) && $_POST['ref_id'] !== '' ? (int)$_POST['ref_id'] : null;
+        log_activity($me['id'], 'mail', $rtype, $rid, $pid, mb_substr($subject . ' → ' . implode(', ', array_column(array_merge($to, $cc), 'email')), 0, 250));
+        out(['ok' => true, 'sent' => count($to) + count($cc)]);
 
     // ------------------------------------------------------------ Historique des actions
     case 'activity':

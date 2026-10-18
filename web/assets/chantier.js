@@ -160,7 +160,7 @@ async function tabOverview(p, el, contacts) {
           ${d.architectId ? `<div class="kv"><span>Architecte</span><div>${esc(contactName(byId(contacts, d.architectId)))}</div></div>` : ''}
           ${d.notes ? `<div class="kv"><span>Notes</span><div class="pre">${esc(d.notes)}</div></div>` : ''}
         </div>
-        <div class="card"><div class="card-h"><h3>Activité récente</h3></div><div class="feed">${act.map((a) => `<div><b>${esc(a.user_name || '')}</b> ${{ create: 'a créé', update: 'a modifié', delete: 'a supprimé' }[a.action] || a.action} <span class="muted">${esc(TYPE_LABELS[a.type] || a.type)}</span> ${esc(a.label || '')}<small class="muted">${fmtDT(a.created_at)}</small></div>`).join('') || '<div class="empty sm">Aucune activité</div>'}</div></div>
+        <div class="card"><div class="card-h"><h3>Activité récente</h3></div><div class="feed">${act.map((a) => `<div><b>${esc(a.user_name || '')}</b> ${{ create: 'a créé', update: 'a modifié', delete: 'a supprimé', mail: 'a envoyé par email' }[a.action] || a.action} <span class="muted">${esc(TYPE_LABELS[a.type] || a.type)}</span> ${esc(a.label || '')}<small class="muted">${fmtDT(a.created_at)}</small></div>`).join('') || '<div class="empty sm">Aucune activité</div>'}</div></div>
       </div></div>`;
   bindKpis(el);
 }
