@@ -241,10 +241,35 @@ function layout(p) {
       ${p.tabs ? `<nav class="tabs">${p.tabs}</nav>` : ''}
       <section class="page" id="page">${p.body || ''}</section>
     </main>
+    ${bottomNav(p.active)}
   </div>`;
   bindShell();
+  mobileActions();
+  setTimeout(installTip, 2500);
   return $('#page');
 }
+// Barre d'onglets en bas de l'écran (téléphone) : comme une application
+function bottomNav(active) {
+  const it = (k, h, i, l) => `<a class="bn-it ${k === active ? 'on' : ''}" href="${h}">${I[i]}<span>${l}</span></a>`;
+  return `<nav class="bnav" aria-label="Navigation">${it('dashboard', '#/dashboard', 'dash', 'Accueil')}${it('projects', '#/projects', 'crane', 'Chantiers')}
+    <button class="bn-add" data-act="qadd" aria-label="Créer">${I.plus}</button>
+    ${it('quotes', '#/quotes', 'calc', 'Devis')}<button class="bn-it ${['dashboard', 'projects', 'quotes'].includes(active) ? '' : 'on'}" data-act="openside">${I.menu}<span>Menu</span></button></nav>`;
+}
+// Téléphone : les boutons de l'en-tête passent dans un menu « ⋯ » (on garde le bouton principal)
+const isPhone = () => window.matchMedia('(max-width: 860px)').matches;
+function mobileActions() {
+  const box = $('.top-actions'); if (!box || !isPhone()) return;
+  const items = [...box.querySelectorAll('a, button')].filter((x) => !x.closest('label'));
+  if (items.length < 2) return;
+  const keep = [...items].reverse().find((x) => x.classList.contains('primary') && x.parentElement === box) || null;
+  const extra = items.filter((x) => x !== keep);
+  extra.forEach((x) => x.classList.add('m-hide'));
+  // groupes de boutons (ex. Cartes / Liste) entièrement passés dans le menu
+  [...box.children].forEach((g) => { if (!g.matches('a, button') && g.querySelector('a, button') && [...g.querySelectorAll('a, button')].every((x) => x.classList.contains('m-hide'))) g.classList.add('m-hide'); });
+  box.insertAdjacentHTML('beforeend', `<button class="icon-btn m-more" aria-label="Plus d'actions">${I.more}</button>`);
+  $('.m-more', box).onclick = () => menuSheet('Actions', extra.map((x) => ({ label: x.textContent.trim() || x.title || x.getAttribute('aria-label') || '…', icon: null, run: () => x.click() })));
+}
+
 function bindShell() {
   const side = $('#side');
   $('[data-act=collapse]').onclick = () => { ui.collapsed = !ui.collapsed; saveUi(); side.classList.toggle('collapsed', ui.collapsed); };
@@ -259,7 +284,8 @@ function bindShell() {
   $('[data-act=profile]').onclick = () => editProfile();
   const fb = $('[data-act=firmback]'); if (fb) fb.onclick = () => switchFirm(0);
   $('[data-act=search]').onclick = () => quickSearch();
-  $('[data-act=openside]').onclick = () => document.body.classList.add('side-open');
+  $$('[data-act=openside]').forEach((b) => { b.onclick = () => document.body.classList.add('side-open'); });
+  const qa = $('[data-act=qadd]'); if (qa) qa.onclick = () => quickAddMenu();
   $('[data-act=closeside]').onclick = () => document.body.classList.remove('side-open');
   $$('.side a').forEach((a) => a.addEventListener('click', () => document.body.classList.remove('side-open')));
 }
@@ -494,4 +520,22 @@ async function boot() {
     else if (e.status === 503) app.innerHTML = `<div class="login"><div class="login-box"><h1>Installation requise</h1><p>${esc(e.message)}</p><a class="btn primary" href="install.php">Installer</a></div></div>`;
     else app.innerHTML = `<div class="login"><div class="login-box"><h1>Erreur</h1><p>${esc(e.message)}</p><button class="btn" onclick="location.reload()">Réessayer</button></div></div>`;
   }
+}
+
+// ---------------------------------------------------------------- Application installable (écran d'accueil du téléphone)
+if ('serviceWorker' in navigator && location.protocol !== 'file:') window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; });
+function installTip() {
+  const standalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+  if (standalone || !isPhone() || $('.install-tip')) return;
+  try { if (localStorage.getItem('bp-install-tip')) return; } catch (e) { return; }
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  if (!ios && !installEvt) return;
+  const el = document.createElement('div'); el.className = 'install-tip';
+  el.innerHTML = `<img src="assets/apple-touch-icon.png" alt=""><div class="grow"><b>Installer BâtiPro sur votre téléphone</b><br>${ios ? 'Touchez <b>Partager</b> (carré avec une flèche) puis <b>« Sur l\'écran d\'accueil »</b>.' : 'S\'ouvre en plein écran, comme une application.'}</div>${ios ? '' : '<button class="btn" data-i>Installer</button>'}<button data-x aria-label="Fermer">✕</button>`;
+  document.body.appendChild(el);
+  const done = () => { try { localStorage.setItem('bp-install-tip', '1'); } catch (e) { /* */ } el.remove(); };
+  $('[data-x]', el).onclick = done;
+  const ib = $('[data-i]', el); if (ib) ib.onclick = async () => { installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; done(); };
 }

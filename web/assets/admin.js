@@ -223,11 +223,16 @@ function editProfile() {
   });
 }
 
+// Actions de création (recherche rapide et bouton « + » de la barre mobile)
+const quickActions = () => [['Nouveau devis', () => newQuote()], ['Nouveau chantier', () => editProject()], ['Nouveau contact', () => editContact().then((c) => c && go(`#/contact/${c.id}`))], ['Nouvelle opportunité', () => editOpportunity()], ['Nouvelle intervention', () => editIntervention()], ['Nouvelle tâche', () => editTask()], ['Encoder des heures', () => editTimesheet()], ['Nouvel achat', () => editExpense()]];
+const QA_ICONS = ['calc', 'crane', 'contacts', 'target', 'tool', 'tasks', 'people', 'coins'];
+function quickAddMenu() { menuSheet('Créer', quickActions().map(([label, run], i) => ({ label, icon: QA_ICONS[i] || 'plus', run }))); }
+
 // ---------------------------------------------------------------- Recherche rapide (⌘K)
 async function quickSearch() {
   const m = modal(`<div class="qs"><label class="search big">${I.search}<input placeholder="Rechercher un chantier, contact, devis, facture… ou une action" autofocus></label><div class="qs-res"></div></div>`, { wide: true });
   const all = await db.many(['project', 'contact', 'quote', 'invoice', 'opportunity', 'order', 'intervention']);
-  const actions = [['Nouveau devis', () => newQuote()], ['Nouveau chantier', () => editProject()], ['Nouveau contact', () => editContact().then((c) => c && go(`#/contact/${c.id}`))], ['Nouvelle opportunité', () => editOpportunity()], ['Nouvelle intervention', () => editIntervention()], ['Nouvelle tâche', () => editTask()], ['Encoder des heures', () => editTimesheet()], ['Nouvel achat', () => editExpense()]];
+  const actions = quickActions();
   const items = [
     ...actions.map(([l, run]) => ({ l, s: 'Action', run })),
     ...all.project.map((x) => ({ l: x.data.name, s: `Chantier ${x.number}`, h: `#/project/${x.id}` })),
