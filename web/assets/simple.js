@@ -73,8 +73,10 @@ const realDoc = (x) => !!x.number && x.data.status !== 'brouillon' || (x.data.li
 async function purgeEmpty(list, typ) {
   const junk = list.filter((x) => !realDoc(x) && (x.data.status || 'brouillon') === 'brouillon' && !(x.data.payments || []).length && (x.data.simple || !x.data.clientId));
   for (const x of junk) { try { await db.del(typ, x.id); } catch (e) { /* déjà supprimé */ } }
-  return list.filter((x) => !junk.includes(x));
+  return list.filter((x) => !junk.includes(x) && !S.pendingDel.has(`${typ}:${x.id}`));
 }
+// suppressions en attente (6 s pour « Annuler ») : déjà masquées partout
+S.pendingDel = S.pendingDel || new Set();
 // Achats abandonnés avant d'avoir un montant ou un ticket (anciennes versions) : supprimés
 async function purgeEmptyBuys(list) {
   const junk = list.filter((e) => e.data.simple && e.data.status === 'avalider' && !e.data.fileId && !num(e.data.ttc) && !num(e.data.amount));
@@ -258,7 +260,7 @@ async function docWizard(kind, id, step) {
 
   // fini : aperçu + envoi
   const t = totals(d);
-  page.innerHTML = `<div class="s-done-h"><small>${kind === 'devis' ? 'Devis' : 'Facture'} pour</small><b>${esc(sName(client))}</b><span>${sMoney(t.total)} <small>avec TVA</small></span></div>
+  page.innerHTML = `<div class="s-done-h"><small>${kind === 'devis' ? 'Devis' : d.kind === 'avoir' ? `Note de crédit (annule la facture ${esc(d.refInvoice || '')})` : 'Facture'} pour</small><b>${esc(sName(client))}</b><span>${sMoney(t.total)} <small>avec TVA</small></span></div>
     <div class="s-actions" data-acts></div>
     <details class="s-preview" open><summary>Voir ${kind === 'devis' ? 'le devis' : 'la facture'}</summary><div class="s-doc" data-doc><p class="muted">Chargement…</p></div></details>
     <button class="s-big" data-edit>${I.edit} Modifier</button>`;
@@ -298,12 +300,23 @@ async function emitSimple(it, client) {
   const d = it.data;
   if (d.reverse && !(client && client.data.vat)) { toast('Autoliquidation : ajoutez d\'abord le n° de TVA du client', 5000); return false; }
   if (!(d.title || '').trim()) d.title = `Travaux ${sName(client)}`;
-  if (!confirm('Valider la facture ? Elle reçoit son numéro et ne pourra plus être modifiée.')) return false;
-  const r = await api('POST', `number/${d.kind === 'avoir' ? 'avoir' : 'invoice'}`);
-  it.number = r.number; d.status = 'emise'; d.emittedAt = today();
-  if (!d.communication && company().country !== 'FR') d.communication = structComm(r.number.replace(/\D/g, ''));
+  const cn = d.kind === 'avoir';
+  if (!confirm(cn ? 'Valider la note de crédit ? Elle reçoit son numéro et annule la facture.' : it.number ? `Valider à nouveau la facture n° ${it.number} (même numéro) ?` : 'Valider la facture ? Elle reçoit son numéro et ne pourra plus être modifiée.')) return false;
+  if (!it.number) { const r = await api('POST', `number/${cn ? 'avoir' : 'invoice'}`); it.number = r.number; }
+  d.status = 'emise'; d.emittedAt = d.emittedAt || today();
+  if (d.reopened) { d.reopened.revalidatedAt = new Date().toISOString(); }
+  if (!cn && !d.communication && company().country !== 'FR') d.communication = structComm(it.number.replace(/\D/g, ''));
   await persist('invoice', it, { silent: true });
-  toast(`Facture n° ${it.number} validée ✓`, 2500);
+  // note de crédit : la facture annulée est soldée (« payée » par la note de crédit)
+  if (cn && d.refInvoiceId) {
+    try {
+      const orig = await db.get('invoice', +d.refInvoiceId); const st = invState(orig);
+      const amt = Math.min(st.rest, Math.abs(totals(d).total));
+      if (amt > 0.005) { orig.data.payments = [...(orig.data.payments || []), { date: today(), amount: r2(amt), method: 'Note de crédit', note: `Note de crédit ${it.number}` }]; }
+      orig.data.creditedBy = it.id; await persist('invoice', orig, { silent: true });
+    } catch (e) { /* facture d'origine supprimée */ }
+  }
+  toast(`${cn ? 'Note de crédit' : 'Facture'} n° ${it.number} validée ✓`, 2500);
   return true;
 }
 // Partager le PDF depuis n'importe quel écran (WhatsApp, SMS, enregistrer…)
@@ -480,7 +493,7 @@ async function paidWizard(id) {
 }
 
 // ---------------------------------------------------------------- Listes (factures, devis, achats)
-const S_INV_ST = { brouillon: ['Pas encore envoyée', '#868e96'], impayee: ['Pas encore payée', '#f08c00'], partielle: ['Payée en partie', '#0c8599'], retard: ['En retard !', '#e5484d'], payee: ['Payée ✓', '#2f9e44'], avoir: ['Note de crédit', '#7048e8'] };
+const S_INV_ST = { brouillon: ['Pas encore envoyée', '#868e96'], impayee: ['Pas encore payée', '#f08c00'], partielle: ['Payée en partie', '#0c8599'], retard: ['En retard !', '#e5484d'], payee: ['Payée ✓', '#2f9e44'], avoir: ['Note de crédit', '#7048e8'], annulee: ['Annulée (note de crédit)', '#7048e8'] };
 const S_Q_ST = { brouillon: ['Pas encore envoyé', '#868e96'], envoye: ['Attend la réponse', '#f08c00'], accepte: ['Accepté ✓', '#2f9e44'], refuse: ['Refusé', '#e5484d'], annule: ['Annulé', '#adb5bd'] };
 async function listSimple(kind) {
   const f = new URLSearchParams(location.hash.split('?')[1] || '').get('f') || '';
@@ -502,7 +515,7 @@ async function listSimple(kind) {
   const isInv = kind === 'factures'; const typ = isInv ? 'invoice' : 'quote';
   const rows = await purgeEmpty(await db.list(typ), typ);
   const ST = isInv ? S_INV_ST : S_Q_ST;
-  const stOf = (x) => (isInv ? invState(x).s : x.data.status || 'brouillon');
+  const stOf = (x) => (isInv ? (x.data.creditedBy && x.data.status === 'emise' ? 'annulee' : invState(x).s) : x.data.status || 'brouillon');
   const filters = isInv ? [['', 'Toutes'], ['apayer', 'Pas payées'], ['brouillon', 'Pas envoyées'], ['payee', 'Payées']] : [['', 'Tous'], ['envoye', 'En attente'], ['accepte', 'Acceptés'], ['brouillon', 'Pas envoyés']];
   const match = (x) => { const s = stOf(x); return !f || (f === 'apayer' ? ['impayee', 'partielle', 'retard'].includes(s) : s === f); };
   const page = sPage(isInv ? 'Mes factures' : 'Mes devis', '#/dashboard');
@@ -513,7 +526,7 @@ async function listSimple(kind) {
       const card = `<a class="s-card" href="#/s/doc/${isInv ? 'facture' : 'devis'}/${x.id}"><span class="s-ct"><b>${esc(sName(byId(contacts, x.data.clientId)))}</b><small>${esc(isInv && s === 'brouillon' ? 'Brouillon' : x.number || 'Brouillon')} · ${fmtDate(x.data.date)}${x.data.title ? ` · ${esc(x.data.title)}` : ''}</small></span>
         <span class="s-ca"><b>${sMoney(isInv && ['impayee', 'partielle', 'retard'].includes(s) ? rest : t.total)}</b><em style="--c:${(ST[s] || ['', '#868e96'])[1]}">${esc((ST[s] || [s])[0])}</em></span></a>`;
       // brouillon : modifier ou supprimer directement depuis la liste
-      return s === 'brouillon' ? `<div class="s-cardw" data-w="${x.id}">${card}<div class="s-cardacts"><a href="#/s/${isInv ? 'facture' : 'devis'}/${x.id}/travail">${I.edit} Modifier</a><button type="button" data-del="${x.id}">${I.trash} Supprimer</button></div></div>` : card; }).join('') || `<p class="muted s-empty">Rien ici pour l'instant.</p>`}</div>`;
+      return (isInv ? x.data.status !== 'emise' : s === 'brouillon') ? `<div class="s-cardw" data-w="${x.id}">${card}<div class="s-cardacts"><a href="#/s/${isInv ? 'facture' : 'devis'}/${x.id}/travail">${I.edit} Modifier</a><button type="button" data-del="${x.id}">${I.trash} Supprimer</button></div></div>` : card; }).join('') || `<p class="muted s-empty">Rien ici pour l'instant.</p>`}</div>`;
   $('[data-new]', page).onclick = () => go(`#/s/${isInv ? 'facture' : 'devis'}/new`);
   $$('[data-del]', page).forEach((b) => { b.onclick = () => sDeleteDraft(typ, rows.find((x) => x.id === +b.dataset.del), b.closest('.s-cardw')); });
 }
@@ -521,11 +534,13 @@ async function listSimple(kind) {
 // Supprimer un brouillon : disparaît tout de suite, « Annuler » pendant 6 secondes, puis suppression définitive
 function sDeleteDraft(typ, x, el, after) {
   if (!x) return;
-  const word = typ === 'invoice' ? 'Facture' : 'Devis';
+  const word = typ === 'invoice' ? (x.data.kind === 'avoir' ? 'Note de crédit' : 'Facture') : 'Devis';
+  const what = x.number ? `${word} n° ${x.number} supprimé${typ === 'invoice' ? 'e' : ''}` : `${word} brouillon supprimé${typ === 'invoice' ? 'e' : ''}`;
+  const key = `${typ}:${x.id}`; S.pendingDel.add(key);
   if (el) el.hidden = true;
   let undone = false;
-  const tm = setTimeout(async () => { if (undone) return; try { await db.del(typ, x.id); } catch (e) { toast('Suppression impossible : ' + e.message, 4000); if (el) el.hidden = false; } }, 6000);
-  undoToast(`${word} brouillon supprimé${typ === 'invoice' ? 'e' : ''}`, () => { undone = true; clearTimeout(tm); if (el) el.hidden = false; else render(); });
+  const tm = setTimeout(async () => { if (undone) return; try { await db.del(typ, x.id); } catch (e) { toast('Suppression impossible : ' + e.message, 4000); if (el) el.hidden = false; } S.pendingDel.delete(key); }, 6000);
+  undoToast(what, () => { undone = true; clearTimeout(tm); S.pendingDel.delete(key); if (el) el.hidden = false; else render(); });
   if (after) after();
 }
 
@@ -534,14 +549,20 @@ async function docSimple(kind, id) {
   const typ = kind === 'devis' ? 'quote' : 'invoice';
   const it = await db.get(typ, +id); const d = it.data;
   const contacts = await db.list('contact'); const c = byId(contacts, d.clientId);
-  const page = sPage(`${kind === 'devis' ? 'Devis' : 'Facture'} ${it.number || '(brouillon)'}`, `#/s/liste/${kind === 'devis' ? 'devis' : 'factures'}`);
+  const page = sPage(`${kind === 'devis' ? 'Devis' : d.kind === 'avoir' ? 'Note de crédit' : 'Facture'} ${it.number || '(brouillon)'}`, `#/s/liste/${kind === 'devis' ? 'devis' : 'factures'}`);
   const t = totals(d);
-  const st = typ === 'invoice' ? invState(it) : null; const s = st ? st.s : d.status || 'brouillon';
+  const st = typ === 'invoice' ? invState(it) : null; const s = st ? (d.creditedBy && d.status === 'emise' ? 'annulee' : st.s) : d.status || 'brouillon';
   const ST = typ === 'invoice' ? S_INV_ST : S_Q_ST;
-  const draft = typ === 'invoice' ? s === 'brouillon' : d.status === 'brouillon';
+  const draft = typ === 'invoice' ? d.status !== 'emise' : d.status === 'brouillon';
   page.innerHTML = `<div class="s-done-h"><small>${esc(sName(c))}${d.title ? ` · ${esc(d.title)}` : ''}</small><b style="color:${(ST[s] || ['', '#333'])[1]}">${esc((ST[s] || [s])[0])}</b><span>${sMoney(st && st.rest > 0.005 && s !== 'brouillon' ? st.rest : t.total)} <small>${st && st.paid > 0.005 && st.rest > 0.005 ? `reste à payer (sur ${sMoney(t.total)})` : 'avec TVA'}</small></span></div>
+    ${d.reopened && draft ? `<div class="s-warn">⚠ Facture n° ${esc(it.number || '')} rouverte le ${fmtDate(d.reopened.at)} : pensez à prévenir votre comptable et le client.</div>` : ''}
+    ${d.creditedBy ? `<a class="s-info" href="#/s/doc/facture/${d.creditedBy}">Annulée par une note de crédit ${I.chevron}</a>` : ''}
+    ${d.kind === 'avoir' && d.refInvoiceId ? `<a class="s-info" href="#/s/doc/facture/${d.refInvoiceId}">Annule la facture ${esc(d.refInvoice || '')} ${I.chevron}</a>` : ''}
     <div class="s-actions" data-acts></div>
-    <details class="s-preview"><summary>Voir ${kind === 'devis' ? 'le devis' : 'la facture'}</summary><div class="s-doc" data-doc></div></details>`;
+    ${typ === 'invoice' && (d.payments || []).length ? `<div class="s-pays"><b>Paiements reçus</b>${d.payments.map((p, i) => `<div class="s-pay"><span>${fmtDate(p.date)} · ${esc(p.method || '')}${p.note ? ` · ${esc(p.note)}` : ''}</span><b>${sMoney(p.amount)}</b><button type="button" data-pdel="${i}" aria-label="Supprimer ce paiement">${I.trash}</button></div>`).join('')}</div>` : ''}
+    <details class="s-preview"><summary>Voir ${kind === 'devis' ? 'le devis' : 'la facture'}</summary><div class="s-doc" data-doc></div></details>
+    ${!draft ? `<div class="s-list s-danger-zone">${typ === 'invoice' ? sBtn('data-a="fix"', 'edit', `Modifier ou supprimer cette ${d.kind === 'avoir' ? 'note de crédit' : 'facture'}`, 'elle est validée : on vous explique les règles') : sBtn('data-a="qedit"', 'edit', 'Modifier ce devis', '') + sBtn('data-a="qdel"', 'trash', 'Supprimer ce devis', '', 'danger')}</div>` : ''}
+    ${d.correctionId && !draft ? sBtn('data-a="corr"', 'edit', 'Voir la facture corrigée', 'préparée avec la note de crédit', 'primary') : ''}`;
   const acts = [];
   if (draft) acts.push(['edit', 'edit', kind === 'devis' ? 'Continuer le devis' : 'Continuer la facture', 'ajouter, modifier, puis envoyer', 'primary']);
   if (typ === 'invoice' && ['impayee', 'partielle', 'retard'].includes(s)) acts.push(['pay', 'check', 'On m\'a payé', 'enregistrer le paiement', 'primary']);
@@ -555,10 +576,21 @@ async function docSimple(kind, id) {
   acts.push(['pdf', 'eye', 'Voir en grand / imprimer', '']);
   if (draft) acts.push(['del', 'trash', kind === 'devis' ? 'Supprimer ce devis' : 'Supprimer ce brouillon', 'il n\'a pas encore été envoyé', 'danger']);
   $('[data-acts]', page).innerHTML = acts.map(([k, ic, l, sub, cls]) => sBtn(`data-a="${k}"`, ic, l, sub, cls || '')).join('');
+  // supprimer un paiement enregistré par erreur
+  $$('[data-pdel]', page).forEach((b) => { b.onclick = async () => {
+    const i = +b.dataset.pdel; const p = d.payments[i];
+    if (!confirm(`Supprimer le paiement de ${sMoney(p.amount)} du ${fmtDate(p.date)} ?\n\nAttention : si la facture est déjà chez votre comptable, il a peut-être déjà encodé ce paiement (banque). Prévenez-le.`)) return;
+    d.payments.splice(i, 1); await persist(typ, it, { silent: true }); render();
+    undoToast('Paiement supprimé', async () => { d.payments.splice(i, 0, p); await persist(typ, it, { silent: true }); render(); });
+  }; });
   $('details', page).addEventListener('toggle', (e) => { if (e.target.open && !$('[data-doc] .doc', page)) docHtml(typ, it.id).then((r) => { $('[data-doc]', page).innerHTML = r.html; }); });
   $$('[data-a]', page).forEach((b) => { b.onclick = async () => {
     const a = b.dataset.a;
     if (a === 'edit') return go(`#/s/${kind}/${it.id}/travail`);
+    if (a === 'fix') return validatedInvoiceChange(it, c);
+    if (a === 'corr') return go(`#/s/doc/facture/${d.correctionId}`);
+    if (a === 'qedit') { if (d.status === 'accepte' && !confirm('Ce devis est accepté par le client. Le modifier quand même ? (Prévenez le client.)')) return; return go(`#/s/devis/${it.id}/travail`); }
+    if (a === 'qdel') { const inv = (await db.list('invoice')).filter((x) => +x.data.quoteId === it.id); if (!confirm(inv.length ? `Ce devis a ${inv.length} facture(s). Supprimer quand même le devis ? (les factures restent)` : 'Supprimer ce devis ?')) return; return sDeleteDraft('quote', it, null, () => go('#/s/liste/devis')); }
     if (a === 'del') return sDeleteDraft(typ, it, null, () => go(`#/s/liste/${kind === 'devis' ? 'devis' : 'factures'}`));
     if (a === 'pay') return go(`#/s/paye/${it.id}`);
     if (a === 'mail') return go(`#/print/${typ}/${it.id}?mail=1`);
@@ -570,6 +602,55 @@ async function docSimple(kind, id) {
     if (a === 'yes' || a === 'bill') return billQuote(it);
   }; });
 }
+// Facture validée : modifier ou supprimer → avertissement (règles belges) et choix
+function validatedInvoiceChange(it, c) {
+  const d = it.data; const st = invState(it); const cn = d.kind === 'avoir';
+  const sentMail = (d.sent || []).length; const sentPep = d.peppol && d.peppol.sentAt;
+  const facts = [
+    `Elle a le n° <b>${esc(it.number)}</b>${d.emittedAt ? ` (validée le ${fmtDate(d.emittedAt)})` : ''}.`,
+    sentPep ? `Elle a été <b>envoyée par Peppol</b> le ${fmtDate(sentPep)} : elle est déjà chez le client et ne peut pas être reprise.` : sentMail ? `Elle a été <b>envoyée au client</b> par e-mail.` : '',
+    st.paid > 0.005 ? `Le client a déjà payé <b>${sMoney(st.paid)}</b>.` : '',
+  ].filter(Boolean);
+  const m = modal(`${mhead(cn ? '⚠ Attention : note de crédit validée' : '⚠ Attention : facture validée')}<div class="m-body s-legal">
+    <ul>${facts.map((f) => `<li>${f}</li>`).join('')}</ul>
+    <p><b>En Belgique, une facture validée ne doit plus être changée ni supprimée.</b> Son contenu doit rester intact pendant toute la durée de conservation, et les numéros doivent se suivre sans trou.</p>
+    <p>La bonne façon de corriger : faire une <b>note de crédit</b> (elle annule la facture), puis une <b>nouvelle facture</b> correcte.</p>
+    <p class="s-acc">📒 <b>Votre comptable</b> a peut-être déjà encodé cette facture. Vérifiez avec lui avant de la changer.</p>
+    <div class="s-list">
+      ${cn ? '' : sBtn('data-c="credit"', 'check', 'Annuler avec une note de crédit', 'conseillé – puis refaire la facture correcte', 'primary')}
+      ${sBtn('data-c="keep"', 'x', 'Ne rien changer', '')}
+    </div>
+    <details class="s-more"><summary>Je veux quand même modifier ou supprimer</summary>
+      <label class="s-chk"><input type="checkbox" data-ok> Je comprends le risque et je préviens mon comptable (et le client).</label>
+      <div class="s-list">${sBtn('data-c="edit" disabled', 'edit', 'Modifier quand même', 'garde le même numéro', 'danger')}${sBtn('data-c="del" disabled', 'trash', 'Supprimer quand même', 'le numéro manquera dans la suite', 'danger')}</div>
+    </details></div>`);
+  const ok = $('[data-ok]', m.el);
+  ok.onchange = () => { $$('[data-c="edit"],[data-c="del"]', m.el).forEach((b) => { b.disabled = !ok.checked; }); };
+  $$('[data-c]', m.el).forEach((b) => { b.onclick = async () => {
+    const k = b.dataset.c; if (b.disabled) return;
+    if (k === 'keep') return m.close();
+    if (k === 'credit') {
+      m.close();
+      const correction = await persist('invoice', { project_id: it.project_id, data: { ...JSON.parse(JSON.stringify(d)), status: 'brouillon', number: undefined, emittedAt: null, payments: [], sent: [], peppol: null, communication: '', date: today(), due: addDays(today(), num(d.payDays) || 30), title: d.title, simple: true, creditedBy: null, reopened: null } });
+      const cn = await persist('invoice', { project_id: it.project_id, data: { kind: 'avoir', status: 'brouillon', clientId: d.clientId, date: today(), reverse: d.reverse, discount: d.discount, defaultVat: d.defaultVat, title: `Annulation facture ${it.number}`, refInvoice: it.number, refInvoiceId: it.id, correctionId: correction.id, ownerId: S.me.id, lines: (d.lines || []).map((l) => (l.kind === 'item' ? { ...l, id: lid(), qty: -num(l.qty) } : { ...l, id: lid() })), payments: [], simple: true } });
+      toast('Note de crédit prête : vérifiez et validez-la', 4000);
+      return go(`#/s/facture/${cn.id}/fini`);
+    }
+    if (k === 'edit') {
+      d.reopened = { at: new Date().toISOString(), by: S.me.id, payments: (d.payments || []).length };
+      d.status = 'brouillon'; await persist('invoice', it, { silent: true }); m.close();
+      return go(`#/s/facture/${it.id}/travail`);
+    }
+    if (k === 'del') {
+      if (!confirm(`Supprimer définitivement la facture n° ${it.number}${st.paid > 0.005 ? ' et ses paiements' : ''} ?`)) return;
+      m.close();
+      // note de crédit supprimée : la facture d'origine n'est plus soldée par elle
+      if (cn && d.refInvoiceId) { try { const o = await db.get('invoice', +d.refInvoiceId); o.data.payments = (o.data.payments || []).filter((p) => p.note !== `Note de crédit ${it.number}`); o.data.creditedBy = null; await persist('invoice', o, { silent: true }); } catch (e) { /* facture d'origine supprimée */ } }
+      return sDeleteDraft('invoice', it, null, () => go('#/s/liste/factures'));
+    }
+  }; });
+}
+
 // Devis accepté → facture (tout, ou un acompte en %)
 function billQuote(q) {
   const d = q.data; const t = totals(d);
