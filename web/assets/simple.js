@@ -75,8 +75,15 @@ async function purgeEmpty(list, typ) {
   for (const x of junk) { try { await db.del(typ, x.id); } catch (e) { /* déjà supprimé */ } }
   return list.filter((x) => !junk.includes(x));
 }
+// Achats abandonnés avant d'avoir un montant ou un ticket (anciennes versions) : supprimés
+async function purgeEmptyBuys(list) {
+  const junk = list.filter((e) => e.data.simple && e.data.status === 'avalider' && !e.data.fileId && !num(e.data.ttc) && !num(e.data.amount));
+  for (const x of junk) { try { await db.del('expense', x.id); } catch (err) { /* déjà supprimé */ } }
+  return list.filter((x) => !junk.includes(x));
+}
 async function homeSimple() {
   const all = await db.many(['quote', 'invoice', 'project', 'expense']);
+  all.expense = await purgeEmptyBuys(all.expense);
   all.invoice = await purgeEmpty(all.invoice, 'invoice'); all.quote = await purgeEmpty(all.quote, 'quote');
   const page = sPage('Accueil');
   const co = company(); const s = sellerInfo();
@@ -100,15 +107,19 @@ async function homeSimple() {
     </div>
     ${drafts.length ? `<div class="s-note">${I.edit}<span>${drafts.length} facture${drafts.length > 1 ? 's' : ''} pas encore envoyée${drafts.length > 1 ? 's' : ''}</span><a href="#/s/liste/factures?f=brouillon">Voir</a></div>` : ''}
     ${qWait.length ? `<div class="s-note">${I.calc}<span>${qWait.length} devis en attente de réponse du client</span><a href="#/s/liste/devis">Voir</a></div>` : ''}
+    ${peppolApOn() ? '' : `<a class="s-note" href="#/s/peppol">${I.send}<span><b>Factures électroniques (Peppol)</b> : pas encore activé</span><b>Activer</b></a>`}
     <div class="s-list">
       ${sBtn('data-go="#/s/liste/factures"', 'coins', 'Mes factures', `${all.invoice.length} facture(s)`)}
       ${sBtn('data-go="#/s/liste/devis"', 'calc', 'Mes devis', `${all.quote.length} devis`)}
       ${sBtn('data-go="#/s/liste/achats"', 'download', 'Mes achats', `${all.expense.length} achat(s)`)}
       ${sBtn('data-go="#/projects"', 'crane', 'Mes chantiers', `${all.project.filter((p) => !['termine', 'annule'].includes(p.data.status)).length} en cours`)}
       ${sBtn('data-go="#/contacts/client"', 'contacts', 'Mes clients')}
+      ${sBtn('data-go="#/s/peppol"', 'send', 'Factures électroniques (Peppol)', peppolApOn() ? '✓ activé – envoyer et recevoir' : 'pas encore activé')}
       ${sBtn('data-go="#/s/moi"', 'gear', 'Mes informations', 'nom, adresse, TVA, banque, logo')}
     </div>`;
   $$('[data-go]', page).forEach((b) => { b.onclick = () => go(b.dataset.go); });
+  // factures fournisseurs reçues par Peppol : relevées en arrivant sur l'accueil (au plus toutes les 10 minutes)
+  if (peppolApOn()) peppolSync().then((r) => { if (r && r.created.length && /^#\/(dashboard)?$/.test(location.hash || '#/')) render(); }).catch(() => {});
 }
 
 // ---------------------------------------------------------------- Facture / devis : parcours en 5 étapes
@@ -254,11 +265,11 @@ async function docWizard(kind, id, step) {
   $('[data-edit]', page).onclick = () => goStep('travail');
   docHtml(typ, it.id).then((r) => { const el = $('[data-doc]', page); if (el) el.innerHTML = r.html; }).catch((e) => { $('[data-doc]', page).innerHTML = `<p class="late">${esc(e.message)}</p>`; });
   const acts = $('[data-acts]', page);
-  const peppolOk = typ === 'invoice' && typeof buyerInfo === 'function' && buyerInfo(client).peppolId && buyerInfo(client).isCompany;
+  const peppolOk = typ === 'invoice' && buyerInfo(client).peppolId && buyerInfo(client).isCompany;
   if (typ === 'invoice') {
     acts.innerHTML = `<p class="s-lead">En validant, la facture reçoit son numéro et ne peut plus être changée.</p>
       ${sBtn('data-a="mail"', 'mail', 'Valider et envoyer par e-mail', client.data.email ? esc(client.data.email) : 'vous choisirez l\'adresse', 'primary')}
-      ${peppolOk ? sBtn('data-a="peppol"', 'send', 'Valider et envoyer par Peppol', 'facture électronique (entreprises)') : ''}
+      ${peppolOk ? sBtn('data-a="peppol"', 'send', 'Valider et envoyer par Peppol', peppolApOn() ? 'facture électronique – conseillé pour une entreprise' : 'Peppol pas encore activé : on vous guide', 'primary') : `<p class="s-help">${client.data.company || client.data.vat ? 'Pour envoyer par Peppol, ajoutez le n° de TVA du client dans sa fiche.' : 'Client particulier : Peppol n\'est pas utilisé, envoyez par e-mail ou WhatsApp.'}</p>`}
       ${sBtn('data-a="share"', 'download', 'Valider et partager le PDF', 'WhatsApp, SMS, enregistrer…')}
       ${sBtn('data-a="later"', 'file', 'Garder pour plus tard', 'pas encore validée')}`;
     $$('[data-a]', acts).forEach((b) => { b.onclick = async () => {
@@ -266,7 +277,7 @@ async function docWizard(kind, id, step) {
       if (a === 'later') { toast('Facture gardée (pas encore validée)', 2500); return go('#/dashboard'); }
       if (!await emitSimple(it, client)) return;
       if (a === 'mail') return go(`#/print/invoice/${it.id}?mail=1`);
-      if (a === 'peppol') { go(`#/s/doc/facture/${it.id}`); return setTimeout(() => peppolInvoice(it), 700); }
+      if (a === 'peppol') { if (!peppolApOn()) { toast('Activez d\'abord Peppol (2 minutes)', 4000); return go('#/s/peppol'); } go(`#/s/doc/facture/${it.id}`); return setTimeout(() => peppolInvoice(it), 700); }
       go(`#/s/doc/facture/${it.id}`); setTimeout(() => sharePdfOf('invoice', it.id), 600);
     }; });
   } else {
@@ -376,21 +387,22 @@ async function buyWizard(id, step) {
     };
     $('[data-cam]', page).onclick = async () => go1(await pickFile('image/*', false, 'environment'));
     $('[data-file]', page).onclick = async () => go1(await pickFile('application/pdf,image/*,.xml'));
-    $('[data-none]', page).onclick = () => go1(null);
+    $('[data-none]', page).onclick = () => go('#/s/achat/new/chantier'); // rien n'est créé avant « Enregistrer »
     return;
   }
-  const e = await db.get('expense', +id); const d = e.data;
+  const e = id === 'new' ? { project_id: S.buyDraftPid || null, data: { date: today(), category: 'mat', source: 'manuel', status: 'avalider', simple: true } } : await db.get('expense', +id); const d = e.data;
+  const eid = e.id || 'new';
   if (step === 'chantier') {
     const page = sPage('Pour quel chantier ?', `#/s/achat`, { wiz: true, step: [2, 3] });
     const projects = (await db.list('project')).filter((p) => !['termine', 'annule'].includes(p.data.status)).sort((a, b) => b.id - a.id);
     page.innerHTML = `<p class="s-lead">Choisissez où ce matériel sera utilisé.</p>
       <div class="s-list">${projects.map((p) => sBtn(`data-p="${p.id}"`, 'crane', esc(p.data.name), esc([p.data.address, p.data.city].filter(Boolean).join(', ')), e.project_id === p.id ? 'sel' : '')).join('')}</div>
       <button class="s-big" data-p="0">${I.gear} Pour l'entreprise (pas de chantier)</button>`;
-    $$('[data-p]', page).forEach((b) => { b.onclick = async () => { e.project_id = +b.dataset.p || null; delete d.alloc; await persist('expense', e, { silent: true }); go(`#/s/achat/${e.id}/montant`); }; });
+    $$('[data-p]', page).forEach((b) => { b.onclick = async () => { e.project_id = +b.dataset.p || null; delete d.alloc; if (e.id) await persist('expense', e, { silent: true }); else S.buyDraftPid = e.project_id; go(`#/s/achat/${eid}/montant`); }; });
     return;
   }
   // montant : vérifier ce qui a été lu
-  const page = sPage('Vérifiez', `#/s/achat/${e.id}/chantier`, { wiz: true, step: [3, 3] });
+  const page = sPage('Vérifiez', `#/s/achat/${eid}/chantier`, { wiz: true, step: [3, 3] });
   const contacts = await db.list('contact');
   const sup = byId(contacts, d.supplierId); const guess = d.supplierGuess || {};
   const ttc = purchTtc(d);
@@ -421,13 +433,13 @@ async function buyWizard(id, step) {
     delete d.readNote; delete d.supplierGuess;
     d.payments = paid ? [{ date: d.date, amount: total, method: 'Carte' }] : [];
     purchSyncPaid(d); if (!paid) { d.paid = false; d.due = d.due || addDays(d.date, 30); }
-    await persist('expense', e, { silent: true });
+    await persist('expense', e, { silent: true }); S.buyDraftPid = null;
     const page2 = sPage('C\'est noté !', '#/dashboard', { wiz: true });
     page2.innerHTML = `<div class="s-ok">${I.check}<b>Achat enregistré</b><span>${sMoney(total)}${e.project_id ? ' · sur le chantier' : ''}</span></div>
       <button class="s-big primary" data-again>${I.camera} Encore un achat</button><button class="s-big" data-home>${I.dash} Retour à l'accueil</button>`;
     $('[data-again]', page2).onclick = () => go('#/s/achat');
     $('[data-home]', page2).onclick = () => go('#/dashboard');
-  }, 'Enregistrer', () => go(`#/s/achat/${e.id}/chantier`));
+  }, 'Enregistrer', () => go(`#/s/achat/${eid}/chantier`));
 }
 
 // ---------------------------------------------------------------- On m'a payé
@@ -474,14 +486,17 @@ async function listSimple(kind) {
   const f = new URLSearchParams(location.hash.split('?')[1] || '').get('f') || '';
   const contacts = await db.list('contact');
   if (kind === 'achats') {
-    const [rows, projects] = await Promise.all([db.list('expense'), db.list('project')]);
+    const [rows0, projects] = await Promise.all([db.list('expense'), db.list('project')]);
+    const rows = await purgeEmptyBuys(rows0);
     const page = sPage('Mes achats', '#/dashboard');
     rows.sort((a, b) => (b.data.date || '').localeCompare(a.data.date || '') || b.id - a.id);
     page.innerHTML = `<button class="s-big primary" data-new>${I.camera} J'ai acheté quelque chose</button>
+      ${peppolApOn() ? `<button class="s-big" data-sync>${I.download} Recevoir mes factures Peppol</button>` : `<a class="s-note" href="#/s/peppol">${I.send}<span>Recevoir les factures des fournisseurs par <b>Peppol</b></span><b>Activer</b></a>`}
       <div class="s-cards">${rows.map((e) => { const stt = purchState(e); const p = byId(projects, e.project_id);
-        return `<a class="s-card" href="#/s/achat/${e.id}/montant"><span class="s-ct"><b>${esc(sName(byId(contacts, e.data.supplierId)) !== '—' ? sName(byId(contacts, e.data.supplierId)) : e.data.desc || 'Achat')}</b><small>${fmtDate(e.data.date)}${p ? ` · ${esc(p.data.name)}` : ''}</small></span>
+        return `<a class="s-card" href="#/s/achat/${e.id}/montant"><span class="s-ct"><b>${esc(sName(byId(contacts, e.data.supplierId)) !== '—' ? sName(byId(contacts, e.data.supplierId)) : e.data.desc || 'Achat')}</b><small>${e.data.source === 'peppol' || e.data.peppol ? '📥 Peppol · ' : ''}${fmtDate(e.data.date)}${p ? ` · ${esc(p.data.name)}` : ''}</small></span>
           <span class="s-ca"><b>${sMoney(purchTtc(e.data))}</b>${stt === 'avalider' ? '<em class="warn">À vérifier</em>' : stt === 'payee' ? '<em class="ok">Payé</em>' : '<em class="late">À payer</em>'}</span></a>`; }).join('') || '<p class="muted s-empty">Aucun achat pour l\'instant.</p>'}</div>`;
     $('[data-new]', page).onclick = () => go('#/s/achat');
+    const sy = $('[data-sync]', page); if (sy) sy.onclick = async () => { sy.disabled = true; const r = await peppolSync({ force: true, quiet: false }); sy.disabled = false; if (r && r.created.length) render(); else if (r) toast('Aucune nouvelle facture', 2500); };
     return;
   }
   const isInv = kind === 'factures'; const typ = isInv ? 'invoice' : 'quote';
@@ -520,7 +535,7 @@ async function docSimple(kind, id) {
     acts.push(['mail', 'mail', 'Envoyer par e-mail', c && c.data.email ? esc(c.data.email) : '']);
     acts.push(['share', 'download', 'Partager le PDF', 'WhatsApp, SMS, enregistrer…']);
   }
-  if (typ === 'invoice' && !draft && c && typeof buyerInfo === 'function' && buyerInfo(c).peppolId && buyerInfo(c).isCompany) acts.push(['peppol', 'send', 'Envoyer par Peppol', d.peppol && d.peppol.sentAt ? `déjà envoyée le ${fmtDate(d.peppol.sentAt)}` : 'facture électronique']);
+  if (typ === 'invoice' && !draft && c && buyerInfo(c).peppolId && buyerInfo(c).isCompany) acts.push(['peppol', 'send', 'Envoyer par Peppol', d.peppol && d.peppol.sentAt ? `✓ déjà envoyée le ${fmtDate(d.peppol.sentAt)}` : peppolApOn() ? 'facture électronique (entreprise)' : 'Peppol pas encore activé', d.peppol && d.peppol.sentAt ? '' : 'primary']);
   if (typ === 'quote' && ['envoye', 'brouillon'].includes(d.status)) { acts.push(['yes', 'check', 'Le client a dit oui', 'je fais la facture', d.status === 'envoye' ? 'primary' : '']); acts.push(['no', 'x', 'Le client a dit non', '']); }
   if (typ === 'quote' && d.status === 'accepte') acts.push(['bill', 'coins', 'Faire la facture', 'tout le devis ou un acompte', 'primary']);
   acts.push(['pdf', 'eye', 'Voir en grand / imprimer', '']);
@@ -532,7 +547,7 @@ async function docSimple(kind, id) {
     if (a === 'pay') return go(`#/s/paye/${it.id}`);
     if (a === 'mail') return go(`#/print/${typ}/${it.id}?mail=1`);
     if (a === 'pdf') return go(`#/print/${typ}/${it.id}`);
-    if (a === 'peppol') return peppolInvoice(it);
+    if (a === 'peppol') return peppolApOn() ? peppolInvoice(it) : go('#/s/peppol');
     if (a === 'share') { if (typ === 'quote' && d.status === 'brouillon') { d.status = 'envoye'; d.sentAt = today(); await persist('quote', it, { silent: true }); } return sharePdfOf(typ, it.id); }
     if (a === 'no') { d.status = 'refuse'; await persist('quote', it, { silent: true }); return render(); }
     if (a === 'yes') { d.status = 'accepte'; d.acceptedAt = today(); await persist('quote', it, { silent: true }); }
@@ -573,7 +588,8 @@ async function meSimple() {
       <div class="field"><span>Votre logo (facultatif)</span><div class="s-logo">${co.logoId ? `<img src="${fileUrl(co.logoId)}" alt="">` : '<span class="muted">Pas de logo</span>'}<button type="button" class="btn" data-logo>${I.camera} Choisir une image</button></div></div>
       <input type="hidden" name="country" value="${esc(co.country || 'BE')}"><input type="hidden" name="website" value="${esc(co.website || '')}">
     </form>
-    <p class="s-help">Plus de réglages (TVA, numéros, modèle, Peppol, e-mail) : <a href="#/settings/company">réglages avancés</a>.</p>`;
+    <a class="s-note" href="#/s/peppol">${I.send}<span><b>Factures électroniques (Peppol)</b> : ${peppolApOn() ? '✓ activé' : 'pas encore activé'}</span><b>${peppolApOn() ? 'Voir' : 'Activer'}</b></a>
+    <p class="s-help">Plus de réglages (TVA, numéros, modèle, e-mail) : <a href="#/settings/company">réglages avancés</a>.</p>`;
   const f = $('form', page);
   vatAutofill(f, { name: 'name', street: 'street', zip: 'zip', city: 'city', country: 'country', phone: 'phone', email: 'email', website: 'website' }, { countryCode: true });
   $('[data-logo]', page).onclick = async () => { const [file] = await pickFile('image/*'); if (!file) return; const r = await resizeImage(await blobToImg(file), 600, 'image/png'); const res = await upload(new File([r.blob], 'logo.png', { type: 'image/png' })); co.logoId = res.id; $('.s-logo', page).firstElementChild.outerHTML = `<img src="${fileUrl(res.id)}" alt="">`; };
@@ -586,6 +602,48 @@ async function meSimple() {
   }, 'Enregistrer');
 }
 
+// ---------------------------------------------------------------- Peppol : factures électroniques (envoyer et recevoir)
+async function peppolSimple() {
+  const page = sPage('Factures électroniques (Peppol)', '#/dashboard');
+  const on = peppolApOn(); const s = sellerInfo(); const last = S.settings.peppol_sync && S.settings.peppol_sync.at;
+  page.innerHTML = `<div class="s-pep ${on ? 'on' : ''}">${on ? I.check : I.send}<b>${on ? 'Peppol est activé' : 'Peppol n\'est pas encore activé'}</b>
+      <span>${on ? 'Vos factures partent et arrivent toutes seules.' : 'Depuis 2026, les factures entre entreprises belges passent par Peppol.'}</span></div>
+    ${on ? `<button class="s-big primary" data-sync>${I.download} Relever mes factures maintenant</button>
+      <p class="s-help">${last ? `Dernière relève : ${fmtDT(last)}. ` : ''}Les factures reçues arrivent dans <a href="#/s/liste/achats">Mes achats</a>, marquées « À vérifier ».</p>
+      <div class="s-list">${sBtn('data-look', 'search', 'Vérifier mon inscription', esc(s.peppolId || 'identifiant Peppol'))}${sBtn('data-adv', 'gear', 'Réglages détaillés', 'clé, environnement, relève automatique')}</div>`
+    : `<p class="s-lead">C'est simple et gratuit pour une petite entreprise :</p>
+      <ol class="s-how">
+        <li><b>Créez votre compte gratuit</b> chez Peppyrus et inscrivez votre entreprise.<a class="s-big" href="https://www.peppyrus.be" target="_blank" rel="noopener">${I.send} Ouvrir peppyrus.be</a></li>
+        <li><b>Dans Peppyrus, créez une « clé API »</b> et copiez-la.</li>
+        <li><b>Collez la clé ici</b> puis touchez « Activer ».
+          <form class="s-form" data-ap autocomplete="off" onsubmit="return false"><label class="field"><span>Clé API Peppyrus</span><input name="key" type="password" placeholder="collez la clé ici"></label></form>
+          <button class="s-big primary" data-on>${I.check} Activer Peppol</button></li>
+      </ol>
+      <p class="s-help">Déjà inscrit ailleurs (Vertuoza, comptable…) ? Demandez-leur de « libérer votre identifiant Peppol », puis activez-le chez Peppyrus.</p>`}
+    <div data-res></div>
+    <div class="s-card-info"><b>Comment ça marche ?</b>
+      <p>📤 <b>Envoyer</b> : quand vous faites une facture pour une <b>entreprise</b> (avec un n° de TVA), le bouton « Envoyer par Peppol » apparaît à la fin.</p>
+      <p>📥 <b>Recevoir</b> : les factures de vos fournisseurs arrivent toutes seules dans « Mes achats » avec leur PDF.</p>
+      <p>👤 Pour un <b>particulier</b>, Peppol n'est pas utilisé : envoyez la facture par e-mail ou WhatsApp.</p></div>`;
+  const sync = $('[data-sync]', page);
+  if (sync) sync.onclick = async () => { sync.disabled = true; const r = await peppolSync({ force: true, quiet: false }); sync.disabled = false; if (r) toast(r.created.length ? `${r.created.length} facture(s) reçue(s) → Mes achats` : 'Aucune nouvelle facture', 3500); };
+  const look = $('[data-look]', page); if (look) look.onclick = () => { if (!s.peppolId) return toast('Ajoutez d\'abord votre n° de TVA dans Mes informations', 4000); peppolLookupInto($('[data-res]', page), s.peppolId); };
+  const adv = $('[data-adv]', page); if (adv) adv.onclick = () => go('#/settings/peppol');
+  const act = $('[data-on]', page);
+  if (act) act.onclick = async () => {
+    const key = $('[name=key]', page).value.trim(); if (!key) { toast('Collez d\'abord la clé API', 3000); return; }
+    act.disabled = true;
+    try {
+      await api('PUT', 'settings', { peppolap: { provider: 'peppyrus', env: 'prod', key } });
+      S.settings.peppolap = { provider: 'peppyrus', env: 'prod', hasKey: true };
+      // identifiant Peppol déduit du n° de TVA de l'entreprise
+      const co = { ...company() }; if (!co.peppolId && sellerInfo().peppolId) { co.peppolId = sellerInfo().peppolId; await api('PUT', 'settings', { company: co }); S.settings.company = co; }
+      try { await api('POST', 'peppol/test'); toast('Peppol activé ✓', 3000); } catch (e) { toast(`Clé enregistrée, mais la connexion a échoué : ${e.message}`, 7000); }
+      render();
+    } finally { act.disabled = false; }
+  };
+}
+
 // ---------------------------------------------------------------- Aiguillage #/s/…
 route('s', async (screen, a, b) => {
   if (screen === 'facture' || screen === 'devis') return docWizard(screen, a, b);
@@ -594,5 +652,6 @@ route('s', async (screen, a, b) => {
   if (screen === 'liste') return listSimple(a || 'factures');
   if (screen === 'doc') return docSimple(a, b);
   if (screen === 'moi') return meSimple();
+  if (screen === 'peppol') return peppolSimple();
   return go('#/dashboard');
 });

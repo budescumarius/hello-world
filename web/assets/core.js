@@ -210,6 +210,7 @@ const MENU_SIMPLE = [
   { k: 'projects', l: 'Mes chantiers', i: 'crane', h: '#/projects', m: ['#/project'] },
   { k: 'contacts', l: 'Mes clients et fournisseurs', i: 'contacts', sub: [['Clients', '#/contacts/client'], ['Fournisseurs', '#/contacts/fournisseur'], ['Tous', '#/contacts/all']] },
   { k: 'library', l: 'Mes prix', i: 'book', h: '#/library' },
+  { k: 'speppol', l: 'Peppol (factures électroniques)', i: 'send', h: '#/s/peppol', m: ['#/s/peppol'] },
   { k: 'sme', l: 'Mes informations', i: 'gear', h: '#/s/moi', m: ['#/s/moi'] },
 ];
 const menu = () => (isSimple() ? MENU_SIMPLE : MENU);
