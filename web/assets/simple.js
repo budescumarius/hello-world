@@ -71,7 +71,7 @@ const grow = (t) => { t.style.height = 'auto'; t.style.height = `${t.scrollHeigh
 // Brouillons vides (aucune ligne, pas de numéro) laissés par un ancien parcours abandonné : supprimés, jamais comptés
 const realDoc = (x) => !!x.number && x.data.status !== 'brouillon' || (x.data.lines || []).some((l) => l.kind === 'item' && ((l.desc || '').trim() || num(l.price)));
 async function purgeEmpty(list, typ) {
-  const junk = list.filter((x) => !realDoc(x) && x.data.status === 'brouillon' && !(x.data.payments || []).length && x.data.simple);
+  const junk = list.filter((x) => !realDoc(x) && (x.data.status || 'brouillon') === 'brouillon' && !(x.data.payments || []).length && (x.data.simple || !x.data.clientId));
   for (const x of junk) { try { await db.del(typ, x.id); } catch (e) { /* déjà supprimé */ } }
   return list.filter((x) => !junk.includes(x));
 }
@@ -510,9 +510,23 @@ async function listSimple(kind) {
   page.innerHTML = `<button class="s-big primary" data-new>${I.plus} ${isInv ? 'Faire une facture' : 'Faire un devis'}</button>
     <div class="s-chips s-filter">${filters.map(([k, l]) => `<a href="#/s/liste/${kind}${k ? '?f=' + k : ''}" class="${f === k ? 'on' : ''}">${l}</a>`).join('')}</div>
     <div class="s-cards">${rows.filter(match).map((x) => { const s = stOf(x); const t = totals(x.data); const rest = isInv ? invState(x).rest : 0;
-      return `<a class="s-card" href="#/s/doc/${isInv ? 'facture' : 'devis'}/${x.id}"><span class="s-ct"><b>${esc(sName(byId(contacts, x.data.clientId)))}</b><small>${esc(x.number || 'Brouillon')} · ${fmtDate(x.data.date)}${x.data.title ? ` · ${esc(x.data.title)}` : ''}</small></span>
-        <span class="s-ca"><b>${sMoney(isInv && ['impayee', 'partielle', 'retard'].includes(s) ? rest : t.total)}</b><em style="--c:${(ST[s] || ['', '#868e96'])[1]}">${esc((ST[s] || [s])[0])}</em></span></a>`; }).join('') || `<p class="muted s-empty">Rien ici pour l'instant.</p>`}</div>`;
+      const card = `<a class="s-card" href="#/s/doc/${isInv ? 'facture' : 'devis'}/${x.id}"><span class="s-ct"><b>${esc(sName(byId(contacts, x.data.clientId)))}</b><small>${esc(isInv && s === 'brouillon' ? 'Brouillon' : x.number || 'Brouillon')} · ${fmtDate(x.data.date)}${x.data.title ? ` · ${esc(x.data.title)}` : ''}</small></span>
+        <span class="s-ca"><b>${sMoney(isInv && ['impayee', 'partielle', 'retard'].includes(s) ? rest : t.total)}</b><em style="--c:${(ST[s] || ['', '#868e96'])[1]}">${esc((ST[s] || [s])[0])}</em></span></a>`;
+      // brouillon : modifier ou supprimer directement depuis la liste
+      return s === 'brouillon' ? `<div class="s-cardw" data-w="${x.id}">${card}<div class="s-cardacts"><a href="#/s/${isInv ? 'facture' : 'devis'}/${x.id}/travail">${I.edit} Modifier</a><button type="button" data-del="${x.id}">${I.trash} Supprimer</button></div></div>` : card; }).join('') || `<p class="muted s-empty">Rien ici pour l'instant.</p>`}</div>`;
   $('[data-new]', page).onclick = () => go(`#/s/${isInv ? 'facture' : 'devis'}/new`);
+  $$('[data-del]', page).forEach((b) => { b.onclick = () => sDeleteDraft(typ, rows.find((x) => x.id === +b.dataset.del), b.closest('.s-cardw')); });
+}
+
+// Supprimer un brouillon : disparaît tout de suite, « Annuler » pendant 6 secondes, puis suppression définitive
+function sDeleteDraft(typ, x, el, after) {
+  if (!x) return;
+  const word = typ === 'invoice' ? 'Facture' : 'Devis';
+  if (el) el.hidden = true;
+  let undone = false;
+  const tm = setTimeout(async () => { if (undone) return; try { await db.del(typ, x.id); } catch (e) { toast('Suppression impossible : ' + e.message, 4000); if (el) el.hidden = false; } }, 6000);
+  undoToast(`${word} brouillon supprimé${typ === 'invoice' ? 'e' : ''}`, () => { undone = true; clearTimeout(tm); if (el) el.hidden = false; else render(); });
+  if (after) after();
 }
 
 // ---------------------------------------------------------------- Une facture / un devis : grands boutons d'action
@@ -539,11 +553,13 @@ async function docSimple(kind, id) {
   if (typ === 'quote' && ['envoye', 'brouillon'].includes(d.status)) { acts.push(['yes', 'check', 'Le client a dit oui', 'je fais la facture', d.status === 'envoye' ? 'primary' : '']); acts.push(['no', 'x', 'Le client a dit non', '']); }
   if (typ === 'quote' && d.status === 'accepte') acts.push(['bill', 'coins', 'Faire la facture', 'tout le devis ou un acompte', 'primary']);
   acts.push(['pdf', 'eye', 'Voir en grand / imprimer', '']);
+  if (draft) acts.push(['del', 'trash', kind === 'devis' ? 'Supprimer ce devis' : 'Supprimer ce brouillon', 'il n\'a pas encore été envoyé', 'danger']);
   $('[data-acts]', page).innerHTML = acts.map(([k, ic, l, sub, cls]) => sBtn(`data-a="${k}"`, ic, l, sub, cls || '')).join('');
   $('details', page).addEventListener('toggle', (e) => { if (e.target.open && !$('[data-doc] .doc', page)) docHtml(typ, it.id).then((r) => { $('[data-doc]', page).innerHTML = r.html; }); });
   $$('[data-a]', page).forEach((b) => { b.onclick = async () => {
     const a = b.dataset.a;
     if (a === 'edit') return go(`#/s/${kind}/${it.id}/travail`);
+    if (a === 'del') return sDeleteDraft(typ, it, null, () => go(`#/s/liste/${kind === 'devis' ? 'devis' : 'factures'}`));
     if (a === 'pay') return go(`#/s/paye/${it.id}`);
     if (a === 'mail') return go(`#/print/${typ}/${it.id}?mail=1`);
     if (a === 'pdf') return go(`#/print/${typ}/${it.id}`);
