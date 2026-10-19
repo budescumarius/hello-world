@@ -94,7 +94,6 @@ switch ($seg[0] ?? '') {
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) fail(400, 'Email invalide.');
             if (mb_strlen((string)($b['password'] ?? '')) < 8) fail(400, 'Le mot de passe doit contenir au moins 8 caractères.');
             if (q('SELECT id FROM users WHERE email = ?', [$email])->fetch()) fail(400, 'Cet email est déjà utilisé.');
-            set_setting('edition', in_array($b['edition'] ?? '', ['simple', 'avance'], true) ? $b['edition'] : edition_default(), $cid);
             q('INSERT INTO users (company_id, name, email, pass, role, color, created_at) VALUES (?,?,?,?,?,?,?)', [cid(),
                 trim((string)($b['name'] ?? $email)), $email, password_hash($b['password'], PASSWORD_DEFAULT),
                 ($b['role'] ?? '') === 'admin' ? 'admin' : 'user', (string)($b['color'] ?? '#3b5bdb'), now()]);
@@ -445,6 +444,7 @@ switch ($seg[0] ?? '') {
             db()->beginTransaction();
             q('INSERT INTO companies (name, active, created_at) VALUES (?, 1, ?)', [$name, now()]);
             $cid = (int)db()->lastInsertId();
+            set_setting('edition', in_array($b['edition'] ?? '', ['simple', 'avance'], true) ? $b['edition'] : edition_default(), $cid);
             $country = in_array($b['country'] ?? 'BE', ['BE', 'FR', 'LU', 'CH', 'RO'], true) ? $b['country'] : 'BE';
             set_setting('company', ['name' => $name, 'currency' => 'EUR', 'vatRates' => [21, 12, 6, 0], 'defaultVat' => 21, 'country' => $country,
                 'vat' => trim((string)($b['vat'] ?? '')), 'street' => trim((string)($b['street'] ?? '')), 'zip' => trim((string)($b['zip'] ?? '')), 'city' => trim((string)($b['city'] ?? '')),
