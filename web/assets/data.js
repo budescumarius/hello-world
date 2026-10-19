@@ -165,6 +165,7 @@ function linesEditor(el, doc, opts) {
   const autoGrow = (t) => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; };
   function bind() {
     $$('textarea.in', el).forEach(autoGrow);
+    requestAnimationFrame(() => $$('textarea.in', el).forEach(autoGrow)); // après la mise en page (cartes sur téléphone)
     $$('tr[data-i]', el).forEach((tr) => {
       const l = doc.lines[+tr.dataset.i];
       $$('[data-k]', tr).forEach((inp) => {

@@ -245,6 +245,7 @@ function layout(p) {
   </div>`;
   bindShell();
   mobileActions();
+  tabSwitcher();
   const topEl = $('.top'); if (topEl) document.documentElement.style.setProperty('--top-h', `${topEl.offsetHeight}px`);
   const tOn = $('.tabs a.on'); if (tOn && isPhone()) tOn.scrollIntoView({ block: 'nearest', inline: 'center' });
   setTimeout(installTip, 2500);
@@ -257,6 +258,23 @@ function bottomNav(active) {
     <button class="bn-add" data-act="qadd" aria-label="Créer">${I.plus}</button>
     ${it('quotes', '#/quotes', 'calc', 'Devis')}<button class="bn-it ${['dashboard', 'projects', 'quotes'].includes(active) ? '' : 'on'}" data-act="openside">${I.menu}<span>Menu</span></button></nav>`;
 }
+// Téléphone : plus de 4 onglets → un bouton « section actuelle ▾ » qui ouvre toutes les sections d'un coup (grille d'icônes)
+const TAB_ICONS = { overview: 'dash', quotes: 'calc', orders: 'truck', invoices: 'coins', expenses: 'download', hours: 'people', planning: 'calendar', plans: 'file', points: 'pin', meetings: 'fiche', forms: 'tasks', diary: 'book', documents: 'file',
+  company: 'gear', docs: 'file', templates: 'edit', peppol: 'send', mail: 'mail', ai: 'spark', users: 'people', activity: 'hist' };
+function tabSwitcher() {
+  const nav = $('.tabs'); if (!nav || !isPhone()) return;
+  const tabs = [...nav.querySelectorAll('a')]; if (tabs.length <= 4) return;
+  const cur = tabs.find((a) => a.classList.contains('on')) || tabs[0];
+  const key = (a) => (a.getAttribute('href') || '').split('/').pop();
+  const ic = (a) => I[TAB_ICONS[key(a)]] || I.file;
+  nav.classList.add('tabs-sw');
+  nav.innerHTML = `<button type="button" class="tsw-btn">${ic(cur)}<span>${esc(cur.textContent.trim())}</span><small>${tabs.indexOf(cur) + 1}/${tabs.length}</small>${I.chevron}</button>`;
+  $('.tsw-btn', nav).onclick = () => {
+    const m = modal(`${mhead('Sections')}<div class="m-body tsw-grid">${tabs.map((a, i) => `<a href="${a.getAttribute('href')}" class="tsw-it ${a === cur ? 'on' : ''}" data-i="${i}">${ic(a)}<span>${esc(a.textContent.trim())}</span></a>`).join('')}</div>`);
+    $$('.tsw-it', m.el).forEach((x) => x.addEventListener('click', () => m.close()));
+  };
+}
+
 // Téléphone : les boutons de l'en-tête passent dans un menu « ⋯ » (on garde le bouton principal)
 const isPhone = () => window.matchMedia('(max-width: 860px)').matches;
 function mobileActions() {
