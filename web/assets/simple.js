@@ -4,7 +4,7 @@
    tout est enregistré tout seul, dictée vocale pour décrire le travail, retour à l'accueil toujours visible.
    Les données sont les mêmes que dans l'édition complète (devis, factures, achats, chantiers, contacts). */
 
-const S_UNITS = [['pc', 'pièce'], ['m²', 'm²'], ['m', 'mètre'], ['h', 'heure'], ['j', 'jour'], ['forfait', 'forfait']];
+const S_UNITS = [['pc', 'pièce'], ['u', 'unité'], ['m²', 'm²'], ['m', 'mètre'], ['h', 'heure'], ['j', 'jour'], ['forfait', 'forfait']];
 const sMoney = (x) => money(x);
 const sName = (c) => (c ? contactName(c) : '—');
 
@@ -24,18 +24,45 @@ function sFoot(page, next, nextLabel = 'Suivant', back = null) {
   $('[data-snext]', page).onclick = next;
   if (back) $('[data-sback]', page).onclick = back;
 }
-// Dictée vocale (Chrome / Safari récents) : ajoute le texte dicté à la zone de texte
-const speechOk = () => !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+// Dictée vocale.
+// iPhone / iPad : la reconnaissance vocale du navigateur est peu fiable (surtout dans l'application installée : elle peut
+// rester bloquée sans jamais répondre) → on ouvre le clavier et on montre le micro du clavier, qui fonctionne toujours.
+// Android / ordinateur : reconnaissance vocale du navigateur, avec arrêt au 2e appui et délai maximum (jamais bloquée).
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const speechOk = () => !!(window.SpeechRecognition || window.webkitSpeechRecognition) && !isIOS();
+function keyboardDictation(ta) {
+  ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) { /* */ }
+  const m = modal(`${mhead('Dicter avec le clavier')}<div class="m-body s-dict">
+    <div class="s-dict-kb"><span>a z e r t y</span><span class="s-dict-mic">🎤</span></div>
+    <p>Touchez le <b>micro 🎤 du clavier</b> (en bas, à côté de la barre d'espace), parlez, puis touchez <b>OK</b> ou le clavier.</p>
+    <p class="muted">Si le micro n'apparaît pas : Réglages du téléphone › Général › Clavier › activer « Dictée ».</p></div>
+    <div class="m-foot"><button class="btn primary" data-close>J'ai compris</button></div>`);
+  $('[data-close]', m.el).addEventListener('click', () => setTimeout(() => ta.focus(), 50));
+}
+let activeRec = null;
 function micFor(btn, ta) {
-  if (!speechOk()) { btn.remove(); return; }
   btn.onclick = () => {
-    const R = window.SpeechRecognition || window.webkitSpeechRecognition; const rec = new R();
-    rec.lang = 'fr-BE'; rec.interimResults = false; rec.maxAlternatives = 1;
-    btn.classList.add('on'); toast('Parlez… (le texte s\'écrit tout seul)', 4000);
-    rec.onresult = (e) => { const t = e.results[0][0].transcript; ta.value = (ta.value ? ta.value.trimEnd() + ' ' : '') + t.charAt(0).toUpperCase() + t.slice(1); ta.dispatchEvent(new Event('input', { bubbles: true })); };
-    rec.onerror = () => toast('Je n\'ai pas entendu, réessayez', 2500);
-    rec.onend = () => btn.classList.remove('on');
-    rec.start();
+    if (!speechOk()) {
+      // iPhone : une seule explication, ensuite le clavier s'ouvre directement
+      let seen = false; try { seen = !!localStorage.getItem('bp-dict-tip'); localStorage.setItem('bp-dict-tip', '1'); } catch (e) { /* */ }
+      if (seen) { ta.focus(); toast('Touchez le 🎤 du clavier pour parler', 3500); } else keyboardDictation(ta);
+      return;
+    }
+    if (activeRec) { try { activeRec.abort(); } catch (e) { /* */ } return; } // 2e appui : arrêter
+    const R = window.SpeechRecognition || window.webkitSpeechRecognition; let rec;
+    try { rec = new R(); } catch (e) { keyboardDictation(ta); return; }
+    activeRec = rec; let got = false; let started = false;
+    rec.lang = 'fr-BE'; rec.interimResults = false; rec.maxAlternatives = 1; rec.continuous = false;
+    const stop = () => { clearTimeout(t1); clearTimeout(t2); btn.classList.remove('on'); if (activeRec === rec) activeRec = null; };
+    // ne démarre pas (permission, réseau) ou ne finit jamais : on arrête et on propose le clavier
+    const t1 = setTimeout(() => { if (!started) { try { rec.abort(); } catch (e) { /* */ } stop(); keyboardDictation(ta); } }, 4000);
+    const t2 = setTimeout(() => { try { rec.stop(); } catch (e) { /* */ } setTimeout(() => { if (activeRec === rec) { try { rec.abort(); } catch (e) { /* */ } stop(); } }, 1500); }, 15000);
+    rec.onstart = () => { started = true; btn.classList.add('on'); toast('Parlez… (touchez à nouveau 🎤 pour arrêter)', 4000); };
+    rec.onaudiostart = () => { started = true; };
+    rec.onresult = (e) => { got = true; const t = e.results[0][0].transcript; ta.value = (ta.value ? ta.value.trimEnd() + ' ' : '') + t.charAt(0).toUpperCase() + t.slice(1); ta.dispatchEvent(new Event('input', { bubbles: true })); };
+    rec.onerror = (e) => { stop(); if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { toast('Le micro est refusé : autorisez-le dans les réglages du navigateur', 5000); keyboardDictation(ta); } else if (e.error !== 'aborted' && !got) toast('Je n\'ai pas entendu, réessayez', 2500); };
+    rec.onend = () => stop();
+    try { rec.start(); } catch (e) { stop(); keyboardDictation(ta); }
   };
 }
 const grow = (t) => { t.style.height = 'auto'; t.style.height = `${t.scrollHeight + 2}px`; };
