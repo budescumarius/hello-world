@@ -68,8 +68,16 @@ function micFor(btn, ta) {
 const grow = (t) => { t.style.height = 'auto'; t.style.height = `${t.scrollHeight + 2}px`; };
 
 // ---------------------------------------------------------------- Accueil
+// Brouillons vides (aucune ligne, pas de numéro) laissés par un ancien parcours abandonné : supprimés, jamais comptés
+const realDoc = (x) => !!x.number && x.data.status !== 'brouillon' || (x.data.lines || []).some((l) => l.kind === 'item' && ((l.desc || '').trim() || num(l.price)));
+async function purgeEmpty(list, typ) {
+  const junk = list.filter((x) => !realDoc(x) && x.data.status === 'brouillon' && !(x.data.payments || []).length && x.data.simple);
+  for (const x of junk) { try { await db.del(typ, x.id); } catch (e) { /* déjà supprimé */ } }
+  return list.filter((x) => !junk.includes(x));
+}
 async function homeSimple() {
   const all = await db.many(['quote', 'invoice', 'project', 'expense']);
+  all.invoice = await purgeEmpty(all.invoice, 'invoice'); all.quote = await purgeEmpty(all.quote, 'quote');
   const page = sPage('Accueil');
   const co = company(); const s = sellerInfo();
   const inv = all.invoice.map((i) => ({ i, s: invState(i) }));
@@ -107,15 +115,15 @@ async function homeSimple() {
 const DOC_STEPS = ['client', 'chantier', 'tva', 'travail', 'fini'];
 async function docWizard(kind, id, step) {
   const typ = kind === 'devis' ? 'quote' : 'invoice'; const word = kind === 'devis' ? 'devis' : 'facture';
+  // nouvelle pièce : rien n'est enregistré avant le choix du client (pas de brouillons vides si on revient en arrière)
+  let it;
   if (id === 'new') {
     const co = company();
     const base = kind === 'devis'
       ? { status: 'brouillon', date: today(), valid: addDays(today(), num(co.quoteValidity) || 30), ownerId: S.me.id, lines: [], discount: 0, reverse: false, notes: co.quoteNotes || '', simple: true }
       : { kind: 'facture', status: 'brouillon', date: today(), due: addDays(today(), num(co.paymentDays) || 30), payDays: num(co.paymentDays) || 30, defaultVat: defVat(), ownerId: S.me.id, billSame: true, lines: [], payments: [], discount: 0, reverse: false, notes: co.invoiceNotes || '', simple: true };
-    const it = await persist(typ, { project_id: null, data: base });
-    location.replace(`#/s/${kind}/${it.id}/client`); return;
-  }
-  const it = await db.get(typ, +id);
+    it = { project_id: null, data: base }; step = 'client';
+  } else it = await db.get(typ, +id);
   const d = it.data; d.lines = d.lines || [];
   if (typ === 'invoice' && d.status === 'emise') return go(`#/s/doc/facture/${it.id}`);
   step = DOC_STEPS.includes(step) ? step : 'client';
@@ -477,7 +485,7 @@ async function listSimple(kind) {
     return;
   }
   const isInv = kind === 'factures'; const typ = isInv ? 'invoice' : 'quote';
-  const rows = (await db.list(typ)).filter((x) => (x.data.lines || []).length || x.number);
+  const rows = await purgeEmpty(await db.list(typ), typ);
   const ST = isInv ? S_INV_ST : S_Q_ST;
   const stOf = (x) => (isInv ? invState(x).s : x.data.status || 'brouillon');
   const filters = isInv ? [['', 'Toutes'], ['apayer', 'Pas payées'], ['brouillon', 'Pas envoyées'], ['payee', 'Payées']] : [['', 'Tous'], ['envoye', 'En attente'], ['accepte', 'Acceptés'], ['brouillon', 'Pas envoyés']];

@@ -1097,3 +1097,4 @@ body.wiz .bnav, body.wiz .ai-fab { display: none !important; }
 /* le bouton « Assistant » ne cache jamais les derniers boutons d'une page : espace en bas */
 body:has(#ai-fab) .page { padding-bottom: 110px; }
 @media (max-width: 860px) { body:has(#ai-fab) .page { padding-bottom: calc(150px + env(safe-area-inset-bottom)); } }
+.bn-it, .bn-it:hover, .bn-it span { text-decoration: none !important; }
