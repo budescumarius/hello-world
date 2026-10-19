@@ -82,7 +82,7 @@ switch ($seg[0] ?? '') {
         if (isset($settings['ai']) && is_array($settings['ai'])) { $settings['ai']['hasKey'] = !empty($settings['ai']['key']); unset($settings['ai']['key']); }
         $firm = q('SELECT id, name FROM companies WHERE id = ?', [cid()])->fetch() ?: ['id' => cid(), 'name' => ''];
         out(['user' => $u, 'users' => $users, 'settings' => $settings, 'version' => APP_VERSION,
-            'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => cid() === $u['company_id']], 'ai' => ai_ready()]);
+            'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => cid() === $u['company_id']], 'edition' => edition(), 'ai' => edition() === 'simple' ? false : ai_ready()]);
 
     // ------------------------------------------------------------ Utilisateurs
     case 'users':
@@ -94,6 +94,7 @@ switch ($seg[0] ?? '') {
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) fail(400, 'Email invalide.');
             if (mb_strlen((string)($b['password'] ?? '')) < 8) fail(400, 'Le mot de passe doit contenir au moins 8 caractères.');
             if (q('SELECT id FROM users WHERE email = ?', [$email])->fetch()) fail(400, 'Cet email est déjà utilisé.');
+            set_setting('edition', in_array($b['edition'] ?? '', ['simple', 'avance'], true) ? $b['edition'] : edition_default(), $cid);
             q('INSERT INTO users (company_id, name, email, pass, role, color, created_at) VALUES (?,?,?,?,?,?,?)', [cid(),
                 trim((string)($b['name'] ?? $email)), $email, password_hash($b['password'], PASSWORD_DEFAULT),
                 ($b['role'] ?? '') === 'admin' ? 'admin' : 'user', (string)($b['color'] ?? '#3b5bdb'), now()]);
@@ -135,7 +136,7 @@ switch ($seg[0] ?? '') {
         if ($method === 'PUT') {
             $me = require_admin();
             foreach (body() as $k => $v) {
-                if (!preg_match('/^[a-z_]{2,40}$/', (string)$k)) continue;
+                if (!preg_match('/^[a-z_]{2,40}$/', (string)$k) || $k === 'edition') continue; // l'édition se choisit dans Plateforme
                 if ($k === 'smtp' && is_array($v)) {
                     // mot de passe vide = conserver l'ancien
                     $old = setting('smtp', []) ?: [];
@@ -429,7 +430,7 @@ switch ($seg[0] ?? '') {
                 (SELECT MAX(u.last_login) FROM users u WHERE u.company_id = c.id) AS last_login,
                 (SELECT GROUP_CONCAT(u.email ORDER BY u.id SEPARATOR ', ') FROM users u WHERE u.company_id = c.id AND u.role = 'admin') AS admins
                 FROM companies c ORDER BY c.name")->fetchAll();
-            foreach ($rows as &$r) foreach (['id', 'active', 'users', 'users_active', 'projects'] as $k) $r[$k] = (int)$r[$k];
+            foreach ($rows as &$r) { foreach (['id', 'active', 'users', 'users_active', 'projects'] as $k) $r[$k] = (int)$r[$k]; $r['edition'] = edition((int)$r['id']); }
             unset($r);
             out($rows);
         }
@@ -476,6 +477,7 @@ switch ($seg[0] ?? '') {
             if ($id === $me['company_id'] && array_key_exists('active', $b) && !$b['active']) fail(400, 'Vous ne pouvez pas suspendre votre propre firme.');
             if (isset($b['name']) && trim((string)$b['name']) !== '') q('UPDATE companies SET name = ? WHERE id = ?', [trim((string)$b['name']), $id]);
             if (array_key_exists('active', $b)) q('UPDATE companies SET active = ? WHERE id = ?', [$b['active'] ? 1 : 0, $id]);
+            if (in_array($b['edition'] ?? '', ['simple', 'avance'], true)) set_setting('edition', $b['edition'], $id);
             out(['ok' => true]);
         }
         if ($act === 'switch' && $method === 'POST') {

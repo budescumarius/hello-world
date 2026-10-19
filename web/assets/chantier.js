@@ -96,15 +96,21 @@ function projectFinance(p, all) {
 route('project', async (id, tab = 'overview', sub) => {
   const p = await db.get('project', +id);
   if (tab === 'plan' && sub) return viewPlan(p, +sub);
-  if (!PTABS.some(([k]) => k === tab)) tab = 'overview';
+  const tabs = isSimple() ? PTABS.filter(([k]) => ['overview', 'quotes', 'invoices', 'expenses', 'documents'].includes(k)) : PTABS;
+  if (!tabs.some(([k]) => k === tab)) tab = 'overview';
   const contacts = await db.list('contact');
   const c = byId(contacts, p.data.clientId);
   const page = layout({ active: 'projects', icon: 'crane', title: p.data.name, back: '#/projects',
     sub: `${esc(p.number)} · ${st(PST, p.data.status)}${c ? ` · <a href="#/contact/${c.id}">${esc(contactName(c))}</a>` : ''}${p.data.city ? ' · ' + esc(p.data.city) : ''}`,
     actions: `<button class="btn" data-act="edit">${I.edit} Modifier</button><button class="btn primary" data-act="padd">${I.plus} Ajouter…</button>`,
-    tabs: PTABS.map(([k, l]) => `<a href="#/project/${p.id}/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
+    tabs: tabs.map(([k, l]) => `<a href="#/project/${p.id}/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
   $('[data-act=edit]').onclick = () => editProject(p);
-  $('[data-act=padd]').onclick = () => menuSheet('Ajouter au chantier', [
+  if (isSimple()) $('[data-act=padd]').onclick = () => menuSheet('Ajouter au chantier', [
+    { label: 'Achat : photo ou PDF de la facture', icon: 'camera', primary: true, run: () => importPurchase(p.id) },
+    { label: 'Facture', icon: 'coins', run: () => newInvoice({ project_id: p.id, data: { clientId: p.data.clientId, title: p.data.name } }) },
+    { label: 'Devis', icon: 'calc', run: () => newQuote({ projectId: p.id, clientId: p.data.clientId, title: p.data.name, siteAddress: [p.data.address, p.data.city].filter(Boolean).join(', ') }) },
+  ]);
+  else $('[data-act=padd]').onclick = () => menuSheet('Ajouter au chantier', [
     { label: 'Devis', icon: 'calc', run: () => newQuote({ projectId: p.id, clientId: p.data.clientId, title: p.data.name, siteAddress: [p.data.address, p.data.city].filter(Boolean).join(', ') }) },
     { label: 'Facture', icon: 'coins', run: () => newInvoice({ project_id: p.id, data: { clientId: p.data.clientId, title: p.data.name } }) },
     { label: 'Commande fournisseur', icon: 'truck', run: () => newOrder({ project_id: p.id, kind: 'fournisseur' }) },
@@ -132,6 +138,7 @@ async function tabOverview(p, el, contacts) {
   const progress = phases.length ? Math.round(phases.reduce((a, x) => a + num(x.data.progress) * (dnum(x.data.end) - dnum(x.data.start) + 1), 0) / phases.reduce((a, x) => a + (dnum(x.data.end) - dnum(x.data.start) + 1), 0)) : null;
   const d = p.data;
   const used = f.est ? Math.round((f.real / f.est) * 100) : 0;
+  if (isSimple()) return overviewSimple(p, el, contacts, f, d);
   el.innerHTML = `<div class="kpis">
       ${kpi('Budget HT (devis acceptés)', money(f.budget))}
       ${kpi('Déboursé prévu', money(f.est), { sub: f.budget ? `marge prévue ${fnum((1 - f.est / f.budget) * 100, 1)} %` : '' })}
@@ -166,6 +173,32 @@ async function tabOverview(p, el, contacts) {
       </div></div>`;
   bindKpis(el);
   bindSocialProject(el, p, byId(contacts, d.clientId), f.budget, all.quote, () => render());
+}
+// Chantier (édition simplifiée) : ce qui est facturé, encaissé et dépensé (achats) sur ce chantier
+async function overviewSimple(p, el, contacts, f, d) {
+  const exp = (await db.list('expense')).filter((e) => !e.data.refused && expenseFor(e, p.id).length);
+  const byType = {}; exp.forEach((e) => expenseFor(e, p.id).forEach((x) => { byType[x.category] = (byType[x.category] || 0) + x.amount; }));
+  const recent = exp.sort((a, b) => (b.data.date || '').localeCompare(a.data.date || '')).slice(0, 6);
+  el.innerHTML = `<div class="kpis">
+      ${kpi('Devis acceptés HT', money(f.budget))}
+      ${kpi('Facturé HT', money(f.invoiced), { meter: f.budget ? (f.invoiced / f.budget) * 100 : null, sub: f.budget ? `${Math.round((f.invoiced / f.budget) * 100)} % des devis` : '' })}
+      ${kpi('Encaissé TVAC', money(f.cashed), { cls: 'good' })}
+      ${kpi('Reste à encaisser', money(f.due), { cls: f.due > 0 ? 'warn' : '' })}
+      ${kpi('Achats (consommé) HT', money(f.real), { cls: 'bad' })}
+      ${kpi('Résultat HT', money((f.invoiced || f.budget) - f.real), { cls: (f.invoiced || f.budget) - f.real < 0 ? 'bad' : 'good', sub: f.invoiced ? 'facturé − achats' : 'devis − achats' })}
+    </div>
+    <div class="cols"><div class="col-main">
+      <div class="card"><div class="card-h"><h3>Achats du chantier</h3><button class="btn sm primary" data-act="buy">${I.camera} Ajouter un achat</button></div>
+        <div class="rows">${Object.entries(byType).map(([k, v]) => `<div class="row static"><i class="tdot" style="--c:${TYPE_COLORS[k] || '#999'}"></i><span class="grow"><b>${esc(TYPES[k] || k)}</b></span><b>${money(v)}</b></div>`).join('') || '<div class="empty sm">Aucun achat encodé pour ce chantier</div>'}</div>
+        ${recent.length ? `<div class="rows">${recent.map((e) => `<a class="row" href="#/purchase/${e.id}"><span class="grow"><b>${esc(contactName(byId(contacts, e.data.supplierId)))}</b><small class="muted">${fmtDate(e.data.date)} · ${esc(e.data.ref || e.data.desc || '')}</small></span><b>${money(expenseAmountFor(e, p.id))}</b></a>`).join('')}</div><a class="btn sm" href="#/project/${p.id}/expenses">Voir tous les achats</a>` : ''}
+      </div></div>
+      <div class="col-side"><div class="card info">
+        ${[['Client', contactName(byId(contacts, d.clientId))], ['Adresse', [d.address, [d.zip, d.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')], ['Début', fmtDate(d.start)], ['Fin prévue', fmtDate(d.end)]].filter(([, v]) => v && v !== '—').map(([k, v]) => `<div class="kv"><span>${k}</span><div>${esc(v)}</div></div>`).join('')}
+        ${d.address ? `<a class="btn sm" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([d.address, d.zip, d.city].filter(Boolean).join(' '))}">Itinéraire</a>` : ''}
+        ${d.notes ? `<div class="kv"><span>Notes</span><div class="pre">${esc(d.notes)}</div></div>` : ''}
+      </div></div></div>`;
+  $('[data-act=buy]', el).onclick = () => importPurchase(p.id);
+  bindKpis(el);
 }
 const TYPE_LABELS = { project: 'chantier', quote: 'devis', invoice: 'facture', order: 'commande', expense: 'achat', timesheet: 'heures', point: 'point', meeting: 'PV', form: 'formulaire', diary: 'journal', plan: 'plan', phase: 'phase', task: 'tâche', document: 'document', contact: 'contact', opportunity: 'opportunité', intervention: 'intervention' };
 

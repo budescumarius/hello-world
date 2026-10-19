@@ -386,3 +386,9 @@ function http_get(string $url, int $timeout = 15, string $accept = 'application/
     $r = @file_get_contents($url, false, stream_context_create(['http' => ['timeout' => $timeout, 'header' => "Accept: $accept\r\nUser-Agent: Mozilla/5.0 (BatiPro)\r\n"]]));
     return $r === false ? null : $r;
 }
+
+// ---------------------------------------------------------------- Éditions : « BâtiPro Avancé » (complet) ou « BâtiPro Simplifié » (indépendants)
+// Choisie par firme dans Plateforme ; valeur par défaut des nouvelles firmes : 'edition' => 'simple' dans config.php
+function edition_default(): string { $e = config()['edition'] ?? 'avance'; return $e === 'simple' ? 'simple' : 'avance'; }
+function edition(?int $company = null): string { $e = setting('edition', null, $company); return in_array($e, ['simple', 'avance'], true) ? $e : edition_default(); }
+

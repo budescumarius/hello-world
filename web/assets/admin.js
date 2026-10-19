@@ -67,6 +67,7 @@ async function hrAbsences() {
 
 // ---------------------------------------------------------------- Tableau de bord
 route('dashboard', async () => {
+  if (isSimple()) return dashboardSimple();
   const all = await db.many(['opportunity', 'quote', 'invoice', 'project', 'task', 'point', 'intervention', 'expense']);
   const page = layout({ active: 'dashboard', icon: 'dash', title: 'Tableau de bord', actions: `<label class="chk"><input type="checkbox" data-mine ${ui.dashAll ? '' : 'checked'}>Uniquement mes éléments</label>` });
   $('[data-mine]').onchange = (e) => { ui.dashAll = !e.target.checked; saveUi(); render(); };
@@ -95,6 +96,41 @@ route('dashboard', async () => {
     ${block('pin', 'Suivi de chantier', '#/projects', `${badge('Points en retard', '#e5484d')} <div class="big">${pLate.length}</div>`, line("Interventions aujourd'hui", inter.length, '', '#/interventions') + line('Points ouverts (tous chantiers)', all.point.filter(isOpenPt).length, '', '#/projects'))}
   </div>`;
 });
+
+// Tableau de bord de l'édition simplifiée : devis, factures, achats, chantiers
+async function dashboardSimple() {
+  const all = await db.many(['quote', 'invoice', 'project', 'expense']);
+  const page = layout({ active: 'dashboard', icon: 'dash', title: 'Tableau de bord' });
+  const sum = (l, f) => l.reduce((a, x) => a + f(x), 0);
+  const month = today().slice(0, 7);
+  const inv = all.invoice.map((i) => ({ i, s: invState(i) }));
+  const late = inv.filter((x) => x.s.s === 'retard'); const toCash = inv.filter((x) => ['impayee', 'partielle', 'retard'].includes(x.s.s)); const draftI = inv.filter((x) => x.s.s === 'brouillon');
+  const qSent = all.quote.filter((q) => q.data.status === 'envoye'); const qDraft = all.quote.filter((q) => q.data.status === 'brouillon');
+  const exp = all.expense.filter((e) => !e.data.refused);
+  const eCheck = exp.filter((e) => purchState(e) === 'avalider'); const eToPay = exp.filter((e) => ['apayer', 'partiel', 'retard'].includes(purchState(e)));
+  const projects = all.project.filter((p) => ['preparation', 'encours', 'reception'].includes(p.data.status));
+  const line = (label, n, amount, href, cls = '') => `<a class="dash-line" href="${href}"><span>${label} <span class="muted">(${n})</span></span><b class="${cls}">${amount}</b></a>`;
+  const block = (icon, title, href, main, rows) => `<div class="card dash"><div class="card-h"><h3>${I[icon]} ${title}</h3><a class="muted" href="${href}">Voir tout ›</a></div><div class="dash-b">${main}</div>${rows ? `<div class="dash-rows">${rows}</div>` : ''}</div>`;
+  page.innerHTML = `<div class="quick-row">
+      <button class="quick" data-q="buy">${I.camera}<span>Photo d'un achat</span></button>
+      <button class="quick" data-q="inv">${I.coins}<span>Nouvelle facture</span></button>
+      <button class="quick" data-q="quote">${I.calc}<span>Nouveau devis</span></button></div>
+    <div class="kpis">${kpi('À encaisser TVAC', money(sum(toCash, (x) => x.s.rest)), { href: '#/invoices', sub: `${toCash.length} facture(s)` })}${kpi('Clients en retard', money(sum(late, (x) => x.s.rest)), { cls: late.length ? 'bad' : '', href: '#/invoices', sub: `${late.length} facture(s)` })}
+      ${kpi('Achats à payer', money(sum(eToPay, (e) => purchRest(e.data))), { href: '#/expenses', sub: `${eToPay.length} facture(s)` })}${kpi('Facturé ce mois HT', money(sum(inv.filter((x) => (x.i.data.date || '').startsWith(month) && x.s.s !== 'brouillon'), (x) => x.s.t.base)), { cls: 'good', href: '#/invoices' })}</div>
+    <div class="dash-grid">
+    ${block('coins', 'Factures clients', '#/invoices', `${badge('À encaisser', '#3b5bdb')} <span class="muted">(${toCash.length})</span><div class="big">${money(sum(toCash, (x) => x.s.rest))}</div>`,
+      line('À envoyer', draftI.length, money(sum(draftI, (x) => x.s.t.total)), '#/invoices') + line('En retard', late.length, money(sum(late, (x) => x.s.rest)), '#/invoices', late.length ? 'late' : ''))}
+    ${block('calc', 'Devis', '#/quotes', `${badge('Envoyés, en attente', '#3b5bdb')} <span class="muted">(${qSent.length})</span><div class="big">${money(sum(qSent, (q) => totals(q.data).base))}</div>`,
+      line('À envoyer', qDraft.length, money(sum(qDraft, (q) => totals(q.data).base)), '#/quotes') + line('Acceptés ce mois-ci', all.quote.filter((q) => q.data.status === 'accepte' && (q.data.acceptedAt || '').startsWith(month)).length, money(sum(all.quote.filter((q) => q.data.status === 'accepte' && (q.data.acceptedAt || '').startsWith(month)), (q) => totals(q.data).base)), '#/quotes'))}
+    ${block('download', 'Achats', '#/expenses', `${badge('À payer', '#f08c00')} <span class="muted">(${eToPay.length})</span><div class="big">${money(sum(eToPay, (e) => purchRest(e.data)))}</div>`,
+      line('À valider (reçus / photos)', eCheck.length, '', '#/expenses', eCheck.length ? 'late' : '') + line('Achats ce mois HT', exp.filter((e) => (e.data.date || '').startsWith(month)).length, money(sum(exp.filter((e) => (e.data.date || '').startsWith(month)), (e) => num(e.data.amount))), '#/expenses'))}
+    ${block('crane', 'Chantiers en cours', '#/projects', `<div class="big">${projects.length}</div>`, projects.slice(0, 6).map((p) => { const cost = sum(exp, (e) => expenseAmountFor(e, p.id)); return `<a class="dash-line" href="#/project/${p.id}"><span><i class="dot" style="--c:${esc(p.data.color || '#3b5bdb')}"></i> ${esc(p.data.name)}</span><small class="muted">achats ${money(cost)}</small></a>`; }).join('') || '<div class="muted sm">Aucun chantier en cours</div>')}
+  </div>`;
+  bindKpis(page);
+  $('[data-q=buy]').onclick = () => importPurchase();
+  $('[data-q=inv]').onclick = () => newInvoice({ data: {} });
+  $('[data-q=quote]').onclick = () => newQuote();
+}
 
 // ---------------------------------------------------------------- Statistiques
 function barChart(series, { h = 200, color = '#3b5bdb', fmt = money } = {}) {
@@ -141,7 +177,7 @@ route('stats', async () => {
 // ---------------------------------------------------------------- Paramètres
 route('settings', async (tab = 'company') => {
   if (!isAdmin()) return go('#/dashboard');
-  const page = layout({ active: '', icon: 'gear', title: 'Paramètres', tabs: [['company', 'Entreprise'], ['docs', 'Documents & numérotation'], ['templates', 'Modèles de documents'], ['peppol', 'Peppol'], ['mail', 'Email'], ['ai', 'Assistant IA'], ['users', 'Utilisateurs'], ['activity', 'Journal d\'activité']].map(([k, l]) => `<a href="#/settings/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
+  const page = layout({ active: '', icon: 'gear', title: 'Paramètres', tabs: [['company', 'Entreprise'], ['docs', 'Documents & numérotation'], ['templates', 'Modèles de documents'], ['peppol', 'Peppol'], ['mail', 'Email'], ['ai', 'Assistant IA'], ['users', 'Utilisateurs'], ['activity', 'Journal d\'activité']].filter(([k]) => !(isSimple() && k === 'ai')).map(([k, l]) => `<a href="#/settings/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
   const co = { ...company() };
   if (tab === 'users') return settingsUsers(page);
   if (tab === 'peppol') return peppolSettings(page);
@@ -223,16 +259,22 @@ function editProfile() {
   });
 }
 
+const EDITIONS = [['simple', 'BâtiPro Simplifié (indépendants)'], ['avance', 'BâtiPro Avancé (complet)']];
 // Actions de création (recherche rapide et bouton « + » de la barre mobile)
 const quickActions = () => [['Nouveau devis', () => newQuote()], ['Nouveau chantier', () => editProject()], ['Nouveau contact', () => editContact().then((c) => c && go(`#/contact/${c.id}`))], ['Nouvelle opportunité', () => editOpportunity()], ['Nouvelle intervention', () => editIntervention()], ['Nouvelle tâche', () => editTask()], ['Encoder des heures', () => editTimesheet()], ['Nouvel achat', () => editExpense()]];
 const QA_ICONS = ['calc', 'crane', 'contacts', 'target', 'tool', 'tasks', 'people', 'coins'];
-function quickAddMenu() { menuSheet('Créer', quickActions().map(([label, run], i) => ({ label, icon: QA_ICONS[i] || 'plus', run }))); }
+const quickActionsSimple = () => [['Photo / PDF d\'un achat', 'camera', () => importPurchase()], ['Nouvelle facture', 'coins', () => newInvoice({ data: {} })], ['Nouveau devis', 'calc', () => newQuote()],
+  ['Nouveau chantier', 'crane', () => editProject()], ['Nouveau contact', 'contacts', () => editContact().then((c) => c && go(`#/contact/${c.id}`))]];
+function quickAddMenu() {
+  if (isSimple()) return menuSheet('Créer', quickActionsSimple().map(([label, icon, run], i) => ({ label, icon, run, primary: i === 0 })));
+  menuSheet('Créer', quickActions().map(([label, run], i) => ({ label, icon: QA_ICONS[i] || 'plus', run })));
+}
 
 // ---------------------------------------------------------------- Recherche rapide (⌘K)
 async function quickSearch() {
   const m = modal(`<div class="qs"><label class="search big">${I.search}<input placeholder="Rechercher un chantier, contact, devis, facture… ou une action" autofocus></label><div class="qs-res"></div></div>`, { wide: true });
   const all = await db.many(['project', 'contact', 'quote', 'invoice', 'opportunity', 'order', 'intervention']);
-  const actions = quickActions();
+  const actions = isSimple() ? quickActionsSimple().map(([l, , run]) => [l, run]) : quickActions();
   const items = [
     ...actions.map(([l, run]) => ({ l, s: 'Action', run })),
     ...all.project.map((x) => ({ l: x.data.name, s: `Chantier ${x.number}`, h: `#/project/${x.id}` })),
@@ -272,10 +314,11 @@ route('platform', async () => {
       <li>Une firme suspendue ne peut plus se connecter ; ses données sont conservées. La corbeille la supprime définitivement avec toutes ses données.</li>
     </ol></div>`;
   const edit = (c) => formModal({
-    title: c ? c.name : 'Nouvelle firme', values: c ? { name: c.name } : { country: 'BE' },
-    fields: c ? [{ name: 'name', label: 'Nom de la firme', required: true, cls: 'full' }] : [
+    title: c ? c.name : 'Nouvelle firme', values: c ? { name: c.name, edition: c.edition } : { country: 'BE', edition: 'simple' },
+    fields: c ? [{ name: 'name', label: 'Nom de la firme', required: true, cls: 'full' }, { name: 'edition', label: 'Version', type: 'select', options: EDITIONS, cls: 'full', hint: 'Simplifié : devis, factures, achats par chantier, Peppol (indépendants). Avancé : tous les modules.' }] : [
       { name: 'vat', label: 'N° TVA', placeholder: 'BE0123456789', hint: 'Vérifié automatiquement : nom et adresse remplis' }, { name: 'name', label: 'Nom de la firme', required: true },
       { name: 'country', label: 'Pays', type: 'select', options: [['BE', 'Belgique'], ['FR', 'France'], ['LU', 'Luxembourg'], ['CH', 'Suisse'], ['RO', 'Roumanie']] },
+      { name: 'edition', label: 'Version', type: 'select', options: EDITIONS },
       { name: 'street', label: 'Rue et numéro' }, { name: 'zip', label: 'Code postal' }, { name: 'city', label: 'Localité' },
       { name: 'html', type: 'html', cls: 'full', html: '<div class="section-t">Premier administrateur de la firme</div>' },
       { name: 'admin', label: 'Nom', required: true }, { name: 'email', label: 'Email (identifiant)', type: 'email', required: true },
@@ -284,7 +327,7 @@ route('platform', async () => {
     saveLabel: c ? 'Enregistrer' : 'Créer la firme',
     after: (form) => { if (!c) vatAutofill(form, { name: 'name', street: 'street', zip: 'zip', city: 'city', country: 'country' }, { countryCode: true }); },
     async onSave(v) {
-      if (c) await api('PUT', `platform/companies/${c.id}`, { name: v.name });
+      if (c) { await api('PUT', `platform/companies/${c.id}`, { name: v.name, edition: v.edition }); if (c.id === S.firm.id) { location.reload(); return; } }
       else { await api('POST', 'platform/companies', v); toast(`Firme créée – ${v.email} peut se connecter`, 4000); }
       render();
     },
@@ -294,6 +337,7 @@ route('platform', async () => {
     search: (c) => [c.name, c.admins].join(' '),
     columns: [
       { l: 'Firme', v: (c) => `<b>${esc(c.name)}</b>${c.id === S.me.company_id ? ` ${badge('Votre firme', '#3b5bdb')}` : ''}<br><small class="muted">${esc(c.admins || '')}</small>` },
+      { l: 'Version', v: (c) => (c.edition === 'simple' ? badge('Simplifié', '#0c8599') : badge('Avancé', '#7048e8')), sort: (c) => c.edition },
       { l: 'Utilisateurs', cls: 'r', v: (c) => `${c.users_active}${c.users !== c.users_active ? ` <small class="muted">/ ${c.users}</small>` : ''}` },
       { l: 'Chantiers', cls: 'r', v: (c) => c.projects },
       { l: 'Dernière connexion', v: (c) => fmtDT(c.last_login) },

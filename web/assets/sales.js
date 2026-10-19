@@ -293,7 +293,7 @@ route('quote', async (id) => {
       <button class="btn sm">${I.edit} Modifier</button></div>
     <div class="status-bar">${Object.entries(QST).map(([k, [l, col]]) => `<button class="${d.status === k ? 'on' : ''}" data-st="${k}" style="--c:${col}">${l}</button>`).join('')}</div>
     <div id="lines"></div>
-    <div class="cols-2"><div>${d.status === 'accepte' && pr ? `<div class="hint-box">Déclaration de travaux (30bis) et Checkin@Work : sur la page du chantier. <a href="#/project/${pr.id}">Ouvrir le chantier ${esc(pr.number)}</a></div>` : ''}${inv.length ? `<div class="card"><div class="card-h"><h3>Factures liées</h3></div><div class="rows">${inv.map((i) => { const s = invState(i); return `<a class="row" href="#/invoice/${i.id}"><span class="grow"><b>${esc(i.number || 'Brouillon')}</b> · ${esc(IKIND[i.data.kind])}</span>${st(IST, s.s)}<b>${money(s.t.base)}</b></a>`; }).join('')}</div></div>` : ''}</div><div id="tot"></div></div>`;
+    <div class="cols-2"><div>${d.status === 'accepte' && pr && !isSimple() ? `<div class="hint-box">Déclaration de travaux (30bis) et Checkin@Work : sur la page du chantier. <a href="#/project/${pr.id}">Ouvrir le chantier ${esc(pr.number)}</a></div>` : ''}${inv.length ? `<div class="card"><div class="card-h"><h3>Factures liées</h3></div><div class="rows">${inv.map((i) => { const s = invState(i); return `<a class="row" href="#/invoice/${i.id}"><span class="grow"><b>${esc(i.number || 'Brouillon')}</b> · ${esc(IKIND[i.data.kind])}</span>${st(IST, s.s)}<b>${money(s.t.base)}</b></a>`; }).join('')}</div></div>` : ''}</div><div id="tot"></div></div>`;
   const drawTot = () => { $('#tot').innerHTML = totalsBox(totals(d), d, true); };
   linesEditor($('#lines'), d, { showCost: true, onChange: () => { drawTot(); $('[data-saved]').textContent = 'Modification…'; save(); } });
   drawTot();
@@ -315,7 +315,7 @@ route('quote', async (id) => {
   $('[data-act=more]').onclick = () => menuSheet(`Devis ${q.number}`, [
     { label: 'Modifier l\'en-tête', icon: 'edit', run: () => quoteHead(q, contacts, projects, render) },
     { label: 'Créer une facture…', icon: 'coins', run: async () => { await save.flush(); invoiceFromQuote(q); } },
-    { label: 'Créer les commandes fournisseurs / sous-traitants', icon: 'truck', run: async () => { await save.flush(); ordersFromQuote(q); } },
+    ...(isSimple() ? [] : [{ label: 'Créer les commandes fournisseurs / sous-traitants', icon: 'truck', run: async () => { await save.flush(); ordersFromQuote(q); } }]),
     ...(!q.project_id ? [{ label: 'Créer le chantier', icon: 'crane', run: async () => { await save.flush(); createProjectFromQuote(q); } }] : []),
     { label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/quote/${q.id}?mail=1`) },
     { label: 'Dupliquer (nouvelle version)', icon: 'copy', run: async () => { await save.flush(); const n = await persist('quote', { project_id: q.project_id, data: { ...JSON.parse(JSON.stringify(d)), status: 'brouillon', date: today(), valid: addDays(today(), num(company().quoteValidity) || 30), acceptedAt: null, sentAt: null, title: d.title } }); go(`#/quote/${n.id}`); } },

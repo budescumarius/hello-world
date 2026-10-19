@@ -64,3 +64,14 @@ Toți utilizatorii conectați văd toate proiectele firmei, iar fiecare element 
 ```bash
 php -S localhost:8080   # din dosarul web/, cu o bază MySQL locală
 ```
+
+## Éditions (noms internes)
+
+- **BâtiPro Avancé** : tous les modules (planning, commandes, interventions, RH, statistiques, assistant IA…).
+- **BâtiPro Simplifié** (indépendants) : devis, factures clients et paiements, achats / factures fournisseurs
+  (PDF, photo, Peppol) affectés aux chantiers, chantiers simples (facturé / encaissé / consommé), contacts, Peppol.
+
+Les deux éditions utilisent le même code et la même base. L'édition se choisit **par firme** dans
+*Plateforme* (création ou modification d'une firme). Les firmes existantes restent en « Avancé ».
+Pour qu'une installation crée par défaut des firmes « Simplifié », ajoutez dans `config.php` :
+`'edition' => 'simple',`

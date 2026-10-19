@@ -949,3 +949,10 @@ body:has(.pi-bar) .ai-fab { bottom: calc(84px + env(safe-area-inset-bottom)); }
   .lines tr.l-text td:nth-child(2) .in { min-height: 54px; border-color: var(--border); background: #fff; }
 }
 @media (max-width: 860px) { .lines tr.l-item td[data-l] { text-align: left !important; } }
+
+/* Édition simplifiée : raccourcis du tableau de bord */
+.quick-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.quick { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 58px; border: 0; border-radius: 14px; background: var(--primary); color: #fff; font: inherit; font-weight: 700; font-size: 15px; cursor: pointer; box-shadow: 0 4px 14px rgba(59, 91, 219, .25); }
+.quick + .quick { background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: none; }
+.quick svg { width: 22px; height: 22px; }
+@media (max-width: 860px) { .quick { flex-direction: column; gap: 4px; font-size: 12.5px; min-height: 76px; text-align: center; line-height: 1.2; padding: 6px; } }

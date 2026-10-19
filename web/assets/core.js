@@ -200,6 +200,19 @@ const MENU = [
   { k: 'hr', l: 'RH', i: 'people', sub: [['Personnel', '#/hr/staff'], ['Pointage', '#/hr/timesheets'], ['Absences', '#/hr/absences']] },
   { k: 'stats', l: 'Statistiques', i: 'chart', h: '#/stats' },
 ];
+// « BâtiPro Simplifié » (indépendants) : devis, factures, achats par chantier, contacts – sans planning, commandes, RH, assistant…
+const isSimple = () => S.edition === 'simple';
+const MENU_SIMPLE = [
+  { k: 'dashboard', l: 'Tableau de bord', i: 'dash', h: '#/dashboard' },
+  { k: 'quotes', l: 'Devis', i: 'calc', h: '#/quotes', m: ['#/quote'] },
+  { k: 'invoices', l: 'Factures clients', i: 'coins', h: '#/invoices', m: ['#/invoice', '#/print/invoice'] },
+  { k: 'payments', l: 'Paiements reçus', i: 'percent', h: '#/payments', m: ['#/payments'] },
+  { k: 'expenses', l: 'Achats / factures fournisseurs', i: 'download', h: '#/expenses', m: ['#/expenses', '#/purchase'] },
+  { k: 'projects', l: 'Chantiers', i: 'crane', h: '#/projects', m: ['#/project'] },
+  { k: 'contacts', l: 'Contacts', i: 'contacts', sub: [['Clients', '#/contacts/client'], ['Fournisseurs', '#/contacts/fournisseur'], ['Tous les contacts', '#/contacts/all']] },
+  { k: 'library', l: 'Mes prix (bibliothèque)', i: 'book', h: '#/library' },
+];
+const menu = () => (isSimple() ? MENU_SIMPLE : MENU);
 const ui = (() => { try { return JSON.parse(localStorage.getItem('bp-ui') || '{}'); } catch (e) { return {}; } })();
 const saveUi = () => { try { localStorage.setItem('bp-ui', JSON.stringify(ui)); } catch (e) { /* stockage indisponible */ } };
 
@@ -210,9 +223,10 @@ function sidebar(active) {
     <div class="side-head"><a class="brand" href="#/dashboard">${company.logoId ? `<img src="${fileUrl(company.logoId)}" alt="">` : '<span class="brand-mark"></span>'}<span>${esc(company.appName || company.name || 'BâtiPro')}</span></a>
       <button class="side-toggle" data-act="collapse" title="Réduire le menu">${I.collapse}</button></div>
     <button class="side-search" data-act="search">${I.search}<span>Actions</span><kbd>⌘</kbd><kbd>K</kbd></button>
-    <nav class="side-nav">${MENU.map((m) => {
+    <nav class="side-nav">${menu().map((m) => {
       const open = m.k === active || (ui.open || {})[m.k];
-      if (!m.sub) return `<a class="nav ${m.k === active ? 'on' : ''}" href="${m.h}" title="${esc(m.l)}">${I[m.i]}<span>${m.l}</span></a>`;
+      const on = m.m ? m.m.some((x) => hash.startsWith(x)) : m.k === active;
+      if (!m.sub) return `<a class="nav ${on ? 'on' : ''}" href="${m.h}" title="${esc(m.l)}">${I[m.i]}<span>${m.l}</span></a>`;
       return `<div class="nav-group ${open ? 'open' : ''}"><button class="nav ${m.k === active ? 'on' : ''}" data-grp="${m.k}" title="${esc(m.l)}">${I[m.i]}<span>${m.l}</span><i class="chev">${I.chevron}</i></button>
         <div class="nav-sub">${m.sub.map(([l, h]) => `<a href="${h}" class="${hash === h || (hash.startsWith(h + '/') && h !== '#/fiches') ? 'on' : ''}">${l}</a>`).join('')}</div></div>`;
     }).join('')}</nav>
@@ -254,6 +268,12 @@ function layout(p) {
 // Barre d'onglets en bas de l'écran (téléphone) : comme une application
 function bottomNav(active) {
   const it = (k, h, i, l) => `<a class="bn-it ${k === active ? 'on' : ''}" href="${h}">${I[i]}<span>${l}</span></a>`;
+  if (isSimple()) {
+    const h = location.hash; const fin = /^#\/(invoice|payments)/.test(h); const q = /^#\/quote/.test(h); const home = /^#\/(dashboard)?$/.test(h) || h === '';
+    return `<nav class="bnav" aria-label="Navigation"><a class="bn-it ${home ? 'on' : ''}" href="#/dashboard">${I.dash}<span>Accueil</span></a><a class="bn-it ${q ? 'on' : ''}" href="#/quotes">${I.calc}<span>Devis</span></a>
+      <button class="bn-add" data-act="qadd" aria-label="Créer">${I.plus}</button>
+      <a class="bn-it ${fin ? 'on' : ''}" href="#/invoices">${I.coins}<span>Factures</span></a><button class="bn-it ${home || q || fin ? '' : 'on'}" data-act="openside">${I.menu}<span>Menu</span></button></nav>`;
+  }
   return `<nav class="bnav" aria-label="Navigation">${it('dashboard', '#/dashboard', 'dash', 'Accueil')}${it('projects', '#/projects', 'crane', 'Chantiers')}
     <button class="bn-add" data-act="qadd" aria-label="Créer">${I.plus}</button>
     ${it('quotes', '#/quotes', 'calc', 'Devis')}<button class="bn-it ${['dashboard', 'projects', 'quotes'].includes(active) ? '' : 'on'}" data-act="openside">${I.menu}<span>Menu</span></button></nav>`;
@@ -487,6 +507,9 @@ async function render() {
   closeModals();
   if (cleanupView) { try { await cleanupView(); } catch (e) { /* vue déjà détruite */ } cleanupView = null; }
   const parts = location.hash.replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean);
+  // édition simplifiée : les modules absents renvoient au tableau de bord
+  const SIMPLE_ROUTES = ['dashboard', 'quotes', 'quote', 'invoices', 'invoice', 'payments', 'expenses', 'purchase', 'projects', 'project', 'contacts', 'contact', 'library', 'print', 'settings', 'platform'];
+  if (isSimple() && parts[0] && !SIMPLE_ROUTES.includes(parts[0])) { location.hash = '#/dashboard'; return; }
   const fn = ROUTES[parts[0] || 'dashboard'] || ROUTES.dashboard;
   const seq = ++renderSeq;
   try { await fn(...parts.slice(1)); } catch (e) {
@@ -531,7 +554,7 @@ async function switchFirm(id) {
 async function boot() {
   try {
     const b = await api('GET', 'bootstrap');
-    Object.assign(S, { me: b.user, users: b.users, settings: b.settings || {}, firm: b.firm || {}, ai: !!b.ai, ready: true });
+    Object.assign(S, { me: b.user, users: b.users, settings: b.settings || {}, firm: b.firm || {}, edition: b.edition || 'avance', ai: !!b.ai, ready: true });
     document.title = (S.settings.company || {}).appName || (S.settings.company || {}).name || 'BâtiPro';
     if (!location.hash) location.hash = '#/dashboard';
     render();
