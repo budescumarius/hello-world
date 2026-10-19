@@ -1094,3 +1094,6 @@ body.wiz .bnav, body.wiz .ai-fab { display: none !important; }
 .s-row2 .s-big { font-size: 15.5px; padding: 0 8px; gap: 6px; white-space: nowrap; min-width: 0; }
 .s-row2 .s-big svg { width: 18px; height: 18px; flex: none; }
 @media (max-width: 360px) { .s-row2 .s-big { font-size: 14px; } }
+/* le bouton « Assistant » ne cache jamais les derniers boutons d'une page : espace en bas */
+body:has(#ai-fab) .page { padding-bottom: 110px; }
+@media (max-width: 860px) { body:has(#ai-fab) .page { padding-bottom: calc(150px + env(safe-area-inset-bottom)); } }
