@@ -263,7 +263,7 @@ function printDocPage(kind, id, it, d, c, project, title, html, typ, co) {
       },
     });
   };
-  printPage(title, html, { quote: `#/quote/${id}`, invoice: `#/invoice/${id}`, order: `#/order/${id}` }[kind], mailDoc);
+  printPage(title, html, (isSimple() && kind !== 'order' ? { quote: `#/s/doc/devis/${id}`, invoice: `#/s/doc/facture/${id}` } : { quote: `#/quote/${id}`, invoice: `#/invoice/${id}`, order: `#/order/${id}` })[kind], mailDoc);
   if (new URLSearchParams(location.hash.split('?')[1] || '').has('mail')) mailDoc();
 }
 route('print', (kind, id) => printDoc(kind, +id));

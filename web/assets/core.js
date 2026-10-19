@@ -101,11 +101,12 @@ async function upload(file, projectId) {
 const fileUrl = (id, dl) => `api.php?r=files/${id}${dl ? '&download=1' : ''}`;
 const delFile = (id) => (id ? api('DELETE', `files/${id}`).catch(() => {}) : null);
 
-function pickFile(accept, multiple = false) {
+function pickFile(accept, multiple = false, capture = '') {
   return new Promise((res) => {
     // l'élément reste dans la page le temps de la lecture : certains navigateurs perdent l'accès au fichier sinon
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = accept; inp.multiple = multiple; inp.hidden = true;
+    if (capture) inp.setAttribute('capture', capture); // téléphone : ouvre directement l'appareil photo
     document.body.appendChild(inp);
     inp.onchange = () => { res([...inp.files]); setTimeout(() => inp.remove(), 120000); };
     inp.click();
@@ -203,14 +204,14 @@ const MENU = [
 // « BâtiPro Simplifié » (indépendants) : devis, factures, achats par chantier, contacts – sans planning, commandes, RH, assistant…
 const isSimple = () => S.edition === 'simple';
 const MENU_SIMPLE = [
-  { k: 'dashboard', l: 'Tableau de bord', i: 'dash', h: '#/dashboard' },
-  { k: 'quotes', l: 'Devis', i: 'calc', h: '#/quotes', m: ['#/quote'] },
-  { k: 'invoices', l: 'Factures clients', i: 'coins', h: '#/invoices', m: ['#/invoice', '#/print/invoice'] },
-  { k: 'payments', l: 'Paiements reçus', i: 'percent', h: '#/payments', m: ['#/payments'] },
-  { k: 'expenses', l: 'Achats / factures fournisseurs', i: 'download', h: '#/expenses', m: ['#/expenses', '#/purchase'] },
-  { k: 'projects', l: 'Chantiers', i: 'crane', h: '#/projects', m: ['#/project'] },
-  { k: 'contacts', l: 'Contacts', i: 'contacts', sub: [['Clients', '#/contacts/client'], ['Fournisseurs', '#/contacts/fournisseur'], ['Tous les contacts', '#/contacts/all']] },
-  { k: 'library', l: 'Mes prix (bibliothèque)', i: 'book', h: '#/library' },
+  { k: 'dashboard', l: 'Accueil', i: 'dash', h: '#/dashboard' },
+  { k: 'sinv', l: 'Mes factures', i: 'coins', h: '#/s/liste/factures', m: ['#/s/liste/factures', '#/s/facture', '#/s/doc/facture', '#/s/paye', '#/invoice'] },
+  { k: 'squote', l: 'Mes devis', i: 'calc', h: '#/s/liste/devis', m: ['#/s/liste/devis', '#/s/devis', '#/s/doc/devis', '#/quote'] },
+  { k: 'sbuy', l: 'Mes achats', i: 'download', h: '#/s/liste/achats', m: ['#/s/liste/achats', '#/s/achat', '#/expenses', '#/purchase'] },
+  { k: 'projects', l: 'Mes chantiers', i: 'crane', h: '#/projects', m: ['#/project'] },
+  { k: 'contacts', l: 'Mes clients et fournisseurs', i: 'contacts', sub: [['Clients', '#/contacts/client'], ['Fournisseurs', '#/contacts/fournisseur'], ['Tous', '#/contacts/all']] },
+  { k: 'library', l: 'Mes prix', i: 'book', h: '#/library' },
+  { k: 'sme', l: 'Mes informations', i: 'gear', h: '#/s/moi', m: ['#/s/moi'] },
 ];
 const menu = () => (isSimple() ? MENU_SIMPLE : MENU);
 const ui = (() => { try { return JSON.parse(localStorage.getItem('bp-ui') || '{}'); } catch (e) { return {}; } })();
@@ -241,6 +242,7 @@ function sidebar(active) {
 
 // page = { active, title, icon, actions, body, back, sub, tabs }
 function layout(p) {
+  document.body.classList.remove('wiz'); document.body.classList.toggle('simple', isSimple());
   app.innerHTML = `<div class="shell">
     ${sidebar(p.active)}
     <div class="side-scrim" data-act="closeside"></div>
@@ -269,10 +271,10 @@ function layout(p) {
 function bottomNav(active) {
   const it = (k, h, i, l) => `<a class="bn-it ${k === active ? 'on' : ''}" href="${h}">${I[i]}<span>${l}</span></a>`;
   if (isSimple()) {
-    const h = location.hash; const fin = /^#\/(invoice|payments)/.test(h); const q = /^#\/quote/.test(h); const home = /^#\/(dashboard)?$/.test(h) || h === '';
-    return `<nav class="bnav" aria-label="Navigation"><a class="bn-it ${home ? 'on' : ''}" href="#/dashboard">${I.dash}<span>Accueil</span></a><a class="bn-it ${q ? 'on' : ''}" href="#/quotes">${I.calc}<span>Devis</span></a>
+    const h = location.hash; const fin = /^#\/(s\/(liste\/factures|facture|doc\/facture|paye)|invoice)/.test(h); const buy = /^#\/(s\/(liste\/achats|achat)|expenses|purchase)/.test(h); const home = /^#\/(dashboard)?$/.test(h) || h === '';
+    return `<nav class="bnav" aria-label="Navigation"><a class="bn-it ${home ? 'on' : ''}" href="#/dashboard">${I.dash}<span>Accueil</span></a><a class="bn-it ${fin ? 'on' : ''}" href="#/s/liste/factures">${I.coins}<span>Factures</span></a>
       <button class="bn-add" data-act="qadd" aria-label="Créer">${I.plus}</button>
-      <a class="bn-it ${fin ? 'on' : ''}" href="#/invoices">${I.coins}<span>Factures</span></a><button class="bn-it ${home || q || fin ? '' : 'on'}" data-act="openside">${I.menu}<span>Menu</span></button></nav>`;
+      <a class="bn-it ${buy ? 'on' : ''}" href="#/s/liste/achats">${I.download}<span>Achats</span></a><button class="bn-it ${home || fin || buy ? '' : 'on'}" data-act="openside">${I.menu}<span>Menu</span></button></nav>`;
   }
   return `<nav class="bnav" aria-label="Navigation">${it('dashboard', '#/dashboard', 'dash', 'Accueil')}${it('projects', '#/projects', 'crane', 'Chantiers')}
     <button class="bn-add" data-act="qadd" aria-label="Créer">${I.plus}</button>
@@ -508,7 +510,7 @@ async function render() {
   if (cleanupView) { try { await cleanupView(); } catch (e) { /* vue déjà détruite */ } cleanupView = null; }
   const parts = location.hash.replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean);
   // édition simplifiée : les modules absents renvoient au tableau de bord
-  const SIMPLE_ROUTES = ['dashboard', 'quotes', 'quote', 'invoices', 'invoice', 'payments', 'expenses', 'purchase', 'projects', 'project', 'contacts', 'contact', 'library', 'print', 'settings', 'platform'];
+  const SIMPLE_ROUTES = ['s', 'dashboard', 'quotes', 'quote', 'invoices', 'invoice', 'payments', 'expenses', 'purchase', 'projects', 'project', 'contacts', 'contact', 'library', 'print', 'settings', 'platform'];
   if (isSimple() && parts[0] && !SIMPLE_ROUTES.includes(parts[0])) { location.hash = '#/dashboard'; return; }
   const fn = ROUTES[parts[0] || 'dashboard'] || ROUTES.dashboard;
   const seq = ++renderSeq;

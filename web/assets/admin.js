@@ -67,7 +67,7 @@ async function hrAbsences() {
 
 // ---------------------------------------------------------------- Tableau de bord
 route('dashboard', async () => {
-  if (isSimple()) return dashboardSimple();
+  if (isSimple()) return homeSimple();
   const all = await db.many(['opportunity', 'quote', 'invoice', 'project', 'task', 'point', 'intervention', 'expense']);
   const page = layout({ active: 'dashboard', icon: 'dash', title: 'Tableau de bord', actions: `<label class="chk"><input type="checkbox" data-mine ${ui.dashAll ? '' : 'checked'}>Uniquement mes éléments</label>` });
   $('[data-mine]').onchange = (e) => { ui.dashAll = !e.target.checked; saveUi(); render(); };
@@ -263,8 +263,8 @@ const EDITIONS = [['simple', 'BâtiPro Simplifié (indépendants)'], ['avance', 
 // Actions de création (recherche rapide et bouton « + » de la barre mobile)
 const quickActions = () => [['Nouveau devis', () => newQuote()], ['Nouveau chantier', () => editProject()], ['Nouveau contact', () => editContact().then((c) => c && go(`#/contact/${c.id}`))], ['Nouvelle opportunité', () => editOpportunity()], ['Nouvelle intervention', () => editIntervention()], ['Nouvelle tâche', () => editTask()], ['Encoder des heures', () => editTimesheet()], ['Nouvel achat', () => editExpense()]];
 const QA_ICONS = ['calc', 'crane', 'contacts', 'target', 'tool', 'tasks', 'people', 'coins'];
-const quickActionsSimple = () => [['Photo / PDF d\'un achat', 'camera', () => importPurchase()], ['Nouvelle facture', 'coins', () => newInvoice({ data: {} })], ['Nouveau devis', 'calc', () => newQuote()],
-  ['Nouveau chantier', 'crane', () => editProject()], ['Nouveau contact', 'contacts', () => editContact().then((c) => c && go(`#/contact/${c.id}`))]];
+const quickActionsSimple = () => [['Faire une facture', 'coins', () => go('#/s/facture/new')], ['Faire un devis', 'calc', () => go('#/s/devis/new')], ['J\'ai acheté (photo du ticket)', 'camera', () => go('#/s/achat')],
+  ['On m\'a payé', 'check', () => go('#/s/paye')], ['Nouveau chantier', 'crane', () => editProject()], ['Nouveau client', 'contacts', () => sNewClient().then((c) => c && go(`#/contact/${c.id}`))]];
 function quickAddMenu() {
   if (isSimple()) return menuSheet('Créer', quickActionsSimple().map(([label, icon, run], i) => ({ label, icon, run, primary: i === 0 })));
   menuSheet('Créer', quickActions().map(([label, run], i) => ({ label, icon: QA_ICONS[i] || 'plus', run })));
