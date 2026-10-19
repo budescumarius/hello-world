@@ -427,6 +427,7 @@ function vatAutofill(form, map = {}, opts = {}) {
     try {
       const r = await api('GET', `vat/lookup&vat=${encodeURIComponent(v)}&cc=${ccOf()}`);
       form.dataset.vatcheck = JSON.stringify({ valid: r.valid, vat: r.vat, name: r.name || '', date: today() });
+      if (r.test) { box.innerHTML = '<div class="vat-ok">✓ N° de TVA de test (exception : pas de vérification VIES / BCE). Complétez le nom et l\'adresse à la main.</div>'; return; }
       if (!r.valid && !r.kbo) { box.innerHTML = `<div class="vat-bad">✗ ${esc(r.error || 'Ce numéro n\'est pas actif à la TVA (VIES)')} </div>`; return; }
       if (opts.normalize !== false && inp.value !== r.vat) inp.value = r.vat;
       const vals = values(r);

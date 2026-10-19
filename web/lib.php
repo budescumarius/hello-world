@@ -272,12 +272,21 @@ function smtp_send(array $cfg, string $from, array $rcpt, string $data): void {
 
 // ---------------------------------------------------------------- TVA : service VIES de la Commission européenne
 // Renvoie { valid, vat, cc, name, street, zip, city, country, checked } ; nom / adresse vides si le pays ne les publie pas
+// N° de TVA de test acceptés sans contrôle (comptes de démonstration) ; config.php peut définir TEST_VATS
+function test_vats(): array {
+    $list = defined('TEST_VATS') ? (array)TEST_VATS : ['BE123456789'];
+    return array_map(fn($x) => preg_replace('/^BE(\d{9})$/', 'BE0$1', strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string)$x))), $list);
+}
+
 function vat_lookup(string $raw, string $defCc = 'BE'): array {
     $v = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $raw));
     $cc = preg_match('/^([A-Z]{2})(.+)$/', $v, $m) ? $m[1] : strtoupper($defCc);
     $num = preg_match('/^[A-Z]{2}(.+)$/', $v, $m) ? $m[1] : $v;
     if ($cc === 'GR') $cc = 'EL';
     if ($cc === 'BE' && preg_match('/^\d{9}$/', $num)) $num = '0' . $num; // ancien format à 9 chiffres
+    if (in_array($cc . $num, test_vats(), true)) {
+        return ['valid' => true, 'test' => true, 'vat' => $cc . $num, 'cc' => $cc, 'country' => $cc === 'BE' ? 'Belgique' : $cc, 'name' => '', 'street' => '', 'zip' => '', 'city' => '', 'checked' => date('Y-m-d H:i')];
+    }
     if ($cc === 'BE' && !preg_match('/^[01]\d{9}$/', $num)) fail(400, 'Numéro de TVA belge invalide : 10 chiffres (ex. BE0693697280)');
     if (!preg_match('/^[A-Z]{2}$/', $cc) || !preg_match('/^[A-Z0-9]{4,14}$/', $num)) fail(400, 'Numéro de TVA invalide');
     if ($cc === 'BE' && (97 - ((int)substr($num, 0, 8) % 97)) !== (int)substr($num, 8, 2)) {

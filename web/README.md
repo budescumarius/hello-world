@@ -26,6 +26,7 @@ Toți utilizatorii conectați văd toate proiectele firmei, iar fiecare element 
 - **RH**: personnel (coût horaire), pointage, absences.
 - **Statistiques**: CA, encaissements, coûts, pipeline, rentabilité par chantier.
 - **Paramètres**: entreprise, logo, TVA, préfixes, mentions, utilisateurs (admin / utilisateur), journal d'activité.
+- **N° de TVA de test** : `BE123456789` est accepté sans vérification VIES / BCE (comptes de démonstration). Pour changer la liste : `define('TEST_VATS', ['BE123456789', ...]);` dans `config.php`.
 
 ## Instalare pe cPanel (aprox. 10 minute)
 1. **Bază de date**: cPanel → *Bases de données MySQL* (*MySQL Databases*):
