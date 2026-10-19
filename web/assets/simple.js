@@ -301,7 +301,7 @@ async function emitSimple(it, client) {
   if (d.reverse && !(client && client.data.vat)) { toast('Autoliquidation : ajoutez d\'abord le n° de TVA du client', 5000); return false; }
   if (!(d.title || '').trim()) d.title = `Travaux ${sName(client)}`;
   const cn = d.kind === 'avoir';
-  if (!confirm(cn ? 'Valider la note de crédit ? Elle reçoit son numéro et annule la facture.' : it.number ? `Valider à nouveau la facture n° ${it.number} (même numéro) ?` : 'Valider la facture ? Elle reçoit son numéro et ne pourra plus être modifiée.')) return false;
+  if (!confirm(cn ? 'Valider la note de crédit ? Elle reçoit son numéro et annule la facture (ou la partie indiquée).' : it.number ? `Valider à nouveau la facture n° ${it.number} (même numéro) ?` : 'Valider la facture ? Elle reçoit son numéro et ne pourra plus être modifiée.')) return false;
   if (!it.number) { const r = await api('POST', `number/${cn ? 'avoir' : 'invoice'}`); it.number = r.number; }
   d.status = 'emise'; d.emittedAt = d.emittedAt || today();
   if (d.reopened) { d.reopened.revalidatedAt = new Date().toISOString(); }
@@ -313,7 +313,10 @@ async function emitSimple(it, client) {
       const orig = await db.get('invoice', +d.refInvoiceId); const st = invState(orig);
       const amt = Math.min(st.rest, Math.abs(totals(d).total));
       if (amt > 0.005) { orig.data.payments = [...(orig.data.payments || []), { date: today(), amount: r2(amt), method: 'Note de crédit', note: `Note de crédit ${it.number}` }]; }
-      orig.data.creditedBy = it.id; await persist('invoice', orig, { silent: true });
+      const sumCn = (await db.list('invoice')).filter((x) => x.data.kind === 'avoir' && x.data.status === 'emise' && +x.data.refInvoiceId === orig.id).reduce((sum, x) => sum + Math.abs(totals(x.data).total), 0);
+      if (sumCn >= totals(orig.data).total - 0.01) orig.data.creditedBy = it.id;
+      else orig.data.creditNotes = [...new Set([...(orig.data.creditNotes || []), it.id])];
+      await persist('invoice', orig, { silent: true });
     } catch (e) { /* facture d'origine supprimée */ }
   }
   toast(`${cn ? 'Note de crédit' : 'Facture'} n° ${it.number} validée ✓`, 2500);
@@ -521,6 +524,7 @@ async function listSimple(kind) {
   const page = sPage(isInv ? 'Mes factures' : 'Mes devis', '#/dashboard');
   rows.sort((a, b) => (b.data.date || '').localeCompare(a.data.date || '') || b.id - a.id);
   page.innerHTML = `<button class="s-big primary" data-new>${I.plus} ${isInv ? 'Faire une facture' : 'Faire un devis'}</button>
+    ${isInv ? `<a class="s-note" href="#/s/avoir">${I.copy}<span>Annuler ou corriger une facture : <b>note de crédit</b></span><b>${I.chevron}</b></a>` : ''}
     <div class="s-chips s-filter">${filters.map(([k, l]) => `<a href="#/s/liste/${kind}${k ? '?f=' + k : ''}" class="${f === k ? 'on' : ''}">${l}</a>`).join('')}</div>
     <div class="s-cards">${rows.filter(match).map((x) => { const s = stOf(x); const t = totals(x.data); const rest = isInv ? invState(x).rest : 0;
       const card = `<a class="s-card" href="#/s/doc/${isInv ? 'facture' : 'devis'}/${x.id}"><span class="s-ct"><b>${esc(sName(byId(contacts, x.data.clientId)))}</b><small>${esc(isInv && s === 'brouillon' ? 'Brouillon' : x.number || 'Brouillon')} · ${fmtDate(x.data.date)}${x.data.title ? ` · ${esc(x.data.title)}` : ''}</small></span>
@@ -557,6 +561,7 @@ async function docSimple(kind, id) {
   page.innerHTML = `<div class="s-done-h"><small>${esc(sName(c))}${d.title ? ` · ${esc(d.title)}` : ''}</small><b style="color:${(ST[s] || ['', '#333'])[1]}">${esc((ST[s] || [s])[0])}</b><span>${sMoney(st && st.rest > 0.005 && s !== 'brouillon' ? st.rest : t.total)} <small>${st && st.paid > 0.005 && st.rest > 0.005 ? `reste à payer (sur ${sMoney(t.total)})` : 'avec TVA'}</small></span></div>
     ${d.reopened && draft ? `<div class="s-warn">⚠ Facture n° ${esc(it.number || '')} rouverte le ${fmtDate(d.reopened.at)} : pensez à prévenir votre comptable et le client.</div>` : ''}
     ${d.creditedBy ? `<a class="s-info" href="#/s/doc/facture/${d.creditedBy}">Annulée par une note de crédit ${I.chevron}</a>` : ''}
+    ${(d.creditNotes || []).map((n) => `<a class="s-info" href="#/s/doc/facture/${n}">Note de crédit partielle ${I.chevron}</a>`).join('')}
     ${d.kind === 'avoir' && d.refInvoiceId ? `<a class="s-info" href="#/s/doc/facture/${d.refInvoiceId}">Annule la facture ${esc(d.refInvoice || '')} ${I.chevron}</a>` : ''}
     <div class="s-actions" data-acts></div>
     ${typ === 'invoice' && (d.payments || []).length ? `<div class="s-pays"><b>Paiements reçus</b>${d.payments.map((p, i) => `<div class="s-pay"><span>${fmtDate(p.date)} · ${esc(p.method || '')}${p.note ? ` · ${esc(p.note)}` : ''}</span><b>${sMoney(p.amount)}</b><button type="button" data-pdel="${i}" aria-label="Supprimer ce paiement">${I.trash}</button></div>`).join('')}</div>` : ''}
@@ -573,6 +578,7 @@ async function docSimple(kind, id) {
   if (typ === 'invoice' && !draft && c && buyerInfo(c).peppolId && buyerInfo(c).isCompany) acts.push(['peppol', 'send', 'Envoyer par Peppol', d.peppol && d.peppol.sentAt ? `✓ déjà envoyée le ${fmtDate(d.peppol.sentAt)}` : peppolApOn() ? 'facture électronique (entreprise)' : 'Peppol pas encore activé', d.peppol && d.peppol.sentAt ? '' : 'primary']);
   if (typ === 'quote' && ['envoye', 'brouillon'].includes(d.status)) { acts.push(['yes', 'check', 'Le client a dit oui', 'je fais la facture', d.status === 'envoye' ? 'primary' : '']); acts.push(['no', 'x', 'Le client a dit non', '']); }
   if (typ === 'quote' && d.status === 'accepte') acts.push(['bill', 'coins', 'Faire la facture', 'tout le devis ou un acompte', 'primary']);
+  if (typ === 'invoice' && !draft && d.kind !== 'avoir' && !d.creditedBy) acts.push(['credit', 'copy', 'Faire une note de crédit', 'annuler toute la facture ou une partie']);
   acts.push(['pdf', 'eye', 'Voir en grand / imprimer', '']);
   if (draft) acts.push(['del', 'trash', kind === 'devis' ? 'Supprimer ce devis' : 'Supprimer ce brouillon', 'il n\'a pas encore été envoyé', 'danger']);
   $('[data-acts]', page).innerHTML = acts.map(([k, ic, l, sub, cls]) => sBtn(`data-a="${k}"`, ic, l, sub, cls || '')).join('');
@@ -588,6 +594,7 @@ async function docSimple(kind, id) {
     const a = b.dataset.a;
     if (a === 'edit') return go(`#/s/${kind}/${it.id}/travail`);
     if (a === 'fix') return validatedInvoiceChange(it, c);
+    if (a === 'credit') return go(`#/s/avoir/${it.id}`);
     if (a === 'corr') return go(`#/s/doc/facture/${d.correctionId}`);
     if (a === 'qedit') { if (d.status === 'accepte' && !confirm('Ce devis est accepté par le client. Le modifier quand même ? (Prévenez le client.)')) return; return go(`#/s/devis/${it.id}/travail`); }
     if (a === 'qdel') { const inv = (await db.list('invoice')).filter((x) => +x.data.quoteId === it.id); if (!confirm(inv.length ? `Ce devis a ${inv.length} facture(s). Supprimer quand même le devis ? (les factures restent)` : 'Supprimer ce devis ?')) return; return sDeleteDraft('quote', it, null, () => go('#/s/liste/devis')); }
@@ -630,11 +637,7 @@ function validatedInvoiceChange(it, c) {
     const k = b.dataset.c; if (b.disabled) return;
     if (k === 'keep') return m.close();
     if (k === 'credit') {
-      m.close();
-      const correction = await persist('invoice', { project_id: it.project_id, data: { ...JSON.parse(JSON.stringify(d)), status: 'brouillon', number: undefined, emittedAt: null, payments: [], sent: [], peppol: null, communication: '', date: today(), due: addDays(today(), num(d.payDays) || 30), title: d.title, simple: true, creditedBy: null, reopened: null } });
-      const cn = await persist('invoice', { project_id: it.project_id, data: { kind: 'avoir', status: 'brouillon', clientId: d.clientId, date: today(), reverse: d.reverse, discount: d.discount, defaultVat: d.defaultVat, title: `Annulation facture ${it.number}`, refInvoice: it.number, refInvoiceId: it.id, correctionId: correction.id, ownerId: S.me.id, lines: (d.lines || []).map((l) => (l.kind === 'item' ? { ...l, id: lid(), qty: -num(l.qty) } : { ...l, id: lid() })), payments: [], simple: true } });
-      toast('Note de crédit prête : vérifiez et validez-la', 4000);
-      return go(`#/s/facture/${cn.id}/fini`);
+      m.close(); return makeCreditNote(it, { redo: true });
     }
     if (k === 'edit') {
       d.reopened = { at: new Date().toISOString(), by: S.me.id, payments: (d.payments || []).length };
@@ -649,6 +652,63 @@ function validatedInvoiceChange(it, c) {
       return sDeleteDraft('invoice', it, null, () => go('#/s/liste/factures'));
     }
   }; });
+}
+
+// Note de crédit : toute la facture (lignes en négatif) ou un montant TVAC réparti par taux de TVA
+async function makeCreditNote(it, { amount = 0, reason = '', redo = false } = {}) {
+  const d = it.data; const base = { kind: 'avoir', status: 'brouillon', clientId: d.clientId, date: today(), reverse: d.reverse, defaultVat: d.defaultVat, refInvoice: it.number, refInvoiceId: it.id, ownerId: S.me.id, payments: [], simple: true };
+  let data;
+  if (!amount) {
+    data = { ...base, discount: d.discount, title: d.title || `Annulation facture ${it.number}`, lines: (d.lines || []).map((l) => (l.kind === 'item' ? { ...l, id: lid(), qty: -num(l.qty) } : { ...l, id: lid() })) };
+  } else {
+    const t = totals(d); const label = reason || 'Réduction';
+    data = { ...base, title: d.title || `${label} – facture ${it.number}`, lines: t.vats.map((v) => { const ttc = amount * ((v.base + v.vat) / t.total); return { id: lid(), kind: 'item', desc: `${label} sur la facture ${it.number}${t.vats.length > 1 ? ` (partie TVA ${v.rate} %)` : ''}`, unit: 'forfait', qty: -1, price: r2(d.reverse ? ttc : ttc / (1 + v.rate / 100)), vat: v.rate }; }) };
+  }
+  if (redo) {
+    const correction = await persist('invoice', { project_id: it.project_id, data: { ...JSON.parse(JSON.stringify(d)), status: 'brouillon', emittedAt: null, payments: [], sent: [], peppol: null, communication: '', date: today(), due: addDays(today(), num(d.payDays) || 30), simple: true, creditedBy: null, creditNotes: [], reopened: null } });
+    data.correctionId = correction.id;
+  }
+  const cn = await persist('invoice', { project_id: it.project_id, data });
+  toast('Note de crédit prête : vérifiez et validez-la', 4000);
+  return go(`#/s/facture/${cn.id}/fini`);
+}
+// Assistant « Note de crédit » : choisir la facture, puis tout ou une partie
+async function creditWizard(id) {
+  const [invoices, contacts] = await Promise.all([db.list('invoice'), db.list('contact')]);
+  const credited = (inv) => r2(invoices.filter((x) => x.data.kind === 'avoir' && +x.data.refInvoiceId === inv.id).reduce((sum, x) => sum + Math.abs(totals(x.data).total), 0));
+  if (!id) {
+    const page = sPage('Note de crédit', '#/s/liste/factures', { wiz: true });
+    const ok = invoices.filter((x) => x.data.status === 'emise' && x.data.kind !== 'avoir' && !x.data.creditedBy).sort((a, b) => (b.data.date || '').localeCompare(a.data.date || '') || b.id - a.id);
+    page.innerHTML = `<p class="s-lead">Une note de crédit <b>annule une facture</b> (toute ou une partie) : erreur, remise, travail pas fait… Elle reçoit son propre numéro.</p>
+      ${ok.length ? `<p class="s-lead">Touchez la facture à corriger :</p><div class="s-list">${ok.map((x) => sBtn(`data-i="${x.id}"`, 'coins', `${esc(sName(byId(contacts, x.data.clientId)))} – ${sMoney(totals(x.data).total)}`, `Facture ${esc(x.number || '')} du ${fmtDate(x.data.date)}`)).join('')}</div>` : `<div class="s-ok">${I.check}<b>Aucune facture validée</b><span>Une note de crédit se fait toujours sur une facture déjà validée.</span></div>`}`;
+    $$('[data-i]', page).forEach((b) => { b.onclick = () => go(`#/s/avoir/${b.dataset.i}`); });
+    return;
+  }
+  const it = invoices.find((x) => x.id === +id); if (!it || it.data.status !== 'emise' || it.data.kind === 'avoir') return go('#/s/avoir');
+  const d = it.data; const c = byId(contacts, d.clientId); const total = totals(d).total; const done = credited(it); const max = r2(total - done);
+  const page = sPage('Note de crédit', '#/s/avoir', { wiz: true });
+  let reason = '';
+  page.innerHTML = `<div class="s-done-h"><small>${esc(sName(c))} · facture ${esc(it.number || '')}</small><b>Montant de la facture</b><span>${sMoney(total)} <small>avec TVA</small></span></div>
+    ${done > 0.005 ? `<div class="s-warn">Déjà ${sMoney(done)} en note(s) de crédit sur cette facture. Il reste au maximum ${sMoney(max)}.</div>` : ''}
+    ${max > 0.005 ? `<button class="s-big primary" data-all>${I.x} Annuler toute la facture (${sMoney(max)})</button>
+    <label class="s-chk"><input type="checkbox" data-redo> Refaire ensuite une facture correcte (copie à modifier)</label>
+    <p class="s-lead">ou <b>une partie seulement</b> :</p>
+    <label class="field s-amount"><span>Montant à déduire (avec TVA)</span><input name="amt" inputmode="decimal" placeholder="0,00"><em>€</em></label>
+    <p class="s-help" data-vat></p>
+    <div class="field"><span>Pourquoi ?</span><div class="s-chips">${['Erreur de prix', 'Remise', 'Travail pas fait', 'Matériel repris', 'Geste commercial'].map((x) => `<button type="button" data-r="${x}">${x}</button>`).join('')}</div></div>
+    <button class="s-big" data-part>${I.check} Faire la note de crédit</button>` : `<div class="s-ok">${I.check}<b>Facture déjà entièrement annulée</b></div>`}`;
+  if (max <= 0.005) return;
+  const amt = $('[name=amt]', page);
+  amt.oninput = () => { const v = num(amt.value.replace(',', '.')); const t = totals(d);
+    $('[data-vat]', page).textContent = v > 0 && !d.reverse ? `dont TVA : ${sMoney(r2(t.vats.reduce((sum, x) => { const ttc = v * ((x.base + x.vat) / t.total); return sum + ttc - ttc / (1 + x.rate / 100); }, 0)))}` : ''; };
+  $$('[data-r]', page).forEach((b) => { b.onclick = () => { reason = reason === b.dataset.r ? '' : b.dataset.r; $$('[data-r]', page).forEach((x) => x.classList.toggle('on', x.dataset.r === reason)); }; });
+  $('[data-all]', page).onclick = () => (done > 0.005 ? makeCreditNote(it, { amount: max, reason: 'Annulation du solde' }) : makeCreditNote(it, { redo: $('[data-redo]', page).checked }));
+  $('[data-part]', page).onclick = () => {
+    const v = r2(num(amt.value.replace(',', '.')));
+    if (!(v > 0)) { toast('Indiquez le montant à déduire', 3000); return amt.focus(); }
+    if (v - max > 0.01) { toast(`C'est plus que le maximum (${sMoney(max)})`, 4000); return; }
+    return makeCreditNote(it, { amount: v, reason });
+  };
 }
 
 // Devis accepté → facture (tout, ou un acompte en %)
@@ -746,6 +806,7 @@ route('s', async (screen, a, b) => {
   if (screen === 'facture' || screen === 'devis') return docWizard(screen, a, b);
   if (screen === 'achat') return buyWizard(a, b || (a ? 'montant' : ''));
   if (screen === 'paye') return paidWizard(a);
+  if (screen === 'avoir') return creditWizard(a);
   if (screen === 'liste') return listSimple(a || 'factures');
   if (screen === 'doc') return docSimple(a, b);
   if (screen === 'moi') return meSimple();
