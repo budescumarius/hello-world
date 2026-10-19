@@ -40,11 +40,15 @@ function keyboardDictation(ta) {
   $('[data-close]', m.el).addEventListener('click', () => setTimeout(() => ta.focus(), 50));
 }
 let activeRec = null;
-function micFor(btn, ta) {
+// Langue de dictée : français, ou roumain traduit automatiquement en français (assistant IA)
+const dictLang = () => { try { return localStorage.getItem('bp-dict-lang') === 'ro' && S.translate ? 'ro' : 'fr'; } catch (e) { return 'fr'; } };
+const appendText = (ta, t) => { ta.value = (ta.value ? ta.value.trimEnd() + ' ' : '') + t.charAt(0).toUpperCase() + t.slice(1); ta.dispatchEvent(new Event('input', { bubbles: true })); };
+function micFor(btn, ta, onText = (t) => appendText(ta, t)) {
   btn.onclick = () => {
     if (!speechOk()) {
       // iPhone : une seule explication, ensuite le clavier s'ouvre directement
       let seen = false; try { seen = !!localStorage.getItem('bp-dict-tip'); localStorage.setItem('bp-dict-tip', '1'); } catch (e) { /* */ }
+      if (dictLang() === 'ro') { ta.focus(); toast('Clavier en roumain (🌐), touchez 🎤 et parlez : je traduis en français ensuite', 5000); return; }
       if (seen) { ta.focus(); toast('Touchez le 🎤 du clavier pour parler', 3500); } else keyboardDictation(ta);
       return;
     }
@@ -52,14 +56,14 @@ function micFor(btn, ta) {
     const R = window.SpeechRecognition || window.webkitSpeechRecognition; let rec;
     try { rec = new R(); } catch (e) { keyboardDictation(ta); return; }
     activeRec = rec; let got = false; let started = false;
-    rec.lang = 'fr-BE'; rec.interimResults = false; rec.maxAlternatives = 1; rec.continuous = false;
+    rec.lang = dictLang() === 'ro' ? 'ro-RO' : 'fr-BE'; rec.interimResults = false; rec.maxAlternatives = 1; rec.continuous = false;
     const stop = () => { clearTimeout(t1); clearTimeout(t2); btn.classList.remove('on'); if (activeRec === rec) activeRec = null; };
     // ne démarre pas (permission, réseau) ou ne finit jamais : on arrête et on propose le clavier
     const t1 = setTimeout(() => { if (!started) { try { rec.abort(); } catch (e) { /* */ } stop(); keyboardDictation(ta); } }, 4000);
     const t2 = setTimeout(() => { try { rec.stop(); } catch (e) { /* */ } setTimeout(() => { if (activeRec === rec) { try { rec.abort(); } catch (e) { /* */ } stop(); } }, 1500); }, 15000);
     rec.onstart = () => { started = true; btn.classList.add('on'); toast('Parlez… (touchez à nouveau 🎤 pour arrêter)', 4000); };
     rec.onaudiostart = () => { started = true; };
-    rec.onresult = (e) => { got = true; const t = e.results[0][0].transcript; ta.value = (ta.value ? ta.value.trimEnd() + ' ' : '') + t.charAt(0).toUpperCase() + t.slice(1); ta.dispatchEvent(new Event('input', { bubbles: true })); };
+    rec.onresult = (e) => { got = true; onText(e.results[0][0].transcript); };
     rec.onerror = (e) => { stop(); if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { toast('Le micro est refusé : autorisez-le dans les réglages du navigateur', 5000); keyboardDictation(ta); } else if (e.error !== 'aborted' && !got) toast('Je n\'ai pas entendu, réessayez', 2500); };
     rec.onend = () => stop();
     try { rec.start(); } catch (e) { stop(); keyboardDictation(ta); }
@@ -214,7 +218,8 @@ async function docWizard(kind, id, step) {
   if (step === 'travail') {
     const rate = d.defaultVat ?? defVat();
     if (!d.lines.some((l) => l.kind === 'item')) d.lines.push({ id: lid(), kind: 'item', desc: '', unit: 'forfait', qty: 1, price: '', vat: rate });
-    page.innerHTML = `<p class="s-lead">Écrivez ou dites (🎤) le travail, la quantité et le prix.</p><div data-lines></div>
+    page.innerHTML = `<p class="s-lead">Écrivez ou dites (🎤) le travail, la quantité et le prix.</p>
+      <div class="s-lang"><span>Je parle :</span><button type="button" data-lang="fr">🇫🇷 Français</button><button type="button" data-lang="ro">🇷🇴 Română</button></div><div data-lines></div>
       <div class="s-row2"><button class="s-big" data-add>${I.plus} Ajouter une ligne</button><button class="s-big" data-lib>${I.book} Mes prix</button></div>
       <div class="s-total" data-tot></div>`;
     const box = $('[data-lines]', page);
@@ -222,6 +227,26 @@ async function docWizard(kind, id, step) {
       const t = totals(d);
       $('[data-tot]', page).innerHTML = `<div><span>Sans TVA</span><b>${sMoney(t.base)}</b></div><div><span>${d.reverse ? 'TVA (autoliquidation)' : 'TVA'}</span><b>${sMoney(t.vat)}</b></div><div class="big"><span>Total ${kind === 'devis' ? 'du devis' : 'à payer'}</span><b>${sMoney(t.total)}</b></div>`;
     };
+    // roumain : la ligne est traduite en français (après la dictée, ou en quittant le champ)
+    const pend = new Set();
+    const translate = (ta, l, text, append) => {
+      const wrap = ta.closest('.s-desc'); wrap.classList.add('tr');
+      const before = ta.value;
+      const p = api('POST', 'ai/translate', { text }).then((r) => {
+        ta.value = append ? (before ? before.trimEnd() + ' ' : '') + r.text : r.text; ta.dataset.fr = ta.value;
+        l.desc = ta.value; grow(ta); later();
+        undoToast('Traduit en français ✓', () => { ta.value = append ? (before ? before.trimEnd() + ' ' : '') + text : before; ta.dataset.fr = ta.value; l.desc = ta.value; grow(ta); later(); });
+      }).catch((e) => { if (append) appendText(ta, text); toast(e.message || 'Traduction impossible', 4000); })
+        .finally(() => { wrap.classList.remove('tr'); pend.delete(p); });
+      pend.add(p); return p;
+    };
+    const drawLang = () => $$('[data-lang]', page).forEach((b) => b.classList.toggle('on', b.dataset.lang === dictLang()));
+    $$('[data-lang]', page).forEach((b) => { b.onclick = () => {
+      if (b.dataset.lang === 'ro' && !S.translate) { toast('La traduction demande l\'assistant IA (clé API à mettre par l\'administrateur de la plateforme)', 5000); return; }
+      try { localStorage.setItem('bp-dict-lang', b.dataset.lang); } catch (e) { /* */ }
+      drawLang(); if (b.dataset.lang === 'ro') toast('Vorbiți în română: traduc automat în franceză 🇫🇷', 3500);
+    }; });
+    drawLang();
     let tmr = 0; const later = () => { clearTimeout(tmr); tmr = setTimeout(() => save().catch(() => {}), 600); drawTot(); };
     const draw = () => {
       const items = d.lines.filter((l) => l.kind === 'item');
@@ -235,7 +260,9 @@ async function docWizard(kind, id, step) {
       $$('.s-line', box).forEach((row) => {
         const l = d.lines.find((x) => x.id === row.dataset.i);
         const ta = $('textarea', row); grow(ta); ta.oninput = () => { l.desc = ta.value; grow(ta); later(); };
-        micFor($('[data-mic]', row), ta);
+        ta.dataset.fr = ta.value;
+        micFor($('[data-mic]', row), ta, (t) => (dictLang() === 'ro' ? translate(ta, l, t, true) : appendText(ta, t)));
+        ta.onchange = () => { if (dictLang() === 'ro' && ta.value.trim() && ta.value !== ta.dataset.fr) translate(ta, l, ta.value, false); };
         const q = $('[data-k=qty]', row); const pr = $('[data-k=price]', row); const lt = $('.s-ltot b', row);
         const upd = () => { lt.textContent = sMoney(num(l.qty) * num(l.price)); later(); };
         q.oninput = () => { l.qty = num(q.value); upd(); };
@@ -249,6 +276,8 @@ async function docWizard(kind, id, step) {
     $('[data-add]', page).onclick = () => { d.lines.push({ id: lid(), kind: 'item', desc: '', unit: 'pc', qty: 1, price: '', vat: rate }); draw(); later(); setTimeout(() => { const t = $$('.s-line textarea', box).pop(); if (t) { t.scrollIntoView({ block: 'center', behavior: 'smooth' }); t.focus(); } }, 50); };
     $('[data-lib]', page).onclick = () => pickArticles((items) => { items.forEach((x) => { x.vat = rate; }); d.lines = d.lines.filter((l) => l.kind !== 'item' || (l.desc || '').trim() || num(l.price)); d.lines.push(...items); draw(); later(); });
     sFoot(page, async () => {
+      if (document.activeElement && document.activeElement.matches('.s-line textarea')) document.activeElement.blur();
+      if (pend.size) { toast('Traduction en cours…', 2000); await Promise.allSettled([...pend]); }
       d.lines = d.lines.filter((l) => l.kind !== 'item' || (l.desc || '').trim() || num(l.price));
       if (!d.lines.some((l) => l.kind === 'item')) { toast('Écrivez au moins une ligne de travail', 3500); d.lines.push({ id: lid(), kind: 'item', desc: '', unit: 'forfait', qty: 1, price: '', vat: rate }); return draw(); }
       const empty = d.lines.find((l) => l.kind === 'item' && !(l.desc || '').trim());

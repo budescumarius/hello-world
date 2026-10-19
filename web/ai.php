@@ -300,6 +300,32 @@ function ai_messages(array $turns): array {
     return $out;
 }
 
+// Description de travaux dictée (souvent en roumain) → français de devis / facture
+function ai_translate(string $text): string {
+    require_once __DIR__ . '/vendor/autoload.php';
+    $client = new Client(apiKey: ai_key(), baseUrl: ai_base_url());
+    $resp = $client->beta->messages->create(
+        maxTokens: 4000,
+        messages: [['role' => 'user', 'content' => $text]],
+        model: AI_MODEL,
+        fallbacks: 'default',
+        outputConfig: ['effort' => 'low'],
+        system: "Tu traduis en français la description d'un travail de construction, dictée par un artisan pour une ligne de devis ou de facture en Belgique. Le texte est souvent en roumain, parfois mélangé avec du français, et peut contenir des erreurs de dictée.\n"
+            . "Réponds uniquement par la description en français, sans guillemets, sans explication.\n"
+            . "- Style court et professionnel de devis (ex. « Pose de carrelage au sol, salle de bain »).\n"
+            . "- Garde exactement les nombres, dimensions, quantités, marques et unités (m², m, cm, h…).\n"
+            . "- Vocabulaire du bâtiment : glet → enduit de lissage, rigips → plaques de plâtre, faianță → faïence, gresie → carrelage de sol, tencuială → plafonnage / enduit, șapă → chape, termoizolație → isolation thermique, hidroizolație → étanchéité.\n"
+            . "- Si le texte est déjà en français, renvoie-le en corrigeant seulement l'orthographe.",
+        betas: ['server-side-fallback-2026-07-01'],
+    );
+    if ($resp->stopReason === 'refusal') throw new RuntimeException('refus');
+    $out = '';
+    foreach ($resp->content as $block) if ($block->type === 'text') $out .= $block->text;
+    $out = trim($out, " \n\r\t\"«»");
+    if ($out === '') throw new RuntimeException('réponse vide');
+    return $out;
+}
+
 function ai_chat(array $me, ?int $convId, string $text, array $ctx, array $photos = []): array {
     require_once __DIR__ . '/vendor/autoload.php';
     @set_time_limit(300);

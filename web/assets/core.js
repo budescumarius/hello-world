@@ -556,7 +556,7 @@ async function switchFirm(id) {
 async function boot() {
   try {
     const b = await api('GET', 'bootstrap');
-    Object.assign(S, { me: b.user, users: b.users, settings: b.settings || {}, firm: b.firm || {}, edition: b.edition || 'avance', ai: !!b.ai, ready: true });
+    Object.assign(S, { me: b.user, users: b.users, settings: b.settings || {}, firm: b.firm || {}, edition: b.edition || 'avance', ai: !!b.ai, translate: !!b.translate, ready: true });
     document.title = (S.settings.company || {}).appName || (S.settings.company || {}).name || 'BâtiPro';
     if (!location.hash) location.hash = '#/dashboard';
     render();

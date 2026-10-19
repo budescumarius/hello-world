@@ -1134,3 +1134,11 @@ a.s-note { text-decoration: none; color: var(--text); } a.s-note > b { color: va
 .s-legal p { margin: 0 0 10px; }
 .s-acc { background: #fff4e6; border-radius: 12px; padding: 10px 12px; }
 .s-chk { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; font-size: 15.5px; } .s-chk input { width: 24px; height: 24px; flex: none; }
+/* Langue de dictée (roumain → français) */
+.s-lang { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; font-size: 15px; color: var(--muted); }
+.s-lang button { min-height: 44px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border); background: #fff; font: inherit; font-weight: 700; color: var(--text); cursor: pointer; }
+.s-lang button small { font-weight: 500; color: var(--muted); }
+.s-lang button.on { background: var(--primary); border-color: var(--primary); color: #fff; } .s-lang button.on small { color: #dfe6ff; }
+.s-desc.tr { position: relative; } .s-desc.tr textarea { opacity: .55; }
+.s-desc.tr::after { content: 'Traduction…'; position: absolute; left: 12px; bottom: 8px; font-size: 13px; font-weight: 700; color: var(--primary); }
+#toast:has(.toast-undo) { min-width: min(330px, 92vw); justify-content: space-between; } #toast .toast-undo { flex: none; white-space: nowrap; }

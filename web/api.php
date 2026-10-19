@@ -82,7 +82,7 @@ switch ($seg[0] ?? '') {
         if (isset($settings['ai']) && is_array($settings['ai'])) { $settings['ai']['hasKey'] = !empty($settings['ai']['key']); unset($settings['ai']['key']); }
         $firm = q('SELECT id, name FROM companies WHERE id = ?', [cid()])->fetch() ?: ['id' => cid(), 'name' => ''];
         out(['user' => $u, 'users' => $users, 'settings' => $settings, 'version' => APP_VERSION,
-            'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => cid() === $u['company_id']], 'edition' => edition(), 'ai' => edition() === 'simple' ? false : ai_ready()]);
+            'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => cid() === $u['company_id']], 'edition' => edition(), 'ai' => edition() === 'simple' ? false : ai_ready(), 'translate' => ai_ready()]);
 
     // ------------------------------------------------------------ Utilisateurs
     case 'users':
@@ -548,6 +548,20 @@ switch ($seg[0] ?? '') {
                 fail(504, 'L\'assistant a mis trop de temps à répondre : simplifiez la demande ou réessayez.');
             } catch (\Anthropic\Core\Exceptions\APIConnectionException $e) {
                 fail(502, 'Service IA injoignable depuis le serveur : ' . $e->getMessage());
+            }
+        }
+        // Traduction d'une ligne dictée (roumain → français), aussi en édition Simplifiée
+        if ($act === 'translate' && $method === 'POST') {
+            if (!ai_ready()) fail(503, "Traduction indisponible : la clé de l'assistant IA n'est pas configurée.");
+            $text = trim((string)(body()['text'] ?? ''));
+            if ($text === '' || mb_strlen($text) > 2000) fail(400, 'Texte vide ou trop long.');
+            try {
+                out(['text' => ai_translate($text)]);
+            } catch (\Anthropic\Core\Exceptions\AuthenticationException $e) {
+                fail(502, 'Clé API Anthropic refusée.');
+            } catch (\Throwable $e) {
+                error_log('[batipro translate] ' . $e->getMessage());
+                fail(502, 'Traduction impossible pour le moment, réessayez.');
             }
         }
         if ($act === 'test' && $method === 'POST') {
