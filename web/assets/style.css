@@ -1142,3 +1142,15 @@ a.s-note { text-decoration: none; color: var(--text); } a.s-note > b { color: va
 .s-desc.tr { position: relative; } .s-desc.tr textarea { opacity: .55; }
 .s-desc.tr::after { content: 'Traduction…'; position: absolute; left: 12px; bottom: 8px; font-size: 13px; font-weight: 700; color: var(--primary); }
 #toast:has(.toast-undo) { min-width: min(330px, 92vw); justify-content: space-between; } #toast .toast-undo { flex: none; white-space: nowrap; }
+/* Listes longues avec recherche */
+.sp-wrap { position: relative; min-width: 0; } .sp-wrap > select { width: 100%; }
+.sp-hit { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; cursor: pointer; padding: 0; margin: 0; }
+.sp-modal .m-body.sp { display: flex; flex-direction: column; gap: 10px; }
+.sp .search { position: sticky; top: 0; z-index: 1; }
+.sp-list { display: flex; flex-direction: column; gap: 2px; min-height: 40vh; }
+.sp-o { display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; min-height: 48px; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; font: inherit; font-size: 16px; color: var(--text); cursor: pointer; }
+.sp-o:hover, .sp-o:focus-visible { background: #f1f3f9; } .sp-o.on { background: #edf2ff; font-weight: 700; color: var(--primary); }
+.sp-o.empty { color: var(--muted); } .sp-o svg { width: 18px; height: 18px; flex: none; } .sp-o:disabled { opacity: .45; }
+.sp-g { font-size: 12.5px; font-weight: 700; text-transform: uppercase; color: var(--muted); padding: 10px 12px 2px; }
+.sp-none { padding: 14px 12px; }
+@media (max-width: 760px) { .modal.sp-modal { height: 88vh; height: 88dvh; } }

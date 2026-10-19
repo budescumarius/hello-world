@@ -587,3 +587,51 @@ function installTip() {
   $('[data-x]', el).onclick = done;
   const ib = $('[data-i]', el); if (ib) ib.onclick = async () => { installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; done(); };
 }
+
+// ---------------------------------------------------------------- Listes longues : recherche en tapant
+// Tout <select> de plus de 10 choix (clients, chantiers, fournisseurs…) s'ouvre dans une fenêtre avec un champ
+// de recherche au lieu de la liste native à faire défiler. data-native sur le select pour garder la liste du système.
+const SP_MIN = 10;
+const spNorm = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+function selectPicker(sel) {
+  const host = sel.closest('label, .field');
+  const lab = host ? ($('span', host) || {}).textContent || '' : '';
+  const opts = [...sel.options].map((o) => ({ v: o.value, t: o.textContent.trim(), g: o.parentElement.tagName === 'OPTGROUP' ? o.parentElement.label : '', dis: o.disabled }));
+  const m = modal(`${mhead(lab.replace(/\s*\*$/, '') || 'Choisir')}<div class="m-body sp"><label class="search big">${I.search}<input type="search" placeholder="Tapez quelques lettres…" autocomplete="off" enterkeyhint="search"></label><div class="sp-list" role="listbox"></div></div>`);
+  m.el.classList.add('sp-modal');
+  const inp = $('input', m.el); const list = $('.sp-list', m.el);
+  const draw = () => {
+    const words = spNorm(inp.value).split(/\s+/).filter(Boolean);
+    const hit = opts.filter((o) => !words.length || words.every((w) => spNorm(`${o.t} ${o.g}`).includes(w)));
+    let g = null;
+    list.innerHTML = hit.slice(0, 300).map((o) => { const head = o.g !== g ? `<div class="sp-g">${esc(o.g)}</div>` : ''; g = o.g;
+      return `${o.g ? head : ''}<button type="button" class="sp-o ${o.v === sel.value ? 'on' : ''} ${o.v === '' ? 'empty' : ''}" data-v="${esc(o.v)}" ${o.dis ? 'disabled' : ''}>${esc(o.t || '—')}${o.v === sel.value ? ` ${I.check}` : ''}</button>`; }).join('')
+      || `<p class="muted sp-none">Aucun résultat pour « ${esc(inp.value)} »</p>`;
+  };
+  const pick = (v) => { if (sel.value !== v) { sel.value = v; sel.dispatchEvent(new Event('input', { bubbles: true })); sel.dispatchEvent(new Event('change', { bubbles: true })); } m.close(); };
+  list.onclick = (e) => { const b = e.target.closest('[data-v]'); if (b && !b.disabled) pick(b.dataset.v); };
+  inp.oninput = draw;
+  inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); const b = $('.sp-o:not([disabled]):not(.empty)', list) || $('.sp-o:not([disabled])', list); if (b) pick(b.dataset.v); } };
+  draw();
+  const cur = $('.sp-o.on', list); if (cur) cur.scrollIntoView({ block: 'center' });
+  // ordinateur : on tape directement ; téléphone : le clavier s'ouvre en touchant le champ (la liste reste visible)
+  if (!('ontouchstart' in window)) setTimeout(() => inp.focus(), 50);
+}
+function spEnhance(sel) {
+  if (!sel || sel.dataset.sp || sel.multiple || sel.dataset.native != null || sel.options.length <= SP_MIN) return;
+  sel.dataset.sp = '1';
+  const wrap = document.createElement('span');
+  wrap.className = 'sp-wrap'; wrap.style.display = sel.closest('.field, label') || getComputedStyle(sel).display === 'block' ? 'block' : 'inline-block';
+  sel.parentNode.insertBefore(wrap, sel); wrap.appendChild(sel);
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'sp-hit'; b.setAttribute('aria-label', 'Rechercher dans la liste');
+  b.onclick = (e) => { e.preventDefault(); if (!sel.disabled) selectPicker(sel); };
+  wrap.appendChild(b);
+}
+new MutationObserver((muts) => {
+  for (const mu of muts) for (const n of mu.addedNodes) {
+    if (n.nodeType !== 1) continue;
+    if (n.tagName === 'SELECT') spEnhance(n);
+    else if (n.tagName === 'OPTION' || n.tagName === 'OPTGROUP') spEnhance(n.closest('select'));
+    else if (n.querySelectorAll) n.querySelectorAll('select').forEach(spEnhance);
+  }
+}).observe(document.documentElement, { childList: true, subtree: true });
