@@ -21,6 +21,15 @@ Aplicație web instalabilă (PWA) pentru urmărirea șantierelor: planuri, punct
 - **Setări**: datele firmei, logo, monedă, cote TVA, prefixe și numerotare pentru devize și facturi.
 - **Backup / restaurare** a tuturor datelor într-un fișier JSON (îl poți salva în iCloud Drive / Fișiere).
 
+## Ofertare Mobilier (`app/mobila/`)
+Aplicație separată pentru atelierul de mobilă, la adresa `https://<utilizator>.github.io/<repo>/mobila/`. Se instalează la fel pe iPhone / iPad și merge offline.
+- **Corpuri după dimensiuni** (bază, suspendat, coloană, dulap, raft): din L × H × A, polițe, uși și sertare generează piesele, cantul și accesoriile. Piesele se pot modifica, iar blaturile și panourile se adaugă manual.
+- **Debitare**: optimizare tip ghilotină pe placa reală (ex. Unilin 2800 × 2070), cu grosimea pânzei, tăierea marginilor și fibra. Arată desenul fiecărei plăci, numărul de plăci, utilizarea, pierderea în m² și metrii de tăietură. Lista de debitare se exportă în CSV pentru furnizor.
+- **Cant** pe tip și decor, cu adaos pe latură.
+- **Accesorii**: balamale după înălțimea ușii, glisiere, mânere, picioare, suporți, consumabile, plus orice linie din catalog.
+- **Manoperă** în ore × tarif (75 / 80 lei), cu estimare automată din corpuri. **Transport** în km × drumuri × lei/km.
+- **Ofertă** cu adaos, discount, TVA, avans și rotunjire. Textul se copiază pentru WhatsApp / e-mail sau se printează ca PDF.
+
 ## Publicare
 1. Pe GitHub: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 2. La fiecare push pe `master`, workflow-ul `.github/workflows/pages.yml` publică folderul `app/`.

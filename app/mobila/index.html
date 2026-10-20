@@ -1,0 +1,1204 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f5e52">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ofertare">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<!-- ARTIFACT-START -->
+<title>Ofertare Mobilier</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: atelier de lucru — antet lipicios cu totalul mereu vizibil, pașii procesului ca file numerotate, conținut în carduri late; plăcile de debitare desenate la scară. */
+:root {
+  --bg: #eef2f0;
+  --surface: #ffffff;
+  --surface-2: #f5f7f6;
+  --ink: #17211e;
+  --muted: #5b6965;
+  --line: #d3dbd8;
+  --accent: #0f5e52;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcebe7;
+  --wood: #d8b07a;
+  --wood-2: #c99a5b;
+  --wood-ink: #3a2a14;
+  --sheet: #e6ebe9;
+  --hatch: #b9c4c0;
+  --good: #2f7d32;
+  --warn: #a15c00;
+  --bad: #b3261e;
+  --font-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1513; --surface: #172020; --surface-2: #1c2725; --ink: #e4ebe8; --muted: #98a8a3;
+    --line: #2b3835; --accent: #4fbfa6; --accent-ink: #06201b; --accent-soft: #1d3a34;
+    --wood: #b9925e; --wood-2: #a57d48; --wood-ink: #1d1407; --sheet: #23302d; --hatch: #3a4a46;
+    --good: #6cc070; --warn: #e0a24a; --bad: #f08a80; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1513; --surface: #172020; --surface-2: #1c2725; --ink: #e4ebe8; --muted: #98a8a3;
+  --line: #2b3835; --accent: #4fbfa6; --accent-ink: #06201b; --accent-soft: #1d3a34;
+  --wood: #b9925e; --wood-2: #a57d48; --wood-ink: #1d1407; --sheet: #23302d; --hatch: #3a4a46;
+  --good: #6cc070; --warn: #e0a24a; --bad: #f08a80; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(--font-body); -webkit-text-size-adjust: 100%; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h2 { font-size: 1.25rem; font-weight: 700; }
+h3 { font-size: 1.02rem; font-weight: 700; }
+button, input, select, textarea { font: inherit; color: inherit; }
+.mono, .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.small { font-size: 0.85rem; }
+
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+.top-in { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-block: 10px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); max-width: 1180px; margin: 0 auto; }
+.brand { font-family: var(--font-display); font-weight: 800; font-size: 1.05rem; display: flex; align-items: center; gap: 8px; }
+.brand svg { width: 26px; height: 26px; }
+.projpick { display: flex; gap: 6px; align-items: center; flex: 1 1 220px; min-width: 0; }
+.projpick select { flex: 1; min-width: 0; }
+.total-pill { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; }
+.total-pill b { font-family: var(--font-display); font-size: 1.35rem; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+.total-pill span { font-size: 0.75rem; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); max-width: 1180px; margin: 0 auto; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { border: 0; background: none; padding: 10px 12px; border-bottom: 3px solid transparent; white-space: nowrap; cursor: pointer; color: var(--muted); font-weight: 500; }
+.tab i { font-style: normal; font-family: var(--font-mono); font-size: 0.78rem; margin-right: 6px; color: var(--muted); }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.tab[aria-selected="true"] i { color: var(--accent); }
+.tab:focus-visible, .btn:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+main { max-width: 1180px; margin: 0 auto; padding-block: 18px 80px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.card-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.card-h .sp { flex: 1; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+label.f { display: grid; gap: 4px; font-size: 0.8rem; color: var(--muted); font-weight: 500; min-width: 0; }
+label.f > span { letter-spacing: 0.02em; }
+input, select, textarea { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; width: 100%; }
+textarea { min-height: 84px; resize: vertical; }
+input[type="number"] { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); padding: 0; }
+label.chk { display: inline-flex; gap: 8px; align-items: center; font-size: 0.9rem; cursor: pointer; }
+.btn { border: 1px solid var(--line); background: var(--surface); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-weight: 500; display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+.btn:hover { border-color: var(--accent); }
+.btn.pri { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.ghost { border-color: transparent; background: none; }
+.btn.danger { color: var(--bad); }
+.btn.sm { padding: 4px 8px; font-size: 0.85rem; }
+.btn.icon { padding: 6px 8px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-size: 0.78rem; font-weight: 600; white-space: nowrap; }
+.chip.warn { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.chip.bad { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
+.chip.plain { background: var(--surface-2); color: var(--muted); }
+
+.tw { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th { text-align: left; font-weight: 600; font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); padding: 8px; background: var(--surface-2); border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
+td input, td select { padding: 6px 7px; }
+td.r, th.r { text-align: right; }
+td .w-xs { width: 62px; } td .w-s { width: 84px; } td .w-m { width: 150px; } td .w-l { min-width: 170px; }
+.tot td { font-weight: 700; background: var(--surface-2); }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.stat { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; display: grid; gap: 2px; }
+.stat span { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.stat b { font-family: var(--font-display); font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+.meter { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.meter > i { display: block; height: 100%; background: var(--accent); }
+
+.sheets { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.sheet-card { display: grid; gap: 6px; min-width: 0; }
+.sheet-card .cap { display: flex; justify-content: space-between; gap: 8px; font-size: 0.85rem; }
+svg.sheet { width: 100%; height: auto; display: block; border-radius: 4px; }
+.sh-bg { fill: url(#hatch); }
+.sh-trim { fill: none; stroke: var(--muted); stroke-width: 3; stroke-dasharray: 18 12; }
+.sh-part { fill: var(--wood); stroke: var(--wood-ink); stroke-width: 2.5; }
+.sh-part.rot { fill: var(--wood-2); }
+.sh-txt { fill: var(--wood-ink); font-family: var(--font-mono); text-anchor: middle; dominant-baseline: middle; }
+.hatch-bg { fill: var(--sheet); }
+.hatch-ln { stroke: var(--hatch); stroke-width: 6; }
+
+.sumtbl td:first-child { color: var(--muted); }
+.sumtbl td.r { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sumtbl tr.big td { font-size: 1.15rem; font-weight: 700; color: var(--ink); font-family: var(--font-display); }
+.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 860px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+
+.doc { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r); padding: 28px; display: grid; gap: 16px; max-width: 820px; }
+.doc-h { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-bottom: 2px solid var(--ink); padding-bottom: 12px; }
+.doc-h h1 { font-size: 1.7rem; font-weight: 800; }
+.doc table td, .doc table th { padding: 6px 8px; }
+.olist { display: grid; }
+.olist-h { display: flex; justify-content: space-between; gap: 8px; font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.oitem { display: grid; gap: 2px; padding-block: 8px; border-bottom: 1px solid var(--line); }
+.oitem-t { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.doc .grand { display: flex; justify-content: space-between; align-items: baseline; border-top: 2px solid var(--ink); padding-top: 10px; font-family: var(--font-display); }
+.doc .grand b { font-size: 1.6rem; }
+
+.empty { text-align: center; padding: 28px 16px; color: var(--muted); display: grid; gap: 10px; justify-items: center; }
+.note { font-size: 0.85rem; color: var(--muted); background: var(--surface-2); border-radius: 8px; padding: 8px 12px; }
+
+.modal { position: fixed; inset: 0; z-index: 20; background: color-mix(in srgb, var(--ink) 45%, transparent); display: grid; place-items: center; padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.modal-box { background: var(--surface); border-radius: 12px; width: min(640px, 100%); max-height: 100%; overflow: auto; padding: 18px; display: grid; gap: 14px; border: 1px solid var(--line); }
+.toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 8px; z-index: 30; font-size: 0.9rem; }
+
+@media (max-width: 520px) {
+  .doc { padding: 18px; }
+  .total-pill b { font-size: 1.15rem; }
+  .sheets { grid-template-columns: minmax(0, 1fr); }
+}
+@media print {
+  body::before, .top { display: none !important; }
+  body { background: #fff; }
+  body * { visibility: hidden; }
+  #offerDoc, #offerDoc * { visibility: visible; }
+  #offerDoc { position: absolute; left: 0; top: 0; width: 100%; border: 0; padding: 0; max-width: none; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <pattern id="hatch" width="40" height="40" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="40" height="40" class="hatch-bg"/>
+      <line x1="0" y1="0" x2="0" y2="40" class="hatch-ln"/>
+    </pattern>
+  </defs>
+</svg>
+
+<header class="top">
+  <div class="top-in">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="5" width="26" height="22" rx="2" fill="var(--accent)"/><rect x="6" y="8" width="11" height="16" fill="var(--wood)"/><rect x="19" y="8" width="7" height="7" fill="var(--wood)"/><rect x="19" y="17" width="7" height="7" fill="var(--wood-2)"/></svg>
+      Ofertare
+    </div>
+    <div class="projpick">
+      <label for="projSel" class="muted small" style="position:absolute;left:-9999px">Proiect</label>
+      <select id="projSel" aria-label="Proiect curent"></select>
+      <button class="btn sm" data-act="newProject" title="Proiect nou">+ Nou</button>
+    </div>
+    <div class="total-pill" aria-live="polite"><span>Total ofertă</span><b data-out="total">0 lei</b></div>
+  </div>
+  <nav class="tabs" role="tablist" id="tabs"></nav>
+</header>
+<main id="view"></main>
+<div id="modal" class="modal" hidden></div>
+<div id="toast" class="toast" hidden role="status"></div>
+
+<script>
+'use strict';
+/* Ofertare Mobilier — calcul rapid de ofertă pentru atelier de mobilă:
+   corpuri → piese → optimizare debitare plăci → cant → accesorii → manoperă → transport → ofertă client.
+   Datele se păstrează local în browser (localStorage) + backup JSON. */
+
+// ---------------------------------------------------------------- Utilitare
+const KEY = 'ofertare-mobilier-v1';
+const $ = (s, el = document) => el.querySelector(s);
+const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const num = (v) => { const n = parseFloat(String(v ?? '').replace(',', '.')); return isFinite(n) ? n : 0; };
+const fmt = (v, d = 0) => (Number(v) || 0).toLocaleString('ro-RO', { minimumFractionDigits: d, maximumFractionDigits: d });
+const lei = (v, d = 0) => fmt(v, d) + ' lei';
+const today = () => new Date().toISOString().slice(0, 10);
+const roDate = (iso) => { if (!iso) return ''; const [y, m, d] = iso.split('-'); return `${d}.${m}.${y}`; };
+const inFrame = (() => { try { return window.self !== window.top; } catch { return true; } })();
+
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.hidden = false;
+  clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, 2200);
+}
+
+// ---------------------------------------------------------------- Date implicite
+const TYPES = {
+  baza:      { nume: 'Corp bază',      W: 600, H: 720,  D: 560, polite: 1, usi: 1, sertare: 0, picioare: true },
+  suspendat: { nume: 'Corp suspendat', W: 600, H: 720,  D: 320, polite: 1, usi: 1, sertare: 0, prindere: true },
+  coloana:   { nume: 'Coloană',        W: 600, H: 2100, D: 560, polite: 4, usi: 2, sertare: 0, picioare: true },
+  dulap:     { nume: 'Dulap haine',    W: 1000, H: 2400, D: 600, polite: 2, usi: 2, sertare: 0, picioare: true, bara: true },
+  raft:      { nume: 'Raft deschis',   W: 800, H: 1800, D: 300, polite: 4, usi: 0, sertare: 0 },
+};
+
+function defaultSettings() {
+  return {
+    firma: { nume: '', tel: '', email: '', adresa: '', cui: '' },
+    kerf: 4, trim: 10, cantAdaos: 30,
+    rate: 80, pretKm: 2.5, tva: 21, pierdere: 15,
+    furnizor: false, debitareMl: 2.5, cantMl: 2,
+    cantCorp: 'c04', cantFront: 'c2',
+    roundTo: 10, valabil: 15,
+    h: { proiect: 2, piesa: 0.1, corp: 1, sertar: 0.5, usa: 0.2, montaj: 0.75 },
+  };
+}
+function defaultMaterials() {
+  return [
+    { id: 'm_alb', nume: 'PAL Unilin Alb', decor: '', tip: 'PAL', gros: 18, L: 2800, W: 2070, pret: 260, fibra: false },
+    { id: 'm_stejar', nume: 'PAL Unilin Stejar', decor: '', tip: 'PAL', gros: 18, L: 2800, W: 2070, pret: 340, fibra: true },
+    { id: 'm_hdf', nume: 'HDF alb', decor: '', tip: 'HDF', gros: 3, L: 2800, W: 2070, pret: 75, fibra: false },
+    { id: 'm_blat', nume: 'Blat bucătărie', decor: '', tip: 'Blat', gros: 38, L: 4100, W: 600, pret: 650, fibra: true, trim: 0 },
+  ];
+}
+function defaultCants() {
+  return [{ id: 'c04', nume: 'Cant ABS 0,4 mm', pret: 1.2 }, { id: 'c2', nume: 'Cant ABS 2 mm', pret: 3.5 }];
+}
+function defaultCatalog() {
+  return [
+    { id: 'a_balama', nume: 'Balama aplicată cu amortizor', um: 'buc', pret: 12 },
+    { id: 'a_glisiera', nume: 'Glisiere cu bile (pereche)', um: 'set', pret: 38 },
+    { id: 'a_maner', nume: 'Mâner 128 mm', um: 'buc', pret: 15 },
+    { id: 'a_picior', nume: 'Picior reglabil 100 mm', um: 'buc', pret: 4.5 },
+    { id: 'a_suport', nume: 'Suport poliță', um: 'buc', pret: 0.4 },
+    { id: 'a_prindere', nume: 'Sistem prindere corp suspendat', um: 'buc', pret: 7 },
+    { id: 'a_bara', nume: 'Bară haine cu suporți', um: 'set', pret: 30 },
+    { id: 'a_plinta', nume: 'Plintă bucătărie', um: 'ml', pret: 25 },
+    { id: 'a_consum', nume: 'Consumabile (șuruburi, dibluri, cuie)', um: 'corp', pret: 15 },
+  ];
+}
+
+function newProject(nume) {
+  const s = S.settings;
+  return {
+    id: uid(), nume: nume || 'Proiect nou', status: 'ciorna', creat: today(),
+    client: { nume: '', tel: '', adresa: '' }, descriere: '', note: '', termen: '4 săptămâni',
+    groups: [], acc: [], accAdj: {},
+    labor: [
+      { id: uid(), nume: 'Măsurători și proiect 3D', h: 0 },
+      { id: uid(), nume: 'Debitare, cant, găurire', h: 0 },
+      { id: uid(), nume: 'Asamblare', h: 0 },
+      { id: uid(), nume: 'Montaj la client', h: 0 },
+    ],
+    rate: s.rate, transport: { km: 0, drumuri: 3, pretKm: s.pretKm, fix: 0 },
+    markup: 0, discount: 0, tvaOn: false, avans: 50, placi: 'intregi', detaliat: true, listaCorpuri: true,
+  };
+}
+
+function seed() {
+  S = { v: 1, settings: defaultSettings(), materials: defaultMaterials(), cants: defaultCants(), catalog: defaultCatalog(), projects: [], current: null, tab: 'corpuri' };
+  const p = newProject('Exemplu – bucătărie 2,4 m');
+  p.client = { nume: 'Client exemplu', tel: '', adresa: '' };
+  p.descriere = 'Bucătărie dreaptă 2,4 m: corpuri albe, fronturi stejar, blat 38 mm.';
+  p.note = 'Exemplu de lucru — modifică sau șterge. Perete 2420 mm, înălțime 2600 mm, priză la 1100 mm.';
+  const specs = [
+    { tip: 'baza', W: 800, usi: 2 }, { tip: 'baza', W: 600, usi: 0, sertare: 3, polite: 0 },
+    { tip: 'baza', W: 600 }, { tip: 'baza', W: 400 },
+    { tip: 'suspendat', W: 800, usi: 2 }, { tip: 'suspendat', W: 600, buc: 2 }, { tip: 'suspendat', W: 400 },
+  ];
+  for (const sp of specs) p.groups.push(makeGroup(fullSpec(sp)));
+  p.groups.push({ id: uid(), nume: 'Blat de lucru', spec: null, parts: [
+    { id: uid(), nume: 'Blat', mat: 'm_blat', L: 2400, W: 600, q: 1, eL: 0, eW: 1, cant: '', rot: false },
+  ] });
+  p.acc.push({ id: uid(), cat: 'a_plinta', nume: 'Plintă bucătărie', um: 'ml', q: 2.4, pret: 25 });
+  p.transport.km = 25;
+  S.projects.push(p); S.current = p.id;
+  estimateHours(p);
+  return S;
+}
+
+let S;
+function load() {
+  try { const raw = localStorage.getItem(KEY); if (!raw) return null; const d = JSON.parse(raw); return d && d.projects ? d : null; } catch { return null; }
+}
+let _saveT; let _saveWarned = false;
+function save() {
+  clearTimeout(_saveT);
+  _saveT = setTimeout(() => {
+    try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { if (!_saveWarned) { _saveWarned = true; toast('Datele nu pot fi salvate în acest browser. Folosește Backup.'); } }
+  }, 250);
+}
+function migrate() {
+  const d = defaultSettings();
+  S.settings = { ...d, ...S.settings, firma: { ...d.firma, ...(S.settings || {}).firma }, h: { ...d.h, ...(S.settings || {}).h } };
+  S.materials ||= defaultMaterials(); S.cants ||= defaultCants(); S.catalog ||= defaultCatalog();
+  S.projects.forEach((p) => { p.accAdj ||= {}; p.acc ||= []; p.groups ||= []; });
+  if (!S.projects.length) S.projects.push(newProject());
+  if (!S.projects.find((p) => p.id === S.current)) S.current = S.projects[0].id;
+}
+const cur = () => S.projects.find((p) => p.id === S.current) || S.projects[0];
+const matById = (id) => S.materials.find((m) => m.id === id);
+const cantById = (id) => S.cants.find((c) => c.id === id);
+const catById = (id) => S.catalog.find((c) => c.id === id);
+const matName = (m) => (m ? [m.nume, m.decor].filter(Boolean).join(' ') : '');
+const trimOf = (m) => (m.trim === '' || m.trim == null ? num(S.settings.trim) : num(m.trim));
+
+// ---------------------------------------------------------------- Generator corpuri
+function fullSpec(sp) {
+  const t = TYPES[sp.tip] || TYPES.baza;
+  return {
+    tip: sp.tip, nume: sp.nume || '', W: sp.W ?? t.W, H: sp.H ?? t.H, D: sp.D ?? t.D, buc: sp.buc ?? 1,
+    polite: sp.polite ?? t.polite, usi: sp.usi ?? (sp.tip === 'raft' ? 0 : t.usi), sertare: sp.sertare ?? t.sertare,
+    manere: sp.manere ?? true, bara: sp.bara ?? !!t.bara,
+    matCorp: sp.matCorp || 'm_alb', matFront: sp.matFront || 'm_stejar', matSpate: sp.matSpate ?? 'm_hdf',
+  };
+}
+function specTitle(sp) { return `${TYPES[sp.tip]?.nume || 'Corp'} ${sp.W}`; }
+function hingesFor(h) { return h <= 900 ? 2 : h <= 1500 ? 3 : h <= 2000 ? 4 : 5; }
+
+function genParts(sp) {
+  const s = S.settings, mc = matById(sp.matCorp), mf = matById(sp.matFront);
+  const t = mc?.gros || 18, n = Math.max(1, sp.buc | 0);
+  const W = num(sp.W), H = num(sp.H), D = num(sp.D), inner = W - 2 * t;
+  const rotC = !(mc?.fibra), rotF = !(mf?.fibra);
+  const cc = s.cantCorp, cf = s.cantFront, out = [];
+  const add = (nume, mat, L, Wd, q, eL, eW, cant, rot) => {
+    if (q > 0 && L > 0 && Wd > 0) out.push({ id: uid(), nume, mat, L: Math.round(L), W: Math.round(Wd), q: q * n, eL, eW, cant: eL + eW ? cant : '', rot });
+  };
+  add('Lateral', sp.matCorp, H, D, 2, 1, 0, cc, rotC);
+  if (sp.tip === 'baza') {
+    add('Fund', sp.matCorp, inner, D, 1, 1, 0, cc, rotC);
+    add('Traversă', sp.matCorp, inner, 100, 2, 1, 0, cc, rotC);
+  } else {
+    add('Blat corp', sp.matCorp, inner, D, 1, 1, 0, cc, rotC);
+    add('Fund', sp.matCorp, inner, D, 1, 1, 0, cc, rotC);
+  }
+  const back = sp.matSpate ? matById(sp.matSpate) : null;
+  const shelfD = D - (back ? 20 : 0);
+  add('Poliță', sp.matCorp, inner - 2, shelfD, num(sp.polite), 1, 0, cc, rotC);
+  if (back) add('Spate', sp.matSpate, H - 4, W - 4, 1, 0, 0, '', !back.fibra);
+  const nd = num(sp.sertare) | 0, nu = num(sp.usi) | 0;
+  if (nd > 0) {
+    const fh = Math.floor((H - 3 * nd) / nd);
+    add('Front sertar', sp.matFront, W - 3, fh, nd, 2, 2, cf, rotF);
+    const slide = Math.min(600, Math.max(250, Math.floor((D - 30) / 50) * 50));
+    const boxH = Math.min(250, Math.max(70, fh - 60)), boxW = inner - 26;
+    add('Lateral sertar', sp.matCorp, slide, boxH, 2 * nd, 1, 0, cc, rotC);
+    add('Față/spate sertar', sp.matCorp, boxW - 2 * t, boxH, 2 * nd, 1, 0, cc, rotC);
+    if (back) add('Fund sertar', sp.matSpate, slide, boxW, nd, 0, 0, '', !back.fibra);
+  } else if (nu > 0) {
+    add(nu > 1 ? 'Ușă' : 'Ușă', sp.matFront, H - 3, Math.floor((W - 3 * nu) / nu), nu, 2, 2, cf, rotF);
+  }
+  return out;
+}
+function accForSpec(sp) {
+  const n = Math.max(1, sp.buc | 0), o = {}, add = (k, q) => { if (q > 0) o[k] = (o[k] || 0) + q * n; };
+  const nd = num(sp.sertare) | 0, nu = nd > 0 ? 0 : num(sp.usi) | 0;
+  add('a_balama', nu * hingesFor(num(sp.H) - 3));
+  add('a_glisiera', nd);
+  if (sp.manere) add('a_maner', nu + nd);
+  if (TYPES[sp.tip]?.picioare) add('a_picior', num(sp.W) > 900 ? 6 : 4);
+  if (sp.tip === 'suspendat') add('a_prindere', 2);
+  if (sp.bara) add('a_bara', 1);
+  add('a_suport', 4 * num(sp.polite));
+  add('a_consum', 1);
+  return o;
+}
+function makeGroup(sp, old) {
+  return { id: old?.id || uid(), nume: sp.nume || specTitle(sp), autoName: !sp.nume, spec: sp, parts: genParts(sp) };
+}
+
+// ---------------------------------------------------------------- Optimizare debitare (ghilotină)
+const optCache = new Map();
+const SORTS = [
+  (a, b) => b.L * b.W - a.L * a.W,
+  (a, b) => Math.max(b.L, b.W) - Math.max(a.L, a.W) || b.L * b.W - a.L * a.W,
+  (a, b) => b.L - a.L || b.W - a.W,
+  (a, b) => b.W - a.W || b.L - a.L,
+  (a, b) => (b.L + b.W) - (a.L + a.W),
+];
+const SCORES = ['baf', 'bssf', 'blsf'];
+const SPLITS = ['sas', 'las', 'h', 'v', 'area'];
+
+function packOnce(items, SW, SH, k, sortFn, score, split) {
+  const sheets = [];
+  const list = items.slice().sort(sortFn);
+  const newSheet = () => ({ free: [{ x: 0, y: 0, w: SW, h: SH }], placed: [], used: 0, cut: 0 });
+  const find = (sh, it) => {
+    let best = null;
+    const ors = it.rot && it.L !== it.W ? [[it.L, it.W, false], [it.W, it.L, true]] : [[it.L, it.W, false]];
+    for (let i = 0; i < sh.free.length; i++) {
+      const f = sh.free[i];
+      for (const [w, h, r] of ors) {
+        if (w > f.w || h > f.h) continue;
+        const dw = f.w - w, dh = f.h - h;
+        const sc = score === 'baf' ? f.w * f.h - w * h : score === 'bssf' ? Math.min(dw, dh) : Math.max(dw, dh);
+        const tie = Math.min(dw, dh);
+        if (!best || sc < best.sc || (sc === best.sc && tie < best.tie)) best = { i, w, h, r, sc, tie };
+      }
+    }
+    return best;
+  };
+  for (const it of list) {
+    let sh = null, pos = null;
+    for (const s of sheets) { pos = find(s, it); if (pos) { sh = s; break; } }
+    if (!pos) { sh = newSheet(); sheets.push(sh); pos = find(sh, it); }
+    const f = sh.free.splice(pos.i, 1)[0];
+    const { w, h } = pos;
+    sh.placed.push({ x: f.x, y: f.y, w, h, no: it.no, nume: it.nume, L: it.L, W: it.W, rot: pos.r });
+    sh.used += w * h;
+    const cw = Math.min(w + k, f.w), ch = Math.min(h + k, f.h), rw = f.w - cw, rh = f.h - ch;
+    let horiz;
+    if (split === 'h') horiz = true; else if (split === 'v') horiz = false;
+    else if (split === 'sas') horiz = rw < rh; else if (split === 'las') horiz = rw >= rh;
+    else horiz = (f.w * rh) > (f.h * rw);
+    if (horiz) {
+      if (rh > 0) { sh.free.push({ x: f.x, y: f.y + ch, w: f.w, h: rh }); sh.cut += f.w; }
+      if (rw > 0) { sh.free.push({ x: f.x + cw, y: f.y, w: rw, h: ch }); sh.cut += h; }
+    } else {
+      if (rw > 0) { sh.free.push({ x: f.x + cw, y: f.y, w: rw, h: f.h }); sh.cut += f.h; }
+      if (rh > 0) { sh.free.push({ x: f.x, y: f.y + ch, w: cw, h: rh }); sh.cut += w; }
+    }
+  }
+  return sheets;
+}
+
+function optimize(items, m) {
+  const k = num(S.settings.kerf), t = trimOf(m);
+  const SW = m.L - 2 * t, SH = m.W - 2 * t;
+  const key = JSON.stringify([items.map((i) => [i.no, i.L, i.W, i.rot ? 1 : 0]), SW, SH, k]);
+  if (optCache.has(key)) return optCache.get(key);
+  const ok = [], bad = [];
+  for (const i of items) {
+    if ((i.L <= SW && i.W <= SH) || (i.rot && i.W <= SW && i.L <= SH)) ok.push(i); else bad.push(i);
+  }
+  let best = null, bestLast = Infinity;
+  if (ok.length) {
+    for (const so of SORTS) for (const sc of SCORES) for (const sp of SPLITS) {
+      const r = packOnce(ok, SW, SH, k, so, sc, sp);
+      const last = r[r.length - 1].used;
+      if (!best || r.length < best.length || (r.length === best.length && last < bestLast)) { best = r; bestLast = last; }
+    }
+  }
+  const sheets = (best || []).sort((a, b) => b.used - a.used);
+  const trimCut = t > 0 ? 2 * (m.L + m.W) : 0;
+  const res = { sheets, unplaced: bad, SW, SH, cut: sheets.reduce((a, sh) => a + sh.cut + trimCut, 0) };
+  if (optCache.size > 200) optCache.clear();
+  optCache.set(key, res);
+  return res;
+}
+
+// ---------------------------------------------------------------- Calcul ofertă
+function compute(p) {
+  const s = S.settings;
+  const all = []; let no = 0;
+  for (const g of p.groups) for (const pt of g.parts) { no++; all.push({ ...pt, no, grup: g.nume }); }
+  const mats = [];
+  for (const m of S.materials) {
+    const rows = all.filter((x) => x.mat === m.id);
+    if (!rows.length) continue;
+    const items = [];
+    for (const r of rows) for (let i = 0; i < Math.max(0, num(r.q) | 0); i++) items.push({ no: r.no, nume: r.nume, L: num(r.L), W: num(r.W), rot: !!r.rot });
+    const opt = optimize(items, m);
+    const area = items.reduce((a, i) => a + i.L * i.W, 0) / 1e6;
+    const sheetA = m.L * m.W / 1e6;
+    const n = opt.sheets.length;
+    const costFull = n * num(m.pret);
+    const costArea = area * (1 + num(s.pierdere) / 100) * num(m.pret) / sheetA;
+    const cost = p.placi === 'suprafata' ? Math.min(costArea, costFull || costArea) : costFull;
+    mats.push({ m, rows, items, opt, area, sheetA, n, util: n ? area / (n * sheetA) : 0, waste: n * sheetA - area, cost, costFull, costArea });
+  }
+  const orphan = all.filter((x) => !matById(x.mat));
+  // cant pe tip + decor
+  const cmap = new Map();
+  for (const r of all) {
+    const e = num(r.eL) + num(r.eW);
+    if (!e || !r.cant) continue;
+    const ml = (num(r.eL) * num(r.L) + num(r.eW) * num(r.W) + e * num(s.cantAdaos)) * num(r.q) / 1000;
+    const key = r.cant + '|' + r.mat;
+    const o = cmap.get(key) || { cant: cantById(r.cant), m: matById(r.mat), ml: 0 };
+    o.ml += ml; cmap.set(key, o);
+  }
+  const cants = [...cmap.values()].map((o) => ({ ...o, cost: o.ml * num(o.cant?.pret) }));
+  const cantMl = cants.reduce((a, c) => a + c.ml, 0);
+  const cutMl = mats.reduce((a, x) => a + x.opt.cut, 0) / 1000;
+  const furn = s.furnizor ? cutMl * num(s.debitareMl) + cantMl * num(s.cantMl) : 0;
+  // accesorii
+  const auto = {};
+  for (const g of p.groups) if (g.spec) for (const [k, q] of Object.entries(accForSpec(g.spec))) auto[k] = (auto[k] || 0) + q;
+  const accAuto = [];
+  for (const k of new Set([...Object.keys(auto), ...Object.keys(p.accAdj || {})])) {
+    const c = catById(k); if (!c) continue;
+    const q = (auto[k] || 0) + num(p.accAdj[k]);
+    accAuto.push({ id: k, c, auto: auto[k] || 0, adj: num(p.accAdj[k]), q, cost: q * num(c.pret) });
+  }
+  const accMan = p.acc.map((a) => ({ ...a, cost: num(a.q) * num(a.pret) }));
+  const accCost = accAuto.reduce((a, x) => a + x.cost, 0) + accMan.reduce((a, x) => a + x.cost, 0);
+
+  const placi = mats.reduce((a, x) => a + x.cost, 0);
+  const cantCost = cants.reduce((a, c) => a + c.cost, 0);
+  const materiale = placi + cantCost + furn;
+  const markupAmt = (materiale + accCost) * num(p.markup) / 100;
+  const ore = p.labor.reduce((a, l) => a + num(l.h), 0);
+  const manopera = ore * num(p.rate);
+  const tr = p.transport;
+  const transport = num(tr.km) * 2 * num(tr.drumuri) * num(tr.pretKm) + num(tr.fix);
+  const brut = materiale + accCost + markupAmt + manopera + transport;
+  const disc = brut * num(p.discount) / 100;
+  const net = brut - disc;
+  const tva = p.tvaOn ? net * num(s.tva) / 100 : 0;
+  const ro = num(s.roundTo);
+  const total = ro > 0 ? Math.round((net + tva) / ro) * ro : net + tva;
+  return { all, mats, orphan, cants, cantMl, cutMl, furn, accAuto, accMan, accCost, placi, cantCost, materiale, markupAmt, ore, manopera, transport, brut, disc, net, tva, total };
+}
+
+function estimateHours(p) {
+  const h = S.settings.h;
+  let corpuri = 0, sertare = 0, usi = 0, piese = 0;
+  for (const g of p.groups) {
+    for (const pt of g.parts) piese += num(pt.q);
+    if (g.spec) {
+      const n = Math.max(1, g.spec.buc | 0), nd = num(g.spec.sertare) | 0;
+      corpuri += n; sertare += nd * n; usi += nd ? 0 : (num(g.spec.usi) | 0) * n;
+    }
+  }
+  const r = (v) => Math.round(v * 2) / 2;
+  const vals = [num(h.proiect), piese * num(h.piesa), corpuri * num(h.corp) + sertare * num(h.sertar) + usi * num(h.usa), corpuri * num(h.montaj)];
+  vals.forEach((v, i) => { if (p.labor[i]) p.labor[i].h = r(v); });
+  return { corpuri, sertare, usi, piese };
+}
+
+// ---------------------------------------------------------------- Randare
+const TABS = [
+  ['client', '1', 'Client'], ['corpuri', '2', 'Corpuri și piese'], ['debitare', '3', 'Debitare'],
+  ['accesorii', '4', 'Accesorii'], ['manopera', '5', 'Manoperă și transport'], ['oferta', '6', 'Ofertă'], ['setari', '', 'Setări'],
+];
+const STATUS = { ciorna: 'Ciornă', trimisa: 'Trimisă', acceptata: 'Acceptată', refuzata: 'Refuzată' };
+let C = null;
+
+function render() {
+  const p = cur();
+  C = compute(p);
+  $('#projSel').innerHTML = S.projects.map((x) => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${esc(x.nume)}</option>`).join('');
+  $('#tabs').innerHTML = TABS.map(([k, n, l]) => `<button class="tab" role="tab" data-act="tab" data-tab="${k}" aria-selected="${S.tab === k}">${n ? `<i>${n}</i>` : ''}${l}</button>`).join('');
+  const v = { client: vClient, corpuri: vCorpuri, debitare: vDebitare, accesorii: vAccesorii, manopera: vManopera, oferta: vOferta, setari: vSetari }[S.tab] || vCorpuri;
+  $('#view').innerHTML = v(p);
+  outs();
+}
+function outs() {
+  const map = { total: lei(C.total), ore: fmt(C.ore, 1) + ' h', manopera: lei(C.manopera), transport: lei(C.transport), acc: lei(C.accCost), net: lei(C.net) };
+  document.querySelectorAll('[data-out]').forEach((el) => { const k = el.dataset.out; if (k in map) el.textContent = map[k]; });
+}
+let _rt;
+function recalcSoon(full) {
+  clearTimeout(_rt);
+  _rt = setTimeout(() => {
+    if (full) { const y = window.scrollY; const a = document.activeElement?.id; render(); window.scrollTo(0, y); if (a) document.getElementById(a)?.focus(); }
+    else { C = compute(cur()); outs(); }
+  }, 200);
+}
+
+// input helpers: data-o = obiect, data-id, data-f = câmp (cu puncte)
+function inp(o, id, f, val, opts = {}) {
+  const t = opts.type || 'text';
+  const idAttr = `${o}-${id || 'x'}-${f}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `<input id="${idAttr}" type="${t}" ${t === 'number' ? 'inputmode="decimal" step="any"' : ''} class="${opts.cls || ''}" data-o="${o}" data-id="${id || ''}" data-f="${f}" value="${esc(val)}" ${opts.ph ? `placeholder="${esc(opts.ph)}"` : ''} ${opts.full ? 'data-full="1"' : ''} aria-label="${esc(opts.label || f)}">`;
+}
+function sel(o, id, f, val, options, opts = {}) {
+  const idAttr = `${o}-${id || 'x'}-${f}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `<select id="${idAttr}" class="${opts.cls || ''}" data-o="${o}" data-id="${id || ''}" data-f="${f}" data-full="${opts.full === false ? '' : '1'}" aria-label="${esc(opts.label || f)}">${options.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(val) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+}
+function chk(o, id, f, val, label, full = true) {
+  const idAttr = `${o}-${id || 'x'}-${f}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `<label class="chk"><input id="${idAttr}" type="checkbox" data-o="${o}" data-id="${id || ''}" data-f="${f}" ${val ? 'checked' : ''} ${full ? 'data-full="1"' : ''}> ${label}</label>`;
+}
+const fld = (label, html) => `<label class="f"><span>${label}</span>${html}</label>`;
+const matOpts = () => S.materials.map((m) => [m.id, `${m.nume}${m.decor ? ' ' + m.decor : ''} ${m.gros}`]);
+const cantOpts = () => [['', '—'], ...S.cants.map((c) => [c.id, c.nume])];
+
+function vClient(p) {
+  return `
+  <section class="card">
+    <div class="card-h"><h2>Client și proiect</h2><span class="sp"></span>
+      ${sel('p', '', 'status', p.status, Object.entries(STATUS), { label: 'Status', cls: 'w-m' })}
+    </div>
+    <div class="grid2">
+      ${fld('Denumire proiect', inp('p', '', 'nume', p.nume, { full: true, label: 'Denumire proiect' }))}
+      ${fld('Data', inp('p', '', 'creat', p.creat, { type: 'date', label: 'Data' }))}
+      ${fld('Nume client', inp('p', '', 'client.nume', p.client.nume, { label: 'Nume client' }))}
+      ${fld('Telefon', inp('p', '', 'client.tel', p.client.tel, { type: 'tel', label: 'Telefon' }))}
+      ${fld('Adresă montaj', inp('p', '', 'client.adresa', p.client.adresa, { label: 'Adresă' }))}
+      ${fld('Termen de execuție', inp('p', '', 'termen', p.termen, { label: 'Termen' }))}
+    </div>
+    ${fld('Ce vrea clientul (apare în ofertă)', `<textarea id="p-desc" data-o="p" data-f="descriere" aria-label="Descriere">${esc(p.descriere)}</textarea>`)}
+    ${fld('Măsurători și observații (doar pentru tine)', `<textarea id="p-note" data-o="p" data-f="note" aria-label="Note">${esc(p.note)}</textarea>`)}
+  </section>
+  <section class="card">
+    <div class="card-h"><h3>Proiecte salvate</h3></div>
+    <div class="tw"><table>
+      <thead><tr><th>Proiect</th><th>Client</th><th>Data</th><th>Status</th><th></th></tr></thead>
+      <tbody>${S.projects.map((x) => `<tr>
+        <td>${x.id === p.id ? '<b>' + esc(x.nume) + '</b>' : esc(x.nume)}</td><td>${esc(x.client?.nume)}</td><td class="mono">${roDate(x.creat)}</td>
+        <td><span class="chip ${x.status === 'refuzata' ? 'bad' : x.status === 'acceptata' ? '' : 'plain'}">${STATUS[x.status] || ''}</span></td>
+        <td class="r"><div class="row" style="justify-content:flex-end;flex-wrap:nowrap">
+          ${x.id !== p.id ? `<button class="btn sm" data-act="openProject" data-id="${x.id}">Deschide</button>` : ''}
+          <button class="btn sm" data-act="dupProject" data-id="${x.id}">Duplică</button>
+          <button class="btn sm danger" data-act="askDelProject" data-id="${x.id}">Șterge</button>
+        </div></td></tr>`).join('')}</tbody></table></div>
+  </section>`;
+}
+
+function groupSummary(g) {
+  if (!g.spec) return `<span class="chip plain">piese manuale</span>`;
+  const sp = g.spec, b = [];
+  b.push(`<span class="mono">${sp.W}×${sp.H}×${sp.D}</span>`);
+  if ((sp.buc | 0) > 1) b.push(`<span class="chip">× ${sp.buc} buc</span>`);
+  if (num(sp.sertare)) b.push(`${sp.sertare} sertare`); else if (num(sp.usi)) b.push(`${sp.usi} ${sp.usi == 1 ? 'ușă' : 'uși'}`);
+  if (num(sp.polite)) b.push(`${sp.polite} ${sp.polite == 1 ? 'poliță' : 'polițe'}`);
+  return b.join(' · ');
+}
+
+function vCorpuri(p) {
+  let no = 0;
+  const groups = p.groups.map((g, gi) => {
+    const rows = g.parts.map((pt) => {
+      no++;
+      const m = matById(pt.mat);
+      return `<tr>
+        <td class="mono muted">${no}</td>
+        <td>${inp('part', pt.id, 'nume', pt.nume, { cls: 'w-l', label: 'Denumire' })}</td>
+        <td>${sel('part', pt.id, 'mat', pt.mat, [...(m ? [] : [['', '— alege —']]), ...matOpts()], { cls: 'w-m', label: 'Material' })}</td>
+        <td>${inp('part', pt.id, 'L', pt.L, { type: 'number', cls: 'w-s', label: 'Lungime', full: true })}</td>
+        <td>${inp('part', pt.id, 'W', pt.W, { type: 'number', cls: 'w-s', label: 'Lățime', full: true })}</td>
+        <td>${inp('part', pt.id, 'q', pt.q, { type: 'number', cls: 'w-xs', label: 'Bucăți', full: true })}</td>
+        <td>${sel('part', pt.id, 'eL', pt.eL, [[0, '0'], [1, '1'], [2, '2']], { cls: 'w-xs', label: 'Cant pe lungime' })}</td>
+        <td>${sel('part', pt.id, 'eW', pt.eW, [[0, '0'], [1, '1'], [2, '2']], { cls: 'w-xs', label: 'Cant pe lățime' })}</td>
+        <td>${sel('part', pt.id, 'cant', pt.cant, cantOpts(), { cls: 'w-m', label: 'Tip cant' })}</td>
+        <td style="text-align:center"><input id="rot-${pt.id}" type="checkbox" data-o="part" data-id="${pt.id}" data-f="rot" data-full="1" ${pt.rot ? 'checked' : ''} aria-label="Se poate roti" title="Se poate roti la debitare (fără fibră)"></td>
+        <td><button class="btn ghost icon danger" data-act="delPart" data-id="${pt.id}" aria-label="Șterge piesa">✕</button></td>
+      </tr>`;
+    }).join('');
+    return `<section class="card">
+      <div class="card-h">
+        <input id="gname-${g.id}" data-o="group" data-id="${g.id}" data-f="nume" value="${esc(g.nume)}" aria-label="Denumire corp" style="font-family:var(--font-display);font-weight:700;font-size:1.05rem;max-width:280px">
+        <span class="muted small">${groupSummary(g)}</span><span class="sp"></span>
+        ${g.spec ? `<button class="btn sm" data-act="editGroup" data-id="${g.id}">Modifică dimensiuni</button>` : ''}
+        <button class="btn sm" data-act="dupGroup" data-id="${g.id}">Duplică</button>
+        <button class="btn sm danger" data-act="delGroup" data-id="${g.id}">Șterge</button>
+      </div>
+      ${g.parts.length ? `<div class="tw"><table>
+        <thead><tr><th>#</th><th>Piesă</th><th>Material</th><th>L (fibră) mm</th><th>l mm</th><th>Buc</th><th title="Laturi lungi cu cant">Cant L</th><th title="Laturi scurte cu cant">Cant l</th><th>Tip cant</th><th title="Se poate roti">Rot.</th><th></th></tr></thead>
+        <tbody>${rows}</tbody></table></div>` : '<p class="muted small">Nicio piesă încă.</p>'}
+      <div class="row"><button class="btn sm" data-act="addPart" data-id="${g.id}">+ Piesă</button>
+      ${g.spec ? '<span class="muted small">Modificările manuale se pierd dacă apeși „Modifică dimensiuni”.</span>' : ''}</div>
+    </section>`;
+  }).join('');
+  const nPieces = C.all.reduce((a, x) => a + num(x.q), 0);
+  return `
+  <section class="card">
+    <div class="card-h"><h2>Corpuri și piese</h2><span class="sp"></span>
+      <button class="btn pri" data-act="addModule">+ Corp după dimensiuni</button>
+      <button class="btn" data-act="addManual">+ Grup piese manual</button>
+    </div>
+    <p class="muted small" style="margin:0">Dai dimensiunile exterioare ale corpului (lățime × înălțime × adâncime), iar aplicația generează piesele, cantul și accesoriile. Pentru blaturi, panouri, plinte sau ce nu e corp standard, folosește „Grup piese manual”. L este dimensiunea pe direcția fibrei.</p>
+    <div class="stats">
+      <div class="stat"><span>Corpuri</span><b>${p.groups.filter((g) => g.spec).reduce((a, g) => a + Math.max(1, g.spec.buc | 0), 0)}</b></div>
+      <div class="stat"><span>Piese</span><b>${fmt(nPieces)}</b></div>
+      <div class="stat"><span>Plăci necesare</span><b>${C.mats.reduce((a, x) => a + x.n, 0)}</b></div>
+      <div class="stat"><span>Cant</span><b>${fmt(C.cantMl, 1)} ml</b></div>
+    </div>
+    ${C.orphan.length ? `<div class="note" style="color:var(--bad)">${C.orphan.length} piese nu au material ales și nu intră în calcul.</div>` : ''}
+  </section>
+  ${groups || `<section class="card empty"><b>Niciun corp încă</b><span>Începe cu „+ Corp după dimensiuni” — de exemplu un corp bază 600 × 720 × 560.</span></section>`}`;
+}
+
+function sheetSVG(sh, m, idx, total) {
+  const t = trimOf(m);
+  let s = `<svg class="sheet" viewBox="-4 -4 ${m.L + 8} ${m.W + 8}" role="img" aria-label="Placa ${idx} din ${total}">`;
+  s += `<rect x="0" y="0" width="${m.L}" height="${m.W}" class="sh-bg"/>`;
+  if (t > 0) s += `<rect x="${t / 2}" y="${t / 2}" width="${m.L - t}" height="${m.W - t}" class="sh-trim"/>`;
+  for (const pc of sh.placed) {
+    const x = t + pc.x, y = t + pc.y;
+    s += `<rect x="${x}" y="${y}" width="${pc.w}" height="${pc.h}" class="sh-part${pc.rot ? ' rot' : ''}"><title>#${pc.no} ${esc(pc.nume)} ${pc.L}×${pc.W}${pc.rot ? ' (rotită)' : ''}</title></rect>`;
+    const dims = `${pc.L}×${pc.W}`;
+    const fs = Math.min(pc.h * 0.32, pc.w / (dims.length * 0.62), 90);
+    if (fs >= 24) {
+      const two = pc.h > fs * 2.6;
+      if (two) {
+        s += `<text x="${x + pc.w / 2}" y="${y + pc.h / 2 - fs * 0.62}" class="sh-txt" font-size="${fs}" font-weight="600">#${pc.no}</text>`;
+        s += `<text x="${x + pc.w / 2}" y="${y + pc.h / 2 + fs * 0.62}" class="sh-txt" font-size="${fs * 0.85}">${dims}</text>`;
+      } else s += `<text x="${x + pc.w / 2}" y="${y + pc.h / 2}" class="sh-txt" font-size="${fs}">#${pc.no} · ${dims}</text>`;
+    } else if (Math.min(pc.w, pc.h) > 40) {
+      s += `<text x="${x + pc.w / 2}" y="${y + pc.h / 2}" class="sh-txt" font-size="${Math.min(pc.w, pc.h) * 0.5}">${pc.no}</text>`;
+    }
+  }
+  return s + '</svg>';
+}
+
+function vDebitare(p) {
+  const s = S.settings;
+  const settings = `<section class="card">
+    <div class="card-h"><h2>Debitare și pierderi</h2><span class="sp"></span>
+      <button class="btn" data-act="copyCSV">Copiază lista de debitare (CSV)</button>
+      ${inFrame ? '' : '<button class="btn" data-act="downloadCSV">Descarcă CSV</button>'}
+    </div>
+    <div class="grid3">
+      ${fld('Grosime pânză (kerf) mm', inp('set', '', 'kerf', s.kerf, { type: 'number', full: true, label: 'Kerf' }))}
+      ${fld('Tăiere margine placă mm / latură', inp('set', '', 'trim', s.trim, { type: 'number', full: true, label: 'Margine' }))}
+      ${fld('Adaos cant mm / latură', inp('set', '', 'cantAdaos', s.cantAdaos, { type: 'number', full: true, label: 'Adaos cant' }))}
+    </div>
+    <p class="muted small" style="margin:0">Tăieturi tip ghilotină (ca pe fierăstrăul circular cu masă), cu fibra pe lungimea plăcii. Piesele bifate „Rot.” pot fi rotite. Zona hașurată este rest/pierdere.</p>
+  </section>`;
+  if (!C.mats.length) return settings + `<section class="card empty"><b>Nimic de debitat</b><span>Adaugă corpuri sau piese în pasul 2.</span></section>`;
+  const cards = C.mats.map((x) => {
+    const m = x.m, o = x.opt;
+    const sheets = o.sheets.map((sh, i) => {
+      const u = sh.used / (m.L * m.W);
+      return `<div class="sheet-card"><div class="cap"><b>Placa ${i + 1} / ${o.sheets.length}</b><span class="muted">${sh.placed.length} piese · utilizare <b class="mono">${fmt(u * 100)}%</b></span></div>${sheetSVG(sh, m, i + 1, o.sheets.length)}</div>`;
+    }).join('');
+    const utilCls = x.util >= 0.75 ? '' : x.util >= 0.55 ? 'warn' : 'bad';
+    return `<section class="card">
+      <div class="card-h"><h3>${esc(m.nume)} ${esc(m.decor)} · ${m.gros} mm</h3><span class="muted small mono">${m.L}×${m.W}</span><span class="sp"></span>
+        <span class="chip ${utilCls}">utilizare ${fmt(x.util * 100)}%</span></div>
+      <div class="stats">
+        <div class="stat"><span>Plăci</span><b>${x.n}</b></div>
+        <div class="stat"><span>Suprafață piese</span><b>${fmt(x.area, 2)} m²</b></div>
+        <div class="stat"><span>Rest / pierdere</span><b>${fmt(x.waste, 2)} m²</b></div>
+        <div class="stat"><span>Tăieturi</span><b>${fmt(o.cut / 1000, 1)} ml</b></div>
+        <div class="stat"><span>Cost plăci</span><b>${lei(x.cost)}</b></div>
+      </div>
+      ${o.unplaced.length ? `<div class="note" style="color:var(--bad)">Nu încap pe placă: ${o.unplaced.map((u) => `#${u.no} ${esc(u.nume)} ${u.L}×${u.W}`).join(', ')}. Verifică dimensiunile sau bifează rotirea.</div>` : ''}
+      <div class="sheets">${sheets}</div>
+    </section>`;
+  }).join('');
+  const cantRows = C.cants.map((c) => `<tr><td>${esc(c.cant?.nume || '?')}</td><td>${esc(c.m ? c.m.nume + ' ' + c.m.decor : '')}</td><td class="r mono">${fmt(c.ml, 1)} ml</td><td class="r mono">${lei(c.cost)}</td></tr>`).join('');
+  return settings + cards + `<section class="card"><h3>Cant necesar</h3>
+    ${C.cants.length ? `<div class="tw"><table><thead><tr><th>Tip</th><th>Decor</th><th class="r">Lungime</th><th class="r">Cost</th></tr></thead><tbody>${cantRows}
+      <tr class="tot"><td colspan="2">Total cant</td><td class="r mono">${fmt(C.cantMl, 1)} ml</td><td class="r mono">${lei(C.cantCost)}</td></tr></tbody></table></div>` : '<p class="muted small">Nicio piesă cu cant.</p>'}
+  </section>`;
+}
+
+function vAccesorii(p) {
+  const autoRows = C.accAuto.map((a) => `<tr>
+    <td>${esc(a.c.nume)}</td><td class="r mono">${fmt(a.auto, 0)}</td>
+    <td>${inp('adj', a.id, 'adj', a.adj || '', { type: 'number', cls: 'w-xs', ph: '±0', label: 'Ajustare' })}</td>
+    <td class="r mono"><b>${fmt(a.q, 1)}</b> ${esc(a.c.um)}</td><td class="r mono">${lei(a.c.pret, 2)}</td><td class="r mono">${lei(a.cost)}</td></tr>`).join('');
+  const manRows = p.acc.map((a) => `<tr>
+    <td>${inp('acc', a.id, 'nume', a.nume, { cls: 'w-l', label: 'Denumire' })}</td>
+    <td>${inp('acc', a.id, 'um', a.um, { cls: 'w-xs', label: 'UM' })}</td>
+    <td>${inp('acc', a.id, 'q', a.q, { type: 'number', cls: 'w-xs', label: 'Cantitate' })}</td>
+    <td>${inp('acc', a.id, 'pret', a.pret, { type: 'number', cls: 'w-s', label: 'Preț' })}</td>
+    <td class="r mono">${lei(num(a.q) * num(a.pret))}</td>
+    <td><button class="btn ghost icon danger" data-act="delAcc" data-id="${a.id}" aria-label="Șterge">✕</button></td></tr>`).join('');
+  return `
+  <section class="card">
+    <div class="card-h"><h2>Accesorii din corpuri</h2><span class="sp"></span><span class="chip">total accesorii <span data-out="acc"></span></span></div>
+    <p class="muted small" style="margin:0">Calculate automat: balamale după înălțimea ușii (2 până la 900 mm, 3 până la 1500, 4 până la 2000), glisiere și mâner pe sertar, picioare la corpurile de jos, suporți de poliță, consumabile pe corp. Corectează cu „Ajustare”. Prețurile vin din Setări → Catalog accesorii.</p>
+    ${C.accAuto.length ? `<div class="tw"><table><thead><tr><th>Accesoriu</th><th class="r">Calculat</th><th>Ajustare</th><th class="r">Cantitate</th><th class="r">Preț unitar</th><th class="r">Total</th></tr></thead><tbody>${autoRows}</tbody></table></div>` : '<p class="muted small">Nu sunt corpuri generate.</p>'}
+  </section>
+  <section class="card">
+    <div class="card-h"><h2>Alte accesorii</h2><span class="sp"></span>
+      <select id="addCat" aria-label="Adaugă din catalog" style="max-width:280px"><option value="">+ Adaugă din catalog…</option>${S.catalog.map((c) => `<option value="${c.id}">${esc(c.nume)} — ${lei(c.pret, 2)}/${esc(c.um)}</option>`).join('')}</select>
+      <button class="btn" data-act="addAcc">+ Linie liberă</button>
+    </div>
+    ${p.acc.length ? `<div class="tw"><table><thead><tr><th>Denumire</th><th>UM</th><th>Cant.</th><th>Preț</th><th class="r">Total</th><th></th></tr></thead><tbody>${manRows}</tbody></table></div>` : '<p class="muted small">Mânere speciale, sisteme de colț, LED, coș gunoi, plintă, electrocasnice puse de tine…</p>'}
+  </section>`;
+}
+
+function vManopera(p) {
+  const rows = p.labor.map((l) => `<tr>
+    <td>${inp('labor', l.id, 'nume', l.nume, { cls: 'w-l', label: 'Operație' })}</td>
+    <td>${inp('labor', l.id, 'h', l.h, { type: 'number', cls: 'w-s', label: 'Ore' })}</td>
+    <td class="r mono">${lei(num(l.h) * num(p.rate))}</td>
+    <td><button class="btn ghost icon danger" data-act="delLabor" data-id="${l.id}" aria-label="Șterge">✕</button></td></tr>`).join('');
+  const tr = p.transport;
+  return `<div class="cols">
+  <section class="card">
+    <div class="card-h"><h2>Manoperă</h2><span class="sp"></span><button class="btn" data-act="estimate">Estimează din corpuri</button></div>
+    <div class="row">
+      ${fld('Tarif lei / oră', inp('p', '', 'rate', p.rate, { type: 'number', label: 'Tarif pe oră', cls: 'w-s' }))}
+      <button class="btn sm" data-act="setRate" data-v="75">75</button><button class="btn sm" data-act="setRate" data-v="80">80</button>
+    </div>
+    <div class="tw"><table><thead><tr><th>Operație</th><th>Ore</th><th class="r">Cost</th><th></th></tr></thead><tbody>${rows}
+      <tr class="tot"><td>Total</td><td class="mono" data-out="ore"></td><td class="r mono" data-out="manopera"></td><td></td></tr></tbody></table></div>
+    <div class="row"><button class="btn sm" data-act="addLabor">+ Operație</button></div>
+    <p class="muted small" style="margin:0">Estimarea folosește coeficienții din Setări (ore pe piesă, pe corp, pe sertar, pe ușă, montaj pe corp). Ajustează-i o dată după cum lucrezi tu și estimările vor fi tot mai apropiate.</p>
+  </section>
+  <section class="card">
+    <h2>Transport</h2>
+    <div class="grid2">
+      ${fld('Distanță dus (km)', inp('p', '', 'transport.km', tr.km, { type: 'number', label: 'Distanță km' }))}
+      ${fld('Număr drumuri (dus-întors)', inp('p', '', 'transport.drumuri', tr.drumuri, { type: 'number', label: 'Drumuri' }))}
+      ${fld('Lei / km', inp('p', '', 'transport.pretKm', tr.pretKm, { type: 'number', label: 'Lei pe km' }))}
+      ${fld('Sumă fixă (lei)', inp('p', '', 'transport.fix', tr.fix, { type: 'number', label: 'Sumă fixă' }))}
+    </div>
+    <div class="note">km × 2 × drumuri × lei/km + sumă fixă = <b data-out="transport"></b>. Drumuri tipice: măsurători, livrare, montaj.</div>
+  </section></div>`;
+}
+
+function vOferta(p) {
+  const s = S.settings;
+  const matRows = C.mats.map((x) => `<tr><td>${esc(x.m.nume)} ${esc(x.m.decor)} ${x.m.gros} mm — ${p.placi === 'suprafata' ? fmt(x.area * (1 + num(s.pierdere) / 100), 2) + ' m²' : x.n + ' plăci × ' + lei(x.m.pret)}</td><td class="r">${lei(x.cost)}</td></tr>`).join('');
+  const internal = `<section class="card">
+    <h2>Calcul intern</h2>
+    <div class="tw"><table class="sumtbl"><tbody>
+      ${matRows}
+      <tr><td>Cant ${fmt(C.cantMl, 1)} ml</td><td class="r">${lei(C.cantCost)}</td></tr>
+      ${s.furnizor ? `<tr><td>Debitare ${fmt(C.cutMl, 1)} ml + aplicare cant la furnizor</td><td class="r">${lei(C.furn)}</td></tr>` : ''}
+      <tr><td>Accesorii</td><td class="r">${lei(C.accCost)}</td></tr>
+      ${C.markupAmt ? `<tr><td>Adaos materiale ${fmt(p.markup, 1)}%</td><td class="r">${lei(C.markupAmt)}</td></tr>` : ''}
+      <tr><td>Manoperă ${fmt(C.ore, 1)} h × ${lei(p.rate)}</td><td class="r">${lei(C.manopera)}</td></tr>
+      <tr><td>Transport</td><td class="r">${lei(C.transport)}</td></tr>
+      ${C.disc ? `<tr><td>Discount ${fmt(p.discount, 1)}%</td><td class="r">−${lei(C.disc)}</td></tr>` : ''}
+      ${p.tvaOn ? `<tr><td>TVA ${fmt(s.tva)}%</td><td class="r">${lei(C.tva)}</td></tr>` : ''}
+      <tr class="big"><td>Total${num(s.roundTo) ? ' (rotunjit)' : ''}</td><td class="r">${lei(C.total)}</td></tr>
+    </tbody></table></div>
+    <div class="grid2">
+      ${fld('Plăci în calcul', sel('p', '', 'placi', p.placi, [['intregi', 'Plăci întregi'], ['suprafata', `Suprafață + ${s.pierdere}% pierdere`]], { label: 'Mod calcul plăci' }))}
+      ${fld('Adaos la materiale %', inp('p', '', 'markup', p.markup, { type: 'number', full: true, label: 'Adaos' }))}
+      ${fld('Discount %', inp('p', '', 'discount', p.discount, { type: 'number', full: true, label: 'Discount' }))}
+      ${fld('Avans cerut %', inp('p', '', 'avans', p.avans, { type: 'number', full: true, label: 'Avans' }))}
+    </div>
+    <div class="row">${chk('p', '', 'tvaOn', p.tvaOn, `Adaugă TVA ${s.tva}%`)} ${chk('p', '', 'detaliat', p.detaliat, 'Arată defalcarea clientului')} ${chk('p', '', 'listaCorpuri', p.listaCorpuri, 'Arată lista de corpuri')}</div>
+  </section>`;
+  return `<div class="cols">${internal}
+    <section class="card print-area">
+      <div class="card-h no-print"><h2>Oferta pentru client</h2><span class="sp"></span>
+        <button class="btn pri" data-act="copyOffer">Copiază textul (WhatsApp / e-mail)</button>
+        ${inFrame ? '' : '<button class="btn" data-act="print">Printează / PDF</button>'}
+      </div>
+      ${offerDoc(p)}
+    </section></div>`;
+}
+
+function offerLines(p) {
+  return p.groups.map((g) => {
+    if (g.spec) {
+      const sp = g.spec, mc = matById(sp.matCorp), mf = matById(sp.matFront);
+      const n = Math.max(1, sp.buc | 0);
+      const fr = num(sp.sertare) ? `${sp.sertare} sertare` : num(sp.usi) ? `${sp.usi} ${sp.usi == 1 ? 'ușă' : 'uși'}` : 'deschis';
+      return { nume: g.autoName ? TYPES[sp.tip]?.nume || g.nume : g.nume, dim: `${sp.W}×${sp.H}×${sp.D}`, buc: n, det: `${fr}; corp ${matName(mc)}${(num(sp.sertare) || num(sp.usi)) && mf ? ', front ' + matName(mf) : ''}` };
+    }
+    const mats = [...new Set(g.parts.map((x) => matName(matById(x.mat))).filter(Boolean))].join(', ');
+    return { nume: g.nume, dim: '', buc: 1, det: mats };
+  });
+}
+
+function offerDoc(p) {
+  const s = S.settings, f = s.firma;
+  const matsUsed = C.mats.map((x) => `${x.m.nume}${x.m.decor ? ' ' + x.m.decor : ''} ${x.m.gros} mm`);
+  const mult = 1 - num(p.discount) / 100;
+  const matClient = (C.materiale + C.accCost + C.markupAmt) * mult, manClient = C.manopera * mult, trClient = C.transport * mult;
+  const lines = offerLines(p);
+  const avans = C.total * num(p.avans) / 100;
+  return `<article class="doc" id="offerDoc">
+    <div class="doc-h">
+      <div><h1>Ofertă de preț</h1><div class="muted">${esc(p.nume)}</div></div>
+      <div style="text-align:right"><b>${esc(f.nume || 'Atelierul tău (completează în Setări)')}</b><div class="small muted">${[f.tel, f.email, f.adresa, f.cui ? 'CUI ' + f.cui : ''].filter(Boolean).map(esc).join(' · ')}</div></div>
+    </div>
+    <div class="grid2 small">
+      <div><span class="muted">Client</span><br><b>${esc(p.client.nume || '—')}</b>${p.client.tel ? '<br>' + esc(p.client.tel) : ''}${p.client.adresa ? '<br>' + esc(p.client.adresa) : ''}</div>
+      <div><span class="muted">Data</span> ${roDate(p.creat)} · valabilă ${s.valabil} zile<br><span class="muted">Termen de execuție</span> ${esc(p.termen || '—')}</div>
+    </div>
+    ${p.descriere ? `<p style="margin:0">${esc(p.descriere)}</p>` : ''}
+    ${p.listaCorpuri && lines.length ? `<div class="olist"><div class="olist-h"><span>Element</span><span>L × H × A mm</span></div>
+      ${lines.map((l) => `<div class="oitem"><div class="oitem-t"><b>${esc(l.nume)}${l.buc > 1 ? ` <span class="chip">× ${l.buc}</span>` : ''}</b><span class="mono">${l.dim}</span></div><div class="small muted">${esc(l.det)}</div></div>`).join('')}</div>` : ''}
+    ${matsUsed.length ? `<p class="small" style="margin:0"><span class="muted">Materiale:</span> ${matsUsed.map(esc).join(', ')}. Cant ABS pe muchiile vizibile.</p>` : ''}
+    ${p.detaliat ? `<table class="sumtbl"><tbody>
+      <tr><td>Materiale și accesorii</td><td class="r">${lei(matClient)}</td></tr>
+      <tr><td>Manoperă (execuție și montaj)</td><td class="r">${lei(manClient)}</td></tr>
+      <tr><td>Transport</td><td class="r">${lei(trClient)}</td></tr>
+      ${p.tvaOn ? `<tr><td>TVA ${s.tva}%</td><td class="r">${lei(C.tva)}</td></tr>` : ''}
+    </tbody></table>` : ''}
+    <div class="grand"><span>Total${p.tvaOn ? ' cu TVA' : ''}</span><b>${lei(C.total)}</b></div>
+    ${num(p.avans) ? `<div class="small">Avans la comandă ${fmt(p.avans)}%: <b>${lei(avans)}</b>, restul la montaj.</div>` : ''}
+    <div class="small muted">Prețul include materialele, accesoriile, execuția, transportul și montajul. Modificările de proiect după acceptare pot schimba prețul.</div>
+  </article>`;
+}
+
+function offerText(p) {
+  const s = S.settings, f = s.firma, L = [];
+  L.push(`OFERTĂ DE PREȚ – ${p.nume}`);
+  if (p.client.nume) L.push(`Client: ${p.client.nume}`);
+  L.push(`Data: ${roDate(p.creat)} (valabilă ${s.valabil} zile)`);
+  if (p.descriere) L.push('', p.descriere);
+  if (p.listaCorpuri) {
+    const lines = offerLines(p);
+    if (lines.length) { L.push('', 'Componență:'); lines.forEach((l) => L.push(`• ${l.nume}${l.dim ? ' ' + l.dim + ' mm' : ''}${l.buc > 1 ? ' × ' + l.buc : ''}${l.det ? ' – ' + l.det : ''}`)); }
+  }
+  if (C.mats.length) L.push('', 'Materiale: ' + C.mats.map((x) => `${x.m.nume}${x.m.decor ? ' ' + x.m.decor : ''} ${x.m.gros} mm`).join(', '));
+  if (p.detaliat) {
+    const mult = 1 - num(p.discount) / 100;
+    L.push('', `Materiale și accesorii: ${lei((C.materiale + C.accCost + C.markupAmt) * mult)}`, `Manoperă și montaj: ${lei(C.manopera * mult)}`, `Transport: ${lei(C.transport * mult)}`);
+    if (p.tvaOn) L.push(`TVA ${s.tva}%: ${lei(C.tva)}`);
+  }
+  L.push('', `TOTAL${p.tvaOn ? ' cu TVA' : ''}: ${lei(C.total)}`);
+  if (num(p.avans)) L.push(`Avans ${fmt(p.avans)}%: ${lei(C.total * num(p.avans) / 100)}`);
+  if (p.termen) L.push(`Termen de execuție: ${p.termen}`);
+  const sig = [f.nume, f.tel].filter(Boolean).join(' · ');
+  if (sig) L.push('', sig);
+  return L.join('\n');
+}
+
+function vSetari() {
+  const s = S.settings;
+  const matRows = S.materials.map((m) => `<tr>
+    <td>${inp('mat', m.id, 'nume', m.nume, { cls: 'w-l', label: 'Denumire' })}</td>
+    <td>${inp('mat', m.id, 'decor', m.decor, { cls: 'w-m', ph: 'cod / decor', label: 'Decor' })}</td>
+    <td>${inp('mat', m.id, 'gros', m.gros, { type: 'number', cls: 'w-xs', label: 'Grosime', full: true })}</td>
+    <td>${inp('mat', m.id, 'L', m.L, { type: 'number', cls: 'w-s', label: 'Lungime placă', full: true })}</td>
+    <td>${inp('mat', m.id, 'W', m.W, { type: 'number', cls: 'w-s', label: 'Lățime placă', full: true })}</td>
+    <td>${inp('mat', m.id, 'trim', m.trim ?? '', { type: 'number', cls: 'w-xs', label: 'Margine', ph: String(S.settings.trim), full: true })}</td>
+    <td>${inp('mat', m.id, 'pret', m.pret, { type: 'number', cls: 'w-s', label: 'Preț placă' })}</td>
+    <td style="text-align:center"><input id="fibra-${m.id}" type="checkbox" data-o="mat" data-id="${m.id}" data-f="fibra" data-full="1" ${m.fibra ? 'checked' : ''} aria-label="Are fibră"></td>
+    <td><button class="btn ghost icon danger" data-act="delMat" data-id="${m.id}" aria-label="Șterge">✕</button></td></tr>`).join('');
+  const cantRows = S.cants.map((c) => `<tr><td>${inp('cant', c.id, 'nume', c.nume, { cls: 'w-l', label: 'Cant' })}</td><td>${inp('cant', c.id, 'pret', c.pret, { type: 'number', cls: 'w-s', label: 'Preț ml' })}</td>
+    <td><button class="btn ghost icon danger" data-act="delCant" data-id="${c.id}" aria-label="Șterge">✕</button></td></tr>`).join('');
+  const catRows = S.catalog.map((c) => `<tr><td>${inp('cat', c.id, 'nume', c.nume, { cls: 'w-l', label: 'Accesoriu' })}</td><td>${inp('cat', c.id, 'um', c.um, { cls: 'w-xs', label: 'UM' })}</td>
+    <td>${inp('cat', c.id, 'pret', c.pret, { type: 'number', cls: 'w-s', label: 'Preț' })}</td>
+    <td>${c.id.startsWith('a_') && ['a_balama', 'a_glisiera', 'a_maner', 'a_picior', 'a_suport', 'a_prindere', 'a_bara', 'a_consum'].includes(c.id) ? '<span class="chip plain">automat</span>' : `<button class="btn ghost icon danger" data-act="delCat" data-id="${c.id}" aria-label="Șterge">✕</button>`}</td></tr>`).join('');
+  const h = s.h;
+  return `
+  <section class="card"><h2>Atelierul tău</h2>
+    <div class="grid2">
+      ${fld('Nume firmă / atelier', inp('set', '', 'firma.nume', s.firma.nume, { label: 'Nume firmă' }))}
+      ${fld('Telefon', inp('set', '', 'firma.tel', s.firma.tel, { type: 'tel', label: 'Telefon' }))}
+      ${fld('E-mail', inp('set', '', 'firma.email', s.firma.email, { type: 'email', label: 'Email' }))}
+      ${fld('Adresă', inp('set', '', 'firma.adresa', s.firma.adresa, { label: 'Adresă' }))}
+      ${fld('CUI', inp('set', '', 'firma.cui', s.firma.cui, { label: 'CUI' }))}
+      ${fld('Valabilitate ofertă (zile)', inp('set', '', 'valabil', s.valabil, { type: 'number', label: 'Valabilitate' }))}
+    </div></section>
+  <section class="card"><div class="card-h"><h2>Plăci (catalog Unilin și altele)</h2><span class="sp"></span><button class="btn" data-act="addMat">+ Material</button></div>
+    <p class="muted small" style="margin:0">Prețurile de început sunt orientative — pune prețurile tale de la furnizor. Adaugă câte un rând pentru fiecare decor ales de client (ex. codul Unilin din catalog). „Fibră” bifat = piesele nu se rotesc la debitare.</p>
+    <div class="tw"><table><thead><tr><th>Denumire</th><th>Decor / cod</th><th>Gros.</th><th>L placă</th><th>l placă</th><th title="Tăiere margine; gol = valoarea generală">Margine</th><th>Lei / placă</th><th>Fibră</th><th></th></tr></thead><tbody>${matRows}</tbody></table></div></section>
+  <div class="cols">
+  <section class="card"><div class="card-h"><h2>Cant</h2><span class="sp"></span><button class="btn" data-act="addCant">+ Cant</button></div>
+    <div class="tw"><table><thead><tr><th>Tip</th><th>Lei / ml</th><th></th></tr></thead><tbody>${cantRows}</tbody></table></div>
+    <div class="grid2">
+      ${fld('Cant implicit pe corp', sel('set', '', 'cantCorp', s.cantCorp, cantOpts(), { label: 'Cant corp' }))}
+      ${fld('Cant implicit pe fronturi', sel('set', '', 'cantFront', s.cantFront, cantOpts(), { label: 'Cant fronturi' }))}
+    </div>
+    ${chk('set', '', 'furnizor', s.furnizor, 'Debitarea și cantuirea se fac la furnizor')}
+    ${s.furnizor ? `<div class="grid2">${fld('Debitare lei / ml tăietură', inp('set', '', 'debitareMl', s.debitareMl, { type: 'number', label: 'Debitare' }))}${fld('Aplicare cant lei / ml', inp('set', '', 'cantMl', s.cantMl, { type: 'number', label: 'Aplicare cant' }))}</div>` : ''}
+  </section>
+  <section class="card"><h2>Calcul</h2>
+    <div class="grid2">
+      ${fld('Tarif implicit lei / oră', inp('set', '', 'rate', s.rate, { type: 'number', label: 'Tarif' }))}
+      ${fld('Transport lei / km', inp('set', '', 'pretKm', s.pretKm, { type: 'number', label: 'Lei km' }))}
+      ${fld('TVA %', inp('set', '', 'tva', s.tva, { type: 'number', label: 'TVA' }))}
+      ${fld('Pierdere la calcul pe suprafață %', inp('set', '', 'pierdere', s.pierdere, { type: 'number', label: 'Pierdere' }))}
+      ${fld('Rotunjire total la (lei)', inp('set', '', 'roundTo', s.roundTo, { type: 'number', label: 'Rotunjire' }))}
+    </div>
+    <h3>Ore pentru estimare</h3>
+    <div class="grid2">
+      ${fld('Proiect 3D / măsurători (fix)', inp('set', '', 'h.proiect', h.proiect, { type: 'number', label: 'Ore proiect' }))}
+      ${fld('Pe piesă (debitare, cant, găurire)', inp('set', '', 'h.piesa', h.piesa, { type: 'number', label: 'Ore piesă' }))}
+      ${fld('Asamblare pe corp', inp('set', '', 'h.corp', h.corp, { type: 'number', label: 'Ore corp' }))}
+      ${fld('Pe sertar', inp('set', '', 'h.sertar', h.sertar, { type: 'number', label: 'Ore sertar' }))}
+      ${fld('Pe ușă (balamale, reglaj)', inp('set', '', 'h.usa', h.usa, { type: 'number', label: 'Ore ușă' }))}
+      ${fld('Montaj pe corp la client', inp('set', '', 'h.montaj', h.montaj, { type: 'number', label: 'Ore montaj' }))}
+    </div>
+  </section></div>
+  <section class="card"><div class="card-h"><h2>Catalog accesorii</h2><span class="sp"></span><button class="btn" data-act="addCat">+ Accesoriu</button></div>
+    <div class="tw"><table><thead><tr><th>Denumire</th><th>UM</th><th>Lei</th><th></th></tr></thead><tbody>${catRows}</tbody></table></div></section>
+  <section class="card"><h2>Backup</h2>
+    <p class="muted small" style="margin:0">Datele stau doar pe acest dispozitiv, în browser. Fă din când în când un backup și păstrează-l în Fișiere / iCloud / Google Drive.</p>
+    <div class="row">
+      <button class="btn" data-act="exportJSON">${inFrame ? 'Arată backup (de copiat)' : 'Descarcă backup'}</button>
+      <label class="btn" for="importFile">Încarcă backup din fișier</label><input id="importFile" type="file" accept=".json,application/json" hidden>
+      <button class="btn" data-act="pasteImport">Lipește backup</button>
+      <button class="btn danger" data-act="askReset">Resetează prețurile implicite</button>
+    </div></section>`;
+}
+
+// ---------------------------------------------------------------- Modale
+function openModal(html) { const m = $('#modal'); m.innerHTML = `<div class="modal-box" role="dialog" aria-modal="true">${html}</div>`; m.hidden = false; m.querySelector('input,select,textarea,button')?.focus(); }
+function closeModal() { $('#modal').hidden = true; $('#modal').innerHTML = ''; }
+
+function moduleForm(sp, gid) {
+  const o = (k, opts) => `<select id="mf-${k}" name="${k}">${opts.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(sp[k]) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  const n = (k, extra = '') => `<input id="mf-${k}" name="${k}" type="number" inputmode="numeric" value="${esc(sp[k])}" ${extra}>`;
+  openModal(`<form id="moduleForm" data-gid="${gid || ''}" style="display:grid;gap:14px">
+    <h2>${gid ? 'Modifică corpul' : 'Corp nou după dimensiuni'}</h2>
+    <div class="grid2">
+      ${fld('Tip corp', o('tip', Object.entries(TYPES).map(([k, t]) => [k, t.nume])))}
+      ${fld('Denumire (opțional)', `<input id="mf-nume" name="nume" value="${esc(sp.nume)}" placeholder="ex. Corp chiuvetă">`)}
+    </div>
+    <div class="grid3">
+      ${fld('Lățime mm', n('W'))}${fld('Înălțime mm', n('H'))}${fld('Adâncime mm', n('D'))}
+      ${fld('Bucăți identice', n('buc', 'min="1"'))}${fld('Polițe', n('polite', 'min="0"'))}${fld('Uși', n('usi', 'min="0"'))}
+      ${fld('Sertare (înlocuiesc ușile)', n('sertare', 'min="0"'))}
+    </div>
+    <div class="grid3">
+      ${fld('Material corp', o('matCorp', matOpts()))}
+      ${fld('Material fronturi', o('matFront', matOpts()))}
+      ${fld('Spate', o('matSpate', [['', 'Fără spate'], ...matOpts()]))}
+    </div>
+    <div class="row"><label class="chk"><input type="checkbox" name="manere" ${sp.manere ? 'checked' : ''}> Mânere</label><label class="chk"><input type="checkbox" name="bara" ${sp.bara ? 'checked' : ''}> Bară haine</label></div>
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeModal">Renunță</button><button class="btn pri" type="submit">${gid ? 'Actualizează piesele' : 'Adaugă corpul'}</button></div>
+  </form>`);
+}
+
+function textModal(title, text, hint) {
+  openModal(`<h2>${esc(title)}</h2>${hint ? `<p class="muted small" style="margin:0">${esc(hint)}</p>` : ''}<textarea id="tm-text" style="min-height:260px" class="mono small">${esc(text)}</textarea>
+    <div class="row" style="justify-content:flex-end"><button class="btn" data-act="closeModal">Închide</button></div>`);
+  const ta = $('#tm-text'); ta.focus(); ta.select();
+}
+async function copyText(text, label) {
+  try { await navigator.clipboard.writeText(text); toast(label + ' copiat'); }
+  catch { textModal(label, text, 'Selectează tot textul și copiază-l.'); }
+}
+function download(name, text, type) {
+  if (inFrame) { textModal(name, text, 'Copiază textul și salvează-l într-un fișier.'); return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+function cutCSV(p) {
+  const rows = [['Nr', 'Corp', 'Piesa', 'Material', 'Decor', 'Grosime', 'Lungime', 'Latime', 'Bucati', 'Cant L', 'Cant l', 'Tip cant', 'Rotire']];
+  C.all.forEach((x) => { const m = matById(x.mat); rows.push([x.no, x.grup, x.nume, m?.nume || '', m?.decor || '', m?.gros || '', x.L, x.W, x.q, x.eL, x.eW, cantById(x.cant)?.nume || '', x.rot ? 'da' : 'nu']); });
+  return rows.map((r) => r.map((v) => { const s = String(v ?? ''); return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(';')).join('\n');
+}
+function importData(text) {
+  try {
+    const d = JSON.parse(text);
+    if (!d || !Array.isArray(d.projects)) throw new Error();
+    S = d; migrate(); save(); closeModal(); render(); toast('Backup încărcat');
+  } catch { toast('Fișierul nu este un backup valid'); }
+}
+function confirmModal(msg, act, id) {
+  openModal(`<h2>${esc(msg)}</h2><div class="row" style="justify-content:flex-end"><button class="btn" data-act="closeModal">Renunță</button><button class="btn pri danger" data-act="${act}" data-id="${id || ''}" style="background:var(--bad);border-color:var(--bad);color:#fff">Da, continuă</button></div>`);
+}
+
+// ---------------------------------------------------------------- Acțiuni
+function findPart(id) { for (const g of cur().groups) { const pt = g.parts.find((x) => x.id === id); if (pt) return { g, pt }; } return {}; }
+const A = {
+  tab: (el) => { S.tab = el.dataset.tab; save(); render(); window.scrollTo(0, 0); },
+  newProject: () => { const p = newProject(); S.projects.unshift(p); S.current = p.id; S.tab = 'client'; save(); render(); toast('Proiect nou creat'); },
+  openProject: (el) => { S.current = el.dataset.id; save(); render(); },
+  dupProject: (el) => {
+    const src = S.projects.find((x) => x.id === el.dataset.id); if (!src) return;
+    const p = JSON.parse(JSON.stringify(src)); p.id = uid(); p.nume = src.nume + ' (copie)'; p.creat = today(); p.status = 'ciorna';
+    S.projects.unshift(p); S.current = p.id; save(); render(); toast('Proiect duplicat');
+  },
+  askDelProject: (el) => { const x = S.projects.find((q) => q.id === el.dataset.id); confirmModal(`Ștergi proiectul „${x?.nume}”?`, 'delProject', el.dataset.id); },
+  delProject: (el) => { S.projects = S.projects.filter((x) => x.id !== el.dataset.id); if (!S.projects.length) S.projects.push(newProject()); if (!S.projects.find((x) => x.id === S.current)) S.current = S.projects[0].id; closeModal(); save(); render(); },
+  addModule: () => moduleForm(fullSpec({ tip: 'baza', matCorp: S.materials[0]?.id, matFront: S.materials[1]?.id || S.materials[0]?.id, matSpate: S.materials.find((m) => m.tip === 'HDF')?.id || '' })),
+  editGroup: (el) => { const g = cur().groups.find((x) => x.id === el.dataset.id); if (g?.spec) moduleForm({ ...g.spec, nume: g.autoName ? '' : g.nume }, g.id); },
+  addManual: () => { cur().groups.push({ id: uid(), nume: 'Piese diverse', spec: null, parts: [{ id: uid(), nume: 'Panou', mat: S.materials[0]?.id || '', L: 1000, W: 500, q: 1, eL: 0, eW: 0, cant: '', rot: !S.materials[0]?.fibra }] }); save(); render(); },
+  dupGroup: (el) => { const p = cur(), i = p.groups.findIndex((x) => x.id === el.dataset.id); if (i < 0) return; const g = JSON.parse(JSON.stringify(p.groups[i])); g.id = uid(); g.parts.forEach((x) => { x.id = uid(); }); p.groups.splice(i + 1, 0, g); save(); render(); toast('Corp duplicat'); },
+  delGroup: (el) => { const p = cur(); p.groups = p.groups.filter((x) => x.id !== el.dataset.id); save(); render(); },
+  addPart: (el) => { const g = cur().groups.find((x) => x.id === el.dataset.id); const last = g.parts[g.parts.length - 1]; g.parts.push({ id: uid(), nume: 'Piesă', mat: last?.mat || S.materials[0]?.id || '', L: 600, W: 300, q: 1, eL: 0, eW: 0, cant: '', rot: last ? last.rot : true }); save(); render(); },
+  delPart: (el) => { const { g } = findPart(el.dataset.id); if (g) { g.parts = g.parts.filter((x) => x.id !== el.dataset.id); save(); render(); } },
+  addAcc: () => { cur().acc.push({ id: uid(), cat: '', nume: 'Accesoriu', um: 'buc', q: 1, pret: 0 }); save(); render(); },
+  delAcc: (el) => { const p = cur(); p.acc = p.acc.filter((x) => x.id !== el.dataset.id); save(); render(); },
+  addLabor: () => { cur().labor.push({ id: uid(), nume: 'Operație', h: 0 }); save(); render(); },
+  delLabor: (el) => { const p = cur(); p.labor = p.labor.filter((x) => x.id !== el.dataset.id); save(); render(); },
+  estimate: () => { const p = cur(); while (p.labor.length < 4) p.labor.push({ id: uid(), nume: 'Operație', h: 0 }); const r = estimateHours(p); save(); render(); toast(`Estimat: ${r.corpuri} corpuri, ${fmt(r.piese)} piese`); },
+  setRate: (el) => { cur().rate = num(el.dataset.v); save(); render(); },
+  copyOffer: () => copyText(offerText(cur()), 'Textul ofertei'),
+  print: () => window.print(),
+  copyCSV: () => copyText(cutCSV(cur()), 'Lista de debitare'),
+  downloadCSV: () => download(`debitare-${cur().nume.replace(/[^\w-]+/g, '_')}.csv`, '﻿' + cutCSV(cur()), 'text/csv'),
+  addMat: () => { S.materials.push({ id: 'm_' + uid(), nume: 'PAL Unilin', decor: '', tip: 'PAL', gros: 18, L: 2800, W: 2070, pret: 0, fibra: true }); save(); render(); },
+  delMat: (el) => { S.materials = S.materials.filter((x) => x.id !== el.dataset.id); save(); render(); },
+  addCant: () => { S.cants.push({ id: 'c_' + uid(), nume: 'Cant', pret: 0 }); save(); render(); },
+  delCant: (el) => { S.cants = S.cants.filter((x) => x.id !== el.dataset.id); save(); render(); },
+  addCat: () => { S.catalog.push({ id: 'x_' + uid(), nume: 'Accesoriu', um: 'buc', pret: 0 }); save(); render(); },
+  delCat: (el) => { S.catalog = S.catalog.filter((x) => x.id !== el.dataset.id); save(); render(); },
+  exportJSON: () => download(`backup-ofertare-${today()}.json`, JSON.stringify(S, null, 1), 'application/json'),
+  pasteImport: () => openModal(`<h2>Lipește backup</h2><textarea id="pasteBox" class="mono small" style="min-height:220px" placeholder="Lipește aici conținutul fișierului de backup"></textarea>
+    <div class="row" style="justify-content:flex-end"><button class="btn" data-act="closeModal">Renunță</button><button class="btn pri" data-act="doPaste">Încarcă</button></div>`),
+  doPaste: () => importData($('#pasteBox').value),
+  askReset: () => confirmModal('Resetezi materialele, cantul, accesoriile și coeficienții la valorile implicite? Proiectele rămân.', 'doReset'),
+  doReset: () => { const f = S.settings.firma; S.settings = { ...defaultSettings(), firma: f }; S.materials = defaultMaterials(); S.cants = defaultCants(); S.catalog = defaultCatalog(); closeModal(); save(); render(); },
+  closeModal,
+};
+
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-act]');
+  if (!el) { if (e.target.id === 'modal') closeModal(); return; }
+  e.preventDefault();
+  A[el.dataset.act]?.(el);
+});
+
+function setPath(obj, path, val) { const ks = path.split('.'); let o = obj; for (let i = 0; i < ks.length - 1; i++) { o[ks[i]] ??= {}; o = o[ks[i]]; } o[ks[ks.length - 1]] = val; }
+function targetOf(el) {
+  const { o, id } = el.dataset, p = cur();
+  switch (o) {
+    case 'p': return p;
+    case 'set': return S.settings;
+    case 'part': return findPart(id).pt;
+    case 'group': return p.groups.find((x) => x.id === id);
+    case 'acc': return p.acc.find((x) => x.id === id);
+    case 'labor': return p.labor.find((x) => x.id === id);
+    case 'mat': return S.materials.find((x) => x.id === id);
+    case 'cant': return S.cants.find((x) => x.id === id);
+    case 'cat': return S.catalog.find((x) => x.id === id);
+    case 'adj': return p.accAdj;
+  }
+}
+function onField(e) {
+  const el = e.target;
+  if (!el.dataset || !el.dataset.o) return;
+  const t = targetOf(el); if (!t) return;
+  let v = el.type === 'checkbox' ? el.checked : el.value;
+  if (el.dataset.o === 'mat' && el.dataset.f === 'trim' && v === '') v = '';
+  else if (el.type === 'number' || (el.tagName === 'SELECT' && /^(eL|eW)$/.test(el.dataset.f))) v = num(v);
+  if (el.dataset.o === 'adj') { t[el.dataset.id] = num(v); }
+  else setPath(t, el.dataset.f, v);
+  if (el.dataset.o === 'group' && el.dataset.f === 'nume') t.autoName = false;
+  if (el.dataset.o === 'part' && el.dataset.f === 'mat') { const m = matById(v); if (m) t.rot = !m.fibra; }
+  save();
+  const full = el.dataset.full === '1' || el.tagName === 'SELECT' || el.type === 'checkbox';
+  if (e.type === 'change' && full) recalcSoon(true);
+  else if (e.type === 'input') recalcSoon(false);
+}
+document.addEventListener('input', onField);
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'projSel') { S.current = e.target.value; save(); render(); return; }
+  if (e.target.id === 'addCat') {
+    const c = catById(e.target.value);
+    if (c) { cur().acc.push({ id: uid(), cat: c.id, nume: c.nume, um: c.um, q: 1, pret: c.pret }); save(); render(); }
+    return;
+  }
+  if (e.target.id === 'importFile') {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader(); r.onload = () => importData(r.result); r.readAsText(f); return;
+  }
+  // la „change” pe text/număr recalculăm complet (tabele, plăci)
+  if (e.target.dataset?.o && e.target.type !== 'checkbox' && e.target.tagName !== 'SELECT') { recalcSoon(true); return; }
+  onField(e);
+});
+document.addEventListener('submit', (e) => {
+  if (e.target.id !== 'moduleForm') return;
+  e.preventDefault();
+  const fd = new FormData(e.target), gid = e.target.dataset.gid, p = cur();
+  const sp = fullSpec({
+    tip: fd.get('tip'), nume: (fd.get('nume') || '').trim(), W: num(fd.get('W')), H: num(fd.get('H')), D: num(fd.get('D')),
+    buc: Math.max(1, num(fd.get('buc')) | 0), polite: num(fd.get('polite')) | 0, usi: num(fd.get('usi')) | 0, sertare: num(fd.get('sertare')) | 0,
+    matCorp: fd.get('matCorp'), matFront: fd.get('matFront'), matSpate: fd.get('matSpate'), manere: !!fd.get('manere'), bara: !!fd.get('bara'),
+  });
+  if (sp.W < 100 || sp.H < 100 || sp.D < 100) { toast('Dimensiunile trebuie să fie de cel puțin 100 mm'); return; }
+  if (gid) { const i = p.groups.findIndex((x) => x.id === gid); p.groups[i] = makeGroup(sp, p.groups[i]); }
+  else p.groups.push(makeGroup(sp));
+  closeModal(); save(); render(); toast(gid ? 'Corp actualizat' : 'Corp adăugat');
+});
+// schimbă tipul în formular → valori implicite pentru tipul ales
+document.addEventListener('change', (e) => {
+  if (e.target.id !== 'mf-tip') return;
+  const t = TYPES[e.target.value], f = $('#moduleForm');
+  for (const k of ['W', 'H', 'D', 'polite', 'usi']) f.elements[k].value = t[k];
+  f.elements.sertare.value = t.sertare; f.elements.bara.checked = !!t.bara;
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
+
+// ---------------------------------------------------------------- Pornire
+S = load();
+if (S) migrate(); else seed();
+save();
+render();
+if ('serviceWorker' in navigator && !inFrame && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+<!-- ARTIFACT-END -->
+</body>
+</html>

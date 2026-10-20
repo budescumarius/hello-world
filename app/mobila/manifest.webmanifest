@@ -1,0 +1,17 @@
+{
+  "name": "Ofertare Mobilier",
+  "short_name": "Ofertare",
+  "description": "Ofertă rapidă pentru atelierul de mobilă: corpuri, debitare plăci, cant, accesorii, manoperă și transport. Funcționează offline.",
+  "lang": "ro",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eef2f0",
+  "theme_color": "#0f5e52",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
