@@ -1,8 +1,8 @@
 {
-  "name": "Ofertare Mobilier",
-  "short_name": "Ofertare",
-  "description": "Ofertă rapidă pentru atelierul de mobilă: corpuri, debitare plăci, cant, accesorii, manoperă și transport. Funcționează offline.",
-  "lang": "ro",
+  "name": "Devis Mobilier",
+  "short_name": "Devis",
+  "description": "Devis rapide pour atelier de meubles : croquis lu par Claude, caissons, plan de découpe, chants, quincaillerie, main-d’œuvre, déplacement et vue 3D.",
+  "lang": "fr",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -10,8 +10,21 @@
   "background_color": "#eef2f0",
   "theme_color": "#0f5e52",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" },
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
   ]
 }

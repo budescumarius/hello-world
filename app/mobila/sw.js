@@ -1,5 +1,5 @@
 // Service worker: aplicația de ofertare funcționează offline după prima încărcare.
-const VERSION = 'ofertare-v2';
+const VERSION = 'ofertare-v3';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
