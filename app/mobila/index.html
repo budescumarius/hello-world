@@ -1309,14 +1309,14 @@ async function initCloud() {
 }
 
 // ---------------------------------------------------------------- Schița
-async function shrink(file, max = 1600) {
+async function shrink(file, max = 1400) {
   try {
     const bmp = await createImageBitmap(file);
     const sc = Math.min(1, max / Math.max(bmp.width, bmp.height));
     const c = document.createElement('canvas');
     c.width = Math.round(bmp.width * sc); c.height = Math.round(bmp.height * sc);
     c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-    return await new Promise((r) => c.toBlob((b) => r(b || file), 'image/jpeg', 0.86));
+    return await new Promise((r) => c.toBlob((b) => r(b || file), 'image/jpeg', 0.8));
   } catch { return file; }
 }
 const sketchURL = (p) => MEM.url[p.id] || (p.sketch?.id ? '/_blob/' + p.sketch.id : '');
@@ -1327,6 +1327,7 @@ async function sketchBlob(p) {
 }
 async function setSketch(file) {
   if (!file || !/^image\//.test(file.type)) { toast('Choisissez une image (photo ou capture)'); return; }
+  if (/^Exemple/.test(cur().nume)) { const np = newProject(); S.projects.unshift(np); S.current = np.id; }
   const p = cur(), blob = await shrink(file);
   MEM.blob[p.id] = blob; MEM.url[p.id] = URL.createObjectURL(blob); p.sketch = null;
   render();
@@ -1369,7 +1370,10 @@ function aiErr(e) {
     case 'invalid_json': return 'La réponse de Claude n’a pas pu être lue. Cliquez à nouveau sur « Lire le croquis ».';
     case 'image_rejected': return 'L’image a été refusée. Essayez une photo JPG ou PNG.';
     case 'empty': return 'Aucun meuble trouvé sur le croquis. Décrivez en quelques mots la demande du client et réessayez.';
-    default: return 'La lecture du croquis a échoué' + (e?.message ? ' : ' + e.message : '.') + ' Réessayez.';
+    case 'session_expired': return 'Votre session Claude a expiré. Reconnectez-vous puis réessayez.';
+    case 'refused': return 'Claude n’a pas pu traiter cette image. Essayez une autre photo ou ajoutez une description.';
+    case 'empty_completion': return 'Claude n’a rien répondu. Ajoutez une courte description et réessayez.';
+    default: return 'La connexion a été interrompue pendant la lecture. Cliquez sur « Réessayer » et gardez l’application ouverte jusqu’à la fin (souvent 30 à 60 secondes).';
   }
 }
 async function aiRun(refine) {
@@ -1380,13 +1384,17 @@ async function aiRun(refine) {
   const withImage = !!(blob && AI.images);
   AI.busy = true; AI.err = ''; AI.status = refine ? 'Claude refait l’estimation avec vos réponses…' : 'Claude lit le croquis et prépare une première estimation…';
   render();
+  let lock = null;
+  try { lock = await navigator.wakeLock?.request('screen'); } catch { /* facultatif */ }
   try {
-    const opts = { modelTier: 'complex', cache: false };
+    const opts = { modelTier: 'default', cache: false, onText: ({ text }) => { const el = $('#aiProgress'); if (el) el.textContent = `Claude écrit l’estimation… ${text.length} caractères reçus.`; } };
     if (withImage) opts.images = [blob];
     const res = await AI.sample.json(aiPrompt(p, refine, withImage), opts);
     applyAI(p, res, refine);
+    AI.retry = '';
     toast(refine ? 'Estimation mise à jour' : 'Première estimation prête');
-  } catch (e) { AI.err = aiErr(e); }
+  } catch (e) { AI.err = aiErr(e); AI.retry = ['upstream_error', 'invalid_json', 'rate_limited', 'session_expired'].includes(e?.code) || !e?.code ? (refine ? 'refine' : 'readSketch') : ''; }
+  try { await lock?.release(); } catch { /* ignoré */ }
   AI.busy = false; AI.status = '';
   save(); render();
 }
@@ -1450,8 +1458,8 @@ function vRapid(p) {
           <button class="btn pri" data-act="readSketch" ${!AI.sample || AI.busy ? 'disabled' : ''}>${specs.length && ai.intrebari ? 'Relire le croquis' : 'Lire le croquis et estimer'}</button>
           <button class="btn" data-act="addModule">+ Ajouter un caisson à la main</button>
         </div>
-        ${AI.busy ? `<div class="note"><span class="spin"></span> ${esc(AI.status)} Cela prend en général moins d’une minute.</div>` : ''}
-        ${AI.err ? `<div class="err">${esc(AI.err)}</div>` : ''}
+        ${AI.busy ? `<div class="note"><span class="spin"></span> ${esc(AI.status)} <span id="aiProgress">Cela prend en général 20 à 60 secondes, gardez l’application ouverte.</span></div>` : ''}
+        ${AI.err ? `<div class="err">${esc(AI.err)}</div>${AI.retry ? `<div class="row"><button class="btn pri" data-act="${AI.retry}">Réessayer</button></div>` : ''}` : ''}
         ${AI.ready && !AI.sample ? '<div class="note">La lecture automatique du croquis fonctionne quand l’application est ouverte depuis le lien claude.ai. Ici, ajoutez les caissons à la main.</div>' : ''}
         ${AI.sample && url && !AI.images ? '<div class="note">Sur cet appareil, Claude ne peut pas recevoir d’images : la lecture se fait uniquement d’après la description.</div>' : ''}
       </div>
