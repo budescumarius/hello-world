@@ -1,5 +1,5 @@
 // Service worker: aplicația de ofertare funcționează offline după prima încărcare.
-const VERSION = 'ofertare-v1';
+const VERSION = 'ofertare-v2';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
@@ -29,8 +29,8 @@ self.addEventListener('fetch', (e) => {
         return cached || net;
       })
     );
-  } else if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') {
-    // Fonturile se păstrează în cache după prima folosire
+  } else if (['fonts.googleapis.com', 'fonts.gstatic.com', 'cdnjs.cloudflare.com', 'cdn.jsdelivr.net'].includes(url.hostname)) {
+    // Fonturile și biblioteca 3D se păstrează în cache după prima folosire
     e.respondWith(
       caches.open(VERSION).then(async (cache) => {
         const cached = await cache.match(req);

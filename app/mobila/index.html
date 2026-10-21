@@ -156,6 +156,28 @@ svg.sheet { width: 100%; height: auto; display: block; border-radius: 4px; }
 .doc .grand { display: flex; justify-content: space-between; align-items: baseline; border-top: 2px solid var(--ink); padding-top: 10px; font-family: var(--font-display); }
 .doc .grand b { font-size: 1.6rem; }
 
+.sketch-row { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 760px) { .sketch-row { grid-template-columns: minmax(0, 1fr); } }
+.drop { border: 2px dashed var(--line); border-radius: var(--r); background: var(--surface-2); min-height: 220px; display: grid; place-items: center; align-content: center; gap: 10px; text-align: center; padding: 12px; color: var(--muted); overflow: hidden; }
+.drop img { width: 100%; height: auto; max-height: 460px; object-fit: contain; border-radius: 6px; display: block; }
+.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop svg { width: 44px; height: 44px; color: var(--accent); }
+.big-total { font-family: var(--font-display); font-weight: 800; font-size: clamp(2.1rem, 7vw, 3.2rem); color: var(--accent); line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.v3d { height: clamp(300px, 52vw, 520px); border-radius: 8px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); position: relative; touch-action: none; display: grid; }
+.v3d canvas { display: block; width: 100% !important; height: 100% !important; }
+.v3d .empty { align-self: center; }
+.opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.opt { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 6px 12px; cursor: pointer; font-size: 0.9rem; }
+.opt[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.swatch { width: 22px; height: 22px; border-radius: 5px; border: 1px solid var(--line); flex: none; }
+.matpick { display: flex; gap: 8px; align-items: center; }
+.qa { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.qa b { font-weight: 600; }
+.spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -2px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.clist td input[type="number"] { width: 78px; }
+.clist td:first-child { min-width: 150px; }
+.err { color: var(--bad); font-size: 0.9rem; }
 .empty { text-align: center; padding: 28px 16px; color: var(--muted); display: grid; gap: 10px; justify-items: center; }
 .note { font-size: 0.85rem; color: var(--muted); background: var(--surface-2); border-radius: 8px; padding: 8px 12px; }
 
@@ -175,7 +197,7 @@ svg.sheet { width: 100%; height: auto; display: block; border-radius: 4px; }
   #offerDoc, #offerDoc * { visibility: visible; }
   #offerDoc { position: absolute; left: 0; top: 0; width: 100%; border: 0; padding: 0; max-width: none; }
 }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation-duration: 3s !important; } }
 </style>
 </head>
 <body>
@@ -207,6 +229,8 @@ svg.sheet { width: 100%; height: auto; display: block; border-radius: 4px; }
 <div id="modal" class="modal" hidden></div>
 <div id="toast" class="toast" hidden role="status"></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script>
 'use strict';
 /* Ofertare Mobilier — calcul rapid de ofertă pentru atelier de mobilă:
@@ -232,11 +256,12 @@ function toast(msg) {
 
 // ---------------------------------------------------------------- Date implicite
 const TYPES = {
-  baza:      { nume: 'Corp bază',      W: 600, H: 720,  D: 560, polite: 1, usi: 1, sertare: 0, picioare: true },
-  suspendat: { nume: 'Corp suspendat', W: 600, H: 720,  D: 320, polite: 1, usi: 1, sertare: 0, prindere: true },
-  coloana:   { nume: 'Coloană',        W: 600, H: 2100, D: 560, polite: 4, usi: 2, sertare: 0, picioare: true },
-  dulap:     { nume: 'Dulap haine',    W: 1000, H: 2400, D: 600, polite: 2, usi: 2, sertare: 0, picioare: true, bara: true },
-  raft:      { nume: 'Raft deschis',   W: 800, H: 1800, D: 300, polite: 4, usi: 0, sertare: 0 },
+  baza:      { nume: 'Corp bază',      W: 600, H: 720,  D: 560, polite: 1, usi: 1, sertare: 0, y: 100, picioare: true, traverse: true },
+  suspendat: { nume: 'Corp suspendat', W: 600, H: 720,  D: 320, polite: 1, usi: 1, sertare: 0, y: 1450, prindere: true },
+  lavoar:    { nume: 'Mască lavoar',   W: 800, H: 500,  D: 460, polite: 0, usi: 0, sertare: 2, y: 350, prindere: true, traverse: true, lavoar: true },
+  coloana:   { nume: 'Coloană',        W: 600, H: 2100, D: 560, polite: 4, usi: 2, sertare: 0, y: 100, picioare: true },
+  dulap:     { nume: 'Dulap haine',    W: 1000, H: 2400, D: 600, polite: 2, usi: 2, sertare: 0, y: 100, picioare: true, bara: true },
+  raft:      { nume: 'Raft deschis',   W: 800, H: 1800, D: 300, polite: 4, usi: 0, sertare: 0, y: 0 },
 };
 
 function defaultSettings() {
@@ -252,10 +277,11 @@ function defaultSettings() {
 }
 function defaultMaterials() {
   return [
-    { id: 'm_alb', nume: 'PAL Unilin Alb', decor: '', tip: 'PAL', gros: 18, L: 2800, W: 2070, pret: 260, fibra: false },
-    { id: 'm_stejar', nume: 'PAL Unilin Stejar', decor: '', tip: 'PAL', gros: 18, L: 2800, W: 2070, pret: 340, fibra: true },
-    { id: 'm_hdf', nume: 'HDF alb', decor: '', tip: 'HDF', gros: 3, L: 2800, W: 2070, pret: 75, fibra: false },
-    { id: 'm_blat', nume: 'Blat bucătărie', decor: '', tip: 'Blat', gros: 38, L: 4100, W: 600, pret: 650, fibra: true, trim: 0 },
+    { id: 'm_alb', nume: 'PAL Unilin Alb', decor: '', tip: 'PAL', gros: 18, L: 2800, W: 2070, pret: 260, fibra: false, culoare: '#f1f1ec' },
+    { id: 'm_stejar', nume: 'PAL Unilin Stejar', decor: '', tip: 'PAL', gros: 18, L: 2800, W: 2070, pret: 340, fibra: true, culoare: '#c49a6c' },
+    { id: 'm_antracit', nume: 'PAL Unilin Antracit', decor: '', tip: 'PAL', gros: 18, L: 2800, W: 2070, pret: 300, fibra: false, culoare: '#4a4d50' },
+    { id: 'm_hdf', nume: 'HDF alb', decor: '', tip: 'HDF', gros: 3, L: 2800, W: 2070, pret: 75, fibra: false, culoare: '#efefea' },
+    { id: 'm_blat', nume: 'Blat bucătărie', decor: '', tip: 'Blat', gros: 38, L: 4100, W: 600, pret: 650, fibra: true, trim: 0, culoare: '#7b5a3c' },
   ];
 }
 function defaultCants() {
@@ -272,6 +298,7 @@ function defaultCatalog() {
     { id: 'a_bara', nume: 'Bară haine cu suporți', um: 'set', pret: 30 },
     { id: 'a_plinta', nume: 'Plintă bucătărie', um: 'ml', pret: 25 },
     { id: 'a_consum', nume: 'Consumabile (șuruburi, dibluri, cuie)', um: 'corp', pret: 15 },
+    { id: 'a_oglinda', nume: 'Oglindă 4 mm lipită pe uși', um: 'm²', pret: 150 },
   ];
 }
 
@@ -289,11 +316,12 @@ function newProject(nume) {
     ],
     rate: s.rate, transport: { km: 0, drumuri: 3, pretKm: s.pretKm, fix: 0 },
     markup: 0, discount: 0, tvaOn: false, avans: 50, placi: 'intregi', detaliat: true, listaCorpuri: true,
+    matCorp: 'm_alb', matFront: 'm_stejar', matSpate: 'm_hdf', sketch: null, ai: null,
   };
 }
 
 function seed() {
-  S = { v: 1, settings: defaultSettings(), materials: defaultMaterials(), cants: defaultCants(), catalog: defaultCatalog(), projects: [], current: null, tab: 'corpuri' };
+  S = { v: 2, settings: defaultSettings(), materials: defaultMaterials(), cants: defaultCants(), catalog: defaultCatalog(), projects: [], current: null, tab: 'rapid' };
   const p = newProject('Exemplu – bucătărie 2,4 m');
   p.client = { nume: 'Client exemplu', tel: '', adresa: '' };
   p.descriere = 'Bucătărie dreaptă 2,4 m: corpuri albe, fronturi stejar, blat 38 mm.';
@@ -319,17 +347,29 @@ function load() {
   try { const raw = localStorage.getItem(KEY); if (!raw) return null; const d = JSON.parse(raw); return d && d.projects ? d : null; } catch { return null; }
 }
 let _saveT; let _saveWarned = false;
+function localSave() {
+  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { if (!_saveWarned && !Cloud.db) { _saveWarned = true; toast('Datele nu pot fi salvate în acest browser. Folosește Backup.'); } }
+}
 function save() {
   clearTimeout(_saveT);
-  _saveT = setTimeout(() => {
-    try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { if (!_saveWarned) { _saveWarned = true; toast('Datele nu pot fi salvate în acest browser. Folosește Backup.'); } }
-  }, 250);
+  _saveT = setTimeout(() => { localSave(); cloudSync(); }, 300);
 }
 function migrate() {
   const d = defaultSettings();
   S.settings = { ...d, ...S.settings, firma: { ...d.firma, ...(S.settings || {}).firma }, h: { ...d.h, ...(S.settings || {}).h } };
   S.materials ||= defaultMaterials(); S.cants ||= defaultCants(); S.catalog ||= defaultCatalog();
-  S.projects.forEach((p) => { p.accAdj ||= {}; p.acc ||= []; p.groups ||= []; });
+  for (const c of defaultCatalog()) if (!S.catalog.find((x) => x.id === c.id)) S.catalog.push(c);
+  const defCol = Object.fromEntries(defaultMaterials().map((m) => [m.id, m.culoare]));
+  S.materials.forEach((m) => { m.culoare ||= defCol[m.id] || (m.fibra ? '#c49a6c' : '#e8e8e4'); });
+  S.projects.forEach((p) => {
+    p.accAdj ||= {}; p.acc ||= []; p.groups ||= [];
+    const g0 = p.groups.find((g) => g.spec);
+    p.matCorp ||= g0?.spec.matCorp || S.materials[0]?.id; p.matFront ||= g0?.spec.matFront || S.materials[0]?.id;
+    if (p.matSpate === undefined) p.matSpate = g0 ? g0.spec.matSpate : (S.materials.find((m) => m.tip === 'HDF')?.id || '');
+  });
+  S.projects.forEach((p) => p.groups.forEach((g) => { if (g.spec && g.spec.y === undefined) g.spec = fullSpec(g.spec); }));
+  if ((S.v || 1) < 2) { S.v = 2; S.tab = 'rapid'; }
+  if (!TABS.find((t) => t[0] === S.tab)) S.tab = 'rapid';
   if (!S.projects.length) S.projects.push(newProject());
   if (!S.projects.find((p) => p.id === S.current)) S.current = S.projects[0].id;
 }
@@ -346,7 +386,8 @@ function fullSpec(sp) {
   return {
     tip: sp.tip, nume: sp.nume || '', W: sp.W ?? t.W, H: sp.H ?? t.H, D: sp.D ?? t.D, buc: sp.buc ?? 1,
     polite: sp.polite ?? t.polite, usi: sp.usi ?? (sp.tip === 'raft' ? 0 : t.usi), sertare: sp.sertare ?? t.sertare,
-    manere: sp.manere ?? true, bara: sp.bara ?? !!t.bara,
+    manere: sp.manere ?? true, bara: sp.bara ?? !!t.bara, oglinda: !!sp.oglinda,
+    y: sp.y ?? t.y ?? 0, x: sp.x ?? null, frontH: Array.isArray(sp.frontH) ? sp.frontH.map(num) : null, note: sp.note || '',
     matCorp: sp.matCorp || 'm_alb', matFront: sp.matFront || 'm_stejar', matSpate: sp.matSpate ?? 'm_hdf',
   };
 }
@@ -363,7 +404,7 @@ function genParts(sp) {
     if (q > 0 && L > 0 && Wd > 0) out.push({ id: uid(), nume, mat, L: Math.round(L), W: Math.round(Wd), q: q * n, eL, eW, cant: eL + eW ? cant : '', rot });
   };
   add('Lateral', sp.matCorp, H, D, 2, 1, 0, cc, rotC);
-  if (sp.tip === 'baza') {
+  if (TYPES[sp.tip]?.traverse) {
     add('Fund', sp.matCorp, inner, D, 1, 1, 0, cc, rotC);
     add('Traversă', sp.matCorp, inner, 100, 2, 1, 0, cc, rotC);
   } else {
@@ -376,18 +417,28 @@ function genParts(sp) {
   if (back) add('Spate', sp.matSpate, H - 4, W - 4, 1, 0, 0, '', !back.fibra);
   const nd = num(sp.sertare) | 0, nu = num(sp.usi) | 0;
   if (nd > 0) {
-    const fh = Math.floor((H - 3 * nd) / nd);
-    add('Front sertar', sp.matFront, W - 3, fh, nd, 2, 2, cf, rotF);
-    const slide = Math.min(600, Math.max(250, Math.floor((D - 30) / 50) * 50));
-    const boxH = Math.min(250, Math.max(70, fh - 60)), boxW = inner - 26;
-    add('Lateral sertar', sp.matCorp, slide, boxH, 2 * nd, 1, 0, cc, rotC);
-    add('Față/spate sertar', sp.matCorp, boxW - 2 * t, boxH, 2 * nd, 1, 0, cc, rotC);
-    if (back) add('Fund sertar', sp.matSpate, slide, boxW, nd, 0, 0, '', !back.fibra);
+    const slide = Math.min(600, Math.max(250, Math.floor((D - 30) / 50) * 50)), boxW = inner - 26;
+    const cnt = {};
+    for (const fh of drawerHeights(sp)) cnt[fh] = (cnt[fh] || 0) + 1;
+    for (const [k, c] of Object.entries(cnt)) {
+      const fh = +k, boxH = Math.min(250, Math.max(70, fh - 60));
+      add('Front sertar', sp.matFront, W - 3, fh, c, 2, 2, cf, rotF);
+      add('Lateral sertar', sp.matCorp, slide, boxH, 2 * c, 1, 0, cc, rotC);
+      add('Față/spate sertar', sp.matCorp, boxW - 2 * t, boxH, 2 * c, 1, 0, cc, rotC);
+      if (back) add('Fund sertar', sp.matSpate, slide, boxW, c, 0, 0, '', !back.fibra);
+    }
   } else if (nu > 0) {
     add(nu > 1 ? 'Ușă' : 'Ușă', sp.matFront, H - 3, Math.floor((W - 3 * nu) / nu), nu, 2, 2, cf, rotF);
   }
   return out;
 }
+function drawerHeights(sp) {
+  const nd = num(sp.sertare) | 0, H = num(sp.H);
+  const fh = sp.frontH;
+  if (Array.isArray(fh) && fh.length === nd && fh.every((v) => v >= 60) && fh.reduce((a, v) => a + v, 0) <= H + 5) return fh.map((v) => Math.round(v));
+  return Array(nd).fill(Math.floor((H - 3 * nd) / nd));
+}
+const doorSize = (sp) => { const nu = num(sp.usi) | 0; return { nu, w: Math.floor((num(sp.W) - 3 * nu) / Math.max(1, nu)), h: num(sp.H) - 3 }; };
 function accForSpec(sp) {
   const n = Math.max(1, sp.buc | 0), o = {}, add = (k, q) => { if (q > 0) o[k] = (o[k] || 0) + q * n; };
   const nd = num(sp.sertare) | 0, nu = nd > 0 ? 0 : num(sp.usi) | 0;
@@ -395,7 +446,8 @@ function accForSpec(sp) {
   add('a_glisiera', nd);
   if (sp.manere) add('a_maner', nu + nd);
   if (TYPES[sp.tip]?.picioare) add('a_picior', num(sp.W) > 900 ? 6 : 4);
-  if (sp.tip === 'suspendat') add('a_prindere', 2);
+  if (TYPES[sp.tip]?.prindere) add('a_prindere', 2);
+  if (sp.oglinda && nu) { const d = doorSize(sp); add('a_oglinda', Math.round(nu * d.w * d.h / 1e4) / 100); }
   if (sp.bara) add('a_bara', 1);
   add('a_suport', 4 * num(sp.polite));
   add('a_consum', 1);
@@ -567,8 +619,8 @@ function estimateHours(p) {
 
 // ---------------------------------------------------------------- Randare
 const TABS = [
-  ['client', '1', 'Client'], ['corpuri', '2', 'Corpuri și piese'], ['debitare', '3', 'Debitare'],
-  ['accesorii', '4', 'Accesorii'], ['manopera', '5', 'Manoperă și transport'], ['oferta', '6', 'Ofertă'], ['setari', '', 'Setări'],
+  ['rapid', '', 'Schiță → ofertă'], ['corpuri', '', 'Corpuri'], ['debitare', '', 'Debitare'], ['accesorii', '', 'Accesorii'],
+  ['manopera', '', 'Manoperă'], ['oferta', '', 'Ofertă client'], ['client', '', 'Proiecte'], ['setari', '', 'Setări'],
 ];
 const STATUS = { ciorna: 'Ciornă', trimisa: 'Trimisă', acceptata: 'Acceptată', refuzata: 'Refuzată' };
 let C = null;
@@ -578,9 +630,10 @@ function render() {
   C = compute(p);
   $('#projSel').innerHTML = S.projects.map((x) => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${esc(x.nume)}</option>`).join('');
   $('#tabs').innerHTML = TABS.map(([k, n, l]) => `<button class="tab" role="tab" data-act="tab" data-tab="${k}" aria-selected="${S.tab === k}">${n ? `<i>${n}</i>` : ''}${l}</button>`).join('');
-  const v = { client: vClient, corpuri: vCorpuri, debitare: vDebitare, accesorii: vAccesorii, manopera: vManopera, oferta: vOferta, setari: vSetari }[S.tab] || vCorpuri;
+  const v = { rapid: vRapid, client: vClient, corpuri: vCorpuri, debitare: vDebitare, accesorii: vAccesorii, manopera: vManopera, oferta: vOferta, setari: vSetari }[S.tab] || vCorpuri;
   $('#view').innerHTML = v(p);
   outs();
+  mount3D();
 }
 function outs() {
   const map = { total: lei(C.total), ore: fmt(C.ore, 1) + ' h', manopera: lei(C.manopera), transport: lei(C.transport), acc: lei(C.accCost), net: lei(C.net) };
@@ -737,7 +790,7 @@ function vDebitare(p) {
   const settings = `<section class="card">
     <div class="card-h"><h2>Debitare și pierderi</h2><span class="sp"></span>
       <button class="btn" data-act="copyCSV">Copiază lista de debitare (CSV)</button>
-      ${inFrame ? '' : '<button class="btn" data-act="downloadCSV">Descarcă CSV</button>'}
+      <button class="btn" data-act="downloadCSV">Descarcă CSV</button>
     </div>
     <div class="grid3">
       ${fld('Grosime pânză (kerf) mm', inp('set', '', 'kerf', s.kerf, { type: 'number', full: true, label: 'Kerf' }))}
@@ -873,7 +926,7 @@ function offerLines(p) {
     if (g.spec) {
       const sp = g.spec, mc = matById(sp.matCorp), mf = matById(sp.matFront);
       const n = Math.max(1, sp.buc | 0);
-      const fr = num(sp.sertare) ? `${sp.sertare} sertare` : num(sp.usi) ? `${sp.usi} ${sp.usi == 1 ? 'ușă' : 'uși'}` : 'deschis';
+      const fr = (num(sp.sertare) ? `${sp.sertare} sertare` : num(sp.usi) ? `${sp.usi} ${sp.usi == 1 ? 'ușă' : 'uși'}${sp.oglinda ? ' cu oglindă' : ''}` : 'deschis');
       return { nume: g.autoName ? TYPES[sp.tip]?.nume || g.nume : g.nume, dim: `${sp.W}×${sp.H}×${sp.D}`, buc: n, det: `${fr}; corp ${matName(mc)}${(num(sp.sertare) || num(sp.usi)) && mf ? ', front ' + matName(mf) : ''}` };
     }
     const mats = [...new Set(g.parts.map((x) => matName(matById(x.mat))).filter(Boolean))].join(', ');
@@ -940,6 +993,7 @@ function offerText(p) {
 function vSetari() {
   const s = S.settings;
   const matRows = S.materials.map((m) => `<tr>
+    <td><input id="col-${m.id}" type="color" data-o="mat" data-id="${m.id}" data-f="culoare" data-full="1" value="${esc(m.culoare || '#dddddd')}" aria-label="Culoare în 3D" style="width:40px;height:34px;padding:2px"></td>
     <td>${inp('mat', m.id, 'nume', m.nume, { cls: 'w-l', label: 'Denumire' })}</td>
     <td>${inp('mat', m.id, 'decor', m.decor, { cls: 'w-m', ph: 'cod / decor', label: 'Decor' })}</td>
     <td>${inp('mat', m.id, 'gros', m.gros, { type: 'number', cls: 'w-xs', label: 'Grosime', full: true })}</td>
@@ -953,7 +1007,7 @@ function vSetari() {
     <td><button class="btn ghost icon danger" data-act="delCant" data-id="${c.id}" aria-label="Șterge">✕</button></td></tr>`).join('');
   const catRows = S.catalog.map((c) => `<tr><td>${inp('cat', c.id, 'nume', c.nume, { cls: 'w-l', label: 'Accesoriu' })}</td><td>${inp('cat', c.id, 'um', c.um, { cls: 'w-xs', label: 'UM' })}</td>
     <td>${inp('cat', c.id, 'pret', c.pret, { type: 'number', cls: 'w-s', label: 'Preț' })}</td>
-    <td>${c.id.startsWith('a_') && ['a_balama', 'a_glisiera', 'a_maner', 'a_picior', 'a_suport', 'a_prindere', 'a_bara', 'a_consum'].includes(c.id) ? '<span class="chip plain">automat</span>' : `<button class="btn ghost icon danger" data-act="delCat" data-id="${c.id}" aria-label="Șterge">✕</button>`}</td></tr>`).join('');
+    <td>${c.id.startsWith('a_') && ['a_balama', 'a_glisiera', 'a_maner', 'a_picior', 'a_suport', 'a_prindere', 'a_bara', 'a_consum', 'a_oglinda'].includes(c.id) ? '<span class="chip plain">automat</span>' : `<button class="btn ghost icon danger" data-act="delCat" data-id="${c.id}" aria-label="Șterge">✕</button>`}</td></tr>`).join('');
   const h = s.h;
   return `
   <section class="card"><h2>Atelierul tău</h2>
@@ -967,7 +1021,7 @@ function vSetari() {
     </div></section>
   <section class="card"><div class="card-h"><h2>Plăci (catalog Unilin și altele)</h2><span class="sp"></span><button class="btn" data-act="addMat">+ Material</button></div>
     <p class="muted small" style="margin:0">Prețurile de început sunt orientative — pune prețurile tale de la furnizor. Adaugă câte un rând pentru fiecare decor ales de client (ex. codul Unilin din catalog). „Fibră” bifat = piesele nu se rotesc la debitare.</p>
-    <div class="tw"><table><thead><tr><th>Denumire</th><th>Decor / cod</th><th>Gros.</th><th>L placă</th><th>l placă</th><th title="Tăiere margine; gol = valoarea generală">Margine</th><th>Lei / placă</th><th>Fibră</th><th></th></tr></thead><tbody>${matRows}</tbody></table></div></section>
+    <div class="tw"><table><thead><tr><th>3D</th><th>Denumire</th><th>Decor / cod</th><th>Gros.</th><th>L placă</th><th>l placă</th><th title="Tăiere margine; gol = valoarea generală">Margine</th><th>Lei / placă</th><th>Fibră</th><th></th></tr></thead><tbody>${matRows}</tbody></table></div></section>
   <div class="cols">
   <section class="card"><div class="card-h"><h2>Cant</h2><span class="sp"></span><button class="btn" data-act="addCant">+ Cant</button></div>
     <div class="tw"><table><thead><tr><th>Tip</th><th>Lei / ml</th><th></th></tr></thead><tbody>${cantRows}</tbody></table></div>
@@ -999,9 +1053,9 @@ function vSetari() {
   <section class="card"><div class="card-h"><h2>Catalog accesorii</h2><span class="sp"></span><button class="btn" data-act="addCat">+ Accesoriu</button></div>
     <div class="tw"><table><thead><tr><th>Denumire</th><th>UM</th><th>Lei</th><th></th></tr></thead><tbody>${catRows}</tbody></table></div></section>
   <section class="card"><h2>Backup</h2>
-    <p class="muted small" style="margin:0">Datele stau doar pe acest dispozitiv, în browser. Fă din când în când un backup și păstrează-l în Fișiere / iCloud / Google Drive.</p>
+    <p class="muted small" style="margin:0">${Cloud.db ? 'Proiectele se salvează în contul tău Claude și le găsești pe orice dispozitiv deschizi linkul.' : 'Datele stau doar pe acest dispozitiv, în browser.'} Fă din când în când un backup și păstrează-l în Fișiere / iCloud / Google Drive.</p>
     <div class="row">
-      <button class="btn" data-act="exportJSON">${inFrame ? 'Arată backup (de copiat)' : 'Descarcă backup'}</button>
+      <button class="btn" data-act="exportJSON">Descarcă backup</button>
       <label class="btn" for="importFile">Încarcă backup din fișier</label><input id="importFile" type="file" accept=".json,application/json" hidden>
       <button class="btn" data-act="pasteImport">Lipește backup</button>
       <button class="btn danger" data-act="askReset">Resetează prețurile implicite</button>
@@ -1024,14 +1078,14 @@ function moduleForm(sp, gid) {
     <div class="grid3">
       ${fld('Lățime mm', n('W'))}${fld('Înălțime mm', n('H'))}${fld('Adâncime mm', n('D'))}
       ${fld('Bucăți identice', n('buc', 'min="1"'))}${fld('Polițe', n('polite', 'min="0"'))}${fld('Uși', n('usi', 'min="0"'))}
-      ${fld('Sertare (înlocuiesc ușile)', n('sertare', 'min="0"'))}
+      ${fld('Sertare (înlocuiesc ușile)', n('sertare', 'min="0"'))}${fld('Cotă de la podea mm', n('y', 'min="0"'))}
     </div>
     <div class="grid3">
       ${fld('Material corp', o('matCorp', matOpts()))}
       ${fld('Material fronturi', o('matFront', matOpts()))}
       ${fld('Spate', o('matSpate', [['', 'Fără spate'], ...matOpts()]))}
     </div>
-    <div class="row"><label class="chk"><input type="checkbox" name="manere" ${sp.manere ? 'checked' : ''}> Mânere</label><label class="chk"><input type="checkbox" name="bara" ${sp.bara ? 'checked' : ''}> Bară haine</label></div>
+    <div class="row"><label class="chk"><input type="checkbox" name="manere" ${sp.manere ? 'checked' : ''}> Mânere</label><label class="chk"><input type="checkbox" name="bara" ${sp.bara ? 'checked' : ''}> Bară haine</label><label class="chk"><input type="checkbox" name="oglinda" ${sp.oglinda ? 'checked' : ''}> Uși cu oglindă</label></div>
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeModal">Renunță</button><button class="btn pri" type="submit">${gid ? 'Actualizează piesele' : 'Adaugă corpul'}</button></div>
   </form>`);
 }
@@ -1045,7 +1099,11 @@ async function copyText(text, label) {
   try { await navigator.clipboard.writeText(text); toast(label + ' copiat'); }
   catch { textModal(label, text, 'Selectează tot textul și copiază-l.'); }
 }
-function download(name, text, type) {
+async function download(name, text, type) {
+  if (Cloud.dl) {
+    try { await Cloud.dl.save({ filename: name, data: new Blob([text], { type }) }); return; }
+    catch (e) { if (e?.code === 'declined' || e?.code === 'rate_limited') return; }
+  }
   if (inFrame) { textModal(name, text, 'Copiază textul și salvează-l într-un fișier.'); return; }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name;
@@ -1071,7 +1129,7 @@ function confirmModal(msg, act, id) {
 function findPart(id) { for (const g of cur().groups) { const pt = g.parts.find((x) => x.id === id); if (pt) return { g, pt }; } return {}; }
 const A = {
   tab: (el) => { S.tab = el.dataset.tab; save(); render(); window.scrollTo(0, 0); },
-  newProject: () => { const p = newProject(); S.projects.unshift(p); S.current = p.id; S.tab = 'client'; save(); render(); toast('Proiect nou creat'); },
+  newProject: () => { const p = newProject(); S.projects.unshift(p); S.current = p.id; S.tab = 'rapid'; save(); render(); toast('Proiect nou: încarcă schița'); },
   openProject: (el) => { S.current = el.dataset.id; save(); render(); },
   dupProject: (el) => {
     const src = S.projects.find((x) => x.id === el.dataset.id); if (!src) return;
@@ -1080,7 +1138,7 @@ const A = {
   },
   askDelProject: (el) => { const x = S.projects.find((q) => q.id === el.dataset.id); confirmModal(`Ștergi proiectul „${x?.nume}”?`, 'delProject', el.dataset.id); },
   delProject: (el) => { S.projects = S.projects.filter((x) => x.id !== el.dataset.id); if (!S.projects.length) S.projects.push(newProject()); if (!S.projects.find((x) => x.id === S.current)) S.current = S.projects[0].id; closeModal(); save(); render(); },
-  addModule: () => moduleForm(fullSpec({ tip: 'baza', matCorp: S.materials[0]?.id, matFront: S.materials[1]?.id || S.materials[0]?.id, matSpate: S.materials.find((m) => m.tip === 'HDF')?.id || '' })),
+  addModule: () => { const p = cur(); moduleForm(fullSpec({ tip: 'baza', matCorp: p.matCorp, matFront: p.matFront, matSpate: p.matSpate })); },
   editGroup: (el) => { const g = cur().groups.find((x) => x.id === el.dataset.id); if (g?.spec) moduleForm({ ...g.spec, nume: g.autoName ? '' : g.nume }, g.id); },
   addManual: () => { cur().groups.push({ id: uid(), nume: 'Piese diverse', spec: null, parts: [{ id: uid(), nume: 'Panou', mat: S.materials[0]?.id || '', L: 1000, W: 500, q: 1, eL: 0, eW: 0, cant: '', rot: !S.materials[0]?.fibra }] }); save(); render(); },
   dupGroup: (el) => { const p = cur(), i = p.groups.findIndex((x) => x.id === el.dataset.id); if (i < 0) return; const g = JSON.parse(JSON.stringify(p.groups[i])); g.id = uid(); g.parts.forEach((x) => { x.id = uid(); }); p.groups.splice(i + 1, 0, g); save(); render(); toast('Corp duplicat'); },
@@ -1133,6 +1191,8 @@ function targetOf(el) {
     case 'cant': return S.cants.find((x) => x.id === id);
     case 'cat': return S.catalog.find((x) => x.id === id);
     case 'adj': return p.accAdj;
+    case 'ans': return (p.ai ||= { intrebari: [], raspunsuri: {}, presupuneri: [] }).raspunsuri;
+    case 'spec': return p.groups.find((x) => x.id === id)?.spec;
   }
 }
 function onField(e) {
@@ -1143,7 +1203,10 @@ function onField(e) {
   if (el.dataset.o === 'mat' && el.dataset.f === 'trim' && v === '') v = '';
   else if (el.type === 'number' || (el.tagName === 'SELECT' && /^(eL|eW)$/.test(el.dataset.f))) v = num(v);
   if (el.dataset.o === 'adj') { t[el.dataset.id] = num(v); }
+  else if (el.dataset.o === 'ans') { t[el.dataset.id] = v; }
   else setPath(t, el.dataset.f, v);
+  if (el.dataset.o === 'spec') { const g = cur().groups.find((x) => x.id === el.dataset.id); g.parts = genParts(g.spec); if (g.autoName) g.nume = specTitle(g.spec); }
+  if (el.dataset.o === 'p' && /^mat(Corp|Front|Spate)$/.test(el.dataset.f)) applyMaterials(cur());
   if (el.dataset.o === 'group' && el.dataset.f === 'nume') t.autoName = false;
   if (el.dataset.o === 'part' && el.dataset.f === 'mat') { const m = matById(v); if (m) t.rot = !m.fibra; }
   save();
@@ -1175,6 +1238,8 @@ document.addEventListener('submit', (e) => {
     tip: fd.get('tip'), nume: (fd.get('nume') || '').trim(), W: num(fd.get('W')), H: num(fd.get('H')), D: num(fd.get('D')),
     buc: Math.max(1, num(fd.get('buc')) | 0), polite: num(fd.get('polite')) | 0, usi: num(fd.get('usi')) | 0, sertare: num(fd.get('sertare')) | 0,
     matCorp: fd.get('matCorp'), matFront: fd.get('matFront'), matSpate: fd.get('matSpate'), manere: !!fd.get('manere'), bara: !!fd.get('bara'),
+    oglinda: !!fd.get('oglinda'), y: num(fd.get('y')), x: gid ? p.groups.find((x) => x.id === gid)?.spec?.x ?? null : null,
+    frontH: gid ? p.groups.find((x) => x.id === gid)?.spec?.frontH ?? null : null,
   });
   if (sp.W < 100 || sp.H < 100 || sp.D < 100) { toast('Dimensiunile trebuie să fie de cel puțin 100 mm'); return; }
   if (gid) { const i = p.groups.findIndex((x) => x.id === gid); p.groups[i] = makeGroup(sp, p.groups[i]); }
@@ -1185,16 +1250,463 @@ document.addEventListener('submit', (e) => {
 document.addEventListener('change', (e) => {
   if (e.target.id !== 'mf-tip') return;
   const t = TYPES[e.target.value], f = $('#moduleForm');
-  for (const k of ['W', 'H', 'D', 'polite', 'usi']) f.elements[k].value = t[k];
+  for (const k of ['W', 'H', 'D', 'polite', 'usi', 'y']) f.elements[k].value = t[k];
   f.elements.sertare.value = t.sertare; f.elements.bara.checked = !!t.bara;
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
 
+// ---------------------------------------------------------------- Cont Claude: salvare, Claude, fișiere
+const Cloud = { db: null, uid: null, last: new Map(), chain: Promise.resolve(), dl: null, assets: null };
+const AI = { sample: null, images: null, ready: false, busy: false, status: '', err: '' };
+const MEM = { blob: {}, url: {} };
+
+function cloudDocs() {
+  const cfg = { v: S.v, settings: S.settings, materials: S.materials, cants: S.cants, catalog: S.catalog, current: S.current, tab: S.tab, order: S.projects.map((p) => p.id) };
+  return [['cfg', cfg], ...S.projects.map((p) => ['p_' + p.id, p])];
+}
+function cloudSync() {
+  if (!Cloud.db) return;
+  const col = Cloud.db.collection('data/users/' + Cloud.uid);
+  const docs = cloudDocs().map(([id, body]) => [id, JSON.stringify(body)]);
+  const want = new Set(docs.map((d) => d[0]));
+  Cloud.chain = Cloud.chain.then(async () => {
+    for (const [id, j] of docs) {
+      if (Cloud.last.get(id) === j) continue;
+      try { await col.doc(id).set(JSON.parse(j)); Cloud.last.set(id, j); } catch { /* rămâne în browser; reîncearcă la următoarea salvare */ }
+    }
+    for (const id of [...Cloud.last.keys()]) {
+      if (want.has(id)) continue;
+      try { await col.doc(id).delete(); Cloud.last.delete(id); } catch { /* ignorat */ }
+    }
+  });
+}
+async function initCloud() {
+  if (!window.claude?.use) { AI.ready = true; if (S.tab === 'rapid') render(); return; }
+  const [db, user, dl, assets, sample] = await Promise.all(['db', 'user', 'downloads', 'assets', 'sample'].map((n) => window.claude.use(n).catch(() => null)));
+  Cloud.dl = dl; Cloud.assets = assets;
+  if (sample) { AI.sample = sample; AI.images = (await sample.limits().catch(() => null))?.images || null; }
+  AI.ready = true;
+  const id = db && user ? await user.id().catch(() => null) : null;
+  if (id) {
+    try {
+      const snap = await db.collection('data/users/' + id).get();
+      Cloud.db = db; Cloud.uid = id;
+      const cfg = snap.docs.find((d) => d.id === 'cfg' && d.exists);
+      if (cfg) {
+        const c = JSON.parse(JSON.stringify(cfg.data()));
+        const projects = snap.docs.filter((d) => d.exists && d.id.startsWith('p_')).map((d) => JSON.parse(JSON.stringify(d.data())));
+        const order = c.order || [];
+        projects.sort((a, b) => (order.indexOf(a.id) + 1 || 1e9) - (order.indexOf(b.id) + 1 || 1e9));
+        snap.docs.forEach((d) => { if (d.exists) Cloud.last.set(d.id, JSON.stringify(d.data())); });
+        delete c.order;
+        S = { ...c, projects };
+        migrate(); localSave();
+      } else cloudSync();
+    } catch { /* fără cont: rămânem pe datele din browser */ }
+  }
+  render();
+}
+
+// ---------------------------------------------------------------- Schița
+async function shrink(file, max = 1600) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const sc = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * sc); c.height = Math.round(bmp.height * sc);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    return await new Promise((r) => c.toBlob((b) => r(b || file), 'image/jpeg', 0.86));
+  } catch { return file; }
+}
+const sketchURL = (p) => MEM.url[p.id] || (p.sketch?.id ? '/_blob/' + p.sketch.id : '');
+async function sketchBlob(p) {
+  if (MEM.blob[p.id]) return MEM.blob[p.id];
+  if (!p.sketch?.id) return null;
+  try { const r = await fetch('/_blob/' + p.sketch.id); if (!r.ok) return null; return (MEM.blob[p.id] = await r.blob()); } catch { return null; }
+}
+async function setSketch(file) {
+  if (!file || !/^image\//.test(file.type)) { toast('Alege o imagine (poză sau captură)'); return; }
+  const p = cur(), blob = await shrink(file);
+  MEM.blob[p.id] = blob; MEM.url[p.id] = URL.createObjectURL(blob); p.sketch = null;
+  render();
+  if (Cloud.assets) {
+    try { const r = await Cloud.assets.upload(blob); p.sketch = { id: r.id }; save(); } catch { /* schița rămâne doar în sesiunea curentă */ }
+  }
+  if (AI.sample) aiRun(false);
+}
+
+// ---------------------------------------------------------------- Claude citește schița
+function aiPrompt(p, refine, withImage) {
+  const tipuri = Object.entries(TYPES).map(([k, t]) => `"${k}" = ${t.nume} (uzual ${t.W}×${t.H}×${t.D} mm, la ${t.y} mm de podea)`).join('\n');
+  const ai = p.ai || {};
+  const ans = [...(ai.istoric || []), ...(ai.intrebari || []).filter((q) => String(ai.raspunsuri?.[q.id] ?? '').trim()).map((q) => ({ intrebare: q.text, raspuns: ai.raspunsuri[q.id] }))];
+  const prev = p.groups.filter((g) => g.spec).map((g) => { const sp = g.spec; return { tip: sp.tip, nume: g.nume, W: sp.W, H: sp.H, D: sp.D, buc: sp.buc, usi: sp.usi, sertare: sp.sertare, polite: sp.polite, frontH: sp.frontH, y: sp.y, x: sp.x, oglinda: sp.oglinda, note: sp.note }; });
+  return `Ești asistentul unui atelier de mobilă din România. Meșterul a fost la client, a luat măsuri și a făcut o schiță.
+${withImage ? 'Imaginea atașată este poza de la client cu schița desenată de mână peste perete: contururile corpurilor și cotele scrise de mână (de obicei în cm; „h” lângă o cotă înseamnă înălțime de la podea; o săgeată orizontală arată o lățime).' : 'Nu există imagine; lucrează doar după descriere.'}
+Ce vrea clientul (scris de meșter): "${(p.descriere || '').slice(0, 1500) || '—'}"
+
+Sarcina: identifică fiecare corp de mobilier și dă dimensiunile EXTERIOARE în milimetri, ca să se poată calcula plăcile și prețul.
+Tipuri de corp permise:
+${tipuri}
+
+Reguli:
+- Transformă cm în mm. Dacă o cotă lipsește, alege o valoare uzuală și scrie-o în "presupuneri".
+- "y" = de la podea până la baza corpului (mm). "x" = de la capătul din stânga al mobilierului până la marginea stângă a corpului (mm).
+- La sertare poți da "frontH" = înălțimile fronturilor, de sus în jos (mm), dacă reies din schiță.
+- "oglinda": true dacă ușile par cu oglindă (de ex. dulapul de deasupra lavoarului).
+- "note": detalii de execuție scurte (de ex. decupaj pentru sifon).
+- Pune cel mult 4 întrebări scurte, doar pentru ce nu reiese din schiță și schimbă dimensiunile sau prețul (de ex. ce înseamnă o cotă neclară). NU întreba de materiale, culori, distanță sau preț — le întreabă aplicația. Dă 2–4 variante scurte de răspuns când se poate.
+${refine ? `\nAnaliza ta de până acum:\n${JSON.stringify(prev)}\nRăspunsurile meșterului:\n${JSON.stringify(ans)}\nActualizează corpurile după răspunsuri. Nu mai pune întrebările la care s-a răspuns; pune altele doar dacă sunt cu adevărat necesare.\n` : ''}
+Răspunde DOAR cu JSON, exact în forma aceasta (valorile sunt doar exemplu):
+{"descriere":"o frază pentru ofertă","corpuri":[{"tip":"suspendat","nume":"Corp suspendat","W":800,"H":700,"D":300,"buc":1,"usi":2,"sertare":0,"polite":1,"frontH":null,"y":1400,"x":0,"oglinda":false,"note":""}],"intrebari":[{"id":"q1","text":"…?","optiuni":["…","…"]}],"presupuneri":["…"]}`;
+}
+function aiErr(e) {
+  switch (e?.code) {
+    case 'not_granted': return 'Nu ai permis aplicației să folosească Claude. Poți adăuga corpurile manual.';
+    case 'rate_limited': return 'Prea multe cereri într-un timp scurt. Încearcă din nou peste un minut.';
+    case 'invalid_json': return 'Claude nu a dat un răspuns pe care să-l pot citi. Apasă din nou „Citește schița”.';
+    case 'image_rejected': return 'Imaginea nu a fost acceptată. Încearcă o poză JPG sau PNG.';
+    case 'empty': return 'Nu am găsit corpuri în schiță. Scrie pe scurt ce vrea clientul și încearcă din nou.';
+    default: return 'Citirea schiței nu a mers' + (e?.message ? ': ' + e.message : '.') + ' Încearcă din nou.';
+  }
+}
+async function aiRun(refine) {
+  const p = cur();
+  if (!AI.sample || AI.busy) return;
+  const blob = await sketchBlob(p);
+  if (!blob && !(p.descriere || '').trim()) { toast('Încarcă poza schiței sau scrie ce vrea clientul'); return; }
+  const withImage = !!(blob && AI.images);
+  AI.busy = true; AI.err = ''; AI.status = refine ? 'Claude reface estimarea după răspunsurile tale…' : 'Claude citește schița și face prima estimare…';
+  render();
+  try {
+    const opts = { modelTier: 'complex', cache: false };
+    if (withImage) opts.images = [blob];
+    const res = await AI.sample.json(aiPrompt(p, refine, withImage), opts);
+    applyAI(p, res, refine);
+    toast(refine ? 'Estimare actualizată' : 'Prima estimare e gata');
+  } catch (e) { AI.err = aiErr(e); }
+  AI.busy = false; AI.status = '';
+  save(); render();
+}
+function applyAI(p, res, refine) {
+  const list = Array.isArray(res?.corpuri) ? res.corpuri : [];
+  if (!list.length) throw { code: 'empty' };
+  const cl = (v, a, b, d) => { if (v === null || v === undefined || v === '') return d; const n = num(v); return Math.min(b, Math.max(a, Math.round(n))); };
+  const specs = list.slice(0, 30).map((c) => {
+    const tip = TYPES[c?.tip] ? c.tip : 'baza', t = TYPES[tip];
+    return fullSpec({
+      tip, nume: String(c.nume || '').slice(0, 60),
+      W: cl(c.W, 100, 4000, t.W), H: cl(c.H, 100, 3000, t.H), D: cl(c.D, 100, 1000, t.D), buc: cl(c.buc, 1, 20, 1),
+      usi: cl(c.usi, 0, 8, t.usi), sertare: cl(c.sertare, 0, 10, t.sertare), polite: cl(c.polite, 0, 12, t.polite),
+      frontH: Array.isArray(c.frontH) ? c.frontH.map(num) : null, y: cl(c.y, 0, 2800, t.y), x: cl(c.x, 0, 10000, null),
+      oglinda: !!c.oglinda, note: String(c.note || '').slice(0, 200),
+      matCorp: p.matCorp, matFront: p.matFront, matSpate: p.matSpate,
+    });
+  });
+  const old = p.ai || {};
+  const answered = (old.intrebari || []).filter((q) => String(old.raspunsuri?.[q.id] ?? '').trim()).map((q) => ({ intrebare: q.text, raspuns: old.raspunsuri[q.id] }));
+  p.groups = [...specs.map((sp) => makeGroup(sp)), ...p.groups.filter((g) => !g.spec)];
+  p.ai = {
+    descriere: String(res.descriere || '').slice(0, 400),
+    intrebari: (Array.isArray(res.intrebari) ? res.intrebari : []).slice(0, 5).map((q, i) => ({ id: 'q' + Date.now().toString(36) + i, text: String(q?.text || '').slice(0, 300), optiuni: Array.isArray(q?.optiuni) ? q.optiuni.slice(0, 5).map((o) => String(o).slice(0, 80)) : [] })).filter((q) => q.text),
+    raspunsuri: {},
+    presupuneri: (Array.isArray(res.presupuneri) ? res.presupuneri : []).slice(0, 8).map((x) => String(x).slice(0, 300)),
+    istoric: refine ? [...(old.istoric || []), ...answered] : [],
+  };
+  if (!(p.descriere || '').trim() && p.ai.descriere) p.descriere = p.ai.descriere;
+  estimateHours(p);
+}
+function applyMaterials(p) {
+  for (const g of p.groups) if (g.spec) { g.spec.matCorp = p.matCorp; g.spec.matFront = p.matFront; g.spec.matSpate = p.matSpate; g.parts = genParts(g.spec); }
+}
+
+// ---------------------------------------------------------------- Ecranul simplu
+function matPick(p, f, label, withNone) {
+  const m = matById(p[f]);
+  const opts = [...(withNone ? [['', 'Fără spate']] : []), ...S.materials.filter((x) => (f === 'matSpate' ? true : x.tip !== 'Blat')).map((x) => [x.id, `${matName(x)} ${x.gros} mm — ${lei(x.pret)}/placă`])];
+  return fld(label, `<div class="matpick"><span class="swatch" style="background:${esc(m?.culoare || 'transparent')}"></span>${sel('p', '', f, p[f] ?? '', opts, { label })}</div>`);
+}
+function vRapid(p) {
+  const url = sketchURL(p), ai = p.ai || {};
+  const specs = p.groups.filter((g) => g.spec);
+  const upload = `<section class="card">
+    <div class="card-h"><h2>Schița de la client</h2><span class="sp"></span>${url ? '<label class="btn sm" for="sketchFile">Schimbă poza</label>' : ''}</div>
+    <div class="sketch-row">
+      <div class="drop" id="drop">
+        ${url ? `<img src="${esc(url)}" alt="Schița clientului">` : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          <b style="color:var(--ink)">Fă o poză la schiță sau încarc-o</b><span class="small">Poza cu desenul și cotele pe perete, ca de obicei.</span>
+          <label class="btn pri" for="sketchFile">Încarcă poza schiței</label>`}
+        <input id="sketchFile" type="file" accept="image/*" hidden>
+      </div>
+      <div style="display:grid;gap:12px;min-width:0">
+        ${fld('Ce vrea clientul (opțional, ajută la citire)', `<textarea id="p-desc" data-o="p" data-f="descriere" aria-label="Ce vrea clientul" placeholder="ex. mască baie 108 cm cu 2 sertare și lavoar, deasupra dulap cu 2 uși cu oglindă">${esc(p.descriere)}</textarea>`)}
+        <div class="grid2">
+          ${fld('Client', inp('p', '', 'client.nume', p.client.nume, { label: 'Nume client', ph: 'Nume' }))}
+          ${fld('Telefon', inp('p', '', 'client.tel', p.client.tel, { type: 'tel', label: 'Telefon' }))}
+        </div>
+        <div class="row">
+          <button class="btn pri" data-act="readSketch" ${!AI.sample || AI.busy ? 'disabled' : ''}>${specs.length && ai.intrebari ? 'Citește din nou schița' : 'Citește schița și estimează'}</button>
+          <button class="btn" data-act="addModule">+ Adaugă corp manual</button>
+        </div>
+        ${AI.busy ? `<div class="note"><span class="spin"></span> ${esc(AI.status)} Durează de obicei sub un minut.</div>` : ''}
+        ${AI.err ? `<div class="err">${esc(AI.err)}</div>` : ''}
+        ${AI.ready && !AI.sample ? '<div class="note">Citirea automată a schiței merge când deschizi aplicația din linkul de pe claude.ai. Aici poți adăuga corpurile manual.</div>' : ''}
+        ${AI.sample && url && !AI.images ? '<div class="note">Pe acest dispozitiv Claude nu poate primi imagini; citirea se face doar după descriere.</div>' : ''}
+      </div>
+    </div>
+  </section>`;
+
+  const qs = (ai.intrebari || []).map((q) => {
+    const a = ai.raspunsuri?.[q.id] ?? '';
+    return `<div class="qa"><b>${esc(q.text)}</b>
+      ${q.optiuni.length ? `<div class="opts">${q.optiuni.map((o) => `<button class="opt" data-act="answer" data-q="${esc(q.id)}" data-v="${esc(o)}" aria-pressed="${a === o}">${esc(o)}</button>`).join('')}</div>` : ''}
+      ${inp('ans', q.id, 'v', q.optiuni.includes(a) ? '' : a, { label: q.text, ph: q.optiuni.length ? 'sau scrie alt răspuns' : 'Răspuns' })}
+    </div>`;
+  }).join('');
+  const answeredN = (ai.intrebari || []).filter((q) => String(ai.raspunsuri?.[q.id] ?? '').trim()).length;
+  const questions = specs.length ? `<section class="card">
+    <div class="card-h"><h2>Din ce material faci?</h2></div>
+    <div class="grid3">
+      ${matPick(p, 'matCorp', 'Corp')}
+      ${matPick(p, 'matFront', 'Fronturi (uși, sertare)')}
+      ${matPick(p, 'matSpate', 'Spate', true)}
+    </div>
+    <div class="row"><button class="btn sm" data-act="newDecor">+ Decor nou din catalogul Unilin</button>
+      <span class="muted small">Prețurile plăcilor le setezi o dată în Setări.</span></div>
+    <div class="grid3">${fld('Distanța până la client (km, dus)', inp('p', '', 'transport.km', p.transport.km, { type: 'number', full: true, label: 'Distanță km' }))}
+      ${fld('Tarif lei / oră', `<div class="row" style="flex-wrap:nowrap">${inp('p', '', 'rate', p.rate, { type: 'number', full: true, label: 'Tarif' })}<button class="btn sm" data-act="setRate" data-v="75">75</button><button class="btn sm" data-act="setRate" data-v="80">80</button></div>`)}</div>
+    ${qs ? `<h3 style="margin-top:6px">Claude are câteva întrebări despre schiță</h3>${qs}
+      <div class="row"><button class="btn pri" data-act="refine" ${AI.busy || !answeredN ? 'disabled' : ''}>Actualizează estimarea</button><span class="muted small">${answeredN ? `${answeredN} din ${ai.intrebari.length} răspunsuri` : 'Alege un răspuns ca să refac calculul.'}</span></div>` : ''}
+    ${(ai.presupuneri || []).length ? `<details><summary class="small muted" style="cursor:pointer">Ce a presupus Claude (${ai.presupuneri.length})</summary><ul class="small muted">${ai.presupuneri.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}
+  </section>` : '';
+
+  const rows = specs.map((g) => {
+    const sp = g.spec, n = (f, w) => `<td>${inp('spec', g.id, f, sp[f] ?? '', { type: 'number', full: true, label: f, cls: w || '' })}</td>`;
+    return `<tr><td><b>${esc(g.nume)}</b>${sp.note ? `<div class="small muted">${esc(sp.note)}</div>` : ''}</td>${n('W')}${n('H')}${n('D')}${n('y')}${n('usi')}${n('sertare')}${n('polite')}
+      <td style="text-align:center"><input id="ogl-${g.id}" type="checkbox" data-o="spec" data-id="${g.id}" data-f="oglinda" ${sp.oglinda ? 'checked' : ''} aria-label="Uși cu oglindă"></td>
+      <td><div class="row" style="flex-wrap:nowrap"><button class="btn ghost icon" data-act="editGroup" data-id="${g.id}" aria-label="Toate opțiunile">⋯</button><button class="btn ghost icon danger" data-act="delGroup" data-id="${g.id}" aria-label="Șterge corpul">✕</button></div></td></tr>`;
+  }).join('');
+  const matSum = C.mats.map((x) => `${x.n} × ${esc(matName(x.m))}`).join(' · ');
+  const result = specs.length || C.all.length ? `<section class="card">
+    <div class="card-h"><h2>Estimare</h2><span class="sp"></span>
+      <button class="btn pri" data-act="copyOffer">Copiază oferta</button>
+      <button class="btn" data-act="tab" data-tab="oferta">Vezi oferta</button></div>
+    <div class="row" style="align-items:flex-end;gap:18px">
+      <div><div class="big-total" data-out="total"></div><div class="muted small">${p.tvaOn ? 'cu TVA' : 'fără TVA'} · ${fmt(C.ore, 1)} h manoperă · ${esc(matSum)}</div></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><span>Plăci</span><b>${lei(C.placi)}</b></div>
+      <div class="stat"><span>Cant ${fmt(C.cantMl, 0)} ml</span><b>${lei(C.cantCost)}</b></div>
+      <div class="stat"><span>Accesorii</span><b>${lei(C.accCost)}</b></div>
+      <div class="stat"><span>Manoperă</span><b>${lei(C.manopera)}</b></div>
+      <div class="stat"><span>Transport</span><b>${lei(C.transport)}</b></div>
+    </div>
+    ${specs.length ? `<div class="tw"><table class="clist"><thead><tr><th>Corp</th><th>Lățime</th><th>Înălțime</th><th>Adâncime</th><th>De la podea</th><th>Uși</th><th>Sertare</th><th>Polițe</th><th>Oglindă</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="muted small" style="margin:0">Cote în mm. Dacă Claude a citit greșit o cotă, o corectezi aici și prețul se reface pe loc. Debitarea, cantul și accesoriile le vezi în filele de sus.</p>` : ''}
+  </section>` : '';
+
+  const v3 = specs.length ? `<section class="card">
+    <div class="card-h"><h2>Vedere 3D</h2><span class="sp"></span>
+      <button class="btn sm" data-act="xray" aria-pressed="${V3.xray}">${V3.xray ? 'Arată fronturile' : 'Arată interiorul'}</button>
+      <button class="btn sm" data-act="reset3D">Vedere din față</button></div>
+    <div class="v3d" id="view3d"></div>
+    <p class="muted small" style="margin:0">Rotești cu un deget, mărești cu două (sau cu rotița mouse-ului). Culorile vin din Setări → Plăci.</p>
+  </section>` : '';
+  return upload + questions + result + v3;
+}
+
+Object.assign(A, {
+  readSketch: () => aiRun(false),
+  refine: () => aiRun(true),
+  answer: (el) => { const p = cur(); p.ai.raspunsuri[el.dataset.q] = el.dataset.v; save(); render(); },
+  xray: () => { V3.xray = !V3.xray; render(); },
+  reset3D: () => { V3.key = ''; mount3D(); },
+  newDecor: () => openModal(`<form id="matForm" style="display:grid;gap:14px">
+    <h2>Decor nou</h2>
+    <div class="grid2">
+      ${fld('Denumire', '<input id="nm-nume" name="nume" value="PAL Unilin" required>')}
+      ${fld('Decor / cod din catalog', '<input id="nm-decor" name="decor" placeholder="ex. nume sau cod decor">')}
+      ${fld('Preț placă (lei)', '<input id="nm-pret" name="pret" type="number" inputmode="decimal" step="any" value="0">')}
+      ${fld('Grosime (mm)', '<input id="nm-gros" name="gros" type="number" value="18">')}
+      ${fld('Culoare în 3D', '<input id="nm-col" name="culoare" type="color" value="#b48a5a" style="height:38px">')}
+      ${fld('Folosește pentru', '<select id="nm-for" name="pentru"><option value="matFront">Fronturi</option><option value="matCorp">Corp</option><option value="both">Corp și fronturi</option></select>')}
+    </div>
+    <label class="chk"><input type="checkbox" name="fibra" checked> Are fibră (lemn) — piesele nu se rotesc la debitare</label>
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeModal">Renunță</button><button class="btn pri" type="submit">Adaugă decorul</button></div>
+  </form>`),
+});
+document.addEventListener('submit', (e) => {
+  if (e.target.id !== 'matForm') return;
+  e.preventDefault();
+  const fd = new FormData(e.target), p = cur();
+  const m = { id: 'm_' + uid(), nume: String(fd.get('nume') || 'PAL').trim(), decor: String(fd.get('decor') || '').trim(), tip: 'PAL', gros: num(fd.get('gros')) || 18, L: 2800, W: 2070, pret: num(fd.get('pret')), fibra: !!fd.get('fibra'), culoare: fd.get('culoare') || '#b48a5a' };
+  S.materials.push(m);
+  const f = fd.get('pentru');
+  if (f === 'both') { p.matCorp = m.id; p.matFront = m.id; } else p[f] = m.id;
+  applyMaterials(p); closeModal(); save(); render(); toast('Decor adăugat');
+});
+document.addEventListener('change', (e) => { if (e.target.id === 'sketchFile') setSketch(e.target.files[0]); });
+document.addEventListener('dragover', (e) => { const d = e.target.closest?.('#drop'); if (d) { e.preventDefault(); d.classList.add('over'); } });
+document.addEventListener('dragleave', (e) => { e.target.closest?.('#drop')?.classList.remove('over'); });
+document.addEventListener('drop', (e) => { const d = e.target.closest?.('#drop'); if (!d) return; e.preventDefault(); d.classList.remove('over'); setSketch(e.dataTransfer.files[0]); });
+document.addEventListener('paste', (e) => { if (S.tab !== 'rapid') return; const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith('image/')); if (f) setSketch(f); });
+
+// ---------------------------------------------------------------- 3D
+const V3 = { r: null, scene: null, cam: null, ctl: null, key: '', xray: false, tex: new Map() };
+function layout(p) {
+  const out = [], cur0 = { lo: 0, hi: 0 };
+  for (const g of p.groups) {
+    if (!g.spec) continue;
+    const sp = g.spec, n = Math.max(1, sp.buc | 0), y = num(sp.y), W = num(sp.W), H = num(sp.H);
+    const tall = y < 1000 && y + H > 1300, row = y >= 1000 ? 'hi' : 'lo';
+    for (let i = 0; i < n; i++) {
+      const x = i === 0 && sp.x !== null && sp.x !== '' && sp.x !== undefined ? num(sp.x) : (tall ? Math.max(cur0.lo, cur0.hi) : cur0[row]);
+      out.push({ g, sp, x, y });
+      if (tall) cur0.lo = cur0.hi = Math.max(cur0.lo, cur0.hi, x + W); else cur0[row] = Math.max(cur0[row], x + W);
+    }
+  }
+  return out;
+}
+function woodTex(hex) {
+  if (V3.tex.has(hex)) return V3.tex.get(hex);
+  const c = document.createElement('canvas'); c.width = 256; c.height = 1024;
+  const x = c.getContext('2d'); x.fillStyle = hex; x.fillRect(0, 0, 256, 1024);
+  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 80; i++) {
+    x.strokeStyle = `rgba(55,32,10,${0.04 + rnd() * 0.09})`; x.lineWidth = 0.6 + rnd() * 2.6;
+    x.beginPath(); let px = rnd() * 256; x.moveTo(px, 0);
+    for (let yy = 0; yy <= 1024; yy += 48) { px += (rnd() - 0.5) * 7; x.lineTo(px, yy); }
+    x.stroke();
+  }
+  const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; t.anisotropy = 4;
+  V3.tex.set(hex, t); return t;
+}
+function disposeScene(sc) { sc?.traverse((o) => { o.geometry?.dispose(); if (o.material && !o.material.userData.keep) o.material.dispose(); }); }
+function buildScene(p, lay) {
+  const T = THREE, scene = new T.Scene();
+  scene.background = new T.Color(getComputedStyle(document.documentElement).getPropertyValue('--surface-2').trim() || '#eef2f0');
+  scene.add(new T.HemisphereLight(0xffffff, 0x9a9690, 0.8));
+  const sun = new T.DirectionalLight(0xffffff, 0.65); sun.position.set(1.5, 3, 3); sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024); Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -1, near: 0.1, far: 12 }); sun.shadow.bias = -0.0005;
+  const root = new T.Group(); root.scale.setScalar(0.001); scene.add(root);
+  const edge = new T.LineBasicMaterial({ color: 0x1c2421, transparent: true, opacity: 0.28 });
+  const matCache = {};
+  const panel = (m, front) => {
+    const k = (m?.id || 'x') + (front && V3.xray ? '-x' : '');
+    if (matCache[k]) return matCache[k];
+    const col = m?.culoare || '#dddddd';
+    const mm = new T.MeshStandardMaterial({ color: m?.fibra ? 0xffffff : col, map: m?.fibra ? woodTex(col) : null, roughness: 0.72, metalness: 0 });
+    if (front && V3.xray) { mm.transparent = true; mm.opacity = 0.16; mm.depthWrite = false; }
+    return (matCache[k] = mm);
+  };
+  const mirror = new T.MeshPhongMaterial({ color: 0xc9d6dc, specular: 0xffffff, shininess: 140, transparent: V3.xray, opacity: V3.xray ? 0.16 : 1 });
+  const metal = new T.MeshStandardMaterial({ color: 0x9aa1a5, metalness: 0.75, roughness: 0.3 });
+  const ceramic = new T.MeshStandardMaterial({ color: 0xf7f8f8, roughness: 0.18 });
+  const box = (w, h, d, x, y, z, material, lines = true) => {
+    if (w <= 0 || h <= 0 || d <= 0) return;
+    const geo = new T.BoxGeometry(w, h, d), mesh = new T.Mesh(geo, material);
+    mesh.position.set(x + w / 2, y + h / 2, z + d / 2); mesh.castShadow = !material.transparent; mesh.receiveShadow = true; root.add(mesh);
+    if (lines) { const e = new T.LineSegments(new T.EdgesGeometry(geo), edge); e.position.copy(mesh.position); root.add(e); }
+  };
+  const cyl = (r, h, x, y, z, material, sx = 1, sz = 1) => {
+    const mesh = new T.Mesh(new T.CylinderGeometry(r, r, h, 40), material);
+    mesh.scale.set(sx, 1, sz); mesh.position.set(x, y + h / 2, z); mesh.castShadow = true; root.add(mesh);
+  };
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = 0, maxD = 0;
+  for (const { sp, x, y } of lay) {
+    const mc = matById(sp.matCorp), mf = matById(sp.matFront), ty = TYPES[sp.tip] || {};
+    const t = mc?.gros || 18, tf = mf?.gros || 18, W = num(sp.W), H = num(sp.H), D = num(sp.D);
+    const pc = panel(mc), pf = sp.oglinda ? mirror : panel(mf, true);
+    minY = Math.min(minY, ty.picioare ? 0 : y); minX = Math.min(minX, x); maxX = Math.max(maxX, x + W); maxY = Math.max(maxY, y + H); maxD = Math.max(maxD, D);
+    box(t, H, D, x, y, 0, pc); box(t, H, D, x + W - t, y, 0, pc);
+    box(W - 2 * t, t, D, x + t, y, 0, pc);
+    if (ty.traverse) { box(W - 2 * t, t, 100, x + t, y + H - t, D - 100, pc); box(W - 2 * t, t, 100, x + t, y + H - t, 0, pc); }
+    else box(W - 2 * t, t, D, x + t, y + H - t, 0, pc);
+    if (sp.matSpate) box(W - 4, H - 4, 3, x + 2, y + 2, 0, panel(matById(sp.matSpate)), false);
+    const np = num(sp.polite) | 0;
+    for (let i = 1; i <= np; i++) box(W - 2 * t - 2, t, D - 20, x + t + 1, y + t + (H - 3 * t) * i / (np + 1), 3, pc);
+    const nd = num(sp.sertare) | 0, front = D;
+    if (nd > 0) {
+      let top = y + H - 1.5;
+      for (const fh of drawerHeights(sp)) {
+        box(W - 3, fh, tf, x + 1.5, top - fh, front, pf);
+        if (sp.manere) box(Math.min(160, W * 0.4), 12, 14, x + W / 2 - Math.min(160, W * 0.4) / 2, top - Math.min(45, fh / 3), front + tf, metal, false);
+        top -= fh + 3;
+      }
+    } else if ((num(sp.usi) | 0) > 0) {
+      const d = doorSize(sp);
+      for (let i = 0; i < d.nu; i++) {
+        const dx = x + 1.5 + i * (d.w + 3);
+        box(d.w, d.h, tf, dx, y + 1.5, front, pf);
+        if (sp.manere) {
+          const hx = d.nu === 1 ? dx + d.w - 45 : (i % 2 === 0 ? dx + d.w - 45 : dx + 33);
+          const hy = y >= 1000 ? y + 50 : sp.tip === 'baza' ? y + H - 200 : y + Math.min(H / 2, 1000);
+          box(12, 140, 14, hx, hy, front + tf, metal, false);
+        }
+      }
+    }
+    if (ty.picioare && y > 20) {
+      for (const [lx, lz] of [[60, 60], [W - 60, 60], [60, D - 80], [W - 60, D - 80]]) cyl(16, y, x + lx, 0, lz, metal);
+      if (sp.tip === 'baza' && y >= 60) box(W, y - 4, 16, x, 0, D - 70, pc);
+    }
+    if (ty.lavoar) {
+      box(W, 16, D + 12, x, y + H, 0, ceramic);
+      cyl(1, 8, x + W / 2, y + H + 13, D * 0.55, new T.MeshStandardMaterial({ color: 0xe1e5e6, roughness: 0.25 }), Math.min(W * 0.32, 300), D * 0.28);
+      cyl(14, 150, x + W / 2, y + H + 16, 55, metal);
+      box(24, 18, 110, x + W / 2 - 12, y + H + 140, 55, metal, false);
+      maxY = Math.max(maxY, y + H + 170);
+    }
+  }
+  const span = maxX - minX, wallW = span + 1600, wallH = Math.max(2600, maxY + 250);
+  const wall = new T.Mesh(new T.PlaneGeometry(wallW, wallH), new T.MeshStandardMaterial({ color: 0xe9ebe8, roughness: 1 }));
+  wall.position.set(minX + span / 2, wallH / 2, -2); wall.receiveShadow = true; root.add(wall);
+  const floor = new T.Mesh(new T.PlaneGeometry(wallW, 2200), new T.MeshStandardMaterial({ color: 0xd8d2c8, roughness: 1 }));
+  floor.rotation.x = -Math.PI / 2; floor.position.set(minX + span / 2, 0, 1100 - 2); floor.receiveShadow = true; root.add(floor);
+  sun.target.position.set((minX + span / 2) / 1000, 0, 0); scene.add(sun, sun.target);
+  return { scene, box: { minX, maxX, minY: Math.max(0, minY - 150), maxY: maxY + 80, maxD } };
+}
+function mount3D() {
+  const el = $('#view3d'); if (!el) return;
+  if (!window.THREE) { el.innerHTML = '<div class="empty small">Vederea 3D are nevoie de internet la prima deschidere.</div>'; return; }
+  const p = cur(), lay = layout(p);
+  if (!lay.length) { el.innerHTML = '<div class="empty small">Adaugă corpuri ca să apară vederea 3D.</div>'; return; }
+  if (!V3.r) {
+    try { V3.r = new THREE.WebGLRenderer({ antialias: true }); } catch { el.innerHTML = '<div class="empty small">Dispozitivul nu poate afișa 3D.</div>'; return; }
+    V3.r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    V3.r.outputEncoding = THREE.sRGBEncoding; V3.r.shadowMap.enabled = true; V3.r.shadowMap.type = THREE.PCFSoftShadowMap;
+    V3.cam = new THREE.PerspectiveCamera(35, 1, 0.01, 60);
+    if (THREE.OrbitControls) { V3.ctl = new THREE.OrbitControls(V3.cam, V3.r.domElement); V3.ctl.addEventListener('change', draw3D); V3.ctl.maxPolarAngle = Math.PI * 0.55; }
+    window.addEventListener('resize', () => { if (V3.r.domElement.isConnected) { size3D(); draw3D(); } });
+  }
+  el.appendChild(V3.r.domElement);
+  disposeScene(V3.scene);
+  const b = buildScene(p, lay);
+  V3.scene = b.scene;
+  size3D();
+  const key = [b.box.minX, b.box.maxX, b.box.maxY].map(Math.round).join('|');
+  if (key !== V3.key) {
+    V3.key = key;
+    const cx = (b.box.minX + b.box.maxX) / 2000, cy = (b.box.minY + b.box.maxY) / 2000, w = (b.box.maxX - b.box.minX) / 1000, h = (b.box.maxY - b.box.minY) / 1000;
+    const fov = V3.cam.fov * Math.PI / 180, aspect = V3.cam.aspect;
+    const dist = Math.max(h / 2 / Math.tan(fov / 2), w / 2 / Math.tan(fov / 2) / aspect) * 1.12 + b.box.maxD / 1000;
+    V3.cam.position.set(cx + w * 0.28, cy + h * 0.12, dist);
+    if (V3.ctl) { V3.ctl.target.set(cx, cy, b.box.maxD / 2000); V3.ctl.update(); } else V3.cam.lookAt(cx, cy, 0);
+  }
+  draw3D();
+}
+function size3D() {
+  const el = V3.r.domElement.parentElement; if (!el) return;
+  const w = el.clientWidth || 600, h = el.clientHeight || 380;
+  V3.r.setSize(w, h, false); V3.cam.aspect = w / h; V3.cam.updateProjectionMatrix();
+}
+function draw3D() { if (V3.r && V3.scene && V3.r.domElement.isConnected) V3.r.render(V3.scene, V3.cam); }
+
 // ---------------------------------------------------------------- Pornire
 S = load();
 if (S) migrate(); else seed();
-save();
+localSave();
 render();
+initCloud();
 if ('serviceWorker' in navigator && !inFrame && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
