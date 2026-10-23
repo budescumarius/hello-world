@@ -1633,3 +1633,13 @@ body.simple .s-owed.late { background: var(--brick); box-shadow: 6px 6px 0 var(-
 .nf b { color: var(--ink); } .nf small { color: #5b5547; } .nf i { font-style: normal; font-size: 12px; color: var(--muted); }
 .t-alert.soft { width: 100%; text-align: left; font: inherit; border: 1.5px dashed var(--ochre-2); background: var(--ochre-soft); box-shadow: none; cursor: pointer; }
 .t-alert.soft small { color: var(--muted); }
+
+/* État d'avancement : étapes jusqu'à la facture */
+.ea-card { border-left: 4px solid var(--ochre); }
+.ea-steps { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 4px 0 12px; padding: 0; counter-reset: ea; }
+.ea-steps li { counter-increment: ea; position: relative; padding: 10px 12px 10px 44px; border-radius: 14px; background: var(--surface-2); border: 1.5px solid var(--border); display: flex; flex-direction: column; min-width: 0; }
+.ea-steps li::before { content: counter(ea); position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; border-radius: 9px; display: grid; place-items: center; font-weight: 800; background: #fff; border: 1.5px solid var(--border); color: var(--muted); }
+.ea-steps li b { color: var(--ink); } .ea-steps li small { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ea-steps li.done::before { content: '✓'; background: var(--sage); border-color: var(--sage); color: #fff; }
+.ea-steps li.on { background: var(--ochre-soft); border-color: var(--ochre); } .ea-steps li.on::before { background: var(--ink); border-color: var(--ink); color: #fff; }
+@media (max-width: 860px) { .ea-steps { grid-template-columns: 1fr 1fr; } }

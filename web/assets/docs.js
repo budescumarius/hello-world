@@ -74,7 +74,9 @@ function clientLabel(c) {
   return [d.civility, d.name, d.firstname].filter(Boolean).join(' ') || '—';
 }
 // Intitulé du document (« Facture », « Facture d'acompte », « Note de crédit »…) sans le numéro
+const isEAdoc = (kind, d) => kind === 'invoice' && d.kind === 'situation' && d.status !== 'emise';
 function docLabel(kind, d, t) {
+  if (isEAdoc(kind, d)) return 'État d\'avancement';
   const raw = kind === 'quote' ? t.quoteTitle : kind === 'order' ? t.orderTitle : d.kind === 'avoir' ? t.creditTitle
     : d.kind && d.kind !== 'facture' && IKIND[d.kind] ? IKIND[d.kind] : t.invoiceTitle;
   return fill(raw, { numero: '' }).replace(/\s*n[°º]?\s*$/i, '').trim() || 'Document';
@@ -92,14 +94,17 @@ function docBlocks(kind, it, c, project, t) {
   const cd = (c && c.data) || {};
   const isInv = kind === 'invoice'; const isQ = kind === 'quote';
   const label = docLabel(kind, d, t);
-  const title = `${label} ${it.number || 'brouillon'}`;
+  const ea = isEAdoc(kind, d);
+  const shown = ea ? `EA${d.situationNo || ''}` : it.number;
+  const title = `${label} ${shown || 'brouillon'}`;
   const days = d.due && d.date ? Math.max(0, dnum(d.due) - dnum(d.date)) : null;
   const resp = userName(+(d.ownerId || it.created_by));
   const meta = [
     ['Date', dateFr(d.date)],
     isQ && ['Valable jusqu\'au', dateFr(d.valid)],
-    isInv && d.kind !== 'avoir' && d.due && ['Échéance', dateFr(d.due)],
-    isInv && d.kind !== 'avoir' && days != null && ['Conditions', fill(t.payTerms, { jours: days, date: fmtDate(d.due) })],
+    isInv && !ea && d.kind !== 'avoir' && d.due && ['Échéance', dateFr(d.due)],
+    isInv && !ea && d.kind !== 'avoir' && days != null && ['Conditions', fill(t.payTerms, { jours: days, date: fmtDate(d.due) })],
+    ea && d.ea && d.ea.approveBy && ['À approuver avant', dateFr(d.ea.approveBy)],
     d.kind === 'situation' && d.situationNo && ['Avancement', `n° ${d.situationNo}`],
     d.kind === 'avoir' && d.refInvoice && ['Facture', d.refInvoice],
     kind === 'order' && d.deliveryDate && ['Livraison', dateFr(d.deliveryDate)],
@@ -109,7 +114,7 @@ function docBlocks(kind, it, c, project, t) {
   const brand = co.logoId ? `<img class="mb-logo" src="${fileUrl(co.logoId)}" alt="">` : `<div class="mb-mono">${esc(monoOf(co.name))}</div>`;
   const head = `<header class="mb-head">
     <div class="mb-brand">${brand}${co.logoId ? '' : `<div class="mb-brand-n">${esc(co.name || '')}</div>`}${t.tagline ? `<div class="mb-brand-t">${esc(t.tagline)}</div>` : ''}</div>
-    <div class="mb-id"><div class="mb-kind">${esc(label)}</div><div class="mb-no ${it.number ? '' : 'draft'}">${esc(it.number || 'Brouillon')}</div>
+    <div class="mb-id"><div class="mb-kind">${esc(label)}</div><div class="mb-no ${shown ? '' : 'draft'}">${esc(shown || 'Brouillon')}</div>
       <dl class="mb-meta">${meta.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl></div></header>`;
   // cartouches : émetteur, client (ou adresse de facturation), chantier
   const from = `<div class="mb-party"><small>Émetteur</small><b>${esc(co.name || '')}</b>${[s.street, [s.cc && s.zip ? `${s.cc}-${s.zip}` : s.zip, s.city].filter(Boolean).join(' ')].filter(Boolean).map(esc).join('<br>')}
@@ -208,10 +213,12 @@ async function totalsBlock(kind, it, t, paid) {
   if (tt.discount || deds.length) rows += row('Total HT net', tt.base, 'mb-sum');
   rows += d.reverse ? row('TVA', 'Autoliquidation') : tt.vats.map((v) => row(`TVA ${fnum(v.rate)} % <small>sur ${dmoney(v.base, t)}</small>`, v.vat)).join('');
   const due = r2(tt.total - (paid || 0));
-  const card = `<div class="mb-totals">${rows}<div class="mb-grand"><span>${isCn ? 'Total crédité' : 'Total TVAC'}</span><b>${dmoney(tt.total, t)}</b></div>
-    ${kind === 'invoice' && !isCn && paid ? `${row('Déjà payé', -paid)}<div class="mb-due"><span>Reste à payer</span><b>${dmoney(due, t)}</b></div>` : ''}</div>`;
+  const card = `<div class="mb-totals">${rows}<div class="mb-grand"><span>${isCn ? 'Total crédité' : isEAdoc(kind, d) ? 'Total de cet état TVAC' : 'Total TVAC'}</span><b>${dmoney(tt.total, t)}</b></div>
+    ${kind === 'invoice' && !isCn && !isEAdoc(kind, d) && paid ? `${row('Déjà payé', -paid)}<div class="mb-due"><span>Reste à payer</span><b>${dmoney(due, t)}</b></div>` : ''}</div>`;
   const side = [];
-  if (kind === 'invoice' && !isCn && co.iban) {
+  const ea = isEAdoc(kind, d);
+  if (ea) side.push(`<div class="mb-accept"><h4>Approbation</h4>Merci de vérifier cet état d'avancement et de nous le retourner approuvé${d.ea && d.ea.approveBy ? ` avant le <b>${esc(dateFr(d.ea.approveBy))}</b>` : ''}. Sans remarque écrite dans ce délai, il sera considéré comme accepté et facturé.</div>`);
+  if (kind === 'invoice' && !isCn && !ea && co.iban) {
     const comm = d.communication || it.number || '';
     let qr = '';
     if (t.qr && due > 0.005 && (company().currency || 'EUR') === 'EUR') {
@@ -295,6 +302,7 @@ async function docHtml(kind, id) {
     ${isProg && t.recap ? progressRecap(d, t) : ''}
     ${d.reverse && c && !(c.data || {}).vat ? '<p class="mb-warn no-print">⚠ Autoliquidation : le numéro de TVA du client doit figurer sur la facture.</p>' : ''}
     ${d.notes ? `<div class="mb-notes pre">${esc(d.notes)}</div>` : ''}
+    ${isEAdoc(kind, d) ? `<section class="mb-sign"><div><small>Pour ${esc(co.name || "l'entreprise")}</small><span class="mb-sl"></span><em>Nom et signature</em></div><div><small>Approuvé – le client</small><span class="mb-sl"></span><em>Date, nom et signature, précédés de « Lu et approuvé »</em></div></section>` : ''}
     ${kind === 'quote' ? `<section class="mb-sign"><div><small>Pour ${esc(co.name || "l'entreprise")}</small><span class="mb-sl"></span><em>Nom et signature</em></div><div><small>Bon pour accord – le client</small><span class="mb-sl"></span><em>Date, nom et signature, précédés de « Bon pour accord »</em></div></section>${co.terms && !t.cgvQuote ? `<div class="mb-terms pre">${esc(co.terms)}</div>` : ''}` : ''}
     ${mentionsBlock(kind, d, t)}
     <footer class="mb-foot"><span>${esc(legal)}</span><span class="mb-pg">1 / ${cgv ? 2 : 1}</span></footer></div>
@@ -306,12 +314,14 @@ function printDocPage(kind, id, it, d, c, project, title, html, typ, co) {
   const mailDoc = () => {
     const tot = money(totals(d).total);
     const site = project ? ` – ${project.data.name}` : '';
-    const label = kind === 'invoice' ? (IKIND[d.kind] || 'Facture') : kind === 'quote' ? 'Devis' : 'Bon de commande';
-    const body = kind === 'quote' ? `Bonjour,\n\nVeuillez trouver ci-joint notre devis ${it.number}${d.title ? ` « ${d.title} »` : ''} d'un montant de ${tot} TVAC.\n\nNous restons à votre disposition pour toute question.\n\n${mailSign()}`
+    const ea = isEAdoc(kind, d);
+    const label = ea ? `État d'avancement EA${d.situationNo || ''}` : kind === 'invoice' ? (IKIND[d.kind] || 'Facture') : kind === 'quote' ? 'Devis' : 'Bon de commande';
+    const body = ea ? `Bonjour,\n\nVeuillez trouver ci-joint notre état d'avancement EA${d.situationNo || ''}${site ? ` pour le chantier ${project.data.name}` : ''}, d'un montant de ${tot} TVAC pour cette période.\n\nMerci de nous le retourner approuvé${d.ea && d.ea.approveBy ? ` avant le ${fmtDate(d.ea.approveBy)}` : ''}. Sans remarque de votre part dans ce délai, il sera considéré comme accepté et nous établirons la facture correspondante.\n\n${mailSign()}`
+      : kind === 'quote' ? `Bonjour,\n\nVeuillez trouver ci-joint notre devis ${it.number}${d.title ? ` « ${d.title} »` : ''} d'un montant de ${tot} TVAC.\n\nNous restons à votre disposition pour toute question.\n\n${mailSign()}`
       : kind === 'invoice' ? `Bonjour,\n\nVeuillez trouver ci-joint notre ${label.toLowerCase()} ${it.number || ''} d'un montant de ${tot} TVAC${d.due ? `, payable avant le ${fmtDate(d.due)}` : ''}${co.iban ? ` sur le compte ${co.iban} avec la communication ${d.communication || it.number}` : ''}.\n\n${mailSign()}`
       : `Bonjour,\n\nVeuillez trouver ci-joint notre bon de commande ${it.number}${d.deliveryDate ? `, livraison souhaitée le ${fmtDate(d.deliveryDate)}` : ''}${project ? ` sur le chantier ${project.data.name} (${[project.data.address, project.data.city].filter(Boolean).join(', ')})` : ''}.\n\nMerci de nous confirmer la bonne réception.\n\n${mailSign()}`;
     sendMailDialog({
-      subject: `${label} ${it.number || ''}${site}`.trim(), body,
+      subject: ea ? `${label} – à approuver${d.ea && d.ea.approveBy ? ` avant le ${fmtDate(d.ea.approveBy)}` : ''}${site}` : `${label} ${it.number || ''}${site}`.trim(), body,
       recipients: [...(c ? [contactRcpt(c, kind === 'order' ? 'Fournisseur' : 'Client', true)] : []), ...S.users.filter((u) => u.active && u.id !== S.me.id).map((u) => userRcpt(u, 'Notre équipe', false))],
       ref: { type: typ, id: it.id }, projectId: it.project_id, pdfName: `${fileTitle(title)}.pdf`,
       onSent: (to) => {

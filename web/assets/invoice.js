@@ -5,8 +5,13 @@ const INV_TYPE = { ...IKIND, facture: 'Facture simple' };
 const PAY_TERMS = [[0, 'Paiement comptant'], [7, '7 jour(s) après date de facturation'], [10, '10 jour(s) après date de facturation'], [15, '15 jour(s) après date de facturation'], [30, '30 jour(s) après date de facturation'], [45, '45 jour(s) après date de facturation'], [60, '60 jour(s) après date de facturation']];
 
 // Statut affiché (paiement / envoi)
+// État d'avancement : avant d'être facturé, il est envoyé au client qui l'approuve dans le délai choisi
+const EA_ST = { brouillon: ['État à envoyer', '#868e96'], envoye: ['État envoyé – à approuver', '#3b5bdb'], approuve: ['État approuvé – à facturer', '#2f9e44'], conteste: ['État contesté – à corriger', '#e5484d'] };
+const isEA = (i) => i.data.kind === 'situation' && i.data.status !== 'emise';
+function eaState(i) { const e = i.data.ea || {}; const k = e.status || 'brouillon'; return { ...e, k, late: k === 'envoye' && !!e.approveBy && e.approveBy < today() }; }
 function invDisp(i) {
   const s = invState(i); const d = i.data;
+  if (isEA(i)) { const e = eaState(i); return e.late ? { k: 'ea_late', l: 'Délai d\'approbation passé', c: '#e8590c', sub: `depuis le ${fmtDate(e.approveBy)}` } : { k: 'ea_' + e.k, l: EA_ST[e.k][0], c: EA_ST[e.k][1], sub: e.k === 'envoye' && e.approveBy ? `avant le ${fmtDate(e.approveBy)}` : '' }; }
   const lastPay = (d.payments || []).map((p) => p.date).filter(Boolean).sort().pop();
   if (s.s === 'brouillon') return { k: 'brouillon', l: 'Brouillon', c: '#868e96' };
   if (s.s === 'avoir') return { k: 'avoir', l: 'Note de crédit', c: '#adb5bd' };
@@ -127,14 +132,15 @@ route('invoice', async (id, tab = 'informations') => {
   const save = debounce(async () => { try { await persist('invoice', it, { silent: true }); const el = $('[data-saved]'); if (el) el.textContent = 'Enregistré'; } catch (e) { toast('Erreur : ' + e.message); } }, 700);
   const changed = () => { const el = $('[data-saved]'); if (el) el.textContent = 'Modification…'; save(); };
   const page = layout({ active: 'finances', icon: 'coins', back: '#/invoices',
-    title: `${locked ? type : `Modifier une ${type.toLowerCase()}`}${it.number ? ` ${it.number}` : ''}${d.title ? ` – ${d.title}` : ''}`,
+    title: isEA(it) ? `État d'avancement EA${d.situationNo || ''}${d.title ? ` – ${d.title}` : ''}` : `${locked ? type : `Modifier une ${type.toLowerCase()}`}${it.number ? ` ${it.number}` : ''}${d.title ? ` – ${d.title}` : ''}`,
     sub: `${badge(disp.l, disp.c)}${d.peppol && d.peppol.sentAt ? ` ${badge('Peppol ✓', '#0c8599')}` : ''} <span class="muted" data-saved></span>`,
     tabs: TABS.map(([k, l, ic]) => `<a href="#/invoice/${it.id}/${k}" class="${k === tab ? 'on' : ''}">${I[ic] || ''} ${l}</a>`).join('') });
-  page.innerHTML = `<div class="inv-page" data-body></div>
+  page.innerHTML = `${isEA(it) ? '<div data-ea></div>' : ''}<div class="inv-page" data-body></div>
     <div class="pi-bar">${locked ? `<button class="btn" data-back>Retour</button><span class="grow"></span><a class="btn" href="#/print/invoice/${it.id}">${I.print} PDF</a><span class="btn-split"><button class="btn primary" data-send>${I.mail} Envoyer</button><button class="btn primary" data-more aria-label="Autres actions">${I.chevron}</button></span>`
-      : `<span class="grow"></span><button class="btn" data-back>Annuler</button><span class="btn-split"><button class="btn primary" data-submit>Soumettre</button><button class="btn primary" data-more aria-label="Autres actions">${I.chevron}</button></span>`}</div>`;
+      : `<span class="grow"></span><button class="btn" data-back>Annuler</button><span class="btn-split"><button class="btn primary" data-submit>${isEA(it) ? 'Facturer' : 'Soumettre'}</button><button class="btn primary" data-more aria-label="Autres actions">${I.chevron}</button></span>`}</div>`;
   const body = $('[data-body]', page);
   const dis = locked ? 'disabled' : '';
+  if (isEA(it)) eaPanel(it, $('[data-ea]', page), () => emit());
   const c = byId(contacts, d.clientId);
 
   if (tab === 'informations') {
@@ -209,7 +215,7 @@ route('invoice', async (id, tab = 'informations') => {
     linesEditor($('#lines', body), d, { showCost: false, defVat: d.defaultVat, readOnly: locked || prog, onChange: () => { foot(); changed(); } });
     foot();
     const pg = $('[data-prog]', body);
-    if (pg) pg.onclick = async () => { const q = await db.get('quote', +d.quoteId); const others = (await db.list('invoice')).filter((x) => +x.data.quoteId === q.id && x.id !== it.id); progressInvoice(q, others, { project_id: it.project_id, data: {} }, it); };
+    if (pg) pg.onclick = async () => { const e = eaState(it); if (['envoye', 'approuve'].includes(e.k) && !confirm(`Cet état a déjà été ${e.k === 'approuve' ? 'approuvé par' : 'envoyé à'} votre client. Le modifier ? Il faudra le lui renvoyer pour approbation.`)) return; const q = await db.get('quote', +d.quoteId); const others = (await db.list('invoice')).filter((x) => +x.data.quoteId === q.id && x.id !== it.id); progressInvoice(q, others, { project_id: it.project_id, data: {} }, it); };
   }
 
   if (tab === 'totaux') {
@@ -252,9 +258,11 @@ route('invoice', async (id, tab = 'informations') => {
     if (!(d.title || '').trim()) { toast('Indiquez la référence de la facture', 4000); return go(`#/invoice/${it.id}/informations`); }
     if (!d.lines.some((l) => l.kind === 'item')) { toast('La facture ne contient aucune ligne (onglet Encodage)', 4000); return go(`#/invoice/${it.id}/encodage`); }
     if (d.reverse && !(c2() && c2().data.vat)) return toast('Autoliquidation : indiquez d\'abord le n° de TVA du client (obligatoire sur la facture)', 5000);
+    if (isEA(it) && eaState(it).k !== 'approuve' && !eaState(it).late && !confirm('Le client n\'a pas encore approuvé cet état d\'avancement. Le facturer quand même ?')) return;
     if (!confirm('Soumettre la facture ? Elle reçoit son numéro définitif et ne sera plus modifiable.')) return;
     const r = await api('POST', `number/${d.kind === 'avoir' ? 'avoir' : 'invoice'}`);
     it.number = r.number; d.status = 'emise'; d.emittedAt = today();
+    if (d.ea) d.ea.invoicedAt = today();
     if (!d.communication && company().country !== 'FR') d.communication = structComm(r.number.replace(/\D/g, ''));
     await persist('invoice', it); toast(`Facture ${it.number} soumise`);
     if (after === 'mail') return go(`#/print/invoice/${it.id}?mail=1`);
@@ -280,3 +288,36 @@ route('invoice', async (id, tab = 'informations') => {
   ]);
   cleanupView = () => save.flush();
 });
+
+// Panneau de l'état d'avancement : préparer → envoyer au client → approbation dans le délai → facturer
+function eaPanel(it, box, emit) {
+  const d = it.data; const e = eaState(it);
+  const step = { brouillon: 1, conteste: 1, envoye: 2, approuve: 3 }[e.k] || 1;
+  const steps = [['Préparer', 'quantités et % réalisés'], ['Envoyer au client', e.k === 'envoye' || e.k === 'approuve' ? `le ${fmtDate(e.sentAt)}` : 'pour approbation'], ['Approbation', e.k === 'approuve' ? `le ${fmtDate(e.approvedAt)}` : e.approveBy ? `avant le ${fmtDate(e.approveBy)}` : 'délai au choix'], ['Facturer', 'numéro définitif']];
+  const msg = e.k === 'conteste' ? `<div class="alert">Contesté par le client${e.note ? ` : « ${esc(e.note)} »` : ''}. Corrigez l'avancement puis renvoyez l'état.</div>`
+    : e.late ? `<div class="alert">Délai d'approbation passé depuis le ${fmtDate(e.approveBy)} sans réponse du client : selon vos conditions, l'état est considéré comme accepté. Vous pouvez le facturer.</div>`
+    : e.k === 'envoye' ? `<p class="muted">Envoyé le ${fmtDate(e.sentAt)} · le client a jusqu'au <b>${fmtDate(e.approveBy)}</b> pour l'approuver (${Math.max(0, dnum(e.approveBy) - dnum(today()))} jour(s) restant(s)).</p>` : '';
+  box.innerHTML = `<section class="card ea-card"><div class="card-h"><h3>État d'avancement EA${d.situationNo || ''}</h3>${badge(...(e.late ? ['Délai passé', '#e8590c'] : EA_ST[e.k]))}</div>
+    <ol class="ea-steps">${steps.map(([t, sub], i) => `<li class="${i + 1 < step ? 'done' : i + 1 === step ? 'on' : ''}"><b>${t}</b><small>${esc(sub)}</small></li>`).join('')}</ol>${msg}
+    <div class="btns">
+      ${['brouillon', 'conteste'].includes(e.k) ? `<button class="btn primary" data-ea="send">${I.mail} Envoyer au client pour approbation</button>` : ''}
+      ${e.k === 'envoye' ? `<button class="btn primary" data-ea="ok">${I.check} Le client a approuvé</button><button class="btn" data-ea="no">${I.x} Le client conteste</button><button class="btn" data-ea="resend">${I.mail} Renvoyer</button>` : ''}
+      ${e.k === 'approuve' || e.late ? `<button class="btn primary" data-ea="bill">${I.coins} Facturer cet état</button>` : ''}
+      <a class="btn" href="#/print/invoice/${it.id}">${I.print} Voir l'état (PDF)</a></div></section>`;
+  const save = async (patch) => { d.ea = { ...(d.ea || {}), ...patch }; await persist('invoice', it, { silent: true }); render(); };
+  const send = async () => {
+    const v = await ask('Envoyer l\'état d\'avancement au client', [{ name: 'days', label: 'Délai pour approuver (jours)', type: 'number', required: true, hint: 'Sans remarque du client dans ce délai, l\'état est considéré comme accepté.' }], { days: ui.eaDays || 7 });
+    if (!v) return;
+    const days = Math.max(1, Math.round(num(v.days))); ui.eaDays = days; saveUi();
+    d.ea = { ...(d.ea || {}), status: 'envoye', sentAt: today(), approveBy: addDays(today(), days), days, note: '' };
+    await persist('invoice', it, { silent: true });
+    go(`#/print/invoice/${it.id}?mail=1`);
+  };
+  $$('[data-ea]', box).forEach((b) => { b.onclick = async () => {
+    const a = b.dataset.ea;
+    if (a === 'send' || a === 'resend') return send();
+    if (a === 'ok') return save({ status: 'approuve', approvedAt: today() });
+    if (a === 'no') { const v = await ask('Le client conteste l\'état', [{ name: 'note', label: 'Remarque du client', type: 'textarea', rows: 3 }]); if (v) save({ status: 'conteste', note: v.note || '', contestedAt: today() }); return; }
+    if (a === 'bill') return emit();
+  }; });
+}

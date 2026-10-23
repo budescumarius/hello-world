@@ -4,7 +4,7 @@
 // Onglets d'un chantier, par famille : vue d'ensemble · l'argent du chantier · le terrain
 const PTABS = [
   ['overview', 'Vue d\'ensemble', ''],
-  ['quotes', 'Devis', 'Argent'], ['invoices', 'Factures', 'Argent'], ['expenses', 'Achats', 'Argent'], ['orders', 'Commandes', 'Argent'], ['hours', 'Heures', 'Argent'],
+  ['quotes', 'Devis', 'Argent'], ['invoices', 'Factures', 'Argent'], ['progress', 'États d\'avancement', 'Argent'], ['expenses', 'Achats', 'Argent'], ['orders', 'Commandes', 'Argent'], ['hours', 'Heures', 'Argent'],
   ['planning', 'Planning', 'Terrain'], ['points', 'Points', 'Terrain'], ['plans', 'Plans', 'Terrain'], ['meetings', 'Réunions', 'Terrain'], ['forms', 'Formulaires', 'Terrain'], ['diary', 'Journal', 'Terrain'], ['reports', 'Rapports', 'Terrain'], ['documents', 'Documents', 'Terrain'],
 ];
 
@@ -126,7 +126,7 @@ route('project', async (id, tab = 'overview', sub) => {
   ]);
   const T = {
     overview: tabOverview, quotes: tabPQuotes, orders: tabPOrders, invoices: tabPInvoices, expenses: tabPExpenses, hours: tabPHours,
-    planning: tabPPlanning, plans: tabPlans, points: tabPoints, meetings: tabMeetings, forms: tabForms, diary: tabDiary, documents: tabDocuments, reports: (pp, el) => reportsPanel(el, pp.id),
+    planning: tabPPlanning, plans: tabPlans, points: tabPoints, meetings: tabMeetings, forms: tabForms, diary: tabDiary, documents: tabDocuments, reports: (pp, el) => reportsPanel(el, pp.id), progress: (pp, el) => progressList(el, pp.id),
   };
   await T[tab](p, page, contacts);
 });

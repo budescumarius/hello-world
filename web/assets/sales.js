@@ -493,6 +493,8 @@ async function progressInvoice(q, prev, base, existing) {
       kind: 'situation', situationNo: n, ref: `EA${n}`, progressRows: rows.map((r) => ({ ...r })), lines,
       deductMode: ac.advTotal ? $('[name=dmode]', m.el).value : null, deductAmount: ac.advTotal ? num($('[name=damount]', m.el).value) : null,
       docNote: ac.advTotal ? `Acompte - reste à déduire ${restPct}%` : (existing ? existing.data.docNote : ''),
+      // un état modifié après l'envoi doit être renvoyé au client pour approbation
+      ea: existing && existing.data.ea ? { ...existing.data.ea, ...(['envoye', 'approuve'].includes(existing.data.ea.status) ? { status: 'brouillon', modifiedAt: today() } : {}) } : { status: 'brouillon' },
     };
     m.close();
     if (existing) { Object.assign(existing.data, extra); await persist('invoice', existing); toast('État d\'avancement mis à jour'); render(); } else newInvoice({ ...base, data: { ...base.data, ...extra } });
@@ -607,4 +609,40 @@ route('order', async (id) => {
     { label: 'Supprimer', danger: true, icon: 'trash', run: async () => { if (confirm('Supprimer cette commande ?')) { await db.del('order', it.id); go(pr ? `#/project/${pr.id}/orders` : '#/orders/fournisseur'); } } },
   ]);
   cleanupView = () => save.flush();
+});
+
+// ---------------------------------------------------------------- États d'avancement (liste générale et par chantier)
+async function newProgress(projectId) {
+  const quotes = (await db.list('quote')).filter((q) => q.data.status === 'accepte' && (!projectId || +q.project_id === +projectId));
+  if (!quotes.length) return toast(projectId ? 'Aucun devis accepté sur ce chantier' : 'Aucun devis accepté : l\'état d\'avancement se fait sur un devis accepté', 4500);
+  const start = async (q) => { const prev = (await db.list('invoice')).filter((i) => +i.data.quoteId === q.id); progressInvoice(q, prev, { project_id: q.project_id, data: { quoteId: q.id, clientId: q.data.clientId, reverse: !!q.data.reverse, title: q.data.title } }); };
+  if (quotes.length === 1) return start(quotes[0]);
+  menuSheet('Sur quel devis ?', quotes.map((q) => ({ label: `${q.number} · ${q.data.title || ''} (${money(totals(q.data).base)} HT)`, icon: 'calc', run: () => start(q) })));
+}
+async function progressList(el, projectId) {
+  const [invoices, contacts, projects, quotes] = await Promise.all([db.list('invoice', projectId ? { project: projectId } : undefined), db.list('contact'), db.list('project'), db.list('quote')]);
+  const rows = invoices.filter((i) => i.data.kind === 'situation');
+  const toolbar = `<button class="btn primary" data-act="nea">${I.plus} Nouvel état d'avancement</button>`;
+  const stOf = (i) => (isEA(i) ? invDisp(i).k : 'facture');
+  dataTable(el, {
+    rows, state: ui[`tbl_ea${projectId ? 'p' : ''}`] || (ui[`tbl_ea${projectId ? 'p' : ''}`] = { sort: -2 }), toolbar,
+    search: (i) => [i.data.ref, i.number, contactName(byId(contacts, i.data.clientId)), (byId(projects, i.project_id) || { data: {} }).data.name, (byId(quotes, i.data.quoteId) || {}).number].join(' '),
+    filters: { def: '', options: [['', 'Tous'], ['ea_brouillon', 'À envoyer', '#868e96'], ['ea_envoye', 'À approuver', '#3b5bdb'], ['ea_late', 'Délai passé', '#e8590c'], ['ea_approuve', 'À facturer', '#2f9e44'], ['ea_conteste', 'Contestés', '#e5484d'], ['facture', 'Facturés', '#1c2550']], match: (i, f) => stOf(i) === f },
+    columns: [
+      { l: 'État', v: (i) => `<b>EA${esc(String(i.data.situationNo || ''))}</b>`, sort: (i) => num(i.data.situationNo) },
+      { l: 'Date', v: (i) => fmtDate(i.data.date), sort: (i) => i.data.date },
+      ...(projectId ? [] : [{ l: 'Chantier', v: (i) => esc((byId(projects, i.project_id) || { data: {} }).data.name || '') }]),
+      { l: 'Devis', v: (i) => esc((byId(quotes, i.data.quoteId) || {}).number || '') },
+      { l: 'Client', v: (i) => esc(contactName(byId(contacts, i.data.clientId))) },
+      { l: 'Cette période HT', cls: 'r', v: (i) => `<b>${money(totals(i.data).base)}</b>`, sort: (i) => totals(i.data).base },
+      { l: 'Statut', v: (i) => (isEA(i) ? invDispHtml(i) : `<span class="pst">${badge('Facturé', '#1c2550')}<small class="muted">${esc(i.number || '')}</small></span>`) },
+    ],
+    onRow: (i) => go(`#/invoice/${i.id}`), empty: 'Aucun état d\'avancement',
+    footer: (l) => `<tr><td colspan="${projectId ? 4 : 5}">Total</td><td class="r"><b>${money(l.reduce((a, i) => a + totals(i.data).base, 0))}</b></td><td></td></tr>`,
+  });
+  $('[data-act=nea]', el).onclick = () => newProgress(projectId);
+}
+route('progress', async () => {
+  const page = layout({ active: 'finances', icon: 'percent', title: 'États d\'avancement', sub: 'Envoyés au client pour approbation, puis facturés' });
+  await progressList(page, null);
 });
