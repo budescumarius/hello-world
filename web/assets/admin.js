@@ -70,7 +70,7 @@ async function hrAbsences() {
 // chaque ligne avec son action (relancer, payer, facturer, c'est fait) ; à côté, l'argent et les chantiers en cours.
 route('dashboard', async () => {
   if (isSimple()) return homeSimple();
-  const all = await db.many(['opportunity', 'quote', 'invoice', 'project', 'task', 'point', 'intervention', 'expense', 'contact']);
+  const all = await db.many(['opportunity', 'quote', 'invoice', 'project', 'task', 'point', 'intervention', 'expense', 'contact', 'report']);
   const team = !!ui.dashAll;
   const page = layout({ active: 'dashboard', icon: 'sun', title: 'Aujourd\'hui', sub: esc(longDate(today())),
     actions: `<div class="tseg" role="group" aria-label="Afficher"><button type="button" data-team="0" class="${team ? '' : 'on'}">Moi</button><button type="button" data-team="1" class="${team ? 'on' : ''}">Toute l'équipe</button></div>` });
@@ -113,6 +113,11 @@ route('dashboard', async () => {
   const drafts = inv.filter((x) => x.s.s === 'brouillon' && (x.i.data.lines || []).some((l) => l.kind === 'item'));
   if (drafts.length) add(4, drafts.length === 1 ? { tone: 'info', icon: 'edit', title: `Facture à terminer : ${cname(drafts[0].i.data.clientId) || drafts[0].i.data.title || ''}`, sub: 'Brouillon pas encore envoyé', amount: drafts[0].s.t.total, href: `#/invoice/${drafts[0].i.id}`, act: ['Terminer', `#/invoice/${drafts[0].i.id}`] }
     : { tone: 'info', icon: 'edit', title: `${drafts.length} factures en brouillon`, sub: 'Pas encore envoyées', amount: sum(drafts, (x) => x.s.t.total), href: '#/invoices', act: ['Voir', '#/invoices'] });
+  // rapports envoyés par le terrain, pas encore lus
+  const fieldIds = S.users.filter((u) => ['ouvrier', 'soustraitant'].includes(u.role)).map((u) => u.id);
+  const newRep = all.report.filter((r) => fieldIds.includes(+r.created_by) && !(r.data.readBy || []).map(Number).includes(S.me.id));
+  many(newRep, 3, 1, (r) => ({ tone: 'todo', icon: r.data.kind === 'photos' ? 'camera' : 'fiche', title: `${(S.users.find((u) => u.id === +r.created_by) || {}).name || 'Terrain'} : ${r.data.kind === 'photos' ? `${(r.data.photos || []).length} photo(s)` : 'nouveau rapport'}`, sub: `${byId(all.project, r.project_id) ? byId(all.project, r.project_id).data.name + ' · ' : ''}${(r.data.text || '').split('\n')[0] || fmtDate(r.data.date)}`, href: `#/report/${r.id}`, act: ['Lire', `#/report/${r.id}`] }),
+    (l) => ({ tone: 'todo', icon: 'fiche', title: `${l.length} rapports du terrain à lire`, sub: 'Remarques et photos de vos équipes', href: '#/reports', act: ['Lire', '#/reports'] }));
   const pLate = all.point.filter(isLatePt);
   if (pLate.length) add(4, { tone: 'info', icon: 'pin', title: `${pLate.length} point(s) de chantier en retard`, sub: 'Réserves et remarques à lever', href: '#/projects', act: ['Voir', '#/projects'] });
   items.sort((a, b) => a.rank - b.rank);
@@ -281,18 +286,39 @@ route('settings', async (tab = 'company') => {
   };
 });
 async function settingsUsers(page) {
-  const b = await api('GET', 'bootstrap'); S.users = b.users;
-  const edit = (u) => formModal({
-    title: u ? u.name : 'Nouvel utilisateur', values: u ? { ...u, active: !!u.active } : { role: 'user', color: '#' + Math.floor(Math.random() * 0xbbbbbb + 0x222222).toString(16).padStart(6, '0'), active: true },
-    fields: [{ name: 'name', label: 'Nom', required: true }, { name: 'email', label: 'Email (identifiant)', type: 'email', required: true },
-      { name: 'role', label: 'Rôle', type: 'select', options: [['user', 'Utilisateur'], ['admin', 'Administrateur']] }, { name: 'color', label: 'Couleur', type: 'color' },
-      { name: 'password', label: u ? 'Nouveau mot de passe (laisser vide pour ne pas changer)' : 'Mot de passe (8 caractères min.)', type: 'password', required: !u },
-      ...(u && u.id !== S.me.id ? [{ name: 'active', label: 'Compte actif', type: 'check' }] : [])],
-    async onSave(v) { if (u) await api('PUT', `users/${u.id}`, v); else await api('POST', 'users', v); toast(u ? 'Utilisateur modifié' : 'Utilisateur créé – communiquez-lui son email et son mot de passe'); render(); },
-  });
+  const [b, staff, contacts] = await Promise.all([api('GET', 'bootstrap'), db.list('employee'), db.list('contact')]);
+  S.users = b.users;
+  const subs = contacts.filter((c) => c.data.kind === 'soustraitant');
+  const linkOf = (u) => ({ employeeId: (staff.find((e) => +e.data.userId === u.id) || {}).id || '', contactId: (subs.find((c) => +c.data.userId === u.id) || {}).id || '' });
+  const edit = (u) => {
+    const m = formModal({
+      title: u ? u.name : 'Nouvel accès', values: u ? { ...u, active: !!u.active, ...linkOf(u) } : { role: 'user', color: '#' + Math.floor(Math.random() * 0xbbbbbb + 0x222222).toString(16).padStart(6, '0'), active: true },
+      fields: [{ name: 'name', label: 'Nom', required: true }, { name: 'email', label: 'Email (identifiant)', type: 'email', required: true },
+        { name: 'role', label: 'Rôle', type: 'select', options: [['user', 'Bureau (accès complet)'], ['admin', 'Administrateur'], ['ouvrier', 'Ouvrier / employé (espace terrain)'], ['soustraitant', 'Sous-traitant (espace terrain)']] }, { name: 'color', label: 'Couleur', type: 'color' },
+        { name: 'employeeId', label: 'Fiche du personnel (RH)', type: 'select', options: [['', staff.length ? '— choisir —' : '— ajoutez-le d\'abord dans RH → Personnel —'], ...staff.map((e) => [e.id, e.data.name])], cls: 'full', hint: 'Ses heures, ses affectations et les phases où il est prévu viennent de cette fiche.' },
+        { name: 'contactId', label: 'Fiche du sous-traitant (Carnet)', type: 'select', options: [['', subs.length ? '— choisir —' : '— ajoutez-le d\'abord dans Carnet → Sous-traitants —'], ...subs.map((c) => [c.id, contactName(c)])], cls: 'full', hint: 'Il voit les chantiers où il est prévu, ses bons de commande (envoyés) et leur statut de facturation.' },
+        { name: 'info', type: 'html', cls: 'full', html: '<div class="s-info" data-fi>Espace terrain : il voit uniquement ses chantiers, encode ses heures, envoie des rapports et des photos, lit les rapports que vous lui envoyez et son planning. Il ne voit ni prix, ni devis, ni factures, ni clients.</div>' },
+        { name: 'password', label: u ? 'Nouveau mot de passe (laisser vide pour ne pas changer)' : 'Mot de passe (8 caractères min.)', type: 'password', required: !u },
+        ...(u && u.id !== S.me.id ? [{ name: 'active', label: 'Compte actif', type: 'check' }] : [])],
+      async onSave(v) {
+        if (v.role === 'ouvrier' && !v.employeeId) throw new Error('Choisissez sa fiche du personnel (RH → Personnel)');
+        if (v.role === 'soustraitant' && !v.contactId) throw new Error('Choisissez la fiche du sous-traitant');
+        const body = { ...v, link: { employeeId: +v.employeeId || 0, contactId: +v.contactId || 0 } }; delete body.employeeId; delete body.contactId; delete body.info;
+        if (u) await api('PUT', `users/${u.id}`, body); else await api('POST', 'users', body);
+        toast(u ? 'Accès modifié' : 'Accès créé – communiquez-lui son email et son mot de passe', 4000); render();
+      },
+    });
+    const form = $('form', m.el); const role = $('[name=role]', form);
+    const sync = () => { const r = role.value; $('[name=employeeId]', form).closest('.field').hidden = r !== 'ouvrier'; $('[name=contactId]', form).closest('.field').hidden = r !== 'soustraitant'; $('[data-fi]', form).closest('.field').hidden = !['ouvrier', 'soustraitant'].includes(r); };
+    role.addEventListener('change', sync); sync();
+    // nom et email repris de la fiche choisie
+    const fill = (sel, list, name, email) => { $(sel, form).addEventListener('change', (e) => { const x = byId(list, +e.target.value); if (!x) return; const n = $('[name=name]', form); const em = $('[name=email]', form); if (!n.value) n.value = name(x); if (!em.value && email(x)) em.value = email(x); }); };
+    fill('[name=employeeId]', staff, (x) => x.data.name || '', (x) => x.data.email || '');
+    fill('[name=contactId]', subs, (x) => contactName(x), (x) => x.data.email || '');
+  };
   dataTable(page, {
-    rows: S.users.filter((u) => S.firm.own !== false || u.id !== S.me.id), toolbar: `<button class="btn primary" data-act="new">${I.plus} Nouvel utilisateur</button>`,
-    columns: [{ l: '', v: (u) => avatar(u.id) }, { l: 'Nom', v: (u) => `<b>${esc(u.name)}</b>` }, { l: 'Email', v: (u) => esc(u.email) }, { l: 'Rôle', v: (u) => (u.role === 'admin' ? badge('Administrateur', '#7048e8') : badge('Utilisateur', '#3b5bdb')) },
+    rows: S.users.filter((u) => S.firm.own !== false || u.id !== S.me.id), toolbar: `<button class="btn primary" data-act="new">${I.plus} Nouvel accès</button>`,
+    columns: [{ l: '', v: (u) => avatar(u.id) }, { l: 'Nom', v: (u) => `<b>${esc(u.name)}</b>` }, { l: 'Email', v: (u) => esc(u.email) }, { l: 'Rôle', v: (u) => badge(...(ROLE_LABELS[u.role] || ROLE_LABELS.user)) },
       { l: 'Statut', v: (u) => (u.active ? badge('Actif', '#2f9e44') : badge('Désactivé', '#868e96')) }, { l: 'Dernière connexion', v: (u) => fmtDT(u.last_login) }],
     onRow: edit,
   });
@@ -318,6 +344,7 @@ const QA_ICONS = ['calc', 'crane', 'contacts', 'target', 'tool', 'tasks', 'peopl
 const quickActionsSimple = () => [['Faire une facture', 'coins', () => go('#/s/facture/new')], ['Faire un devis', 'calc', () => go('#/s/devis/new')], ['J\'ai acheté (photo du ticket)', 'camera', () => go('#/s/achat')],
   ['On m\'a payé', 'check', () => go('#/s/paye')], ['Note de crédit', 'copy', () => go('#/s/avoir')], ['Nouveau chantier', 'crane', () => editProject()], ['Nouveau client', 'contacts', () => sNewClient().then((c) => c && go(`#/contact/${c.id}`))]];
 function quickAddMenu() {
+  if (isField()) return menuSheet('Créer', [{ label: 'Encoder mes heures', icon: 'clock', primary: true, run: () => go('#/t/heures') }, { label: 'Envoyer des photos', icon: 'camera', run: () => go('#/t/photos') }, { label: 'Faire un rapport', icon: 'fiche', run: () => go('#/t/rapport/new') }]);
   if (isSimple()) return menuSheet('Créer', quickActionsSimple().map(([label, icon, run], i) => ({ label, icon, run, primary: i === 0 })));
   menuSheet('Créer', [...quickActions().map(([label, run], i) => ({ label, icon: QA_ICONS[i] || 'plus', run })),
     ...(S.ai ? [{ sep: true }, { label: 'Demander à l\'assistant IA', icon: 'spark', run: () => aiToggle(true) }] : [])]);

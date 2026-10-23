@@ -221,8 +221,7 @@ switch ($seg[0] ?? '') {
             $parent = isset($b['parent_id']) && $b['parent_id'] ? (int)$b['parent_id'] : null;
             if ($field) {
                 // compte terrain : uniquement ses heures (sur sa fiche) et ses rapports, sur ses chantiers
-                if ($type === 'timesheet' && field_scope($me)['employee']) $data['employeeId'] = field_scope($me)['employee'];
-                if ($type === 'timesheet' && field_scope($me)['contact']) $data['contactId'] = field_scope($me)['contact'];
+                if ($type === 'timesheet' && is_array($data)) $data = field_timesheet($me, $data);
                 if (!field_can_write($me, $type, $pid, is_array($data) ? $data : [], null)) fail(403, 'Action non autorisée pour votre compte.');
                 $parent = null;
             }
@@ -244,7 +243,7 @@ switch ($seg[0] ?? '') {
             if ($field) {
                 $nd = array_key_exists('data', $b) && is_array($b['data']) ? $b['data'] : (json_decode($cur['data'], true) ?: []);
                 $npid = array_key_exists('project_id', $b) ? ($b['project_id'] === null || $b['project_id'] === '' ? null : (int)$b['project_id']) : ($cur['project_id'] !== null ? (int)$cur['project_id'] : null);
-                if ($type === 'timesheet' && field_scope($me)['employee']) $nd['employeeId'] = field_scope($me)['employee'];
+                if ($type === 'timesheet') $nd = field_timesheet($me, $nd);
                 if (!field_can_write($me, $type, $npid, $nd, $cur)) fail(403, 'Action non autorisée pour votre compte.');
                 $b['data'] = $nd; unset($b['number']);
             }

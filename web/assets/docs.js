@@ -245,6 +245,7 @@ function cgvBlock(kind, t) {
 }
 // Coordonnées de l'entreprise ou du client manquantes : avertissement à l'écran (non imprimé)
 function coMissing(kind, c) {
+  if (isField()) return '';
   const co = company(); const s = sellerInfo();
   const miss = [!s.street && 'adresse', !s.zip && 'code postal', !s.city && 'localité', !co.vat && 'n° de TVA', kind !== 'quote' && !co.iban && 'IBAN', !co.email && 'e-mail', !co.phone && 'téléphone'].filter(Boolean);
   const out = [];
@@ -321,6 +322,7 @@ function printDocPage(kind, id, it, d, c, project, title, html, typ, co) {
       },
     });
   };
+  if (isField()) return printPage(title, html, '#/t/commandes', null);
   printPage(title, html, (isSimple() && kind !== 'order' ? { quote: `#/s/doc/devis/${id}`, invoice: `#/s/doc/facture/${id}` } : { quote: `#/quote/${id}`, invoice: `#/invoice/${id}`, order: `#/order/${id}` })[kind], mailDoc);
   if (new URLSearchParams(location.hash.split('?')[1] || '').has('mail')) mailDoc();
 }

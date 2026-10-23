@@ -156,6 +156,7 @@ const I = {
   tasks: ic('<path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>'),
   calendar: ic('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M8 14h2M14 14h2M8 18h2"/>'),
   coins: ic('<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'),
+  clock: ic('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
   sun: ic('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
   user: ic('<circle cx="12" cy="8" r="4"/><path d="M4 21c.6-4 3.8-6.5 8-6.5s7.4 2.5 8 6.5"/>'),
   people: ic('<circle cx="9" cy="8" r="3.5"/><path d="M2 20c.8-3.4 3.6-5 7-5s6.2 1.6 7 5M16 4.5a3.5 3.5 0 010 7M18 15c2 .6 3.4 2.2 4 5"/>'),
@@ -193,7 +194,7 @@ const I = {
 const SPACES = [
   { k: 'today', l: "Aujourd'hui", i: 'sun', h: '#/dashboard', sec: [["Aujourd'hui", '#/dashboard'], ['Tâches', '#/tasks'], ['Planning chantiers', '#/planning/projects'], ['Planning équipes', '#/planning/team']] },
   { k: 'deals', l: 'Affaires', i: 'target', h: '#/quotes', sec: [['Devis', '#/quotes', '#/quote/'], ['Opportunités', '#/opportunities'], ['Prix et ouvrages', '#/library']] },
-  { k: 'works', l: 'Chantiers', i: 'crane', h: '#/projects', sec: [['Chantiers', '#/projects', '#/project/'], ['Interventions', '#/interventions', '#/intervention/'], ['Installations', '#/installations', '#/installation/'], ['Fiches techniques', '#/fiches', '#/fiche/'], ['Dossiers de fin', '#/fiches/dossiers', '#/dossier/']] },
+  { k: 'works', l: 'Chantiers', i: 'crane', h: '#/projects', sec: [['Chantiers', '#/projects', '#/project/'], ['Interventions', '#/interventions', '#/intervention/'], ['Installations', '#/installations', '#/installation/'], ['Fiches techniques', '#/fiches', '#/fiche/'], ['Dossiers de fin', '#/fiches/dossiers', '#/dossier/'], ['Rapports terrain', '#/reports', '#/report/']] },
   { k: 'money', l: 'Argent', i: 'coins', h: '#/invoices', sec: [['Factures', '#/invoices', '#/invoice/'], ['Paiements', '#/payments'], ['Achats', '#/expenses', '#/purchase/', '#/expense/'], ['Commandes', '#/orders/fournisseur', '#/order/'], ['Sous-traitance', '#/orders/soustraitant'], ['Chiffres', '#/stats']] },
   { k: 'people', l: 'Carnet', i: 'people', h: '#/contacts/client', sec: [['Clients', '#/contacts/client', '#/contact/'], ['Prospects', '#/contacts/prospect'], ['Fournisseurs', '#/contacts/fournisseur'], ['Sous-traitants', '#/contacts/soustraitant'], ['Tous', '#/contacts/all'], ['Équipe', '#/hr/staff'], ['Pointage', '#/hr/timesheets'], ['Absences', '#/hr/absences']] },
 ];
@@ -206,7 +207,16 @@ const SPACES_SIMPLE = [
   { k: 'works', l: 'Chantiers', i: 'crane', h: '#/projects', sec: [['Chantiers', '#/projects', '#/project/'], ['Clients', '#/contacts/client', '#/contact/'], ['Fournisseurs', '#/contacts/fournisseur'], ['Mes prix', '#/library']] },
   { k: 'me', l: 'Moi', i: 'user', h: '#/s/moi', sec: [['Mes informations', '#/s/moi'], ['Peppol', '#/s/peppol']] },
 ];
-const spaces = () => (isSimple() ? SPACES_SIMPLE : SPACES);
+// Espace terrain (ouvriers, sous-traitants) : uniquement leurs chantiers, heures, rapports, commandes et planning
+const isField = () => !!(S.me && ['ouvrier', 'soustraitant'].includes(S.me.role) && !S.me.super);
+const SPACES_FIELD = () => [
+  { k: 'site', l: 'Chantiers', i: 'crane', h: '#/t', sec: [['Mes chantiers', '#/t', '#/t/chantier']] },
+  { k: 'hours', l: 'Heures', i: 'clock', h: '#/t/heures', sec: [['Mes heures', '#/t/heures']] },
+  { k: 'rep', l: 'Rapports', i: 'fiche', h: '#/t/rapports', sec: [['Rapports', '#/t/rapports', '#/t/rapport', '#/t/photos']] },
+  ...(S.me.role === 'soustraitant' ? [{ k: 'orders', l: 'Commandes', i: 'truck', h: '#/t/commandes', sec: [['Bons de commande', '#/t/commandes', '#/print/order']] }] : []),
+  { k: 'plan', l: 'Planning', i: 'calendar', h: '#/t/planning', sec: [['Mon planning', '#/t/planning']] },
+];
+const spaces = () => (isField() ? SPACES_FIELD() : isSimple() ? SPACES_SIMPLE : SPACES);
 const ui = (() => { try { return JSON.parse(localStorage.getItem('bp-ui') || '{}'); } catch (e) { return {}; } })();
 const saveUi = () => { try { localStorage.setItem('bp-ui', JSON.stringify(ui)); } catch (e) { /* stockage indisponible */ } };
 // Espace et rubrique de l'adresse actuelle : la correspondance la plus longue gagne
@@ -228,7 +238,7 @@ function dock(cur) {
     <a class="dock-brand" href="#/dashboard">${company.logoId ? `<img src="${fileUrl(company.logoId)}" alt="">` : '<span class="brand-mark"></span>'}<span>${esc(company.appName || company.name || 'BâtiPro')}</span></a>
     <nav class="dock-tabs" aria-label="Espaces">${spaces().map((sp) => `<a class="dock-tab ${cur && cur.sp === sp ? 'on' : ''}" href="${sp.h}">${I[sp.i]}<span>${sp.l}</span></a>`).join('')}</nav>
     <div class="dock-tools">
-      <button class="dock-cmd" data-act="search" title="Rechercher ou faire une action">${I.search}<span>Rechercher ou faire…</span><kbd>⌘K</kbd></button>
+      ${isField() ? '' : `<button class="dock-cmd" data-act="search" title="Rechercher ou faire une action">${I.search}<span>Rechercher ou faire…</span><kbd>⌘K</kbd></button>`}
       ${S.ai ? `<button class="dock-ai" data-act="ai" title="Assistant IA">${I.spark}</button>` : ''}
       <button class="dock-add" data-act="qadd">${I.plus}<span>Créer</span></button>
       <button class="dock-me" data-act="account" title="Mon compte">${avatar(S.me.id)}</button>
@@ -241,6 +251,7 @@ function secBar(cur) {
 // Menu du compte (avatar) : profil, paramètres, plateforme, déconnexion
 function accountMenu() {
   const items = [{ label: 'Mon profil', icon: 'user', run: () => editProfile() }];
+  if (isField()) items.push({ label: 'Installer l\'application sur le téléphone', icon: 'download', run: () => installHelp() });
   if (isAdmin()) items.push({ label: 'Paramètres', icon: 'gear', run: () => go('#/settings') });
   if (S.me.super) items.push({ label: 'Plateforme (firmes)', icon: 'people', run: () => go('#/platform') });
   if (S.firm && S.firm.own === false) items.push({ label: 'Revenir à ma firme', icon: 'back', run: () => switchFirm(0) });
@@ -278,7 +289,7 @@ function layout(p) {
 }
 // Téléphone : les cinq espaces en bas de l'écran (comme une application), même ordre que sur ordinateur
 function bottomNav(cur) {
-  return `<nav class="bnav" aria-label="Espaces">${spaces().map((sp) => `<a class="bn-it ${cur && cur.sp === sp ? 'on' : ''}" href="${sp.h}">${I[sp.i]}<span>${sp.l}</span></a>`).join('')}</nav>`;
+  return `<nav class="bnav" aria-label="Espaces" style="grid-template-columns:repeat(${spaces().length},1fr)">${spaces().map((sp) => `<a class="bn-it ${cur && cur.sp === sp ? 'on' : ''}" href="${sp.h}">${I[sp.i]}<span>${sp.l}</span></a>`).join('')}</nav>`;
 }
 // Téléphone : plus de 4 onglets → un bouton « section actuelle ▾ » qui ouvre toutes les sections d'un coup (grille d'icônes)
 const TAB_ICONS = { overview: 'dash', quotes: 'calc', orders: 'truck', invoices: 'coins', expenses: 'download', hours: 'people', planning: 'calendar', plans: 'file', points: 'pin', meetings: 'fiche', forms: 'tasks', diary: 'book', documents: 'file',
@@ -328,7 +339,7 @@ function bindShell() {
   $$('[data-act=qadd]').forEach((b) => { b.onclick = () => quickAddMenu(); });
   $$('[data-act=ai]').forEach((b) => { b.onclick = () => aiToggle(true); });
 }
-document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && S.ready) { e.preventDefault(); quickSearch(); } });
+document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && S.ready && !isField()) { e.preventDefault(); quickSearch(); } });
 
 // ---------------------------------------------------------------- Fenêtres modales
 const openModals = new Set();
@@ -506,6 +517,8 @@ async function render() {
   // édition simplifiée : les modules absents renvoient au tableau de bord
   const SIMPLE_ROUTES = ['s', 'dashboard', 'quotes', 'quote', 'invoices', 'invoice', 'payments', 'expenses', 'purchase', 'projects', 'project', 'contacts', 'contact', 'library', 'print', 'settings', 'platform'];
   if (isSimple() && parts[0] && !SIMPLE_ROUTES.includes(parts[0])) { location.hash = '#/dashboard'; return; }
+  // compte terrain : uniquement son espace (et l'impression de ses bons de commande)
+  if (isField() && !(parts[0] === 't' || (parts[0] === 'print' && parts[1] === 'order'))) { location.hash = '#/t'; return; }
   const fn = ROUTES[parts[0] || 'dashboard'] || ROUTES.dashboard;
   const seq = ++renderSeq;
   try { await fn(...parts.slice(1)); } catch (e) {
@@ -550,12 +563,12 @@ async function switchFirm(id) {
 async function boot() {
   try {
     const b = await api('GET', 'bootstrap');
-    Object.assign(S, { me: b.user, users: b.users, settings: b.settings || {}, firm: b.firm || {}, edition: b.edition || 'avance', ai: !!b.ai, translate: !!b.translate, ready: true });
+    Object.assign(S, { me: b.user, users: b.users, settings: b.settings || {}, firm: b.firm || {}, edition: b.edition || 'avance', ai: !!b.ai, translate: !!b.translate, field: b.field || null, ready: true });
     document.title = (S.settings.company || {}).appName || (S.settings.company || {}).name || 'BâtiPro';
-    if (!location.hash) location.hash = '#/dashboard';
+    if (!location.hash) location.hash = isField() ? '#/t' : '#/dashboard';
     render();
     // relève des factures reçues via Peppol (toutes les 10 min au plus)
-    if (typeof peppolSync === 'function') setTimeout(() => peppolSync(), 1500);
+    if (typeof peppolSync === 'function' && !isField()) setTimeout(() => peppolSync(), 1500);
     if (typeof aiMount === 'function') aiMount();
   } catch (e) {
     if (e.status === 401) showLogin();

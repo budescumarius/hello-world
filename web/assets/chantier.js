@@ -5,7 +5,7 @@
 const PTABS = [
   ['overview', 'Vue d\'ensemble', ''],
   ['quotes', 'Devis', 'Argent'], ['invoices', 'Factures', 'Argent'], ['expenses', 'Achats', 'Argent'], ['orders', 'Commandes', 'Argent'], ['hours', 'Heures', 'Argent'],
-  ['planning', 'Planning', 'Terrain'], ['points', 'Points', 'Terrain'], ['plans', 'Plans', 'Terrain'], ['meetings', 'Réunions', 'Terrain'], ['forms', 'Formulaires', 'Terrain'], ['diary', 'Journal', 'Terrain'], ['documents', 'Documents', 'Terrain'],
+  ['planning', 'Planning', 'Terrain'], ['points', 'Points', 'Terrain'], ['plans', 'Plans', 'Terrain'], ['meetings', 'Réunions', 'Terrain'], ['forms', 'Formulaires', 'Terrain'], ['diary', 'Journal', 'Terrain'], ['reports', 'Rapports', 'Terrain'], ['documents', 'Documents', 'Terrain'],
 ];
 
 async function editProject(p, preset = {}) {
@@ -20,6 +20,7 @@ async function editProject(p, preset = {}) {
       { name: 'address', label: 'Adresse', cls: 'full' }, { name: 'zip', label: 'Code postal' }, { name: 'city', label: 'Localité' },
       { name: 'start', label: 'Début', type: 'date' }, { name: 'end', label: 'Fin prévue', type: 'date' },
       { name: 'managerId', label: 'Conducteur de travaux', type: 'user' }, { name: 'team', label: 'Équipe', type: 'users', cls: 'full' },
+      ...(isSimple() ? [] : [{ name: 'subs', label: 'Sous-traitants sur ce chantier (ils le verront dans leur espace)', type: 'multi', options: contacts.filter((c) => c.data.kind === 'soustraitant').map((c) => [c.id, contactName(c)]), cls: 'full' }]),
       { name: 'architectId', label: 'Architecte / BE', type: 'contact', contacts, kinds: ['architecte', 'autre'], allowNew: false },
       { name: 'color', label: 'Couleur (planning)', type: 'color' },
       { name: 'budget', label: 'Budget HT (si pas de devis)', type: 'money' }, { name: 'access', label: 'Accès / codes / clés' },
@@ -120,11 +121,12 @@ route('project', async (id, tab = 'overview', sub) => {
     { label: 'Heures prestées', icon: 'people', run: () => editTimesheet(null, { project_id: p.id }) },
     { label: 'Point (observation / réserve)', icon: 'pin', run: () => editPoint(p, null) },
     { label: 'PV de réunion', icon: 'fiche', run: () => editMeeting(p, null) },
+    { label: 'Rapport au terrain (ouvriers, sous-traitants)', icon: 'send', run: () => sendReport(p.id) },
     { label: 'Tâche', icon: 'tasks', run: () => editTask(null, { project_id: p.id }) },
   ]);
   const T = {
     overview: tabOverview, quotes: tabPQuotes, orders: tabPOrders, invoices: tabPInvoices, expenses: tabPExpenses, hours: tabPHours,
-    planning: tabPPlanning, plans: tabPlans, points: tabPoints, meetings: tabMeetings, forms: tabForms, diary: tabDiary, documents: tabDocuments,
+    planning: tabPPlanning, plans: tabPlans, points: tabPoints, meetings: tabMeetings, forms: tabForms, diary: tabDiary, documents: tabDocuments, reports: (pp, el) => reportsPanel(el, pp.id),
   };
   await T[tab](p, page, contacts);
 });
@@ -303,14 +305,14 @@ async function editTimesheet(t, preset = {}) {
 function hoursTable(el, rows, staff, projects, showProject) {
   dataTable(el, {
     rows, state: { sort: -1 },
-    search: (t) => [(byId(staff, t.data.employeeId) || { data: {} }).data.name, t.data.task].join(' '),
+    search: (t) => [(byId(staff, t.data.employeeId) || { data: {} }).data.name || t.data.who, t.data.task].join(' '),
     columns: [
-      { l: 'Date', v: (t) => fmtDate(t.data.date), sort: (t) => t.data.date }, { l: 'Ouvrier', v: (t) => esc((byId(staff, t.data.employeeId) || { data: { name: '—' } }).data.name) },
+      { l: 'Date', v: (t) => fmtDate(t.data.date), sort: (t) => t.data.date }, { l: 'Ouvrier', v: (t) => `${esc((byId(staff, t.data.employeeId) || { data: { name: t.data.who || '—' } }).data.name)}${t.data.contactId ? ' <small class="muted">(sous-traitant)</small>' : ''}` },
       ...(showProject ? [{ l: 'Chantier', v: (t) => esc((byId(projects, t.project_id) || { data: {} }).data.name || '') }] : []),
       { l: 'Travail', v: (t) => esc(t.data.task || '') }, { l: 'Heures', cls: 'r', v: (t) => fnum(num(t.data.hours), 2), sort: (t) => num(t.data.hours) },
       { l: 'Coût', cls: 'r', v: (t) => money(num(t.data.hours) * num(t.data.rate)), sort: (t) => num(t.data.hours) * num(t.data.rate) },
     ],
-    onRow: (t) => editTimesheet(t), empty: 'Aucune heure encodée',
+    onRow: (t) => (t.data.employeeId ? editTimesheet(t) : menuSheet(`${t.data.who || 'Sous-traitant'} – ${fnum(num(t.data.hours), 2)} h`, [{ label: 'Supprimer ces heures', icon: 'trash', danger: true, run: async () => { await db.del('timesheet', t.id); render(); } }])), empty: 'Aucune heure encodée',
     footer: (l) => `<tr><td colspan="${showProject ? 4 : 3}">Total</td><td class="r"><b>${fnum(l.reduce((a, t) => a + num(t.data.hours), 0), 2)} h</b></td><td class="r"><b>${money(l.reduce((a, t) => a + num(t.data.hours) * num(t.data.rate), 0))}</b></td></tr>`,
   });
 }

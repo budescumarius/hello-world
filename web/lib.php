@@ -190,6 +190,22 @@ function link_field_user(int $uid, string $role, $link): void {
     }
 }
 
+// Heures encodées par un compte terrain : rattachées à sa fiche, avec son coût horaire (jamais celui envoyé par le téléphone)
+function field_timesheet(array $me, array $data): array {
+    $sc = field_scope($me);
+    unset($data['employeeId'], $data['contactId'], $data['rate']);
+    foreach (['employee' => 'employeeId', 'contact' => 'contactId'] as $t => $k) {
+        if (!$sc[$t]) continue;
+        $r = q('SELECT data FROM items WHERE id = ? AND company_id = ?', [$sc[$t], cid()])->fetch();
+        $d = $r ? (json_decode($r['data'], true) ?: []) : [];
+        $data[$k] = $sc[$t];
+        $data['who'] = trim((string)($d['name'] ?? $d['company'] ?? '')) ?: $me['name'];
+        if ($t === 'employee') $data['rate'] = (float)($d['costRate'] ?? 0);
+    }
+    $data['hours'] = max(0, min(24, (float)($data['hours'] ?? 0)));
+    return $data;
+}
+
 function require_super(): array {
     $u = require_user();
     if (!$u['super']) fail(403, 'Réservé au gestionnaire de la plateforme.');
