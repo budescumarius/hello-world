@@ -5,7 +5,7 @@
 const PTABS = [
   ['overview', 'Vue d\'ensemble', ''],
   ['quotes', 'Devis', 'Argent'], ['invoices', 'Factures', 'Argent'], ['progress', 'États d\'avancement', 'Argent'], ['expenses', 'Achats', 'Argent'], ['orders', 'Commandes', 'Argent'], ['hours', 'Heures', 'Argent'],
-  ['planning', 'Planning', 'Terrain'], ['points', 'Points', 'Terrain'], ['plans', 'Plans', 'Terrain'], ['meetings', 'Réunions', 'Terrain'], ['forms', 'Formulaires', 'Terrain'], ['diary', 'Journal', 'Terrain'], ['reports', 'Rapports', 'Terrain'], ['documents', 'Documents', 'Terrain'],
+  ['planning', 'Planning', 'Terrain'], ['points', 'Points', 'Terrain'], ['plans', 'Plans', 'Terrain'], ['meetings', 'Réunions', 'Terrain'], ['forms', 'Formulaires', 'Terrain'], ['diary', 'Journal', 'Terrain'], ['reports', 'Rapports', 'Terrain'], ['contracts', 'Contrats', 'Terrain'], ['documents', 'Documents', 'Terrain'],
 ];
 
 async function editProject(p, preset = {}) {
@@ -99,7 +99,7 @@ function projectFinance(p, all) {
 route('project', async (id, tab = 'overview', sub) => {
   const p = await db.get('project', +id);
   if (tab === 'plan' && sub) return viewPlan(p, +sub);
-  const tabs = isSimple() ? PTABS.filter(([k]) => ['overview', 'quotes', 'invoices', 'expenses', 'documents'].includes(k)) : PTABS;
+  const tabs = isSimple() ? PTABS.filter(([k]) => ['overview', 'quotes', 'invoices', 'expenses', 'contracts', 'documents'].includes(k)) : PTABS;
   if (!tabs.some(([k]) => k === tab)) tab = 'overview';
   const contacts = await db.list('contact');
   const c = byId(contacts, p.data.clientId);
@@ -126,7 +126,7 @@ route('project', async (id, tab = 'overview', sub) => {
   ]);
   const T = {
     overview: tabOverview, quotes: tabPQuotes, orders: tabPOrders, invoices: tabPInvoices, expenses: tabPExpenses, hours: tabPHours,
-    planning: tabPPlanning, plans: tabPlans, points: tabPoints, meetings: tabMeetings, forms: tabForms, diary: tabDiary, documents: tabDocuments, reports: (pp, el) => reportsPanel(el, pp.id), progress: (pp, el) => progressList(el, pp.id),
+    planning: tabPPlanning, plans: tabPlans, points: tabPoints, meetings: tabMeetings, forms: tabForms, diary: tabDiary, documents: tabDocuments, contracts: tabContracts, reports: (pp, el) => reportsPanel(el, pp.id), progress: (pp, el) => progressList(el, pp.id),
   };
   await T[tab](p, page, contacts);
 });
