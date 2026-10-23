@@ -98,6 +98,98 @@ function require_admin(): array {
     return $u;
 }
 
+// ---------------------------------------------------------------- Espace terrain (ouvriers, sous-traitants)
+// Comptes limités : ils ne voient que les chantiers qui leur sont attribués, leurs heures, leurs rapports,
+// les rapports qu'on leur envoie, leurs bons de commande et leur planning. Tout est vérifié ici, côté serveur.
+const FIELD_ROLES = ['ouvrier', 'soustraitant'];
+const USER_ROLES = ['admin', 'user', 'ouvrier', 'soustraitant'];
+function is_field(array $u): bool { return in_array($u['role'], FIELD_ROLES, true) && !$u['super']; }
+function require_staff(): array {
+    $u = require_user();
+    if (is_field($u)) fail(403, 'Accès réservé au bureau.');
+    return $u;
+}
+// Fiche liée au compte (personnel ou sous-traitant) et chantiers attribués
+function field_scope(array $me): array {
+    static $cache = [];
+    if (isset($cache[$me['id']])) return $cache[$me['id']];
+    $emp = 0; $con = 0;
+    foreach (q("SELECT id, type, data FROM items WHERE company_id = ? AND type IN ('employee', 'contact')", [cid()])->fetchAll() as $r) {
+        $d = json_decode($r['data'], true) ?: [];
+        if ((int)($d['userId'] ?? 0) !== $me['id']) continue;
+        if ($r['type'] === 'employee') $emp = (int)$r['id']; else $con = (int)$r['id'];
+    }
+    $pids = [];
+    foreach (q("SELECT id, type, project_id, data FROM items WHERE company_id = ? AND type IN ('project', 'phase', 'assign', 'order')", [cid()])->fetchAll() as $r) {
+        $d = json_decode($r['data'], true) ?: [];
+        $pid = $r['type'] === 'project' ? (int)$r['id'] : (int)$r['project_id'];
+        if (!$pid) continue;
+        $ok = match ($r['type']) {
+            'project' => in_array($me['id'], array_map('intval', (array)($d['team'] ?? [])), true) || ($con && in_array($con, array_map('intval', (array)($d['subs'] ?? [])), true)),
+            'phase' => ($emp && in_array($emp, array_map('intval', (array)($d['staff'] ?? [])), true)) || ($con && (int)($d['companyId'] ?? 0) === $con),
+            'assign' => $emp && (int)($d['employeeId'] ?? 0) === $emp,
+            'order' => $con && (int)($d['supplierId'] ?? 0) === $con,
+            default => false,
+        };
+        if ($ok) $pids[$pid] = true;
+    }
+    return $cache[$me['id']] = ['employee' => $emp, 'contact' => $con, 'projects' => array_keys($pids)];
+}
+// Un élément peut-il être lu par ce compte terrain ?
+function field_can_read(array $me, array $row): bool {
+    $sc = field_scope($me);
+    $d = json_decode((string)$row['data'], true) ?: [];
+    $pid = (int)($row['project_id'] ?? 0);
+    $inProj = $pid && in_array($pid, $sc['projects'], true);
+    $mine = (int)$row['created_by'] === $me['id'];
+    switch ($row['type']) {
+        case 'project': return in_array((int)$row['id'], $sc['projects'], true);
+        case 'phase': return $inProj;
+        case 'assign': return $sc['employee'] && (int)($d['employeeId'] ?? 0) === $sc['employee'];
+        case 'timesheet': return $mine || ($sc['employee'] && (int)($d['employeeId'] ?? 0) === $sc['employee']);
+        case 'report': return $mine || in_array($me['id'], array_map('intval', (array)($d['to'] ?? [])), true);
+        case 'order': return $sc['contact'] && (int)($d['supplierId'] ?? 0) === $sc['contact'] && ($d['status'] ?? 'brouillon') !== 'brouillon';
+        case 'contact': return $sc['contact'] && (int)$row['id'] === $sc['contact'];
+        case 'employee': return $sc['employee'] && (int)$row['id'] === $sc['employee'];
+        default: return false;
+    }
+}
+// Ce que la fiche d'un élément terrain peut contenir quand c'est le compte terrain qui l'écrit
+function field_can_write(array $me, string $type, ?int $pid, array $data, ?array $cur): bool {
+    $sc = field_scope($me);
+    if ($cur && (int)$cur['created_by'] !== $me['id']) return false;
+    if ($pid && !in_array($pid, $sc['projects'], true)) return false;
+    if ($type === 'timesheet') return $pid && (!$sc['employee'] || (int)($data['employeeId'] ?? 0) === $sc['employee']);
+    if ($type === 'report') return true;
+    return false;
+}
+
+// Fichier lisible par un compte terrain : envoyé par lui, logo de la firme, ou joint à un rapport qu'il peut lire
+function field_can_file(array $me, array $f): bool {
+    if ((int)$f['created_by'] === $me['id']) return true;
+    $co = setting('company', []) ?: [];
+    if ((int)($co['logoId'] ?? 0) === (int)$f['id']) return true;
+    foreach (q("SELECT * FROM items WHERE company_id = ? AND type = 'report'", [cid()])->fetchAll() as $r) {
+        if (!field_can_read($me, $r)) continue;
+        $d = json_decode($r['data'], true) ?: [];
+        $ids = array_map(fn($x) => (int)(is_array($x) ? ($x['id'] ?? 0) : $x), array_merge((array)($d['photos'] ?? []), (array)($d['files'] ?? [])));
+        if (in_array((int)$f['id'], $ids, true)) return true;
+    }
+    return false;
+}
+// Lie un compte terrain à sa fiche (personnel RH ou contact sous-traitant) ; délie les autres fiches
+function link_field_user(int $uid, string $role, $link): void {
+    $want = $role === 'ouvrier' ? ['employee', (int)(is_array($link) ? ($link['employeeId'] ?? 0) : 0)] : ($role === 'soustraitant' ? ['contact', (int)(is_array($link) ? ($link['contactId'] ?? 0) : 0)] : [null, 0]);
+    foreach (q("SELECT id, type, data FROM items WHERE company_id = ? AND type IN ('employee', 'contact')", [cid()])->fetchAll() as $r) {
+        $d = json_decode($r['data'], true) ?: [];
+        $has = (int)($d['userId'] ?? 0) === $uid;
+        $should = $want[0] === $r['type'] && (int)$r['id'] === $want[1];
+        if ($has === $should) continue;
+        if ($should) $d['userId'] = $uid; else unset($d['userId']);
+        q('UPDATE items SET data = ?, version = version + 1 WHERE id = ?', [json_encode($d, JSON_UNESCAPED_UNICODE), $r['id']]);
+    }
+}
+
 function require_super(): array {
     $u = require_user();
     if (!$u['super']) fail(403, 'Réservé au gestionnaire de la plateforme.');

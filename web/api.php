@@ -81,6 +81,16 @@ switch ($seg[0] ?? '') {
         if (isset($settings['peppolap']) && is_array($settings['peppolap'])) { $settings['peppolap']['hasKey'] = !empty($settings['peppolap']['key']); unset($settings['peppolap']['key']); }
         if (isset($settings['ai']) && is_array($settings['ai'])) { $settings['ai']['hasKey'] = !empty($settings['ai']['key']); unset($settings['ai']['key']); }
         $firm = q('SELECT id, name FROM companies WHERE id = ?', [cid()])->fetch() ?: ['id' => cid(), 'name' => ''];
+        if (is_field($u)) {
+            // espace terrain : uniquement ce qui sert à afficher les documents et les noms du bureau
+            $settings = array_intersect_key($settings, array_flip(['company', 'template', 'prefixes', 'numpad']));
+            if (isset($settings['company'])) $settings['company'] = array_intersect_key($settings['company'], array_flip(['name', 'appName', 'logoId', 'street', 'zip', 'city', 'address', 'country', 'phone', 'email', 'website', 'vat', 'currency']));
+            $users = array_values(array_filter($users, fn($x) => $x['id'] === $u['id'] || $x['role'] === 'admin' || $x['role'] === 'user'));
+            $users = array_map(fn($x) => ['id' => $x['id'], 'name' => $x['name'], 'role' => $x['role'], 'active' => $x['active'], 'color' => $x['color']], $users);
+            $sc = field_scope($u);
+            out(['user' => $u, 'users' => $users, 'settings' => $settings, 'version' => APP_VERSION, 'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => true],
+                'edition' => edition(), 'ai' => false, 'translate' => ai_ready(), 'field' => ['employeeId' => $sc['employee'], 'contactId' => $sc['contact'], 'projects' => $sc['projects']]]);
+        }
         out(['user' => $u, 'users' => $users, 'settings' => $settings, 'version' => APP_VERSION,
             'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => cid() === $u['company_id']], 'edition' => edition(), 'ai' => edition() === 'simple' ? false : ai_ready(), 'translate' => ai_ready()]);
 
@@ -96,8 +106,9 @@ switch ($seg[0] ?? '') {
             if (q('SELECT id FROM users WHERE email = ?', [$email])->fetch()) fail(400, 'Cet email est déjà utilisé.');
             q('INSERT INTO users (company_id, name, email, pass, role, color, created_at) VALUES (?,?,?,?,?,?,?)', [cid(),
                 trim((string)($b['name'] ?? $email)), $email, password_hash($b['password'], PASSWORD_DEFAULT),
-                ($b['role'] ?? '') === 'admin' ? 'admin' : 'user', (string)($b['color'] ?? '#3b5bdb'), now()]);
+                in_array($b['role'] ?? '', USER_ROLES, true) ? $b['role'] : 'user', (string)($b['color'] ?? '#3b5bdb'), now()]);
             $nid = (int)db()->lastInsertId();
+            link_field_user($nid, (string)($b['role'] ?? ''), $b['link'] ?? null);
             log_activity($me['id'], 'create', 'user', $nid, null, $b['name'] ?? $email);
             out(['id' => $nid]);
         }
@@ -118,7 +129,7 @@ switch ($seg[0] ?? '') {
                     if (q('SELECT id FROM users WHERE email = ? AND id <> ?', [$em, $id])->fetch()) fail(400, 'Cet email est déjà utilisé.');
                     $fields[] = 'email = ?'; $args[] = $em;
                 }
-                if (isset($b['role']) && $id !== $me['id']) { $fields[] = 'role = ?'; $args[] = $b['role'] === 'admin' ? 'admin' : 'user'; }
+                if (isset($b['role']) && $id !== $me['id']) { $fields[] = 'role = ?'; $args[] = in_array($b['role'], USER_ROLES, true) ? $b['role'] : 'user'; }
                 if (isset($b['active']) && $id !== $me['id']) { $fields[] = 'active = ?'; $args[] = $b['active'] ? 1 : 0; }
                 if (!empty($b['password'])) {
                     if (mb_strlen((string)$b['password']) < 8) fail(400, 'Le mot de passe doit contenir au moins 8 caractères.');
@@ -126,6 +137,7 @@ switch ($seg[0] ?? '') {
                 }
             }
             if ($fields) { $args[] = $id; q('UPDATE users SET ' . implode(', ', $fields) . ' WHERE id = ?', $args); }
+            if ($isAdmin && $id !== $me['id'] && array_key_exists('link', $b)) link_field_user($id, (string)($b['role'] ?? ''), $b['link']);
             out(['ok' => true]);
         }
         fail(404, 'Route inconnue');
@@ -162,7 +174,7 @@ switch ($seg[0] ?? '') {
 
     // ------------------------------------------------------------ Numéro définitif (ex. facture émise)
     case 'number':
-        require_user();
+        require_staff();
         $kind = $seg[1] ?? '';
         if (!preg_match($TYPE_RE, $kind) || $method !== 'POST') fail(400, 'Type invalide');
         db()->beginTransaction();
@@ -175,6 +187,8 @@ switch ($seg[0] ?? '') {
         $me = require_user();
         $type = $seg[1] ?? '';
         $id = isset($seg[2]) ? (int)$seg[2] : 0;
+        $field = is_field($me);
+        $see = fn(array $r) => !$field || field_can_read($me, $r);
 
         if ($method === 'GET' && $type === '') {
             // plusieurs types en une requête : ?types=a,b&project=ID
@@ -184,7 +198,7 @@ switch ($seg[0] ?? '') {
             $args = array_merge([cid()], $types);
             if (isset($_GET['project'])) { $sql .= ' AND project_id = ?'; $args[] = (int)$_GET['project']; }
             $res = array_fill_keys($types, []);
-            foreach (q($sql . ' ORDER BY id', $args)->fetchAll() as $r) $res[$r['type']][] = row_out($r);
+            foreach (q($sql . ' ORDER BY id', $args)->fetchAll() as $r) if ($see($r)) $res[$r['type']][] = row_out($r);
             out($res);
         }
         if (!preg_match($TYPE_RE, $type)) fail(400, 'Type invalide');
@@ -193,11 +207,11 @@ switch ($seg[0] ?? '') {
             $sql = 'SELECT * FROM items WHERE company_id = ? AND type = ?'; $args = [cid(), $type];
             if (isset($_GET['project'])) { $sql .= ' AND project_id = ?'; $args[] = (int)$_GET['project']; }
             if (isset($_GET['parent'])) { $sql .= ' AND parent_id = ?'; $args[] = (int)$_GET['parent']; }
-            out(array_map('row_out', q($sql . ' ORDER BY id', $args)->fetchAll()));
+            out(array_map('row_out', array_values(array_filter(q($sql . ' ORDER BY id', $args)->fetchAll(), $see))));
         }
         if ($method === 'GET') {
             $r = q('SELECT * FROM items WHERE id = ? AND type = ? AND company_id = ?', [$id, $type, cid()])->fetch();
-            if (!$r) fail(404, 'Élément introuvable (supprimé ?)');
+            if (!$r || !$see($r)) fail(404, 'Élément introuvable (supprimé ?)');
             out(row_out($r));
         }
         if ($method === 'POST' && !$id) {
@@ -205,6 +219,13 @@ switch ($seg[0] ?? '') {
             $data = $b['data'] ?? [];
             $pid = isset($b['project_id']) && $b['project_id'] !== null && $b['project_id'] !== '' ? (int)$b['project_id'] : null;
             $parent = isset($b['parent_id']) && $b['parent_id'] ? (int)$b['parent_id'] : null;
+            if ($field) {
+                // compte terrain : uniquement ses heures (sur sa fiche) et ses rapports, sur ses chantiers
+                if ($type === 'timesheet' && field_scope($me)['employee']) $data['employeeId'] = field_scope($me)['employee'];
+                if ($type === 'timesheet' && field_scope($me)['contact']) $data['contactId'] = field_scope($me)['contact'];
+                if (!field_can_write($me, $type, $pid, is_array($data) ? $data : [], null)) fail(403, 'Action non autorisée pour votre compte.');
+                $parent = null;
+            }
             db()->beginTransaction();
             $number = null;
             if (isset(NUMBERED[$type])) $number = make_number($type);
@@ -220,6 +241,13 @@ switch ($seg[0] ?? '') {
             $b = body();
             $cur = q('SELECT * FROM items WHERE id = ? AND type = ? AND company_id = ?', [$id, $type, cid()])->fetch();
             if (!$cur) fail(404, 'Élément introuvable (supprimé ?)');
+            if ($field) {
+                $nd = array_key_exists('data', $b) && is_array($b['data']) ? $b['data'] : (json_decode($cur['data'], true) ?: []);
+                $npid = array_key_exists('project_id', $b) ? ($b['project_id'] === null || $b['project_id'] === '' ? null : (int)$b['project_id']) : ($cur['project_id'] !== null ? (int)$cur['project_id'] : null);
+                if ($type === 'timesheet' && field_scope($me)['employee']) $nd['employeeId'] = field_scope($me)['employee'];
+                if (!field_can_write($me, $type, $npid, $nd, $cur)) fail(403, 'Action non autorisée pour votre compte.');
+                $b['data'] = $nd; unset($b['number']);
+            }
             if (isset($b['version']) && (int)$b['version'] !== (int)$cur['version'] && empty($b['force'])) {
                 out(['error' => 'Cet élément a été modifié par un autre utilisateur entre-temps.', 'conflict' => row_out($cur)], 409);
             }
@@ -235,6 +263,7 @@ switch ($seg[0] ?? '') {
         if ($method === 'DELETE' && $id) {
             $cur = q('SELECT * FROM items WHERE id = ? AND type = ? AND company_id = ?', [$id, $type, cid()])->fetch();
             if (!$cur) out(['ok' => true]);
+            if ($field && (!in_array($type, ['timesheet', 'report'], true) || (int)$cur['created_by'] !== $me['id'])) fail(403, 'Action non autorisée pour votre compte.');
             $d = json_decode($cur['data'], true) ?: [];
             db()->beginTransaction();
             if ($type === 'project') {
@@ -249,6 +278,17 @@ switch ($seg[0] ?? '') {
             out(['ok' => true]);
         }
         fail(404, 'Route inconnue');
+
+    // ------------------------------------------------------------ Rapport lu (destinataire, sans modifier le rapport)
+    case 'seen':
+        $me = require_user();
+        $id = (int)($seg[1] ?? 0);
+        $r = q("SELECT * FROM items WHERE id = ? AND type = 'report' AND company_id = ?", [$id, cid()])->fetch();
+        if (!$r || $method !== 'POST' || (is_field($me) && !field_can_read($me, $r))) fail(404, 'Rapport introuvable');
+        $d = json_decode($r['data'], true) ?: [];
+        $seen = array_map('intval', (array)($d['readBy'] ?? []));
+        if (!in_array($me['id'], $seen, true)) { $d['readBy'] = [...$seen, $me['id']]; q('UPDATE items SET data = ? WHERE id = ?', [json_encode($d, JSON_UNESCAPED_UNICODE), $id]); }
+        out(['ok' => true]);
 
     // ------------------------------------------------------------ Fichiers
     case 'files':
@@ -271,12 +311,13 @@ switch ($seg[0] ?? '') {
             $rel = "$dir/" . bin2hex(random_bytes(16)) . ".$ext";
             if (!move_uploaded_file($f['tmp_name'], __DIR__ . "/uploads/$rel")) fail(500, 'Impossible d\'enregistrer le fichier (droits du dossier uploads ?).');
             $pid = isset($_POST['project_id']) && $_POST['project_id'] !== '' ? (int)$_POST['project_id'] : null;
+            if (is_field($me) && $pid && !in_array($pid, field_scope($me)['projects'], true)) $pid = null;
             q('INSERT INTO files (company_id, project_id, name, mime, size, path, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)', [cid(), $pid, $name, $mime, (int)$f['size'], $rel, $me['id'], now()]);
             out(['id' => (int)db()->lastInsertId(), 'name' => $name, 'mime' => $mime, 'size' => (int)$f['size']]);
         }
         if ($method === 'GET' && $id) {
             $f = q('SELECT * FROM files WHERE id = ? AND company_id = ?', [$id, cid()])->fetch();
-            if (!$f || !is_file(__DIR__ . '/uploads/' . $f['path'])) { http_response_code(404); exit('Fichier introuvable'); }
+            if (!$f || !is_file(__DIR__ . '/uploads/' . $f['path']) || (is_field($me) && !field_can_file($me, $f))) { http_response_code(404); exit('Fichier introuvable'); }
             $inline = preg_match('#^(image/|application/pdf)#', $f['mime']) && !isset($_GET['download']);
             header('Content-Type: ' . $f['mime']);
             header('Content-Length: ' . filesize(__DIR__ . '/uploads/' . $f['path']));
@@ -288,6 +329,7 @@ switch ($seg[0] ?? '') {
         }
         if ($method === 'DELETE' && $id) {
             $f = q('SELECT * FROM files WHERE id = ? AND company_id = ?', [$id, cid()])->fetch();
+            if ($f && is_field($me) && (int)$f['created_by'] !== $me['id']) fail(403, 'Action non autorisée pour votre compte.');
             if ($f) { @unlink(__DIR__ . '/uploads/' . $f['path']); q('DELETE FROM files WHERE id = ?', [$id]); }
             out(['ok' => true]);
         }
@@ -296,7 +338,7 @@ switch ($seg[0] ?? '') {
     // ------------------------------------------------------------ Compteurs de numérotation (reprise d'une numérotation existante)
     case 'counters':
         if ($method === 'GET') {
-            require_user();
+            require_staff();
             out((object)array_map('intval', array_column(q('SELECT k, n FROM counters WHERE company_id = ?', [cid()])->fetchAll(), 'n', 'k')));
         }
         if ($method === 'PUT') {
@@ -312,7 +354,7 @@ switch ($seg[0] ?? '') {
 
     // ------------------------------------------------------------ Annuaire Peppol (participant enregistré ?)
     case 'peppol':
-        $me = require_user();
+        $me = require_staff();
         $act = $seg[1] ?? '';
         if ($act === 'sync' && $method === 'POST') {
             try { $r = pap_sync($me['id']); } catch (Throwable $e) { fail(502, $e->getMessage()); }
@@ -363,13 +405,13 @@ switch ($seg[0] ?? '') {
 
     // ------------------------------------------------------------ Numéro de TVA : vérification VIES (actif ?) + nom et adresse officiels
     case 'vat':
-        require_user();
+        require_staff();
         if (($seg[1] ?? '') !== 'lookup') fail(404, 'Route inconnue');
         out(vat_lookup((string)($_GET['vat'] ?? ''), (string)($_GET['cc'] ?? 'BE')));
 
 
     case 'mail':
-        $me = require_user();
+        $me = require_staff();
         if ($method !== 'POST') fail(404, 'Route inconnue');
         $parse = function ($v): array {
             $list = is_array($v) ? $v : (json_decode((string)$v, true) ?: []);
@@ -492,6 +534,7 @@ switch ($seg[0] ?? '') {
     // ------------------------------------------------------------ Assistant IA
     case 'ai':
         $me = require_user();
+        if (is_field($me) && ($seg[1] ?? '') !== 'translate') fail(403, 'Accès réservé au bureau.');
         db()->exec('CREATE TABLE IF NOT EXISTS ai_convs (id INT AUTO_INCREMENT PRIMARY KEY, company_id INT NOT NULL, user_id INT NOT NULL, title VARCHAR(190) NOT NULL, turns LONGTEXT NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, KEY owner (company_id, user_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
         $act = $seg[1] ?? '';
         $id = isset($seg[2]) ? (int)$seg[2] : 0;
@@ -577,7 +620,7 @@ switch ($seg[0] ?? '') {
 
     // ------------------------------------------------------------ Historique des actions
     case 'activity':
-        require_user();
+        require_staff();
         $args = [cid()]; $sql = 'SELECT a.*, u.name AS user_name FROM activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.company_id = ?';
         if (isset($_GET['project'])) { $sql .= ' AND a.project_id = ?'; $args[] = (int)$_GET['project']; }
         $limit = max(1, min(200, (int)($_GET['limit'] ?? 50)));

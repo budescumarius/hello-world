@@ -409,12 +409,15 @@ async function progressInvoice(q, prev, base, existing) {
   const m = modal(`${mhead(`État d'avancement n° ${n} (EA${n}) – devis ${q.number}`)}<div class="m-body">
     <p class="muted">Encodez l'avancement <b>cumulé</b> de chaque poste, en % ou en quantité. La facture reprend uniquement la différence avec les états précédents. Sur un chapitre, le % s'applique à toutes ses lignes.</p>
     <div class="btns"><button class="btn sm" data-all="100">Tout à 100 %</button><button class="btn sm" data-all="prev">Revenir à l'état précédent</button></div>
-    <div class="dt-body"><table class="dt prog"><thead><tr><th>N°</th><th>Désignation</th><th class="r">Qté prévue</th><th>U</th><th class="r">PU HT</th><th class="r">Montant HT</th><th class="r">Préc.</th><th class="r">Cumul %</th><th class="r">Cumul qté</th><th class="r">Cet état</th></tr></thead><tbody>
+    <div class="pg-list">
     ${rows.map((r, i) => (r.kind === 'title'
-    ? `<tr class="sec ${r.level === 2 ? 'lv2' : ''}"><td>${nos[i]}</td><td colspan="6"><b>${esc(r.desc)}</b></td><td class="r"><input class="pct" data-ch="${i}" inputmode="decimal" placeholder="%"></td><td></td><td class="r" data-ct="${i}"></td></tr>`
-    : `<tr data-r="${i}"><td>${nos[i]}</td><td>${esc(r.desc.split('\n')[0])}</td><td class="r">${fnum(r.qty, 3)}</td><td>${esc(r.unit)}</td><td class="r">${money(r.price)}</td><td class="r">${money(amt(r, 100))}</td><td class="r">${fnum(r.prev, 1)} %</td>
-       <td class="r"><input class="pct" data-p="${i}" inputmode="decimal" value="${r2(r.cum)}"></td><td class="r"><input class="pct" data-q="${i}" inputmode="decimal" value="${r2(r.qty * r.cum / 100)}"></td><td class="r" data-per="${i}"></td></tr>`)).join('')}
-    </tbody></table></div>
+    ? `<div class="pg-sec ${r.level === 2 ? 'lv2' : ''}" ${String(r.desc || '').trim() ? '' : 'hidden'}><span class="pg-no">${esc(String(nos[i]).replace(/(\.0)+$/, ''))}</span><b class="pg-t">${esc(r.desc)}</b><label class="pg-chap" title="Appliquer un % à tout le chapitre"><input class="pct" data-ch="${i}" inputmode="decimal" placeholder="—"><em>%</em></label><b class="pg-amt" data-ct="${i}"></b></div>`
+    : `<div class="pg-row" data-r="${i}">
+        <div class="pg-desc"><span class="pg-no">${esc(String(nos[i]).replace(/(\.0)+$/, ''))}</span><span class="pg-d" title="${esc(r.desc)}">${esc(r.desc.split('\n')[0])}</span></div>
+        <div class="pg-meta"><span>Prévu <b>${fnum(r.qty, 3)} ${esc(r.unit || '')}</b></span><span>PU <b>${money(r.price)}</b></span><span>Marché <b>${money(amt(r, 100))}</b></span><span>Avant <b>${fnum(r.prev, 1)} %</b></span></div>
+        <div class="pg-in"><label><span>Cumul</span><input class="pct" data-p="${i}" inputmode="decimal" value="${r2(r.cum)}"><em>%</em></label><label><span>ou</span><input class="pct" data-q="${i}" inputmode="decimal" value="${r2(r.qty * r.cum / 100)}"><em>${esc(r.unit || 'qté')}</em></label><span class="pg-per"><small>Cet état</small><b data-per="${i}"></b></span></div>
+      </div>`)).join('')}
+    </div>
     ${ac.advTotal ? `<div class="card flat"><b>Acomptes facturés : ${money(ac.advTotal)} HT</b> · déjà déduits ${money(ac.doneTotal)} · reste ${money(ac.advTotal - ac.doneTotal)}
       <div class="grid-form" style="margin-top:8px">${fieldHTML({ name: 'dmode', label: 'Déduction de l\'acompte', type: 'select', options: [['prorata', 'Au prorata de l\'avancement (recommandé)'], ['manual', 'Montant libre HT'], ['none', 'Pas de déduction sur cet état']] }, existing ? existing.data.deductMode || 'prorata' : 'prorata')}${fieldHTML({ name: 'damount', label: 'Montant HT à déduire', type: 'money' }, existing ? existing.data.deductAmount || '' : '')}</div></div>` : ''}
     <div class="totals"><div class="tr"><span>Sous-total n°1 (travaux de cet état)</span><b data-t1></b></div>${ac.advTotal ? '<div class="tr"><span>Déduction acompte</span><b data-t2></b></div>' : ''}<div class="tr big"><span>Sous-total n°2 (HT facturé)</span><span data-t3></span></div><div class="tr int"><span>Avancement global cumulé</span><span data-t4></span></div></div></div>
