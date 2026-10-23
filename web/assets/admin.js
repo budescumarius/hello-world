@@ -66,35 +66,87 @@ async function hrAbsences() {
 }
 
 // ---------------------------------------------------------------- Tableau de bord
+// « Aujourd'hui » : une seule liste de ce qu'il faut faire maintenant, du plus urgent au moins urgent,
+// chaque ligne avec son action (relancer, payer, facturer, c'est fait) ; à côté, l'argent et les chantiers en cours.
 route('dashboard', async () => {
   if (isSimple()) return homeSimple();
-  const all = await db.many(['opportunity', 'quote', 'invoice', 'project', 'task', 'point', 'intervention', 'expense']);
-  const page = layout({ active: 'dashboard', icon: 'dash', title: 'Tableau de bord', actions: `<label class="chk"><input type="checkbox" data-mine ${ui.dashAll ? '' : 'checked'}>Uniquement mes éléments</label>` });
-  $('[data-mine]').onchange = (e) => { ui.dashAll = !e.target.checked; saveUi(); render(); };
-  const mine = (x, key = 'ownerId') => ui.dashAll || +x.data[key] === S.me.id || (!x.data[key] && x.created_by === S.me.id);
-  const opps = all.opportunity.filter((o) => mine(o)); const oOpen = opps.filter((o) => OPP_OPEN.includes(o.data.stage));
-  const quotes = all.quote.filter((q) => mine(q)); const qSent = quotes.filter((q) => q.data.status === 'envoye'); const qDraft = quotes.filter((q) => q.data.status === 'brouillon');
-  const inv = all.invoice.filter((i) => ui.dashAll || i.created_by === S.me.id).map((i) => ({ i, s: invState(i) }));
-  const late = inv.filter((x) => x.s.s === 'retard'); const draftI = inv.filter((x) => x.s.s === 'brouillon'); const toCash = inv.filter((x) => ['impayee', 'partielle'].includes(x.s.s));
+  const all = await db.many(['opportunity', 'quote', 'invoice', 'project', 'task', 'point', 'intervention', 'expense', 'contact']);
+  const team = !!ui.dashAll;
+  const page = layout({ active: 'dashboard', icon: 'sun', title: 'Aujourd\'hui', sub: esc(longDate(today())),
+    actions: `<div class="tseg" role="group" aria-label="Afficher"><button type="button" data-team="0" class="${team ? '' : 'on'}">Moi</button><button type="button" data-team="1" class="${team ? 'on' : ''}">Toute l'équipe</button></div>` });
+  $$('[data-team]').forEach((b) => { b.onclick = () => { ui.dashAll = b.dataset.team === '1'; saveUi(); render(); }; });
+  const mine = (x, key = 'ownerId') => team || +x.data[key] === S.me.id || (!x.data[key] && x.created_by === S.me.id);
+  const cname = (id) => { const c = byId(all.contact, id); return c ? contactName(c) : ''; };
+  const days = (d) => (d ? dnum(today()) - dnum(d) : 0);
   const sum = (l, f) => l.reduce((a, x) => a + f(x), 0);
-  const tasks = all.task.filter((t) => t.data.status !== 'done' && (t.data.assignees || []).includes(S.me.id)).sort((a, b) => (a.data.due || '9').localeCompare(b.data.due || '9'));
-  const projects = all.project.filter((p) => ['preparation', 'encours', 'reception'].includes(p.data.status) && (ui.dashAll || +p.data.managerId === S.me.id || (p.data.team || []).includes(S.me.id)));
+  const inv = all.invoice.filter((i) => team || i.created_by === S.me.id).map((i) => ({ i, s: invState(i) }));
+  const items = [];
+  const add = (rank, o) => items.push({ rank, ...o });
+  // trop d'éléments du même genre : une seule ligne qui renvoie à la liste
+  const many = (list, n, rank, one, group) => { if (list.length > n) add(rank, group(list)); else list.forEach((x) => add(rank, one(x))); };
+  many(inv.filter((x) => x.s.s === 'retard').sort((a, b) => (a.i.data.due || '').localeCompare(b.i.data.due || '')), 5, 0,
+    (x) => ({ tone: 'late', icon: 'coins', title: `${cname(x.i.data.clientId) || 'Client'} ne vous a pas payé`, sub: `Facture ${x.i.number || ''} · en retard de ${days(x.i.data.due)} jour(s)`, amount: x.s.rest, href: `#/invoice/${x.i.id}`, act: ['Relancer', `#/print/invoice/${x.i.id}?mail=1`] }),
+    (l) => ({ tone: 'late', icon: 'coins', title: `${l.length} factures en retard de paiement`, sub: 'Vos clients vous doivent de l\'argent', amount: sum(l, (x) => x.s.rest), href: '#/invoices', act: ['Voir', '#/invoices'] }));
+  const tasks = all.task.filter((t) => t.data.status !== 'done' && (team || (t.data.assignees || []).includes(S.me.id)) && t.data.due && t.data.due <= today());
+  many(tasks, 6, 1, (t) => ({ tone: t.data.due < today() ? 'late' : 'todo', icon: 'tasks', title: t.data.title, sub: t.data.due < today() ? `Tâche en retard de ${days(t.data.due)} jour(s)` : 'Tâche à faire aujourd\'hui', done: t.id, href: '#/tasks' }),
+    (l) => ({ tone: 'todo', icon: 'tasks', title: `${l.length} tâches à faire`, sub: 'Aujourd\'hui ou en retard', href: '#/tasks', act: ['Voir', '#/tasks'] }));
+  all.intervention.filter((x) => x.data.date === today() && !['terminee', 'facturee', 'annulee'].includes(x.data.status))
+    .forEach((x) => add(1, { tone: 'todo', icon: 'tool', title: `Intervention${x.data.time ? ` à ${x.data.time}` : ''} – ${cname(x.data.clientId) || x.number || ''}`, sub: x.data.title || x.data.desc || 'Intervention du jour', href: `#/intervention/${x.id}`, act: ['Ouvrir', `#/intervention/${x.id}`] }));
+  const exp = all.expense.filter((e) => !e.data.refused);
+  many(exp.filter((e) => purchState(e) === 'retard' && purchRest(e.data) > 0.005), 4, 1,
+    (e) => ({ tone: 'late', icon: 'download', title: `Payer ${cname(e.data.supplierId) || e.data.desc || 'le fournisseur'}`, sub: `Facture fournisseur en retard de ${days(e.data.due)} jour(s)`, amount: purchRest(e.data), href: `#/purchase/${e.id}`, act: ['Payer', `#/purchase/${e.id}`] }),
+    (l) => ({ tone: 'late', icon: 'download', title: `${l.length} factures fournisseurs en retard`, sub: 'À payer', amount: sum(l, (e) => purchRest(e.data)), href: '#/expenses', act: ['Voir', '#/expenses'] }));
+  many(exp.filter((e) => purchState(e) === 'avalider'), 3, 3,
+    (e) => ({ tone: 'todo', icon: 'download', title: `Vérifier l'achat ${cname(e.data.supplierId) || e.data.desc || ''}`.trim(), sub: 'Reçu ou photo à contrôler', amount: purchTtc(e.data), href: `#/purchase/${e.id}`, act: ['Vérifier', `#/purchase/${e.id}`] }),
+    (l) => ({ tone: 'todo', icon: 'download', title: `${l.length} achats à vérifier`, sub: 'Reçus, photos et factures Peppol', href: '#/expenses', act: ['Vérifier', '#/expenses'] }));
+  const quotes = all.quote.filter((q) => mine(q));
+  const billed = new Set(all.invoice.map((i) => +i.data.quoteId).filter(Boolean));
+  many(quotes.filter((q) => q.data.status === 'accepte' && !billed.has(q.id)), 4, 2,
+    (q) => ({ tone: 'go', icon: 'calc', title: `Devis accepté : ${cname(q.data.clientId) || q.data.title || ''}`, sub: `${q.number} · pas encore facturé`, amount: totals(q.data).total, href: `#/quote/${q.id}`, act: ['Facturer', `#/quote/${q.id}`] }),
+    (l) => ({ tone: 'go', icon: 'calc', title: `${l.length} devis acceptés à facturer`, sub: 'Acompte ou facture', href: '#/quotes', act: ['Voir', '#/quotes'] }));
+  many(quotes.filter((q) => q.data.status === 'envoye' && days(q.data.sentAt || q.data.date) >= 7), 4, 3,
+    (q) => ({ tone: 'todo', icon: 'calc', title: `Pas de réponse de ${cname(q.data.clientId) || 'votre client'}`, sub: `Devis ${q.number} envoyé il y a ${days(q.data.sentAt || q.data.date)} jours`, amount: totals(q.data).total, href: `#/quote/${q.id}`, act: ['Relancer', `#/print/quote/${q.id}?mail=1`] }),
+    (l) => ({ tone: 'todo', icon: 'calc', title: `${l.length} devis sans réponse depuis une semaine`, sub: 'Un petit rappel fait souvent signer', href: '#/quotes', act: ['Voir', '#/quotes'] }));
+  const opp = all.opportunity.filter((o) => mine(o) && OPP_OPEN.includes(o.data.stage) && o.data.nextDate && o.data.nextDate <= today());
+  many(opp, 3, 3, (o) => ({ tone: 'todo', icon: 'target', title: `Rappeler : ${o.data.title || cname(o.data.contactId) || 'opportunité'}`, sub: 'Relance prévue aujourd\'hui', href: '#/opportunities', act: ['Ouvrir', `#/opportunities?o=${o.id}`] }),
+    (l) => ({ tone: 'todo', icon: 'target', title: `${l.length} opportunités à relancer`, sub: 'Prévu aujourd\'hui ou avant', href: '#/opportunities', act: ['Voir', '#/opportunities'] }));
+  const drafts = inv.filter((x) => x.s.s === 'brouillon' && (x.i.data.lines || []).some((l) => l.kind === 'item'));
+  if (drafts.length) add(4, drafts.length === 1 ? { tone: 'info', icon: 'edit', title: `Facture à terminer : ${cname(drafts[0].i.data.clientId) || drafts[0].i.data.title || ''}`, sub: 'Brouillon pas encore envoyé', amount: drafts[0].s.t.total, href: `#/invoice/${drafts[0].i.id}`, act: ['Terminer', `#/invoice/${drafts[0].i.id}`] }
+    : { tone: 'info', icon: 'edit', title: `${drafts.length} factures en brouillon`, sub: 'Pas encore envoyées', amount: sum(drafts, (x) => x.s.t.total), href: '#/invoices', act: ['Voir', '#/invoices'] });
   const pLate = all.point.filter(isLatePt);
-  const relances = oOpen.filter((o) => o.data.nextDate && o.data.nextDate <= today());
-  const inter = all.intervention.filter((x) => x.data.date === today() && !['terminee', 'facturee', 'annulee'].includes(x.data.status));
-  const block = (icon, title, href, main, rows) => `<div class="card dash"><div class="card-h"><h3>${I[icon]} ${title}</h3><a class="muted" href="${href}">Voir tout ›</a></div><div class="dash-b">${main}</div>${rows ? `<div class="dash-rows">${rows}</div>` : ''}</div>`;
-  const line = (label, n, amount, href, cls = '') => `<a class="dash-line" href="${href}"><span>${label} <span class="muted">(${n})</span></span><b class="${cls}">${amount}</b></a>`;
-  page.innerHTML = `<div class="dash-grid">
-    ${block('target', 'Mes opportunités', '#/opportunities', `${badge('En cours', '#3b5bdb')} <span class="muted">(${oOpen.length})</span><div class="big">${money(sum(oOpen, (o) => num(o.data.amount)))}</div>`,
-      line('À relancer aujourd\'hui', relances.length, '', '#/opportunities', relances.length ? 'late' : '') + line('Gagnées ce mois-ci', opps.filter((o) => o.data.stage === 'gagne' && (o.data.wonAt || '').startsWith(today().slice(0, 7))).length, money(sum(opps.filter((o) => o.data.stage === 'gagne' && (o.data.wonAt || '').startsWith(today().slice(0, 7))), (o) => num(o.data.amount))), '#/opportunities'))}
-    ${block('calc', 'Mes devis', '#/quotes', `${badge('En cours', '#3b5bdb')} <span class="muted">(${qSent.length})</span><div class="big">${money(sum(qSent, (q) => totals(q.data).base))}</div>`,
-      line('À envoyer', qDraft.length, money(sum(qDraft, (q) => totals(q.data).base)), '#/quotes') + line('Acceptés ce mois-ci', quotes.filter((q) => q.data.status === 'accepte' && (q.data.acceptedAt || '').startsWith(today().slice(0, 7))).length, money(sum(quotes.filter((q) => q.data.status === 'accepte' && (q.data.acceptedAt || '').startsWith(today().slice(0, 7))), (q) => totals(q.data).base)), '#/quotes'))}
-    ${block('coins', 'Mes factures', '#/invoices', `${badge('En retard', '#e5484d')} <span class="muted">(${late.length})</span><div class="big">${money(sum(late, (x) => x.s.rest))}</div>`,
-      line('À envoyer', draftI.length, money(sum(draftI, (x) => x.s.t.total)), '#/invoices') + line('À encaisser', toCash.length, money(sum(toCash, (x) => x.s.rest)), '#/invoices'))}
-    ${block('crane', 'Mes chantiers en cours', '#/projects', `<div class="big">${projects.length}</div>`, projects.slice(0, 5).map((p) => `<a class="dash-line" href="#/project/${p.id}"><span><i class="dot" style="--c:${esc(p.data.color || '#3b5bdb')}"></i> ${esc(p.data.name)}</span>${st(PST, p.data.status)}</a>`).join(''))}
-    ${block('tasks', 'Mes tâches', '#/tasks', `<div class="big">${tasks.length}</div>`, tasks.slice(0, 5).map((t) => `<a class="dash-line" href="#/tasks"><span>${esc(t.data.title)}</span><small class="${t.data.due && t.data.due < today() ? 'late' : 'muted'}">${fmtDate(t.data.due)}</small></a>`).join('') || '<div class="muted sm">Rien à faire 🎉</div>')}
-    ${block('pin', 'Suivi de chantier', '#/projects', `${badge('Points en retard', '#e5484d')} <div class="big">${pLate.length}</div>`, line("Interventions aujourd'hui", inter.length, '', '#/interventions') + line('Points ouverts (tous chantiers)', all.point.filter(isOpenPt).length, '', '#/projects'))}
-  </div>`;
+  if (pLate.length) add(4, { tone: 'info', icon: 'pin', title: `${pLate.length} point(s) de chantier en retard`, sub: 'Réserves et remarques à lever', href: '#/projects', act: ['Voir', '#/projects'] });
+  items.sort((a, b) => a.rank - b.rank);
+  // l'argent : à recevoir, en retard, à payer, en attente de signature
+  const toCash = inv.filter((x) => ['impayee', 'partielle', 'retard'].includes(x.s.s)); const late = inv.filter((x) => x.s.s === 'retard');
+  const toPay = exp.filter((e) => ['apayer', 'partiel', 'retard'].includes(purchState(e)) && purchRest(e.data) > 0.005);
+  const qSent = quotes.filter((q) => q.data.status === 'envoye');
+  const projects = all.project.filter((p) => ['preparation', 'encours', 'reception'].includes(p.data.status) && (team || +p.data.managerId === S.me.id || (p.data.team || []).includes(S.me.id)));
+  const prog = (p) => { if (!p.data.start || !p.data.end) return null; const t0 = dnum(p.data.start); const t1 = dnum(p.data.end); return t1 > t0 ? Math.max(0, Math.min(100, Math.round(((dnum(today()) - t0) / (t1 - t0)) * 100))) : null; };
+  const n = items.length;
+  page.innerHTML = `<div class="today">
+    <section class="today-feed">
+      <div class="today-hello"><b>Bonjour ${esc((S.me.name || '').split(' ')[0])}</b><span>${n ? `${n} chose${n > 1 ? 's' : ''} demande${n > 1 ? 'nt' : ''} votre attention` : 'Rien d\'urgent : tout est à jour'}</span></div>
+      ${n ? `<ol class="todo-list">${items.map((x, k) => `<li class="todo tl-${x.tone}" data-k="${k}">
+        <span class="todo-ic">${I[x.icon] || I.check}</span>
+        <a class="todo-tx" href="${x.href}"><b>${esc(x.title)}</b><small>${esc(x.sub || '')}</small></a>
+        ${x.amount ? `<span class="todo-amt">${money(x.amount)}</span>` : ''}
+        ${x.done ? `<button type="button" class="todo-go" data-done="${x.done}">${I.check}<span>C'est fait</span></button>` : x.act ? `<a class="todo-go" href="${x.act[1]}">${esc(x.act[0])}</a>` : ''}</li>`).join('')}</ol>`
+        : `<div class="todo-empty">${I.check}<b>Tout est à jour</b><span>Aucune facture en retard, aucune tâche en attente. Bon chantier !</span></div>`}
+    </section>
+    <aside class="today-side">
+      <div class="card money-card"><div class="card-h"><h3>Votre argent</h3></div>
+        <a class="mc-row" href="#/invoices"><span>À recevoir des clients</span><b>${money(sum(toCash, (x) => x.s.rest))}</b><small>${toCash.length} facture(s)</small></a>
+        <a class="mc-row ${late.length ? 'late' : ''}" href="#/invoices"><span>Dont en retard</span><b>${money(sum(late, (x) => x.s.rest))}</b><small>${late.length} facture(s)</small></a>
+        <a class="mc-row" href="#/expenses"><span>À payer aux fournisseurs</span><b>${money(sum(toPay, (e) => purchRest(e.data)))}</b><small>${toPay.length} facture(s)</small></a>
+        <a class="mc-row" href="#/quotes"><span>Devis en attente de signature</span><b>${money(sum(qSent, (q) => totals(q.data).base))}</b><small>${qSent.length} devis · HT</small></a></div>
+      <div class="card works-card"><div class="card-h"><h3>Chantiers en cours</h3><a class="muted" href="#/projects">Tous ›</a></div>
+        ${projects.length ? projects.slice(0, 6).map((p) => { const pc = prog(p); return `<a class="wk" href="#/project/${p.id}"><span class="wk-dot" style="--c:${esc(p.data.color || '#1c2550')}"></span><span class="wk-tx"><b>${esc(p.data.name)}</b><small>${esc([st(PST, p.data.status).replace(/<[^>]+>/g, ''), p.data.city].filter(Boolean).join(' · '))}</small>${pc != null ? `<i class="wk-bar"><i style="width:${pc}%"></i></i>` : ''}</span></a>`; }).join('') : '<p class="muted">Aucun chantier en cours.</p>'}</div>
+    </aside></div>`;
+  $$('[data-done]', page).forEach((b) => { b.onclick = async () => {
+    const t = all.task.find((x) => x.id === +b.dataset.done); if (!t) return;
+    t.data.status = 'done'; b.closest('.todo').classList.add('gone'); await persist('task', t, { silent: true });
+    toast('Bravo, une chose de moins ✓', 2000); setTimeout(render, 450);
+  }; });
 });
 
 // Tableau de bord de l'édition simplifiée : devis, factures, achats, chantiers
@@ -267,7 +319,8 @@ const quickActionsSimple = () => [['Faire une facture', 'coins', () => go('#/s/f
   ['On m\'a payé', 'check', () => go('#/s/paye')], ['Note de crédit', 'copy', () => go('#/s/avoir')], ['Nouveau chantier', 'crane', () => editProject()], ['Nouveau client', 'contacts', () => sNewClient().then((c) => c && go(`#/contact/${c.id}`))]];
 function quickAddMenu() {
   if (isSimple()) return menuSheet('Créer', quickActionsSimple().map(([label, icon, run], i) => ({ label, icon, run, primary: i === 0 })));
-  menuSheet('Créer', quickActions().map(([label, run], i) => ({ label, icon: QA_ICONS[i] || 'plus', run })));
+  menuSheet('Créer', [...quickActions().map(([label, run], i) => ({ label, icon: QA_ICONS[i] || 'plus', run })),
+    ...(S.ai ? [{ sep: true }, { label: 'Demander à l\'assistant IA', icon: 'spark', run: () => aiToggle(true) }] : [])]);
 }
 
 // ---------------------------------------------------------------- Recherche rapide (⌘K)

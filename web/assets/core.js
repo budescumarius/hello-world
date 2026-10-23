@@ -156,6 +156,8 @@ const I = {
   tasks: ic('<path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>'),
   calendar: ic('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M8 14h2M14 14h2M8 18h2"/>'),
   coins: ic('<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'),
+  sun: ic('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
+  user: ic('<circle cx="12" cy="8" r="4"/><path d="M4 21c.6-4 3.8-6.5 8-6.5s7.4 2.5 8 6.5"/>'),
   people: ic('<circle cx="9" cy="8" r="3.5"/><path d="M2 20c.8-3.4 3.6-5 7-5s6.2 1.6 7 5M16 4.5a3.5 3.5 0 010 7M18 15c2 .6 3.4 2.2 4 5"/>'),
   chart: ic('<path d="M12 3v9l7 4"/><path d="M21 12A9 9 0 1112 3"/>'),
   gear: ic('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/>'),
@@ -183,102 +185,99 @@ const I = {
 };
 
 // ---------------------------------------------------------------- Menu latéral
-const MENU = [
-  { k: 'dashboard', l: 'Tableau de bord', i: 'dash', h: '#/dashboard' },
-  { k: 'contacts', l: 'Contacts', i: 'contacts', sub: [['Clients', '#/contacts/client'], ['Prospects', '#/contacts/prospect'], ['Fournisseurs', '#/contacts/fournisseur'], ['Sous-traitants', '#/contacts/soustraitant'], ['Tous les contacts', '#/contacts/all']] },
-  { k: 'opportunities', l: 'Opportunités', i: 'target', h: '#/opportunities' },
-  { k: 'quotes', l: 'Devis', i: 'calc', h: '#/quotes' },
-  { k: 'library', l: 'Bibliothèque', i: 'book', h: '#/library' },
-  { k: 'fiches', l: 'Fiches Tech.', i: 'fiche', sub: [['Fiches techniques', '#/fiches'], ['Dossiers de fin de chantier', '#/fiches/dossiers']] },
-  { k: 'orders', l: 'Commandes', i: 'truck', sub: [['Commandes fournisseurs', '#/orders/fournisseur'], ['Commandes sous-traitants', '#/orders/soustraitant']] },
-  { k: 'projects', l: 'Chantiers', i: 'crane', h: '#/projects' },
-  { k: 'interventions', l: 'Intervention', i: 'tool', h: '#/interventions' },
-  { k: 'installations', l: 'Installations', i: 'install', h: '#/installations' },
-  { k: 'tasks', l: 'Tâches', i: 'tasks', h: '#/tasks' },
-  { k: 'planning', l: 'Plannings', i: 'calendar', sub: [['Planning des chantiers', '#/planning/projects'], ['Planning des équipes', '#/planning/team']] },
-  { k: 'finances', l: 'Finances', i: 'coins', sub: [['Factures clients', '#/invoices'], ['Paiements reçus', '#/payments'], ['Factures fournisseurs', '#/expenses']] },
-  { k: 'hr', l: 'RH', i: 'people', sub: [['Personnel', '#/hr/staff'], ['Pointage', '#/hr/timesheets'], ['Absences', '#/hr/absences']] },
-  { k: 'stats', l: 'Statistiques', i: 'chart', h: '#/stats' },
+// ---------------------------------------------------------------- Navigation par « espaces »
+// Cinq espaces dans l'ordre de vie d'un chantier : ce qu'il faut faire aujourd'hui → trouver et chiffrer les affaires →
+// réaliser les chantiers → encaisser et payer → les personnes. Mêmes espaces, même ordre sur ordinateur (barre du haut)
+// et sur téléphone (barre du bas). Chaque espace a ses rubriques (pastilles sous la barre). « + Créer » est séparé de la navigation.
+// Rubrique : [libellé, lien, ...autres débuts d'adresse qui appartiennent à la rubrique]
+const SPACES = [
+  { k: 'today', l: "Aujourd'hui", i: 'sun', h: '#/dashboard', sec: [["Aujourd'hui", '#/dashboard'], ['Tâches', '#/tasks'], ['Planning chantiers', '#/planning/projects'], ['Planning équipes', '#/planning/team']] },
+  { k: 'deals', l: 'Affaires', i: 'target', h: '#/quotes', sec: [['Devis', '#/quotes', '#/quote/'], ['Opportunités', '#/opportunities'], ['Prix et ouvrages', '#/library']] },
+  { k: 'works', l: 'Chantiers', i: 'crane', h: '#/projects', sec: [['Chantiers', '#/projects', '#/project/'], ['Interventions', '#/interventions', '#/intervention/'], ['Installations', '#/installations', '#/installation/'], ['Fiches techniques', '#/fiches', '#/fiche/'], ['Dossiers de fin', '#/fiches/dossiers', '#/dossier/']] },
+  { k: 'money', l: 'Argent', i: 'coins', h: '#/invoices', sec: [['Factures', '#/invoices', '#/invoice/'], ['Paiements', '#/payments'], ['Achats', '#/expenses', '#/purchase/', '#/expense/'], ['Commandes', '#/orders/fournisseur', '#/order/'], ['Sous-traitance', '#/orders/soustraitant'], ['Chiffres', '#/stats']] },
+  { k: 'people', l: 'Carnet', i: 'people', h: '#/contacts/client', sec: [['Clients', '#/contacts/client', '#/contact/'], ['Prospects', '#/contacts/prospect'], ['Fournisseurs', '#/contacts/fournisseur'], ['Sous-traitants', '#/contacts/soustraitant'], ['Tous', '#/contacts/all'], ['Équipe', '#/hr/staff'], ['Pointage', '#/hr/timesheets'], ['Absences', '#/hr/absences']] },
 ];
 // « BâtiPro Simplifié » (indépendants) : devis, factures, achats par chantier, contacts – sans planning, commandes, RH, assistant…
 const isSimple = () => S.edition === 'simple';
-const MENU_SIMPLE = [
-  { k: 'dashboard', l: 'Accueil', i: 'dash', h: '#/dashboard' },
-  { k: 'sinv', l: 'Mes factures', i: 'coins', h: '#/s/liste/factures', m: ['#/s/liste/factures', '#/s/facture', '#/s/doc/facture', '#/s/paye', '#/invoice'] },
-  { k: 'squote', l: 'Mes devis', i: 'calc', h: '#/s/liste/devis', m: ['#/s/liste/devis', '#/s/devis', '#/s/doc/devis', '#/quote'] },
-  { k: 'sbuy', l: 'Mes achats', i: 'download', h: '#/s/liste/achats', m: ['#/s/liste/achats', '#/s/achat', '#/expenses', '#/purchase'] },
-  { k: 'projects', l: 'Mes chantiers', i: 'crane', h: '#/projects', m: ['#/project'] },
-  { k: 'contacts', l: 'Mes clients et fournisseurs', i: 'contacts', sub: [['Clients', '#/contacts/client'], ['Fournisseurs', '#/contacts/fournisseur'], ['Tous', '#/contacts/all']] },
-  { k: 'library', l: 'Mes prix', i: 'book', h: '#/library' },
-  { k: 'speppol', l: 'Peppol (factures électroniques)', i: 'send', h: '#/s/peppol', m: ['#/s/peppol'] },
-  { k: 'sme', l: 'Mes informations', i: 'gear', h: '#/s/moi', m: ['#/s/moi'] },
+const SPACES_SIMPLE = [
+  { k: 'home', l: 'Accueil', i: 'sun', h: '#/dashboard', sec: [] },
+  { k: 'bill', l: 'Facturer', i: 'coins', h: '#/s/liste/factures', sec: [['Factures', '#/s/liste/factures', '#/s/facture', '#/s/doc/facture', '#/s/paye', '#/s/avoir', '#/invoice'], ['Devis', '#/s/liste/devis', '#/s/devis', '#/s/doc/devis', '#/quote']] },
+  { k: 'buy', l: 'Achats', i: 'download', h: '#/s/liste/achats', sec: [['Achats', '#/s/liste/achats', '#/s/achat', '#/expenses', '#/purchase']] },
+  { k: 'works', l: 'Chantiers', i: 'crane', h: '#/projects', sec: [['Chantiers', '#/projects', '#/project/'], ['Clients', '#/contacts/client', '#/contact/'], ['Fournisseurs', '#/contacts/fournisseur'], ['Mes prix', '#/library']] },
+  { k: 'me', l: 'Moi', i: 'user', h: '#/s/moi', sec: [['Mes informations', '#/s/moi'], ['Peppol', '#/s/peppol']] },
 ];
-const menu = () => (isSimple() ? MENU_SIMPLE : MENU);
+const spaces = () => (isSimple() ? SPACES_SIMPLE : SPACES);
 const ui = (() => { try { return JSON.parse(localStorage.getItem('bp-ui') || '{}'); } catch (e) { return {}; } })();
 const saveUi = () => { try { localStorage.setItem('bp-ui', JSON.stringify(ui)); } catch (e) { /* stockage indisponible */ } };
-
-function sidebar(active) {
+// Espace et rubrique de l'adresse actuelle : la correspondance la plus longue gagne
+function spaceOf(hash = location.hash) {
+  const h = hash.split('?')[0] || '#/dashboard';
+  let best = null;
+  for (const sp of spaces()) {
+    for (const sec of sp.sec.length ? sp.sec : [[sp.l, sp.h]]) {
+      for (const pre of sec.slice(1)) {
+        if ((h === pre || h.startsWith(pre.endsWith('/') ? pre : pre + '/') || (pre.endsWith('/') && h.startsWith(pre))) && (!best || pre.length > best.len)) best = { sp, sec, len: pre.length };
+      }
+    }
+  }
+  return best;
+}
+function dock(cur) {
   const company = S.settings.company || {};
-  const hash = location.hash;
-  return `<aside class="side ${ui.collapsed ? 'collapsed' : ''}" id="side">
-    <div class="side-head"><a class="brand" href="#/dashboard">${company.logoId ? `<img src="${fileUrl(company.logoId)}" alt="">` : '<span class="brand-mark"></span>'}<span>${esc(company.appName || company.name || 'BâtiPro')}</span></a>
-      <button class="side-toggle" data-act="collapse" title="Réduire le menu">${I.collapse}</button></div>
-    <button class="side-search" data-act="search">${I.search}<span>Actions</span><kbd>⌘</kbd><kbd>K</kbd></button>
-    <nav class="side-nav">${menu().map((m) => {
-      const open = m.k === active || (ui.open || {})[m.k];
-      const on = m.m ? m.m.some((x) => hash.startsWith(x)) : m.k === active;
-      if (!m.sub) return `<a class="nav ${on ? 'on' : ''}" href="${m.h}" title="${esc(m.l)}">${I[m.i]}<span>${m.l}</span></a>`;
-      return `<div class="nav-group ${open ? 'open' : ''}"><button class="nav ${m.k === active ? 'on' : ''}" data-grp="${m.k}" title="${esc(m.l)}">${I[m.i]}<span>${m.l}</span><i class="chev">${I.chevron}</i></button>
-        <div class="nav-sub">${m.sub.map(([l, h]) => `<a href="${h}" class="${hash === h || (hash.startsWith(h + '/') && h !== '#/fiches') ? 'on' : ''}">${l}</a>`).join('')}</div></div>`;
-    }).join('')}</nav>
-    <div class="side-foot">
-      <button class="icon-btn" data-act="profile" title="Mon profil">${avatar(S.me.id)}</button>
-      ${isAdmin() ? `<a class="icon-btn" href="#/settings" title="Paramètres">${I.gear}</a>` : ''}
-      ${S.me.super ? `<a class="icon-btn" href="#/platform" title="Plateforme (firmes)">${I.people}</a>` : ''}
-      <button class="icon-btn" data-act="logout" title="Se déconnecter">${I.logout}</button>
-    </div>
-  </aside>`;
+  return `<header class="dock">
+    <a class="dock-brand" href="#/dashboard">${company.logoId ? `<img src="${fileUrl(company.logoId)}" alt="">` : '<span class="brand-mark"></span>'}<span>${esc(company.appName || company.name || 'BâtiPro')}</span></a>
+    <nav class="dock-tabs" aria-label="Espaces">${spaces().map((sp) => `<a class="dock-tab ${cur && cur.sp === sp ? 'on' : ''}" href="${sp.h}">${I[sp.i]}<span>${sp.l}</span></a>`).join('')}</nav>
+    <div class="dock-tools">
+      <button class="dock-cmd" data-act="search" title="Rechercher ou faire une action">${I.search}<span>Rechercher ou faire…</span><kbd>⌘K</kbd></button>
+      <button class="dock-add" data-act="qadd">${I.plus}<span>Créer</span></button>
+      <button class="dock-me" data-act="account" title="Mon compte">${avatar(S.me.id)}</button>
+    </div></header>`;
+}
+function secBar(cur) {
+  if (!cur || cur.sp.sec.length < 2) return '';
+  return `<nav class="secbar" aria-label="${esc(cur.sp.l)}"><b class="secbar-t">${I[cur.sp.i]}${esc(cur.sp.l)}</b>${cur.sp.sec.map((sec) => `<a href="${sec[1]}" class="${sec === cur.sec ? 'on' : ''}">${esc(sec[0])}</a>`).join('')}</nav>`;
+}
+// Menu du compte (avatar) : profil, paramètres, plateforme, déconnexion
+function accountMenu() {
+  const items = [{ label: 'Mon profil', icon: 'user', run: () => editProfile() }];
+  if (isAdmin()) items.push({ label: 'Paramètres', icon: 'gear', run: () => go('#/settings') });
+  if (S.me.super) items.push({ label: 'Plateforme (firmes)', icon: 'people', run: () => go('#/platform') });
+  if (S.firm && S.firm.own === false) items.push({ label: 'Revenir à ma firme', icon: 'back', run: () => switchFirm(0) });
+  items.push({ sep: true }, { label: 'Se déconnecter', icon: 'logout', danger: true, run: async () => { await api('POST', 'auth/logout').catch(() => {}); S.ready = false; showLogin(); } });
+  menuSheet(S.me.name || 'Mon compte', items);
 }
 
 // page = { active, title, icon, actions, body, back, sub, tabs }
 function layout(p) {
   document.body.classList.remove('wiz'); document.body.classList.toggle('simple', isSimple());
+  const cur = spaceOf();
   app.innerHTML = `<div class="shell">
-    ${sidebar(p.active)}
-    <div class="side-scrim" data-act="closeside"></div>
+    ${dock(cur)}
     <main class="main">
       ${S.firm && S.firm.own === false ? `<div class="firm-band">Vous travaillez dans la firme <b>${esc(S.firm.name)}</b><button class="btn sm" data-act="firmback">Revenir à ma firme</button></div>` : ''}
+      ${secBar(cur)}
       <header class="top">
-        <button class="icon-btn only-mobile" data-act="openside" aria-label="Menu">${I.menu}</button>
-        ${p.back ? `<a class="icon-btn" href="${p.back}" aria-label="Retour">${I.back}</a>` : ''}
+        ${p.back ? `<a class="icon-btn" href="${p.back}" aria-label="Retour">${I.back}</a>` : `<button class="icon-btn only-mobile me-btn" data-act="account" aria-label="Mon compte">${avatar(S.me.id)}</button>`}
         <div class="top-title">${p.icon ? `<span class="top-ic">${I[p.icon] || ''}</span>` : ''}<div><h1>${esc(p.title)}</h1>${p.sub ? `<div class="top-sub">${p.sub}</div>` : ''}</div></div>
         <div class="top-actions">${p.actions || ''}</div>
       </header>
       ${p.tabs ? `<nav class="tabs">${p.tabs}</nav>` : ''}
       <section class="page" id="page">${p.body || ''}</section>
     </main>
-    ${bottomNav(p.active)}
+    ${bottomNav(cur)}
   </div>`;
   bindShell();
   mobileActions();
   tabSwitcher();
   const topEl = $('.top'); if (topEl) document.documentElement.style.setProperty('--top-h', `${topEl.offsetHeight}px`);
   const tOn = $('.tabs a.on'); if (tOn && isPhone()) tOn.scrollIntoView({ block: 'nearest', inline: 'center' });
+  const sOn = $('.secbar a.on'); if (sOn && isPhone()) sOn.scrollIntoView({ block: 'nearest', inline: 'center' });
   setTimeout(installTip, 2500);
   return $('#page');
 }
-// Barre d'onglets en bas de l'écran (téléphone) : comme une application
-function bottomNav(active) {
-  const it = (k, h, i, l) => `<a class="bn-it ${k === active ? 'on' : ''}" href="${h}">${I[i]}<span>${l}</span></a>`;
-  if (isSimple()) {
-    const h = location.hash; const fin = /^#\/(s\/(liste\/factures|facture|doc\/facture|paye)|invoice)/.test(h); const buy = /^#\/(s\/(liste\/achats|achat)|expenses|purchase)/.test(h); const home = /^#\/(dashboard)?$/.test(h) || h === '';
-    return `<nav class="bnav" aria-label="Navigation"><a class="bn-it ${home ? 'on' : ''}" href="#/dashboard">${I.dash}<span>Accueil</span></a><a class="bn-it ${fin ? 'on' : ''}" href="#/s/liste/factures">${I.coins}<span>Factures</span></a>
-      <button class="bn-add" data-act="qadd" aria-label="Créer">${I.plus}</button>
-      <a class="bn-it ${buy ? 'on' : ''}" href="#/s/liste/achats">${I.download}<span>Achats</span></a><button class="bn-it ${home || fin || buy ? '' : 'on'}" data-act="openside">${I.menu}<span>Menu</span></button></nav>`;
-  }
-  return `<nav class="bnav" aria-label="Navigation">${it('dashboard', '#/dashboard', 'dash', 'Accueil')}${it('projects', '#/projects', 'crane', 'Chantiers')}
-    <button class="bn-add" data-act="qadd" aria-label="Créer">${I.plus}</button>
-    ${it('quotes', '#/quotes', 'calc', 'Devis')}<button class="bn-it ${['dashboard', 'projects', 'quotes'].includes(active) ? '' : 'on'}" data-act="openside">${I.menu}<span>Menu</span></button></nav>`;
+// Téléphone : les cinq espaces en bas de l'écran (comme une application), même ordre que sur ordinateur
+function bottomNav(cur) {
+  return `<nav class="bnav" aria-label="Espaces">${spaces().map((sp) => `<a class="bn-it ${cur && cur.sp === sp ? 'on' : ''}" href="${sp.h}">${I[sp.i]}<span>${sp.l}</span></a>`).join('')}</nav>`;
 }
 // Téléphone : plus de 4 onglets → un bouton « section actuelle ▾ » qui ouvre toutes les sections d'un coup (grille d'icônes)
 const TAB_ICONS = { overview: 'dash', quotes: 'calc', orders: 'truck', invoices: 'coins', expenses: 'download', hours: 'people', planning: 'calendar', plans: 'file', points: 'pin', meetings: 'fiche', forms: 'tasks', diary: 'book', documents: 'file',
@@ -301,7 +300,13 @@ function tabSwitcher() {
 const isPhone = () => window.matchMedia('(max-width: 860px)').matches;
 function mobileActions() {
   const box = $('.top-actions'); if (!box || !isPhone()) return;
-  const items = [...box.querySelectorAll('a, button')].filter((x) => !x.closest('label'));
+  let items = [...box.querySelectorAll('a, button')].filter((x) => !x.closest('label'));
+  // pas de bouton principal sur la page : « + Créer » à sa place (en haut à droite, comme sur iPhone)
+  if (!items.some((x) => x.classList.contains('primary'))) {
+    box.insertAdjacentHTML('beforeend', `<button class="btn primary m-create" data-act="qadd">${I.plus}<span>Créer</span></button>`);
+    $('.m-create', box).onclick = () => quickAddMenu();
+    items = [...box.querySelectorAll('a, button')].filter((x) => !x.closest('label'));
+  }
   // un seul bouton principal avec icône : bouton rond « + » (comme une application)
   if (items.length === 1 && items[0].classList.contains('primary') && items[0].querySelector('svg')) { items[0].classList.add('m-icon'); items[0].setAttribute('aria-label', items[0].textContent.trim()); }
   if (items.length < 2) return;
@@ -316,23 +321,10 @@ function mobileActions() {
 }
 
 function bindShell() {
-  const side = $('#side');
-  $('[data-act=collapse]').onclick = () => { ui.collapsed = !ui.collapsed; saveUi(); side.classList.toggle('collapsed', ui.collapsed); };
-  $$('[data-grp]').forEach((b) => {
-    b.onclick = () => {
-      const g = b.parentNode; g.classList.toggle('open');
-      ui.open = ui.open || {}; ui.open[b.dataset.grp] = g.classList.contains('open'); saveUi();
-      if (side.classList.contains('collapsed')) { ui.collapsed = false; saveUi(); side.classList.remove('collapsed'); }
-    };
-  });
-  $('[data-act=logout]').onclick = async () => { await api('POST', 'auth/logout').catch(() => {}); S.ready = false; showLogin(); };
-  $('[data-act=profile]').onclick = () => editProfile();
+  $$('[data-act=account]').forEach((b) => { b.onclick = () => accountMenu(); });
   const fb = $('[data-act=firmback]'); if (fb) fb.onclick = () => switchFirm(0);
-  $('[data-act=search]').onclick = () => quickSearch();
-  $$('[data-act=openside]').forEach((b) => { b.onclick = () => document.body.classList.add('side-open'); });
-  const qa = $('[data-act=qadd]'); if (qa) qa.onclick = () => quickAddMenu();
-  $('[data-act=closeside]').onclick = () => document.body.classList.remove('side-open');
-  $$('.side a').forEach((a) => a.addEventListener('click', () => document.body.classList.remove('side-open')));
+  $$('[data-act=search]').forEach((b) => { b.onclick = () => quickSearch(); });
+  $$('[data-act=qadd]').forEach((b) => { b.onclick = () => quickAddMenu(); });
 }
 document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && S.ready) { e.preventDefault(); quickSearch(); } });
 

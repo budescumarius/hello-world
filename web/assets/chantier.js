@@ -1,9 +1,11 @@
 'use strict';
 /* Chantiers : liste, fiche avec onglets (aperçu financier, devis, commandes, factures, achats, heures…). */
 
+// Onglets d'un chantier, par famille : vue d'ensemble · l'argent du chantier · le terrain
 const PTABS = [
-  ['overview', 'Aperçu'], ['quotes', 'Devis'], ['orders', 'Commandes'], ['invoices', 'Factures'], ['expenses', 'Achats'], ['hours', 'Heures'],
-  ['planning', 'Planning'], ['plans', 'Plans'], ['points', 'Points'], ['meetings', 'PV de réunion'], ['forms', 'Formulaires'], ['diary', 'Journal'], ['documents', 'Documents'],
+  ['overview', 'Vue d\'ensemble', ''],
+  ['quotes', 'Devis', 'Argent'], ['invoices', 'Factures', 'Argent'], ['expenses', 'Achats', 'Argent'], ['orders', 'Commandes', 'Argent'], ['hours', 'Heures', 'Argent'],
+  ['planning', 'Planning', 'Terrain'], ['points', 'Points', 'Terrain'], ['plans', 'Plans', 'Terrain'], ['meetings', 'Réunions', 'Terrain'], ['forms', 'Formulaires', 'Terrain'], ['diary', 'Journal', 'Terrain'], ['documents', 'Documents', 'Terrain'],
 ];
 
 async function editProject(p, preset = {}) {
@@ -103,7 +105,7 @@ route('project', async (id, tab = 'overview', sub) => {
   const page = layout({ active: 'projects', icon: 'crane', title: p.data.name, back: '#/projects',
     sub: `${esc(p.number)} · ${st(PST, p.data.status)}${c ? ` · <a href="#/contact/${c.id}">${esc(contactName(c))}</a>` : ''}${p.data.city ? ' · ' + esc(p.data.city) : ''}`,
     actions: `<button class="btn" data-act="edit">${I.edit} Modifier</button><button class="btn primary" data-act="padd">${I.plus} Ajouter…</button>`,
-    tabs: tabs.map(([k, l]) => `<a href="#/project/${p.id}/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
+    tabs: tabs.map(([k, l, g], i) => `${g && g !== (tabs[i - 1] || [])[2] ? `<span class="tab-g">${g}</span>` : ''}<a href="#/project/${p.id}/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
   $('[data-act=edit]').onclick = () => editProject(p);
   if (isSimple()) $('[data-act=padd]').onclick = () => menuSheet('Ajouter au chantier', [
     { label: 'Achat : photo ou PDF de la facture', icon: 'camera', primary: true, run: () => importPurchase(p.id) },
