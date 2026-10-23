@@ -1215,3 +1215,221 @@ a.s-note { text-decoration: none; color: var(--text); } a.s-note > b { color: va
   .mb-sheet + .mb-sheet { margin-top: 0; break-before: page; page-break-before: always; }
   .mb-foot { position: static; margin-top: 24px; }
 }
+
+/* =====================================================================================================
+   THÈME « ATELIER MADIBU » – identité visuelle propre à l'application (Avancé, Simplifié, téléphone)
+   Encre indigo + ocre de chantier, papier chaud quadrillé (plan), règle graduée, cartes « papier posé »,
+   onglet ocre sur l'élément actif, dock flottant sur téléphone.
+   ===================================================================================================== */
+:root {
+  --ink: #1c2550; --ink-2: #283270; --ink-3: #3a4590;
+  --ochre: #e2a12b; --ochre-2: #c98a17; --ochre-soft: #fcf1dc;
+  --brick: #a8442f; --sage: #3f7a68;
+  --paper: #f4f1e9; --paper-2: #ebe6da;
+  --navy: var(--ink); --navy-2: var(--ink-2); --navy-3: var(--ink-3);
+  --bg: var(--paper); --surface: #fffdf8; --surface-2: #f6f2e8;
+  --text: #1b1e30; --muted: #756e60; --border: #e5dfd0;
+  --primary: var(--ink); --primary-2: #10173a;
+  --radius: 16px;
+  --shadow: 0 1px 0 rgba(28, 37, 80, .06), 5px 5px 0 rgba(28, 37, 80, .045);
+  --grid: rgba(28, 37, 80, .045);
+  --ruler: repeating-linear-gradient(90deg, rgba(255, 255, 255, .55) 0 1px, transparent 1px 8px);
+}
+body { font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-variant-numeric: tabular-nums;
+  background-color: var(--paper);
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 28px 28px; background-attachment: fixed; }
+a { color: var(--ink); }
+::selection { background: var(--ochre-soft); }
+:focus-visible { outline: 2.5px solid var(--ochre); outline-offset: 2px; }
+
+/* ---------- Menu latéral : panneau clair, règle verticale, onglet ocre */
+.side { background: #fbf8f1; color: var(--ink); border-right: 1px solid var(--border); }
+.side::after { content: ''; position: absolute; top: 0; bottom: 0; right: -1px; width: 7px; pointer-events: none;
+  background: repeating-linear-gradient(180deg, rgba(28, 37, 80, .28) 0 1px, transparent 1px 8px), repeating-linear-gradient(180deg, rgba(28, 37, 80, .45) 0 1px, transparent 1px 40px);
+  background-size: 4px 100%, 7px 100%; background-repeat: no-repeat; background-position: right top, right top; }
+.brand { color: var(--ink); font-weight: 800; letter-spacing: -.02em; }
+.brand img { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 3px 5px; height: 34px; }
+.brand-mark { width: 30px; height: 30px; border-radius: 9px; background: url('icon.svg') center / cover no-repeat; }
+.brand.big { color: var(--ink); }
+.side-toggle { background: var(--surface-2); color: var(--ink); border: 1px solid var(--border); }
+.side-search { border: 1.5px dashed #cfc6b2; color: var(--muted); background: #fff; border-radius: 12px; }
+.side-search:hover { border-color: var(--ink); color: var(--ink); }
+kbd { border-color: #d9d1bf; background: var(--surface-2); color: var(--muted); }
+.side-nav { scrollbar-color: #d9d1bf transparent; }
+.nav { color: #3b3f55; border-radius: 12px; position: relative; font-weight: 600; font-size: 14.5px; }
+.nav svg { color: #8a8270; }
+.nav:hover { background: var(--surface-2); color: var(--ink); }
+.nav:hover svg { color: var(--ink); }
+.nav.on { background: var(--ink); color: #fff; font-weight: 700; box-shadow: 4px 4px 0 var(--ochre); }
+.nav.on svg { color: var(--ochre); }
+.nav-sub { border-left: 2px solid var(--border); margin-left: 23px; padding-left: 14px; }
+.nav-sub a { color: #4f5368; font-weight: 600; border-radius: 9px; }
+.nav-sub a:hover { background: var(--surface-2); color: var(--ink); }
+.nav-sub a.on { color: var(--ink); background: var(--ochre-soft); box-shadow: inset 3px 0 0 var(--ochre); }
+.side-foot { border-top: 1px dashed #d9d1bf; }
+.side-foot .icon-btn { color: var(--ink); }
+.side-foot .icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+.avatar { box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px var(--ochre); }
+
+/* ---------- En-tête de page : transparent sur le plan, titre fort, pastille ocre */
+.top { background: rgba(244, 241, 233, .88); backdrop-filter: blur(10px) saturate(1.3); -webkit-backdrop-filter: blur(10px) saturate(1.3); border-bottom: 1px solid var(--border); }
+.top-title h1 { font-weight: 800; letter-spacing: -.025em; color: var(--ink); }
+.top-ic { background: var(--ink); color: #fff; border-radius: 11px; box-shadow: inset 0 -4px 0 var(--ochre); }
+.top-sub { color: var(--muted); }
+.tabs { background: rgba(244, 241, 233, .92); border-bottom: 1px solid var(--border); gap: 4px; padding-top: 6px; }
+.tabs a { color: var(--muted); border-radius: 10px 10px 0 0; border-bottom: 3px solid transparent; }
+.tabs a:hover { color: var(--ink); background: rgba(255, 255, 255, .6); }
+.tabs a.on { color: var(--ink); border-bottom-color: var(--ochre); background: var(--surface); font-weight: 800; }
+
+/* ---------- Cartes « papier posé » */
+.card, .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.card-h h3 { font-weight: 800; letter-spacing: -.01em; color: var(--ink); }
+.card-h h3::before { content: ''; width: 14px; height: 4px; border-radius: 2px; background: var(--ochre); flex: none; }
+.dash .card-h { border-bottom: 1px dashed var(--border); }
+.dash .card-h h3::before { display: none; }
+.dash .card-h svg { color: var(--ochre-2); }
+.dash-b .big { font-weight: 800; color: var(--ink); letter-spacing: -.02em; }
+.dash-line:hover { color: var(--ochre-2); }
+.kpi { position: relative; overflow: hidden; }
+.kpi::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--ochre); }
+.kpi small { text-transform: uppercase; letter-spacing: .08em; font-size: 11px; font-weight: 800; }
+.kpi b { color: var(--ink); font-weight: 800; letter-spacing: -.02em; }
+.card.flat { background: var(--surface-2); box-shadow: none; }
+
+/* ---------- Boutons : encre avec semelle ocre */
+.btn { border-radius: 12px; border: 1.5px solid var(--border); background: var(--surface); color: var(--ink); font-weight: 700; transition: transform .08s, box-shadow .12s, background .12s; }
+.btn:hover { background: #fff; border-color: #cfc6b2; }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; box-shadow: inset 0 -3px 0 var(--ochre); }
+.btn.primary:hover { background: var(--primary-2); border-color: var(--primary-2); }
+.btn.danger { color: var(--brick); }
+.btn.ghost { border-color: transparent; background: transparent; }
+.icon-btn { border-radius: 11px; color: var(--ink); }
+.icon-btn:hover { background: rgba(28, 37, 80, .06); }
+.link-btn { color: var(--ink); text-decoration: underline; text-decoration-color: var(--ochre); text-underline-offset: 3px; }
+.badge { border-radius: 7px; font-weight: 800; font-size: 11.5px; letter-spacing: .02em; }
+.chip { border-radius: 10px; border: 1.5px solid var(--border); background: var(--surface); color: var(--ink); font-weight: 700; }
+.chip.on { background: var(--ink); border-color: var(--ink); color: #fff; box-shadow: inset 0 -3px 0 var(--ochre); }
+
+/* ---------- Champs */
+.field > span, .lbl { color: #5d5749; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.field input:not([type=checkbox]), .field select, .field textarea { border: 1.5px solid var(--border) !important; border-radius: 12px !important; background: #fff; }
+.field input:focus, .field select:focus, .field textarea:focus { border-color: var(--ink) !important; box-shadow: 0 0 0 4px rgba(226, 161, 43, .25) !important; }
+input[type=checkbox], input[type=radio] { accent-color: var(--ink); }
+.search { border: 1.5px solid var(--border); border-radius: 12px; background: #fff; }
+.search:focus-within { border-color: var(--ink); box-shadow: 0 0 0 4px rgba(226, 161, 43, .22); }
+.section-t { color: var(--ink); font-weight: 800; }
+
+/* ---------- Tableaux */
+.dt th { background: var(--surface-2); color: #6b6455; text-transform: uppercase; font-size: 11px; letter-spacing: .08em; font-weight: 800; border-bottom: 1.5px solid var(--border); }
+.dt td { border-bottom: 1px solid #efe9dc; }
+.dt tbody tr:hover { background: var(--ochre-soft); }
+.dt tfoot td { background: var(--surface-2); color: var(--ink); }
+.dt tr.sec td { background: var(--surface-2); }
+
+/* ---------- Fenêtres : règle en tête */
+.overlay { background: rgba(20, 24, 48, .5); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+.modal { background: var(--surface); border-radius: 22px; overflow: hidden; position: relative; box-shadow: 0 26px 70px rgba(10, 14, 40, .35), 8px 8px 0 rgba(226, 161, 43, .35); }
+.modal::before { content: ''; display: block; height: 9px; flex: none; background: var(--ruler), var(--ink); background-size: 8px 4px, auto; background-repeat: repeat-x, no-repeat; }
+.m-head { border-bottom: 1px dashed var(--border); }
+.m-head h2 { font-weight: 800; letter-spacing: -.02em; color: var(--ink); }
+.m-foot { border-top: 1px dashed var(--border) !important; background: var(--surface-2); }
+
+/* ---------- Connexion : plan quadrillé, carte avec règle */
+.login { background-color: var(--ink);
+  background-image: linear-gradient(rgba(255, 255, 255, .06) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, .06) 1px, transparent 1px), radial-gradient(circle at 80% 15%, rgba(226, 161, 43, .35), transparent 45%);
+  background-size: 28px 28px, 28px 28px, auto; }
+.login-box { border-radius: 22px; position: relative; overflow: hidden; padding-top: 40px; background: var(--surface); box-shadow: 10px 10px 0 var(--ochre), 0 30px 80px rgba(0, 0, 0, .35); }
+.login-box::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 12px; background: var(--ruler), var(--ink); background-size: 8px 5px, auto; background-repeat: repeat-x, no-repeat; }
+.login-box h1 { font-weight: 800; color: var(--ink); letter-spacing: -.02em; }
+
+/* ---------- Assistant, toasts, bandeaux */
+.ai-fab { background: var(--ink) !important; color: #fff; box-shadow: 0 10px 26px rgba(28, 37, 80, .35), inset 0 -4px 0 var(--ochre) !important; border-radius: 16px; }
+#toast { background: var(--ink); border-radius: 14px; box-shadow: 0 12px 30px rgba(10, 14, 40, .3), inset 0 -3px 0 var(--ochre); }
+.firm-band { background: var(--ochre) !important; color: #1d1600 !important; }
+.install-tip { background: var(--ink); box-shadow: 0 14px 34px rgba(10, 14, 40, .35), inset 0 -4px 0 var(--ochre); }
+.install-tip .btn { color: var(--ink); }
+
+/* ---------- Recherche dans les listes longues */
+.sp-o.on { background: var(--ochre-soft); color: var(--ink); }
+.sp-o:hover { background: var(--surface-2); }
+
+/* ---------- Téléphone : dock flottant, en-têtes légers */
+@media (max-width: 860px) {
+  body { background-color: var(--paper); }
+  .top { background: rgba(244, 241, 233, .92); box-shadow: 0 1px 0 var(--border); }
+  .tabs { top: calc(53px + env(safe-area-inset-top)); }
+  .page { padding-bottom: calc(112px + env(safe-area-inset-bottom)); }
+  .bnav { left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); padding: 8px 6px; border-radius: 24px; border: 0;
+    background: rgba(28, 37, 80, .96); box-shadow: 0 16px 34px rgba(10, 14, 40, .35); align-items: center; }
+  .bn-it { color: #aeb4d6; font-weight: 700; position: relative; }
+  .bn-it.on { color: #fff; }
+  .bn-it.on::after { content: ''; position: absolute; bottom: -5px; width: 18px; height: 3px; border-radius: 2px; background: var(--ochre); }
+  .bn-it.on svg { color: var(--ochre); }
+  .bn-add { margin-top: 0; width: 54px; height: 54px; border-radius: 18px; border: 0; background: var(--ochre); color: var(--ink); box-shadow: 0 6px 16px rgba(226, 161, 43, .45); transform: translateY(-14px) rotate(45deg); }
+  .bn-add svg { transform: rotate(-45deg); width: 26px; height: 26px; stroke-width: 2.6; }
+  .ai-fab { bottom: calc(92px + env(safe-area-inset-bottom)); }
+  #toast { bottom: calc(env(safe-area-inset-bottom) + 96px); }
+  .install-tip { bottom: calc(96px + env(safe-area-inset-bottom)); }
+  .dt-card .dt-tools, .dt-pager, .dt-body .dt tfoot { border-radius: 16px; border-color: var(--border); background: var(--surface); }
+  .dt-body .dt tbody tr { border-radius: 16px; border-color: var(--border) !important; background: var(--surface); box-shadow: 4px 4px 0 rgba(28, 37, 80, .05); }
+  .dt-body .dt tbody tr:active { background: var(--ochre-soft); }
+  .card, .kpi { border-radius: 18px; }
+  .side { box-shadow: 18px 0 50px rgba(10, 14, 40, .25); }
+  .modal { border-radius: 24px 24px 0 0; box-shadow: 0 -10px 40px rgba(10, 14, 40, .3); }
+}
+
+/* ---------- Édition Simplifiée : tuiles de chantier, couleurs atelier */
+body.simple .s-owed { background: var(--ink); box-shadow: 6px 6px 0 var(--ochre); border-radius: 22px; position: relative; overflow: hidden; }
+body.simple .s-owed::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 8px; background: var(--ruler), rgba(255, 255, 255, .08); background-size: 8px 4px, auto; background-repeat: repeat-x; background-position: bottom; }
+body.simple .s-owed.late { background: var(--brick); box-shadow: 6px 6px 0 var(--ink); }
+.s-owed { background: var(--ink); }
+.s-tile { border-radius: 22px; position: relative; overflow: hidden; box-shadow: 5px 5px 0 rgba(28, 37, 80, .14); font-weight: 800; }
+.s-tile::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 7px; background: var(--ruler); background-size: 8px 4px; background-repeat: repeat-x; background-position: bottom; opacity: .8; }
+.s-tile svg { width: 42px; height: 42px; padding: 9px; border-radius: 14px; background: rgba(255, 255, 255, .16); box-sizing: content-box; }
+.s-tile.t1 { background: var(--ink); } .s-tile.t1 svg { color: var(--ochre); }
+.s-tile.t2 { background: var(--sage); }
+.s-tile.t3 { background: var(--ochre); color: var(--ink); } .s-tile.t3 svg { background: rgba(28, 37, 80, .1); } .s-tile.t3::after { background-image: repeating-linear-gradient(90deg, rgba(28, 37, 80, .4) 0 1px, transparent 1px 8px); }
+.s-tile.t4 { background: var(--brick); }
+.s-btn { border: 1.5px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: 4px 4px 0 rgba(28, 37, 80, .05); }
+.s-btn .s-ic { background: var(--ochre-soft); color: var(--ink); border-radius: 13px; }
+.s-btn .s-tx b { color: var(--ink); font-weight: 800; }
+.s-btn .s-tx small { color: var(--muted); }
+.s-btn.sel { border-color: var(--ink); background: #fff; box-shadow: 4px 4px 0 var(--ochre); }
+.s-btn.primary { background: var(--ink); border-color: var(--ink); box-shadow: 5px 5px 0 var(--ochre); }
+.s-btn.primary .s-ic { background: rgba(255, 255, 255, .14); color: var(--ochre); }
+.s-btn.danger { border-color: #e9c2b8; } .s-btn.danger .s-ic { background: #fbeae5; color: var(--brick); } .s-btn.danger .s-tx b { color: var(--brick); }
+.s-big { border-radius: 18px; border: 1.5px solid var(--border); background: var(--surface); color: var(--ink); font-weight: 800; box-shadow: 4px 4px 0 rgba(28, 37, 80, .05); }
+.s-big.primary { background: var(--ink); border-color: var(--ink); color: #fff; box-shadow: 5px 5px 0 var(--ochre); }
+.s-big.primary svg { color: var(--ochre); }
+.s-steps i { background: var(--paper-2); height: 8px; border-radius: 4px; }
+.s-steps i.on { background: var(--ochre); }
+.s-step { border-color: var(--border); border-radius: 16px; }
+.s-step button { background: var(--ochre-soft); color: var(--ink); }
+.s-next { background: var(--ink) !important; color: #fff !important; box-shadow: inset 0 -4px 0 var(--ochre); border-radius: 16px !important; }
+.s-back { border-radius: 16px !important; }
+.s-foot { background: rgba(244, 241, 233, .94) !important; border-top: 1px solid var(--border) !important; }
+.s-chips button.on, .s-chips a.on { background: var(--ink) !important; border-color: var(--ink) !important; color: #fff !important; }
+.s-card { border-radius: 18px !important; border-color: var(--border) !important; background: var(--surface) !important; box-shadow: 4px 4px 0 rgba(28, 37, 80, .05); }
+.s-cardw { border-radius: 18px; border-color: var(--border); box-shadow: 4px 4px 0 rgba(28, 37, 80, .05); }
+.s-cardw .s-card { box-shadow: none; }
+.s-note { border-radius: 16px; border-color: var(--border); background: var(--surface); }
+.s-lang button.on { background: var(--ink); border-color: var(--ink); box-shadow: inset 0 -3px 0 var(--ochre); }
+.s-total { background: var(--ink) !important; border-radius: 20px !important; box-shadow: 6px 6px 0 var(--ochre); }
+.s-done-h { border-radius: 22px !important; border-color: var(--border) !important; background: var(--surface) !important; box-shadow: 6px 6px 0 rgba(28, 37, 80, .06); position: relative; overflow: hidden; }
+.s-done-h::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 7px; background: var(--ruler), var(--ink); background-size: 8px 3px, auto; background-repeat: repeat-x, no-repeat; }
+.s-line { border-radius: 18px !important; border-color: var(--border) !important; }
+.s-mic { background: var(--ochre-soft) !important; }
+.s-pays, .s-info { border-radius: 16px; }
+.s-warn { border-radius: 16px; }
+/* compléments du thème : éléments encore aux anciennes couleurs */
+.s-huge { background: var(--ochre) !important; color: var(--ink) !important; box-shadow: 6px 6px 0 var(--ink) !important; border-radius: 24px !important; position: relative; overflow: hidden; }
+.s-huge::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 8px; background: repeating-linear-gradient(90deg, rgba(28, 37, 80, .45) 0 1px, transparent 1px 8px); background-size: 8px 5px; background-repeat: repeat-x; background-position: bottom; }
+.quick { background: var(--ink); box-shadow: 5px 5px 0 var(--ochre); border-radius: 18px; }
+.ai-logo { background: var(--ink); box-shadow: inset 0 -3px 0 var(--ochre); }
+.ai-msg.me .ai-bub { background: var(--ink); border-color: var(--ink); }
+.ai-act-ic { color: var(--ink); }
+.row-acts .cnt { background: var(--ochre); color: var(--ink); }
+.pi-empty-ic, .s-pep svg { background: var(--ochre-soft); color: var(--ink); }
+.top-ic svg { color: #fff; }
