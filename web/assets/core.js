@@ -229,6 +229,7 @@ function dock(cur) {
     <nav class="dock-tabs" aria-label="Espaces">${spaces().map((sp) => `<a class="dock-tab ${cur && cur.sp === sp ? 'on' : ''}" href="${sp.h}">${I[sp.i]}<span>${sp.l}</span></a>`).join('')}</nav>
     <div class="dock-tools">
       <button class="dock-cmd" data-act="search" title="Rechercher ou faire une action">${I.search}<span>Rechercher ou faire…</span><kbd>⌘K</kbd></button>
+      ${S.ai ? `<button class="dock-ai" data-act="ai" title="Assistant IA">${I.spark}</button>` : ''}
       <button class="dock-add" data-act="qadd">${I.plus}<span>Créer</span></button>
       <button class="dock-me" data-act="account" title="Mon compte">${avatar(S.me.id)}</button>
     </div></header>`;
@@ -325,6 +326,7 @@ function bindShell() {
   const fb = $('[data-act=firmback]'); if (fb) fb.onclick = () => switchFirm(0);
   $$('[data-act=search]').forEach((b) => { b.onclick = () => quickSearch(); });
   $$('[data-act=qadd]').forEach((b) => { b.onclick = () => quickAddMenu(); });
+  $$('[data-act=ai]').forEach((b) => { b.onclick = () => aiToggle(true); });
 }
 document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && S.ready) { e.preventDefault(); quickSearch(); } });
 

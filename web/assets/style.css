@@ -1545,3 +1545,11 @@ body.simple .s-owed.late { background: var(--brick); box-shadow: 6px 6px 0 var(-
   .main > .s-steps { order: 3; }
   body.wiz .secbar, body.wiz .m-create, body.wiz .me-btn { display: none !important; }
 }
+
+/* assistant : bouton dans la barre du haut (plus de bouton flottant sur la page) */
+.ai-fab { display: none !important; }
+.dock-ai { display: grid; place-items: center; width: 40px; height: 40px; border: 1.5px solid var(--border); border-radius: 13px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.dock-ai:hover { border-color: var(--ink); } .dock-ai svg { width: 19px; height: 19px; color: var(--ochre-2); }
+.s-filter { flex-wrap: wrap; overflow: visible; }
+@media (max-width: 860px) { .card-h { flex-wrap: wrap; } }
+@media (max-width: 1440px) { .dock-cmd span, .dock-cmd kbd { display: none; } .dock-cmd { width: 40px; padding: 0; justify-content: center; } }
