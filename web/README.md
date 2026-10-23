@@ -3,8 +3,14 @@
 Aplicație web multi-utilizator, în franceză, pe care o instalezi pe domeniul tău (găzduire cPanel cu PHP + MySQL).
 Toți utilizatorii conectați văd toate proiectele firmei, iar fiecare element arată cine l-a creat și cine l-a modificat.
 
+## Navigation – « espaces » (interface Atelier Madibu)
+Pas de menu latéral : 5 espaces, dans l'ordre de vie d'un chantier, toujours à la même place.
+- **Avancé** : Aujourd'hui · Affaires (devis, opportunités, prix) · Chantiers (chantiers, interventions, installations, fiches) · Argent (factures, paiements, achats, commandes, chiffres) · Carnet (clients, fournisseurs, sous-traitants, équipe, pointage, absences).
+- **Simplifié** : Accueil · Facturer (factures, devis) · Achats · Chantiers (chantiers, clients, fournisseurs, prix) · Moi.
+- Ordinateur : capsule des espaces en haut, rubriques en pastilles, recherche (⌘K), « Créer » et le compte (avatar) à droite. Téléphone : espaces en bas, « + Créer » en haut à droite, compte en haut à gauche.
+
 ## Module
-- **Tableau de bord**: opportunités, devis, factures (en retard / à envoyer / à encaisser), chantiers, tâches, suivi.
+- **Aujourd'hui**: une seule liste d'actions triées par urgence (factures en retard à relancer, tâches, interventions du jour, achats à payer ou à vérifier, devis acceptés à facturer, devis sans réponse), « Votre argent » et chantiers en cours.
 - **Contacts**: clients, prospects, fournisseurs, sous-traitants, architectes – fiche avec tout l'historique.
 - **Opportunités**: pipeline Kanban (glisser-déposer), relances, montant pondéré.
 - **Devis**: chapitres, lignes, textes, options, éléments de la bibliothèque, déboursés et marges par ligne, TVA par ligne, remise, autoliquidation, PDF. À l'acceptation, le chantier se crée automatiquement.
