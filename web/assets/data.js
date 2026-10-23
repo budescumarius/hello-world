@@ -312,8 +312,11 @@ async function makePdf() {
   holder.style.cssText = `position:fixed;left:-20000px;top:0;width:${W}px;background:#fff;`;
   holder.innerHTML = page.innerHTML;
   holder.querySelectorAll('.no-print').forEach((x) => x.remove());
-  holder.querySelectorAll('.vz-sheet').forEach((x) => { x.style.minHeight = '0'; x.style.boxShadow = 'none'; x.style.margin = '0'; x.style.borderRadius = '0'; });
+  // modèle Madibu : la règle de chantier et le pied de page légal sont redessinés sur chaque page du PDF
+  holder.querySelectorAll('.mb-foot, .mb-ruler').forEach((x) => x.remove());
+  holder.querySelectorAll('.mb-sheet').forEach((x) => { x.style.minHeight = '0'; x.style.boxShadow = 'none'; x.style.margin = '0'; x.style.borderRadius = '0'; x.style.paddingBottom = '10px'; });
   const docEl = holder.querySelector('.doc') || holder;
+  const brand = docEl.dataset && docEl.dataset.ink ? { ink: docEl.dataset.ink, acc: docEl.dataset.acc, foot: docEl.dataset.foot || '' } : null;
   docEl.style.cssText += ';max-width:none;width:' + W + 'px;margin:0;box-shadow:none;border-radius:0;zoom:1;';
   document.body.appendChild(holder);
   try {
@@ -321,12 +324,12 @@ async function makePdf() {
     if (document.fonts && document.fonts.ready) await document.fonts.ready;
     // points de coupure possibles : bas de chaque ligne / bloc (évite de couper une ligne ou le bloc des totaux en deux)
     // mesurés dans la copie rendue par html2canvas (même largeur, mêmes règles CSS que le PDF)
-    const ATOM = '.vz-bottom, .vz-recap, .vz-mention, .vz-sign, .d-tot, .d-sign';
+    const ATOM = '.mb-bottom, .mb-recap, .mb-mention, .mb-sign, .mb-legal h4, .d-tot, .d-sign';
     const cuts = []; const forced = [];
     const measure = (root) => {
       const top = root.getBoundingClientRect().top;
       root.querySelectorAll('.pdf-break').forEach((el) => forced.push(el.getBoundingClientRect().top - top));
-      root.querySelectorAll('tr, .vz-info, .vz-head, .d-pt, .d-sec, .d-head, .d-parties, p, h2, .pre, img, ' + ATOM).forEach((el) => {
+      root.querySelectorAll('tr, .mb-head, .mb-parties, .mb-object, .d-pt, .d-sec, .d-head, .d-parties, p, h2, .pre, img, ' + ATOM).forEach((el) => {
         const r = el.getBoundingClientRect();
         if (el.matches(ATOM)) cuts.push(r.top - top, r.bottom - top);
         else if (!el.parentElement || !el.parentElement.closest(ATOM)) cuts.push(r.bottom - top);
@@ -354,7 +357,7 @@ async function makePdf() {
     const canvas = await window.html2canvas(docEl, { scale, backgroundColor: '#ffffff', useCORS: true, logging: false, windowWidth: W + 40, onclone });
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
-    const m = 8; const pw = 210 - 2 * m; const ph = 297 - 2 * m - 6;
+    const m = 8; const pw = 210 - 2 * m; const ph = 297 - 2 * m - (brand ? 12 : 6);
     if (!cuts.length) measure(docEl);
     const k = canvas.width / docEl.offsetWidth; // px canvas par px CSS
     const pageH = ph * (canvas.width / pw);
@@ -370,8 +373,20 @@ async function makePdf() {
       const part = document.createElement('canvas'); part.width = canvas.width; part.height = Math.ceil(b - a);
       const ctx = part.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, part.width, part.height); ctx.drawImage(canvas, 0, -a);
       if (i) pdf.addPage();
-      pdf.addImage(part.toDataURL('image/jpeg', 0.9), 'JPEG', m, m, pw, (b - a) * pw / canvas.width);
-      pdf.setFontSize(8); pdf.setTextColor(120); pdf.text(`Page ${i + 1}/${breaks.length}`, 210 - m, 297 - 5, { align: 'right' });
+      const top = brand ? m + 4 : m;
+      pdf.addImage(part.toDataURL('image/jpeg', 0.9), 'JPEG', m, top, pw, (b - a) * pw / canvas.width);
+      if (brand) {
+        // règle de chantier : bande, graduations tous les 2 mm (1 cm plus longues), segment d'accent
+        pdf.setFillColor(brand.ink); pdf.rect(0, 0, 210, 3.2, 'F');
+        pdf.setFillColor(brand.acc); pdf.rect(210 - 12 - 30, 0, 30, 3.2, 'F');
+        pdf.setDrawColor(255, 255, 255); pdf.setLineWidth(0.15);
+        for (let x = 2; x < 210; x += 2) pdf.line(x, 0, x, x % 10 === 0 ? 2.1 : 1.1);
+        pdf.setDrawColor(228, 230, 238); pdf.setLineWidth(0.25); pdf.line(m + 4, 297 - 10.5, 210 - m - 4, 297 - 10.5);
+        pdf.setFontSize(7); pdf.setTextColor(107, 112, 128);
+        const foot = pdf.splitTextToSize(brand.foot, pw - 30)[0] || '';
+        pdf.text(foot, m + 4, 297 - 6.5);
+        pdf.setTextColor(brand.ink); pdf.text(`${i + 1} / ${breaks.length}`, 210 - m - 4, 297 - 6.5, { align: 'right' });
+      } else { pdf.setFontSize(8); pdf.setTextColor(120); pdf.text(`Page ${i + 1}/${breaks.length}`, 210 - m, 297 - 5, { align: 'right' }); }
     });
     return pdf.output('blob');
   } finally { holder.remove(); const t = $('#toast'); if (t) t.classList.remove('show'); }
@@ -450,7 +465,7 @@ function vatAutofill(form, map = {}, opts = {}) {
 
 // Téléphone : un devis / une facture s'affiche comme un PDF (feuille A4 entière, réduite à la largeur de l'écran ; zoom avec deux doigts)
 function fitDocs() {
-  $$('.doc.vz-paper').forEach((d) => {
+  $$('.doc.mb-paper').forEach((d) => {
     const host = d.parentElement; if (!host) return;
     const cs = getComputedStyle(host);
     const w = host.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
@@ -462,6 +477,6 @@ function fitDocs() {
 (() => {
   let raf = 0; const run = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(fitDocs); };
   window.addEventListener('resize', run);
-  new MutationObserver((ms) => { if (ms.some((m) => [...m.addedNodes].some((n) => n.nodeType === 1 && (n.matches('.doc.vz-paper') || n.querySelector('.doc.vz-paper'))))) run(); })
+  new MutationObserver((ms) => { if (ms.some((m) => [...m.addedNodes].some((n) => n.nodeType === 1 && (n.matches('.doc.mb-paper') || n.querySelector('.doc.mb-paper'))))) run(); })
     .observe(document.documentElement, { childList: true, subtree: true });
 })();

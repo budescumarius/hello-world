@@ -805,7 +805,7 @@ async function peppolSimple() {
           <form class="s-form" data-ap autocomplete="off" onsubmit="return false"><label class="field"><span>Clé API Peppyrus</span><input name="key" type="password" placeholder="collez la clé ici"></label></form>
           <button class="s-big primary" data-on>${I.check} Activer Peppol</button></li>
       </ol>
-      <p class="s-help">Déjà inscrit ailleurs (Vertuoza, comptable…) ? Demandez-leur de « libérer votre identifiant Peppol », puis activez-le chez Peppyrus.</p>`}
+      <p class="s-help">Déjà inscrit ailleurs (autre logiciel, comptable…) ? Demandez-leur de « libérer votre identifiant Peppol », puis activez-le chez Peppyrus.</p>`}
     <div data-res></div>
     <div class="s-card-info"><b>Comment ça marche ?</b>
       <p>📤 <b>Envoyer</b> : quand vous faites une facture pour une <b>entreprise</b> (avec un n° de TVA), le bouton « Envoyer par Peppol » apparaît à la fin.</p>

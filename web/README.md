@@ -1,4 +1,4 @@
-# BâtiPro – aplicație web de gestiune pentru construcții (în stilul Vertuoza + Aproplan)
+# BâtiPro – aplicație web de gestiune pentru construcții (modèle de documents Madibu)
 
 Aplicație web multi-utilizator, în franceză, pe care o instalezi pe domeniul tău (găzduire cPanel cu PHP + MySQL).
 Toți utilizatorii conectați văd toate proiectele firmei, iar fiecare element arată cine l-a creat și cine l-a modificat.

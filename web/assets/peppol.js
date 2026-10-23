@@ -242,7 +242,7 @@ function peppolSettings(page) {
       ${S.settings.peppol_sync && S.settings.peppol_sync.at ? `<p class="muted sm">Dernière relève : ${fmtDT(S.settings.peppol_sync.at)}${S.settings.peppol_sync.errors && S.settings.peppol_sync.errors.length ? ` – <span class="late">${esc(S.settings.peppol_sync.errors[0])}</span>` : ''}</p>` : ''}
       <ol class="steps">
         <li>Créez un compte gratuit sur <a href="https://www.peppyrus.be" target="_blank" rel="noopener">peppyrus.be</a> et enregistrez votre entreprise (identifiant <b>0208:</b> + numéro d'entreprise).</li>
-        <li>Un identifiant Peppol ne peut être actif que chez <b>un seul point d'accès</b> : si vous recevez aujourd'hui vos factures ailleurs (par ex. via Vertuoza), demandez-leur de <b>libérer votre identifiant Peppol</b>, puis activez-le chez Peppyrus. Faites-le après avoir traité les dernières factures reçues là-bas.</li>
+        <li>Un identifiant Peppol ne peut être actif que chez <b>un seul point d'accès</b> : si vous recevez aujourd'hui vos factures ailleurs (autre logiciel de facturation), demandez-leur de <b>libérer votre identifiant Peppol</b>, puis activez-le chez Peppyrus. Faites-le après avoir traité les dernières factures reçues là-bas.</li>
         <li>Dans Peppyrus, créez une <b>clé API</b> et collez-la ci-dessus, puis « Tester la connexion ».</li>
         <li>Les factures reçues sont relevées à l'ouverture de l'application (toutes les 10 minutes au plus). Pour une relève même quand personne n'est connecté, ajoutez dans cPanel › <b>Tâches cron</b> (toutes les 15 minutes) : <code>php ${esc(location.pathname.replace(/[^/]*$/, ''))}cron.php</code> avec le chemin complet de votre dossier (ex. <code>/home/votrecompte/public_html/cron.php</code>).</li>
       </ol></div>

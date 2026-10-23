@@ -32,16 +32,25 @@ Les matériaux livrés restent notre propriété jusqu'au paiement complet du pr
 
 Article 9 – Litiges
 Le droit belge est applicable. En cas de litige, les tribunaux de l'arrondissement judiciaire du siège social de l'entreprise sont compétents, sans préjudice des règles protectrices du consommateur.`;
+// Modèle « Madibu » : mise en page propre à l'entreprise (règle de chantier en tête, trois cartouches émetteur / client / chantier,
+// codes de ligne, totaux en carte, bloc de paiement avec QR code bancaire, pied de page légal répété sur chaque page du PDF).
 const TPL_DEF = {
-  primary: '#2b3270', band: '#4c5fc7', light: '#d9dcf2', payColor: '#e03131', noteColor: '#1c7ed6', font: 'Montserrat', size: 10.5,
-  quoteTitle: 'DEVIS N°{numero}', invoiceTitle: 'Facture n°{numero}', creditTitle: 'Note de crédit n°{numero}', orderTitle: 'Bon de commande n°{numero}',
-  showTM: true, tmLabel: 'TM', showManager: true, thousands: '.',
-  payText: 'Merci de faire le virement sur le compte {societe}', payTerms: '{jours} jour(s) Après date de facturation',
+  style: 'madibu',
+  ink: '#1f2a5a', accent: '#e0a12a', tint: '#f4f5fa', font: 'Manrope', size: 9.5, tagline: '',
+  quoteTitle: 'Devis', invoiceTitle: 'Facture', creditTitle: 'Note de crédit', orderTitle: 'Bon de commande',
+  showCodes: true, showTM: false, tmLabel: 'TM', showManager: true, thousands: '.',
+  qr: true, payText: 'Merci de régler ce montant au plus tard le {date} sur le compte indiqué, avec la communication structurée.', payTerms: '{jours} jours après la date de facture',
   mention6: MENTION_6, mention12: '', mention21: MENTION_21, mentionAL: MENTION_AL, mentionsOnQuote: true,
   recap: true, footer: '', css: '',
   cgvTitle: 'Conditions générales', cgv: '', cgvInvoice: true, cgvQuote: true, cgvOrder: false, cgvCols: false,
 };
-const tpl = () => ({ ...TPL_DEF, ...(S.settings.template || {}) });
+// réglages d'apparence de l'ancien modèle : ignorés tant que le modèle Madibu n'a pas été enregistré
+const TPL_OLD_LOOK = ['primary', 'band', 'light', 'payColor', 'noteColor', 'font', 'size', 'quoteTitle', 'invoiceTitle', 'creditTitle', 'orderTitle', 'payText', 'payTerms', 'css', 'showTM', 'tmLabel'];
+const tpl = () => {
+  const s = { ...(S.settings.template || {}) };
+  if (s.style !== 'madibu') TPL_OLD_LOOK.forEach((k) => delete s[k]);
+  return { ...TPL_DEF, ...s, style: 'madibu' };
+};
 const fill = (s, vars) => String(s || '').replace(/\{(\w+)\}/g, (m, k) => (vars[k] != null ? vars[k] : m));
 const CUR_SYM = { EUR: '€', CHF: 'CHF', RON: 'lei' };
 function dmoney(x, t = tpl()) {
@@ -50,7 +59,8 @@ function dmoney(x, t = tpl()) {
   return `${v < 0 ? '-' : ''}${i.replace(/\B(?=(\d{3})+(?!\d))/g, t.thousands || '.')},${d} ${CUR_SYM[company().currency || 'EUR'] || company().currency}`;
 }
 const dnum2 = (x) => (num(x) || 0).toFixed(2).replace('.', ',');
-const pctS = (x) => `${(Math.round(num(x) * 10) / 10).toFixed(1).replace('.', ',')}%`;
+const pctS = (x) => `${(Math.round(num(x) * 10) / 10).toFixed(1).replace('.', ',')} %`;
+const dateFr = (d) => (d ? new Date(d + 'T12:00:00').toLocaleDateString('fr-BE', { day: 'numeric', month: 'long', year: 'numeric' }) : '');
 function longDate(d) {
   if (!d) return '';
   return new Date(d + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }).replace(/(^|\s)(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
@@ -63,76 +73,97 @@ function clientLabel(c) {
   if (d.company) return d.company;
   return [d.civility, d.name, d.firstname].filter(Boolean).join(' ') || '—';
 }
+// Intitulé du document (« Facture », « Facture d'acompte », « Note de crédit »…) sans le numéro
+function docLabel(kind, d, t) {
+  const raw = kind === 'quote' ? t.quoteTitle : kind === 'order' ? t.orderTitle : d.kind === 'avoir' ? t.creditTitle
+    : d.kind && d.kind !== 'facture' && IKIND[d.kind] ? IKIND[d.kind] : t.invoiceTitle;
+  return fill(raw, { numero: '' }).replace(/\s*n[°º]?\s*$/i, '').trim() || 'Document';
+}
+// Ligne légale du pied de page (répétée sur chaque page du PDF)
+function legalLine(t) {
+  const co = company(); const s = sellerInfo();
+  return [co.name, [s.street, [s.zip, s.city].filter(Boolean).join(' ')].filter(Boolean).join(', '), co.vat && `TVA ${co.vat}`, co.iban && `IBAN ${ibanFmt(co.iban)}`, co.phone, co.email, co.website, t.footer || co.footer].filter(Boolean).join(' · ');
+}
+const monoOf = (n) => String(n || '?').split(/\s+/).filter((w) => /\p{L}/u.test(w)).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
 
 // ---------------------------------------------------------------- Rendu commun
 function docBlocks(kind, it, c, project, t) {
   const d = it.data; const co = company(); const s = sellerInfo();
   const cd = (c && c.data) || {};
   const isInv = kind === 'invoice'; const isQ = kind === 'quote';
-  const title = fill(isQ ? t.quoteTitle : kind === 'order' ? t.orderTitle : d.kind === 'avoir' ? t.creditTitle : t.invoiceTitle, { numero: it.number || 'BROUILLON' });
+  const label = docLabel(kind, d, t);
+  const title = `${label} ${it.number || 'brouillon'}`;
   const days = d.due && d.date ? Math.max(0, dnum(d.due) - dnum(d.date)) : null;
   const resp = userName(+(d.ownerId || it.created_by));
-  const refTxt = d.ref || (d.kind === 'situation' && d.situationNo ? `EA${d.situationNo}` : (isQ ? d.title : ''));
   const meta = [
-    refTxt ? `<div class="vz-ref">${isQ ? '<b>Référence :</b> ' : ''}${esc(refTxt)}</div>` : '',
-    d.kind === 'situation' && d.situationNo ? `<div>N° avancement : ${d.situationNo}</div>` : '',
-    d.kind === 'avoir' && d.refInvoice ? `<div>Concerne la facture : ${esc(d.refInvoice)}</div>` : '',
-    `<div>Date : ${esc(longDate(d.date))}</div>`,
-    isQ ? `<div><b>Valable jusqu'au :</b> ${esc(longDate(d.valid))}</div>` : '',
-    `<div>${isQ ? '<b>Responsable :</b>' : 'Responsable :'} ${esc(resp)}</div>`,
-    isInv && d.kind !== 'avoir' && days != null ? `<div>Paiement : ${esc(fill(t.payTerms, { jours: days, date: fmtDate(d.due) }))}</div>` : '',
-    kind === 'order' && d.deliveryDate ? `<div>Livraison souhaitée : ${esc(longDate(d.deliveryDate))}</div>` : '',
-  ].join('');
-  const bill = kind !== 'order' && it.data.billSame === false;
-  const clientBox = bill ? `<div class="vz-client"><b>${esc(it.data.billName || clientLabel(c))}</b><div class="vz-addr">${esc(it.data.billAddress || '').replace(/\n/g, '<br>')}</div>${it.data.billVat ? `<div>TVA : ${esc(it.data.billVat)}</div>` : ''}</div>`
-    : `<div class="vz-client"><b>${esc(kind === 'order' ? contactName(c) : clientLabel(c))}</b>
-    ${cd.company && (cd.name || cd.firstname) ? `<div>Att. ${esc([cd.civility, cd.name, cd.firstname].filter(Boolean).join(' '))}</div>` : ''}
-    <div class="vz-addr">${[cd.address, [cd.zip, cd.city].filter(Boolean).join(' '), cd.country].filter(Boolean).map(esc).join('<br>')}</div>
-    ${cd.vat ? `<div>TVA : ${esc(cd.vat)}</div>` : ''}</div>`;
-  const head = `<div class="vz-head">
-    <div class="vz-left">${co.logoId ? `<img class="vz-logo" src="${fileUrl(co.logoId)}" alt="">` : ''}
-      <div class="vz-co"><b>${esc(co.name || '')}</b><br>${esc(s.street)}<br>${esc([s.cc && s.zip ? `${s.cc}-${s.zip}` : s.zip, s.city].filter(Boolean).join(' '))}
-        ${co.email ? `<br>${esc(co.email)}` : ''}${co.website ? `<br><u>${esc(co.website)}</u>` : ''}${co.phone ? `<br>Tél. : ${esc(co.phone)}` : ''}
-        ${co.vat ? `<br>TVA : ${esc(co.vat)}` : ''}${co.iban && !isQ ? `<br>IBAN : ${esc(String(co.iban).replace(/\s/g, ''))}` : ''}</div></div>
-    <div class="vz-right"><h1>${esc(title)}</h1><div class="vz-meta">${meta}</div>${clientBox}</div></div>`;
+    ['Date', dateFr(d.date)],
+    isQ && ['Valable jusqu\'au', dateFr(d.valid)],
+    isInv && d.kind !== 'avoir' && d.due && ['Échéance', dateFr(d.due)],
+    isInv && d.kind !== 'avoir' && days != null && ['Conditions', fill(t.payTerms, { jours: days, date: fmtDate(d.due) })],
+    d.kind === 'situation' && d.situationNo && ['Avancement', `n° ${d.situationNo}`],
+    d.kind === 'avoir' && d.refInvoice && ['Facture', d.refInvoice],
+    kind === 'order' && d.deliveryDate && ['Livraison', dateFr(d.deliveryDate)],
+    d.ref && ['Référence', d.ref],
+    ['Responsable', resp],
+  ].filter((x) => x && x[1]);
+  const brand = co.logoId ? `<img class="mb-logo" src="${fileUrl(co.logoId)}" alt="">` : `<div class="mb-mono">${esc(monoOf(co.name))}</div>`;
+  const head = `<header class="mb-head">
+    <div class="mb-brand">${brand}${co.logoId ? '' : `<div class="mb-brand-n">${esc(co.name || '')}</div>`}${t.tagline ? `<div class="mb-brand-t">${esc(t.tagline)}</div>` : ''}</div>
+    <div class="mb-id"><div class="mb-kind">${esc(label)}</div><div class="mb-no ${it.number ? '' : 'draft'}">${esc(it.number || 'Brouillon')}</div>
+      <dl class="mb-meta">${meta.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl></div></header>`;
+  // cartouches : émetteur, client (ou adresse de facturation), chantier
+  const from = `<div class="mb-party"><small>Émetteur</small><b>${esc(co.name || '')}</b>${[s.street, [s.cc && s.zip ? `${s.cc}-${s.zip}` : s.zip, s.city].filter(Boolean).join(' ')].filter(Boolean).map(esc).join('<br>')}
+    ${co.vat ? `<br>TVA ${esc(co.vat)}` : ''}${co.phone ? `<br>${esc(co.phone)}` : ''}${co.email ? `<br>${esc(co.email)}` : ''}</div>`;
+  const bill = kind !== 'order' && d.billSame === false;
+  const toLabel = kind === 'order' ? 'Fournisseur' : isInv ? (bill ? 'Facturé à' : 'Client') : 'Client';
+  const to = bill ? `<div class="mb-party mb-to"><small>${toLabel}</small><b>${esc(d.billName || clientLabel(c))}</b>${esc(d.billAddress || '').replace(/\n/g, '<br>')}${d.billVat ? `<br>TVA ${esc(d.billVat)}` : ''}</div>`
+    : `<div class="mb-party mb-to"><small>${toLabel}</small><b>${esc(kind === 'order' ? contactName(c) : clientLabel(c))}</b>
+      ${cd.company && (cd.name || cd.firstname) ? `<div>Att. ${esc([cd.civility, cd.name, cd.firstname].filter(Boolean).join(' '))}</div>` : ''}
+      ${[cd.address, [cd.zip, cd.city].filter(Boolean).join(' '), cd.country && !/^(Belgique|BE)$/i.test(cd.country) ? cd.country : ''].filter(Boolean).map(esc).join('<br>')}
+      ${cd.vat ? `<br>TVA ${esc(cd.vat)}` : ''}</div>`;
   const pa = project ? [project.data.address, [project.data.zip, project.data.city].filter(Boolean).join(' ')].filter(Boolean).join(', ') : (d.siteAddress || '');
-  const info = `<div class="vz-info">
-    ${project || d.title ? `<div>Chantier : &nbsp;${esc(project ? project.data.name : d.title)}</div>` : ''}
-    ${pa ? `<div>Adresse du chantier : ${esc(pa)}</div>` : ''}
-    ${isInv && d.communication && d.kind !== 'avoir' ? `<div>Communication structurée : &nbsp;${esc(d.communication)}</div>` : ''}
-    ${isQ && t.showManager && project && project.data.managerId ? `<div><b>Gestionnaire du chantier :</b> ${esc(userName(+project.data.managerId))}</div>` : (isQ && t.showManager ? `<div><b>Gestionnaire du chantier :</b> ${esc(resp)}</div>` : '')}
-  </div>`;
-  return { head, info, title };
+  const manager = isQ && t.showManager ? userName(+((project && project.data.managerId) || d.ownerId || it.created_by)) : '';
+  const site = project || pa ? `<div class="mb-party"><small>Chantier</small>${project ? `<b>${esc(project.data.name)}</b>` : ''}${pa ? esc(pa) : ''}
+    ${manager ? `<br>Gestionnaire : ${esc(manager)}` : ''}</div>` : '';
+  const cols = site ? 3 : 2;
+  const info = `<section class="mb-parties" style="--cols:${cols}">${from}${to}${site}</section>
+    ${d.title && (!project || d.title !== project.data.name) ? `<div class="mb-object"><small>Objet</small><b>${esc(d.title)}</b></div>` : ''}`;
+  return { head, info, title, label };
 }
 
-// Tableau des lignes : chapitres (bande foncée), sous-chapitres (bande claire), lignes
-function linesTable(d, t) {
+// Lignes : code (1.2.3) devant la description, quantité avec l'unité, TVA par ligne, chapitres avec sous-total
+function linesTable(d, t, kind) {
   const lines = (d.lines || []).filter((l) => !isDeduction(l));
   const nos = numbering(lines); const st = sectionTotals(lines);
-  const tm = t.showTM;
-  return `<table class="vz-lines"><thead><tr><th class="c-no">N°</th><th>Description</th>${tm ? `<th class="c-tm">${esc(t.tmLabel)}</th>` : ''}<th class="r">Qte.</th><th class="c-u">U</th><th class="r">PU(€)</th><th class="r">TOTAL</th></tr></thead><tbody>
+  const vat = kind !== 'order' && !d.reverse;
+  const n = vat ? 5 : 4;
+  const code = (i) => (t.showCodes && nos[i] ? `<span class="mb-code">${esc(String(nos[i]).replace(/(\.0)+$/, ''))}</span>` : '');
+  return `<table class="mb-lines"><thead><tr><th>Description</th><th class="r">Quantité</th><th class="r">Prix unit. HT</th>${vat ? '<th class="r c-v">TVA</th>' : ''}<th class="r">Montant HT</th></tr></thead><tbody>
     ${lines.map((l, i) => {
       if (l.kind === 'title' && !String(l.desc || '').trim()) return '';
-      if (l.kind === 'title') return `<tr class="${tlevel(l) === 2 ? 'vz-l2' : 'vz-l1'}"><td>${nos[i]}</td><td colspan="${tm ? 5 : 4}">${esc(l.desc)}</td><td class="r">${dmoney(st[l.id], t)}</td></tr>`;
-      if (l.kind === 'text') return `<tr class="vz-txt"><td></td><td colspan="${tm ? 6 : 5}" class="pre">${esc(l.desc)}</td></tr>`;
-      return `<tr class="${l.option ? 'opt' : ''}"><td>${nos[i]}</td><td class="pre">${esc(l.desc)}${l.option ? '<br><i>(en option, non comprise dans le total)</i>' : ''}</td>${tm ? `<td class="c-tm">${esc(l.tm || '')}</td>` : ''}<td class="r">${dnum2(l.qty)}</td><td class="c-u">${esc(l.unit)}</td><td class="r">${dmoney(l.price, t)}</td><td class="r">${dmoney(num(l.qty) * num(l.price), t)}</td></tr>`;
+      if (l.kind === 'title') return `<tr class="${tlevel(l) === 2 ? 'mb-sub' : 'mb-ch'}"><td colspan="${n - 1}"><div class="mb-dl">${code(i)}<span>${esc(l.desc)}</span></div></td><td class="r">${dmoney(st[l.id], t)}</td></tr>`;
+      if (l.kind === 'text') return `<tr class="mb-txt"><td colspan="${n}" class="pre">${esc(l.desc)}</td></tr>`;
+      return `<tr class="${l.option ? 'mb-opt' : ''}"><td><div class="mb-dl">${code(i)}<span class="pre">${esc(l.desc)}${t.showTM && l.tm ? `<span class="mb-tag">${esc(t.tmLabel)} ${esc(l.tm)}</span>` : ''}${l.option ? '<em class="mb-pill">Option</em>' : ''}</span></div></td>
+        <td class="r">${dnum2(l.qty)}<span class="mb-u">${esc(l.unit || '')}</span></td><td class="r">${dmoney(l.price, t)}</td>${vat ? `<td class="r c-v">${fnum(num(l.vat))} %</td>` : ''}<td class="r">${dmoney(num(l.qty) * num(l.price), t)}</td></tr>`;
     }).join('')}</tbody></table>`;
 }
 
-// Tableau d'un état d'avancement : quantités prévues / avancées et % cumulés
+// État d'avancement : prévu, avancement (avec barre), prix, montant de la période
 function progressTable(d, t) {
   const rows = d.progressRows || [];
-  const tm = t.showTM;
   const nos = numbering(rows.map((r) => ({ kind: r.kind, level: r.level })));
   const period = (r) => { const l = (d.lines || []).find((x) => x.srcId === r.lineId && !isDeduction(x)); return l ? r2(num(l.qty) * num(l.price)) : 0; };
-  return `<table class="vz-lines vz-prog"><thead><tr><th class="c-no">N°</th><th>DESCRIPTION</th>${tm ? `<th class="c-tm">${esc(t.tmLabel)}</th>` : ''}<th class="r">QTE<br>PREVU</th><th class="c-u">U</th><th class="r">QTE<br>AVAN.</th><th class="r">%<br>AVAN.</th><th class="r">PU(€)</th><th class="r">TOTAL</th></tr></thead><tbody>
-    <tr class="vz-txt"><td></td><td colspan="${tm ? 8 : 7}">Référence de l'avancement ; ${esc(d.ref || `EA${d.situationNo || ''}`)}${d.title ? `<br>Référence de Chantier ; ${esc(d.title)}` : ''}</td></tr>
+  const code = (i) => (t.showCodes && nos[i] ? `<span class="mb-code">${esc(String(nos[i]).replace(/(\.0)+$/, ''))}</span>` : '');
+  return `<table class="mb-lines mb-prog"><thead><tr><th>Description</th><th class="r">Prévu</th><th class="r">Avancement</th><th class="r">Prix unit. HT</th><th class="r">Période HT</th></tr></thead><tbody>
+    <tr class="mb-txt"><td colspan="5">Avancement ${esc(d.ref || `EA${d.situationNo || ''}`)}${d.title ? ` · ${esc(d.title)}` : ''}</td></tr>
     ${rows.map((r, i) => {
       if (r.kind === 'title') {
         const sub = rows.slice(i + 1, blockEnd(rows.map((x) => ({ kind: x.kind, level: x.level })), i)).filter((x) => x.kind === 'item');
-        return `<tr class="${+r.level === 2 ? 'vz-l2' : 'vz-l1'}"><td>${nos[i]}</td><td colspan="${tm ? 7 : 6}">${esc(r.desc)}</td><td class="r">${dmoney(sub.reduce((a, x) => a + period(x), 0), t)}</td></tr>`;
+        return `<tr class="${+r.level === 2 ? 'mb-sub' : 'mb-ch'}"><td colspan="4"><div class="mb-dl">${code(i)}<span>${esc(r.desc)}</span></div></td><td class="r">${dmoney(sub.reduce((a, x) => a + period(x), 0), t)}</td></tr>`;
       }
-      return `<tr><td>${nos[i]}</td><td class="pre">${esc(r.desc)}</td>${tm ? '<td class="c-tm"></td>' : ''}<td class="r">${dnum2(r.qty)}</td><td class="c-u">${esc(r.unit)}</td><td class="r">${dnum2(num(r.qty) * num(r.cum) / 100)}</td><td class="r">${pctS(r.cum)}</td><td class="r">${dmoney(r.price, t)}</td><td class="r">${dmoney(period(r), t)}</td></tr>`;
+      const pc = Math.max(0, Math.min(100, num(r.cum)));
+      return `<tr><td><div class="mb-dl">${code(i)}<span class="pre">${esc(r.desc)}</span></div></td><td class="r">${dnum2(r.qty)}<span class="mb-u">${esc(r.unit || '')}</span></td>
+        <td class="r">${dnum2(num(r.qty) * num(r.cum) / 100)} · <b>${pctS(r.cum)}</b><div class="mb-bar"><i style="width:${pc}%"></i></div></td><td class="r">${dmoney(r.price, t)}</td><td class="r">${dmoney(period(r), t)}</td></tr>`;
     }).join('')}</tbody></table>`;
 }
 function progressRecap(d, t) {
@@ -140,50 +171,77 @@ function progressRecap(d, t) {
   const market = rows.reduce((a, r) => a + r2(num(r.qty) * num(r.price)), 0);
   const cum = rows.reduce((a, r) => a + r2(num(r.qty) * num(r.price) * num(r.cum) / 100), 0);
   const prev = rows.reduce((a, r) => a + r2(num(r.qty) * num(r.price) * num(r.prev) / 100), 0);
-  return `<table class="vz-recap"><tr><th colspan="2">Récapitulatif de l'avancement</th></tr>
+  return `<table class="mb-recap"><tr><th colspan="2">Récapitulatif de l'avancement</th></tr>
     <tr><td>Montant du marché HT</td><td class="r">${dmoney(market, t)}</td></tr>
-    <tr><td>Travaux réalisés à ce jour (${market ? pctS((cum / market) * 100) : '0,0%'})</td><td class="r">${dmoney(cum, t)}</td></tr>
+    <tr><td>Travaux réalisés à ce jour (${market ? pctS((cum / market) * 100) : '0,0 %'})</td><td class="r">${dmoney(cum, t)}</td></tr>
     <tr><td>Facturé lors des états précédents</td><td class="r">${dmoney(prev, t)}</td></tr>
     <tr><td><b>Présent état d'avancement</b></td><td class="r"><b>${dmoney(cum - prev, t)}</b></td></tr>
     <tr><td>Reste à facturer</td><td class="r">${dmoney(market - cum, t)}</td></tr></table>`;
 }
 
-// Bloc des totaux (bandes colorées) + textes de paiement à gauche
-function totalsBlock(kind, it, t, paid) {
-  const d = it.data; const tt = totals(d);
+// QR code de virement (norme EPC « SCT », recommandation Febelfin : communication structurée belge dans la référence)
+function epcPayload({ name, iban, bic, amount, comm, text }) {
+  const clean = (s, n) => String(s || '').replace(/[\r\n]+/g, ' ').trim().slice(0, n);
+  const ref = /^\+\+\+\d{3}\/\d{4}\/\d{5}\+\+\+$/.test(comm || '') ? comm : '';
+  return ['BCD', '002', '1', 'SCT', clean(bic, 11), clean(name, 70), String(iban || '').replace(/\s/g, '').toUpperCase(), `EUR${(r2(amount) || 0).toFixed(2)}`, '', ref, ref ? '' : clean(text || comm, 140)].join('\n').replace(/\n+$/, ''); // pas de ligne vide finale
+}
+async function qrDataUrl(text) {
+  await loadScript('assets/vendor/qrcode-generator-1.4.4.js');
+  const q = window.qrcode(0, 'M');
+  window.qrcode.stringToBytes = window.qrcode.stringToBytesFuncs['UTF-8'];
+  q.addData(text, 'Byte'); q.make();
+  return q.createDataURL(6, 0);
+}
+
+// Bas du document : paiement (IBAN, communication, QR) ou acceptation, et carte des totaux
+async function totalsBlock(kind, it, t, paid) {
+  const d = it.data; const tt = totals(d); const co = company();
   const deds = (d.lines || []).filter((l) => l.kind === 'item' && !l.option && isDeduction(l));
   const gross = r2((d.lines || []).filter((l) => l.kind === 'item' && !l.option && !isDeduction(l)).reduce((a, l) => a + r2(num(l.qty) * num(l.price)), 0));
   const dedGroups = {};
-  for (const l of deds) { const k = l.deduction === 'acompte' || /acompte/i.test(l.desc) ? 'Deduction Acompte' : String(l.desc).split(/[(–-]/)[0].trim() || 'Déduction'; dedGroups[k] = (dedGroups[k] || 0) + r2(num(l.qty) * num(l.price)); }
-  const row = (label, val, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="r">${dmoney(val, t)}</td></tr>`;
-  const isQ = kind === 'quote';
-  let rows = row(isQ ? 'Total HT' : 'Sous-total n°1', gross, 'b1');
+  for (const l of deds) { const k = l.deduction === 'acompte' || /acompte/i.test(l.desc) ? 'Déduction acompte' : String(l.desc).split(/[(–-]/)[0].trim() || 'Déduction'; dedGroups[k] = (dedGroups[k] || 0) + r2(num(l.qty) * num(l.price)); }
+  const row = (label, val, cls = '') => `<div class="mb-tr ${cls}"><span>${label}</span><b>${typeof val === 'number' ? dmoney(val, t) : val}</b></div>`;
+  const isCn = d.kind === 'avoir';
+  let rows = row('Total HT', gross, tt.discount || deds.length ? '' : 'mb-sum');
   if (tt.discount) rows += row(`Remise ${fnum(num(d.discount))} %`, -tt.discount);
   for (const [k, v] of Object.entries(dedGroups)) rows += row(esc(k), v);
-  if (tt.discount || deds.length) rows += row(isQ ? 'Total HT après remise' : 'Sous-total n°2', tt.base, 'b1');
-  rows += d.reverse ? '<tr><td>TVA</td><td class="r">Autoliquidation</td></tr>' : tt.vats.map((v) => row(`TVA ${fnum(v.rate, 1).replace(/^(\d+)$/, '$1,0')}%`, v.vat)).join('');
-  rows += row(isQ ? 'Total TVAC' : 'Total TTC', tt.total, 'b1');
-  if (kind === 'invoice' && d.kind !== 'avoir') {
-    if (paid) rows += row('Déjà payé', -paid);
-    rows += row('Total TTC à payer', tt.total - (paid || 0), 'b2');
+  if (tt.discount || deds.length) rows += row('Total HT net', tt.base, 'mb-sum');
+  rows += d.reverse ? row('TVA', 'Autoliquidation') : tt.vats.map((v) => row(`TVA ${fnum(v.rate)} % <small>sur ${dmoney(v.base, t)}</small>`, v.vat)).join('');
+  const due = r2(tt.total - (paid || 0));
+  const card = `<div class="mb-totals">${rows}<div class="mb-grand"><span>${isCn ? 'Total crédité' : 'Total TVAC'}</span><b>${dmoney(tt.total, t)}</b></div>
+    ${kind === 'invoice' && !isCn && paid ? `${row('Déjà payé', -paid)}<div class="mb-due"><span>Reste à payer</span><b>${dmoney(due, t)}</b></div>` : ''}</div>`;
+  const side = [];
+  if (kind === 'invoice' && !isCn && co.iban) {
+    const comm = d.communication || it.number || '';
+    let qr = '';
+    if (t.qr && due > 0.005 && (company().currency || 'EUR') === 'EUR') {
+      try { qr = await qrDataUrl(epcPayload({ name: co.name, iban: co.iban, bic: co.bic, amount: due, comm, text: `${docLabel(kind, d, t)} ${it.number || ''}` })); } catch (e) { qr = ''; }
+    }
+    side.push(`<div class="mb-pay"><div><h4>Paiement</h4><dl class="mb-kv"><dt>Bénéficiaire</dt><dd>${esc(co.name || '')}</dd><dt>IBAN</dt><dd>${esc(ibanFmt(co.iban))}</dd>${co.bic ? `<dt>BIC</dt><dd>${esc(co.bic)}</dd>` : ''}
+      <dt>Communication</dt><dd class="mb-comm">${esc(comm)}</dd>${d.due ? `<dt>Échéance</dt><dd>${esc(dateFr(d.due))}</dd>` : ''}</dl>
+      ${t.payText ? `<p class="mb-paytxt">${esc(fill(t.payText, { societe: co.name || '', iban: ibanFmt(co.iban), date: d.due ? dateFr(d.due) : 'la date d\'échéance', jours: d.due && d.date ? Math.max(0, dnum(d.due) - dnum(d.date)) : '' }))}</p>` : ''}</div>
+      ${qr ? `<figure class="mb-qr"><img src="${qr}" alt="QR code de paiement"><figcaption>Scannez avec votre app bancaire</figcaption></figure>` : ''}</div>`);
   }
-  const co = company();
-  const left = `<div class="vz-pay">
-    ${kind === 'invoice' && d.kind !== 'avoir' && co.iban ? `<div class="vz-red">${esc(fill(t.payText, { societe: (co.name || '').toUpperCase(), iban: ibanFmt(co.iban) }))}</div><div class="vz-red">${esc(ibanFmt(co.iban))}</div>` : ''}
-    ${d.docNote ? `<div class="vz-blue pre">${esc(d.docNote)}</div>` : ''}</div>`;
-  return `<div class="vz-bottom">${left}<table class="vz-tot">${rows}</table></div>`;
+  if (kind === 'quote' && d.valid) side.push(`<div class="mb-accept"><h4>Validité</h4>Offre valable jusqu'au <b>${esc(dateFr(d.valid))}</b>. Les travaux démarrent après signature du devis${d.deposit ? ' et paiement de l\'acompte' : ''}.</div>`);
+  if (d.docNote) side.push(`<div class="mb-note pre">${esc(d.docNote)}</div>`);
+  return `<div class="mb-bottom"><div class="mb-side">${side.join('')}</div>${card}</div>`;
 }
 
-// Conditions générales : sur une nouvelle page (page 2 du PDF), texte libre ; **gras** et titres « Article … » mis en évidence
+// Conditions générales : 2e feuille ; « Article n – titre » mis en évidence
 function cgvBlock(kind, t) {
   const on = { invoice: t.cgvInvoice, quote: t.cgvQuote, order: t.cgvOrder }[kind];
   const txt = String(t.cgv || company().terms || CGV_DEF).trim();
   if (!on || !txt) return '';
   const body = txt.split(/\n{2,}/).map((para) => {
+    const first = para.split('\n')[0];
+    const m = first.match(/^(?:article|art\.)\s*(\d+)\s*[–:.-]?\s*(.*)$/i);
+    const rest = esc(para.split('\n').slice(1).join('\n')).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+    if (m && first.length < 90) return `<p><b><span class="mb-art">${m[1]}</span>${esc(m[2])}</b>${rest ? `<br>${rest}` : ''}</p>`;
     const h = esc(para).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
-    return /^(article|art\.|\d+[.)]\s|[IVX]+[.)]\s)/i.test(para) && para.split('\n')[0].length < 90 ? `<p><b>${h.replace(/<br>/, '</b><br>')}${h.includes('<br>') ? '' : '</b>'}</p>` : `<p>${h}</p>`;
+    return /^(\d+[.)]\s|[IVX]+[.)]\s)/i.test(para) && first.length < 90 ? `<p><b>${h.replace(/<br>/, '</b><br>')}${h.includes('<br>') ? '' : '</b>'}</p>` : `<p>${h}</p>`;
   }).join('');
-  return `<div class="vz-sheet vz-cgv pdf-break ${t.cgvCols ? 'cgv-cols' : ''}"><h3>${esc(t.cgvTitle || 'Conditions générales')}</h3><div class="vz-cgv-body">${body}</div><div class="vz-pgno no-print">Page 2/2</div></div>`;
+  return `<div class="mb-sheet mb-cgv pdf-break ${t.cgvCols ? 'cgv-cols' : ''}"><div class="mb-ruler"></div><h3><span>${esc(t.cgvTitle || 'Conditions générales')}</span><small>${esc(company().name || '')}</small></h3><div class="mb-cgv-body">${body}</div>
+    <footer class="mb-foot"><span>${esc(legalLine(t))}</span><span class="mb-pg">2 / 2</span></footer></div>`;
 }
 // Coordonnées de l'entreprise ou du client manquantes : avertissement à l'écran (non imprimé)
 function coMissing(kind, c) {
@@ -192,7 +250,7 @@ function coMissing(kind, c) {
   const out = [];
   if (miss.length) out.push(`Coordonnées de l'entreprise à compléter pour qu'elles apparaissent sur le document : <b>${miss.join(', ')}</b>.${isAdmin() ? ' <a href="#/settings/company">Paramètres → Entreprise</a>' : ''}`);
   if (!c) out.push(`Aucun ${kind === 'order' ? 'fournisseur' : 'client'} choisi : le cadre de l'adresse reste vide.`);
-  return out.length ? `<div class="vz-warn vz-warn-top no-print">${out.map((x) => `<div>⚠ ${x}</div>`).join('')}</div>` : '';
+  return out.length ? `<div class="mb-warn-top no-print">${out.map((x) => `<div>⚠ ${x}</div>`).join('')}</div>` : '';
 }
 
 // Mentions légales obligatoires selon les taux utilisés
@@ -201,13 +259,13 @@ function mentionsBlock(kind, d, t) {
   if (kind === 'quote' && !t.mentionsOnQuote) return '';
   const rates = new Set((d.lines || []).filter((l) => l.kind === 'item' && !l.option).map((l) => num(l.vat)));
   const out = [];
-  if (d.reverse) out.push(['Autoliquidation :', t.mentionAL]);
+  if (d.reverse) out.push(['Autoliquidation', t.mentionAL]);
   else {
-    if (rates.has(6) && t.mention6) out.push(['TVA 6,0% :', t.mention6]);
-    if (rates.has(12) && t.mention12) out.push(['TVA 12,0% :', t.mention12]);
-    if (rates.has(21) && t.mention21) out.push(['TVA 21,0% :', t.mention21]);
+    if (rates.has(6) && t.mention6) out.push(['TVA 6 %', t.mention6]);
+    if (rates.has(12) && t.mention12) out.push(['TVA 12 %', t.mention12]);
+    if (rates.has(21) && t.mention21) out.push(['TVA 21 %', t.mention21]);
   }
-  return out.map(([k, v]) => `<div class="vz-mention"><u>${k}</u><div class="pre">${esc(v)}</div></div>`).join('');
+  return out.length ? `<section class="mb-legal"><h4>Mentions TVA</h4>${out.map(([k, v]) => `<div class="mb-mention"><b>${k}</b><div class="pre">${esc(v)}</div></div>`).join('')}</section>` : '';
 }
 
 async function printDoc(kind, id) {
@@ -215,7 +273,7 @@ async function printDoc(kind, id) {
   const { it, d, c, project, title, html, typ, co } = r;
   return printDocPage(kind, id, it, d, c, project, title, html, typ, co);
 }
-// Rendu du document (devis, facture, commande) : utilisé pour l'impression et l'aperçu « Visualisation »
+// Rendu du document (devis, facture, commande) : utilisé pour l'impression, l'aperçu et le PDF
 async function docHtml(kind, id) {
   const typ = { quote: 'quote', invoice: 'invoice', order: 'order' }[kind];
   const it = await db.get(typ, id);
@@ -227,18 +285,18 @@ async function docHtml(kind, id) {
   const paid = kind === 'invoice' ? invState(it).paid : 0;
   const isProg = kind === 'invoice' && d.kind === 'situation' && (d.progressRows || []).length;
   const cgv = cgvBlock(kind, t);
-  const html = `<style>${docCSS(t)}</style><div class="doc vz vz-paper"><div class="vz-sheet">
+  const legal = legalLine(t);
+  const html = `<style>${docCSS(t)}</style><div class="doc mb mb-paper" data-foot="${esc(legal)}" data-ink="${esc(t.ink)}" data-acc="${esc(t.accent)}"><div class="mb-sheet"><div class="mb-ruler"></div>
     ${coMissing(kind, c)}${head}${info}
-    ${d.intro ? `<p class="pre vz-intro">${esc(d.intro)}</p>` : ''}
-    ${isProg ? progressTable(d, t) : linesTable(d, t)}
-    ${totalsBlock(kind, it, t, paid)}
+    ${d.intro ? `<p class="pre mb-intro">${esc(d.intro)}</p>` : ''}
+    ${isProg ? progressTable(d, t) : linesTable(d, t, kind)}
+    ${await totalsBlock(kind, it, t, paid)}
     ${isProg && t.recap ? progressRecap(d, t) : ''}
-    ${d.reverse && c && !(c.data || {}).vat ? '<p class="vz-warn no-print">⚠ Autoliquidation : le numéro de TVA du client doit figurer sur la facture.</p>' : ''}
+    ${d.reverse && c && !(c.data || {}).vat ? '<p class="mb-warn no-print">⚠ Autoliquidation : le numéro de TVA du client doit figurer sur la facture.</p>' : ''}
+    ${d.notes ? `<div class="mb-notes pre">${esc(d.notes)}</div>` : ''}
+    ${kind === 'quote' ? `<section class="mb-sign"><div><small>Pour ${esc(co.name || "l'entreprise")}</small><span class="mb-sl"></span><em>Nom et signature</em></div><div><small>Bon pour accord – le client</small><span class="mb-sl"></span><em>Date, nom et signature, précédés de « Bon pour accord »</em></div></section>${co.terms && !t.cgvQuote ? `<div class="mb-terms pre">${esc(co.terms)}</div>` : ''}` : ''}
     ${mentionsBlock(kind, d, t)}
-    ${d.notes ? `<div class="vz-notes pre">${esc(d.notes)}</div>` : ''}
-    ${kind === 'quote' ? `${co.terms && !t.cgvQuote ? `<div class="vz-terms pre">${esc(co.terms)}</div>` : ''}<div class="vz-sign"><div>Pour ${esc(co.name || "l'entreprise")}</div><div>Pour accord, le client<br><small>Date, nom et signature précédés de la mention « Bon pour accord »</small></div></div>` : ''}
-    ${t.footer || co.footer ? `<div class="vz-foot">${esc(t.footer || co.footer)}</div>` : ''}
-    <div class="vz-pgno no-print">Page 1${cgv ? '/2' : '/1'}</div></div>
+    <footer class="mb-foot"><span>${esc(legal)}</span><span class="mb-pg">1 / ${cgv ? 2 : 1}</span></footer></div>
     ${cgv}
   </div>`;
   return { it, d, c, project, title, html, typ, co };
@@ -269,9 +327,8 @@ function printDocPage(kind, id, it, d, c, project, title, html, typ, co) {
 route('print', (kind, id) => printDoc(kind, +id));
 
 function docCSS(t) {
-  const font = t.font === 'Montserrat' ? "'Montserrat', Helvetica, Arial, sans-serif" : t.font === 'Serif' ? "Georgia, 'Times New Roman', serif" : 'Helvetica, Arial, sans-serif';
-  return `.doc.vz{--p:${t.primary};--band:${t.band};--light:${t.light};--payc:${t.payColor};--notec:${t.noteColor};font-family:${font};font-size:${num(t.size) || 10.5}pt;color:#222}
-  @page{@bottom-right{content:"Page " counter(page) "/" counter(pages);font-size:8pt;color:#555}}
+  const fonts = { Manrope: "'Manrope', 'Segoe UI', Helvetica, Arial, sans-serif", Montserrat: "'Montserrat', Helvetica, Arial, sans-serif", Serif: "Georgia, 'Times New Roman', serif" };
+  return `.doc.mb{--ink:${t.ink};--acc:${t.accent};--tint:${t.tint};font-family:${fonts[t.font] || 'Helvetica, Arial, sans-serif'};font-size:${num(t.size) || 9.5}pt}
   ${t.css || ''}`;
 }
 
@@ -279,18 +336,19 @@ function docCSS(t) {
 function templateSettings(page) {
   const t = tpl();
   const fields = [
-    { name: 'h1', type: 'html', cls: 'full', html: '<div class="section-t">Apparence</div>' },
-    { name: 'primary', label: 'Couleur principale (titres, chapitres)', type: 'color' }, { name: 'band', label: 'Couleur des sous-totaux', type: 'color' },
-    { name: 'light', label: 'Couleur des sous-chapitres', type: 'color' }, { name: 'font', label: 'Police', type: 'select', options: [['Montserrat', 'Montserrat (comme vos documents)'], ['Helvetica', 'Helvetica / Arial'], ['Serif', 'Georgia (serif)']] },
+    { name: 'h1', type: 'html', cls: 'full', html: '<div class="section-t">Apparence – modèle Madibu</div><small class="muted">Mise en page propre à votre entreprise : règle de chantier en tête, cartouches émetteur / client / chantier, QR code de paiement.</small>' },
+    { name: 'ink', label: 'Couleur principale (en-tête, chapitres, total)', type: 'color' }, { name: 'accent', label: 'Couleur d\'accent (règle, codes, reste à payer)', type: 'color' },
+    { name: 'tint', label: 'Fond des cartouches et chapitres', type: 'color' }, { name: 'font', label: 'Police', type: 'select', options: [['Manrope', 'Manrope (modèle Madibu)'], ['Montserrat', 'Montserrat'], ['Helvetica', 'Helvetica / Arial'], ['Serif', 'Georgia (serif)']] },
     { name: 'size', label: 'Taille du texte (pt)', type: 'number' }, { name: 'thousands', label: 'Séparateur des milliers', type: 'select', options: [['.', '14.588,10 €'], [' ', '14 588,10 €'], ['', '14588,10 €']] },
-    { name: 'payColor', label: 'Couleur du texte de paiement', type: 'color' }, { name: 'noteColor', label: 'Couleur de la remarque', type: 'color' },
-    { name: 'h2', type: 'html', cls: 'full', html: '<div class="section-t">Titres et colonnes</div><small class="muted">Variable disponible : {numero}</small>' },
-    { name: 'quoteTitle', label: 'Titre des devis' }, { name: 'invoiceTitle', label: 'Titre des factures' },
-    { name: 'creditTitle', label: 'Titre des notes de crédit' }, { name: 'orderTitle', label: 'Titre des bons de commande' },
-    { name: 'showTM', label: 'Afficher la colonne TM', type: 'check' }, { name: 'tmLabel', label: 'Intitulé de la colonne TM' },
-    { name: 'showManager', label: 'Afficher « Gestionnaire du chantier » sur les devis', type: 'check' }, { name: 'recap', label: 'Récapitulatif sous les états d\'avancement', type: 'check' },
+    { name: 'tagline', label: 'Slogan sous le logo (facultatif)', placeholder: 'Ex. : Rénovation & construction depuis 2015', cls: 'full' },
+    { name: 'h2', type: 'html', cls: 'full', html: '<div class="section-t">Intitulés et colonnes</div>' },
+    { name: 'quoteTitle', label: 'Intitulé des devis' }, { name: 'invoiceTitle', label: 'Intitulé des factures' },
+    { name: 'creditTitle', label: 'Intitulé des notes de crédit' }, { name: 'orderTitle', label: 'Intitulé des bons de commande' },
+    { name: 'showCodes', label: 'Codes de ligne (1.1.1) devant les descriptions', type: 'check' }, { name: 'showTM', label: 'Afficher le code TM des lignes', type: 'check' },
+    { name: 'showManager', label: 'Afficher le gestionnaire du chantier sur les devis', type: 'check' }, { name: 'recap', label: 'Récapitulatif sous les états d\'avancement', type: 'check' },
     { name: 'h3', type: 'html', cls: 'full', html: '<div class="section-t">Paiement</div><small class="muted">Variables : {societe}, {iban}, {jours}, {date}</small>' },
-    { name: 'payText', label: 'Texte de paiement (en rouge)', cls: 'full' }, { name: 'payTerms', label: 'Conditions de paiement (en-tête)', cls: 'full' },
+    { name: 'qr', label: 'QR code de paiement sur les factures (scanné par l\'app bancaire du client : montant, IBAN et communication déjà remplis)', type: 'check', cls: 'full' },
+    { name: 'payText', label: 'Texte de paiement', cls: 'full' }, { name: 'payTerms', label: 'Conditions de paiement (en-tête)', cls: 'full' },
     { name: 'h4', type: 'html', cls: 'full', html: '<div class="section-t">Mentions obligatoires</div><small class="muted">Ajoutées automatiquement quand la facture contient des lignes au taux concerné, ou en autoliquidation. Vérifiez les textes avec votre comptable.</small>' },
     { name: 'mention6', label: 'Mention TVA 6 %', type: 'textarea', rows: 7, cls: 'full' },
     { name: 'mention12', label: 'Mention TVA 12 % (facultatif)', type: 'textarea', rows: 3, cls: 'full' },
@@ -302,14 +360,14 @@ function templateSettings(page) {
     { name: 'cgv', label: 'Texte des conditions générales', type: 'textarea', rows: 12, cls: 'full', placeholder: 'Vide = conditions générales proposées par défaut (9 articles)' },
     { name: 'cgvInvoice', label: 'Sur les factures', type: 'check' }, { name: 'cgvQuote', label: 'Sur les devis', type: 'check' }, { name: 'cgvOrder', label: 'Sur les bons de commande', type: 'check' },
     { name: 'h5', type: 'html', cls: 'full', html: '<div class="section-t">Avancé</div>' },
-    { name: 'footer', label: 'Pied de page', cls: 'full' },
-    { name: 'css', label: 'CSS personnalisé (modifie librement la mise en page des documents)', type: 'textarea', rows: 5, cls: 'full', hint: 'Classes : .vz-head, .vz-co, .vz-client, .vz-lines, .vz-l1, .vz-l2, .vz-tot, .vz-red, .vz-blue, .vz-mention' },
+    { name: 'footer', label: 'Texte ajouté au pied de page (ex. n° d\'entreprise, assurance)', cls: 'full' },
+    { name: 'css', label: 'CSS personnalisé (modifie librement la mise en page des documents)', type: 'textarea', rows: 5, cls: 'full', hint: 'Classes : .mb-head, .mb-id, .mb-parties, .mb-party, .mb-lines, .mb-ch, .mb-sub, .mb-totals, .mb-grand, .mb-pay, .mb-qr, .mb-legal, .mb-foot' },
   ];
   page.innerHTML = `<div class="card"><form>${fieldsGrid(fields, t)}
     <div class="btns"><button class="btn primary" type="submit">Enregistrer</button><button class="btn" type="button" data-prev="quote">Aperçu d'un devis</button><button class="btn" type="button" data-prev="invoice">Aperçu d'une facture</button><button class="btn danger ghost" type="button" data-reset>Rétablir les valeurs par défaut</button></div></form></div>
     <div class="card"><div class="card-h"><h3>Numérotation</h3></div><div data-num></div></div>`;
   const form = $('form', page);
-  const save = async () => { const v = readFields(form, fields); S.settings.template = { ...t, ...v }; await api('PUT', 'settings', { template: S.settings.template }); };
+  const save = async () => { const v = readFields(form, fields); S.settings.template = { ...t, ...v, style: 'madibu' }; await api('PUT', 'settings', { template: S.settings.template }); };
   form.onsubmit = async (e) => { e.preventDefault(); await save(); toast('Modèles enregistrés'); };
   $$('[data-prev]', page).forEach((b) => {
     b.onclick = async () => {
@@ -320,7 +378,11 @@ function templateSettings(page) {
       go(`#/print/${b.dataset.prev}/${pick.id}`);
     };
   });
-  $('[data-reset]', page).onclick = async () => { if (!confirm('Rétablir le modèle par défaut ?')) return; S.settings.template = {}; await api('PUT', 'settings', { template: {} }); render(); };
+  $('[data-reset]', page).onclick = async () => {
+    if (!confirm('Rétablir l\'apparence par défaut du modèle Madibu ? (mentions et conditions générales conservées)')) return;
+    const keep = Object.fromEntries(['mention6', 'mention12', 'mention21', 'mentionAL', 'mentionsOnQuote', 'cgvTitle', 'cgv', 'cgvInvoice', 'cgvQuote', 'cgvOrder', 'cgvCols', 'footer'].filter((k) => k in (S.settings.template || {})).map((k) => [k, S.settings.template[k]]));
+    S.settings.template = { ...keep, style: 'madibu' }; await api('PUT', 'settings', { template: S.settings.template }); render();
+  };
   numberingSettings($('[data-num]', page));
 }
 async function numberingSettings(box) {
