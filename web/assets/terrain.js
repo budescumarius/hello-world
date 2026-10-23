@@ -38,6 +38,7 @@ async function tHome() {
   const active = projects.filter((p) => !['termine', 'annule'].includes(p.data.status));
   page.classList.add('s-page', 't-page');
   page.innerHTML = `<div class="today-hello"><b>Bonjour ${esc((S.me.name || '').split(' ')[0])}</b><span>${esc(T_DAY(today()))}${isSub() ? ' · espace sous-traitant' : ''}</span></div>
+    ${pushState() !== 'on' && pushState() !== 'denied' ? `<button type="button" class="t-alert soft" data-push>${I.bell}<span><b>Activer les notifications</b><br><small>Rappel pour vos heures, nouveaux rapports et commandes</small></span>${I.chevron}</button>` : ''}
     ${unread.length ? `<a class="t-alert" href="#/t/rapports">${I.bell}<span><b>${unread.length} rapport${unread.length > 1 ? 's' : ''} du bureau</b> à lire</span>${I.chevron}</a>` : ''}
     <div class="t-acts">
       <a class="s-tile t1" href="#/t/heures">${I.clock}<b>Mes heures</b><small>${todayH ? `${fnum(todayH, 1)} h aujourd'hui` : 'pas encore encodées'}</small></a>
@@ -49,6 +50,7 @@ async function tHome() {
     <div class="s-list">${active.length ? active.map((p) => sBtn(`data-p="${p.id}"`, 'crane', esc(p.data.name), esc([p.data.address, p.data.city].filter(Boolean).join(', ') || st(PST, p.data.status).replace(/<[^>]+>/g, '')))).join('')
       : '<div class="todo-empty">' + I.crane + '<b>Aucun chantier pour l\'instant</b><span>Le bureau vous ajoutera à vos chantiers.</span></div>'}</div>`;
   $$('[data-p]', page).forEach((b) => { b.onclick = () => go(`#/t/chantier/${b.dataset.p}`); });
+  const pb = $('[data-push]', page); if (pb) pb.onclick = () => pushEnable();
 }
 
 // ---------------------------------------------------------------- Un chantier : adresse, mon planning, gestes, rapports

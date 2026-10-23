@@ -234,9 +234,10 @@ route('stats', async () => {
 // ---------------------------------------------------------------- Paramètres
 route('settings', async (tab = 'company') => {
   if (!isAdmin()) return go('#/dashboard');
-  const page = layout({ active: '', icon: 'gear', title: 'Paramètres', tabs: [['company', 'Entreprise'], ['docs', 'Documents & numérotation'], ['templates', 'Modèles de documents'], ['peppol', 'Peppol'], ['mail', 'Email'], ['ai', 'Assistant IA'], ['users', 'Utilisateurs'], ['activity', 'Journal d\'activité']].filter(([k]) => !(isSimple() && k === 'ai')).map(([k, l]) => `<a href="#/settings/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
+  const page = layout({ active: '', icon: 'gear', title: 'Paramètres', tabs: [['company', 'Entreprise'], ['docs', 'Documents & numérotation'], ['templates', 'Modèles de documents'], ['peppol', 'Peppol'], ['mail', 'Email'], ['ai', 'Assistant IA'], ['users', 'Utilisateurs'], ['notifs', 'Notifications'], ['activity', 'Journal d\'activité']].filter(([k]) => !(isSimple() && k === 'ai')).map(([k, l]) => `<a href="#/settings/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
   const co = { ...company() };
   if (tab === 'users') return settingsUsers(page);
+  if (tab === 'notifs') return settingsNotifs(page);
   if (tab === 'peppol') return peppolSettings(page);
   if (tab === 'mail') return mailSettings(page);
   if (tab === 'ai') return aiSettings(page);
@@ -323,6 +324,31 @@ async function settingsUsers(page) {
     onRow: edit,
   });
   $('[data-act=new]', page).onclick = () => edit();
+}
+// Paramètres → Notifications : rappel de fin de journée, nouvelles du terrain, e-mail
+function settingsNotifs(page) {
+  const v = { hour: '17:30', remind: true, summary: true, events: true, emailRemind: true, emailSummary: true, emailEvents: false, ...(S.settings.notif || {}) };
+  const fields = [
+    { name: 'h1', type: 'html', cls: 'full', html: '<div class="section-t">Fin de journée (jours ouvrables)</div>' },
+    { name: 'hour', label: 'Heure du rappel', type: 'time' },
+    { name: 'remind', label: 'Rappeler aux ouvriers et sous-traitants d\'encoder leurs heures s\'ils ne l\'ont pas fait', type: 'check', cls: 'full' },
+    { name: 'summary', label: 'M\'envoyer la liste de ceux qui n\'ont pas encodé leurs heures', type: 'check', cls: 'full' },
+    { name: 'h2', type: 'html', cls: 'full', html: '<div class="section-t">Pendant la journée</div>' },
+    { name: 'events', label: 'Me prévenir à chaque ajout du terrain (heures, rapport, photos)', type: 'check', cls: 'full' },
+    { name: 'h3', type: 'html', cls: 'full', html: '<div class="section-t">Copie par e-mail</div><small class="muted">Les notifications arrivent toujours dans l\'application (et sur le téléphone si elles y sont activées). L\'e-mail est en plus.</small>' },
+    { name: 'emailRemind', label: 'Rappel des heures aussi par e-mail', type: 'check' }, { name: 'emailSummary', label: 'Liste du soir aussi par e-mail', type: 'check' },
+    { name: 'emailEvents', label: 'Chaque ajout du terrain aussi par e-mail', type: 'check' },
+  ];
+  const st = pushState();
+  page.innerHTML = `<div class="card"><div class="card-h"><h3>Cet appareil</h3></div>
+      <p>${st === 'on' ? '✓ Les notifications sont activées sur cet appareil.' : st === 'denied' ? 'Les notifications sont bloquées dans les réglages de ce navigateur.' : st === 'unsupported' ? 'Ce navigateur ne reçoit pas les notifications (sur iPhone : installez d\'abord l\'application sur l\'écran d\'accueil).' : 'Les notifications ne sont pas encore activées sur cet appareil.'}</p>
+      <div class="btns"><button class="btn primary" data-act="push">${I.bell} ${st === 'on' ? 'Envoyer une notification de test' : 'Activer sur cet appareil'}</button></div></div>
+    <div class="card"><form>${fieldsGrid(fields, v)}<div class="btns"><button class="btn primary" type="submit">Enregistrer</button><button class="btn" type="button" data-act="now">Vérifier les heures maintenant</button></div></form>
+      <p class="muted">Le rappel part à l'heure choisie dès qu'une personne utilise l'application. Pour qu'il parte toujours à l'heure exacte, ajoutez la tâche planifiée <code>cron.php</code> (voir README, toutes les 15 minutes).</p></div>`;
+  const form = $('form', page);
+  form.onsubmit = async (e) => { e.preventDefault(); const nv = readFields(form, fields); S.settings.notif = nv; await api('PUT', 'settings', { notif: nv }); toast('Notifications enregistrées'); };
+  $('[data-act=push]', page).onclick = async () => { if (pushState() === 'on') { await api('POST', 'notifs/test'); toast('Notification de test envoyée', 2500); notifRefresh(); } else pushEnable(); };
+  $('[data-act=now]', page).onclick = async () => { const r = await api('POST', 'notifs/remind'); toast(r.missing.length ? `Rappel envoyé à : ${r.missing.join(', ')}` : 'Tout le monde a encodé ses heures aujourd\'hui ✓', 5000); notifRefresh(); };
 }
 function editProfile() {
   formModal({

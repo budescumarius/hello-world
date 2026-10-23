@@ -9,6 +9,10 @@ Pas de menu latéral : 5 espaces, dans l'ordre de vie d'un chantier, toujours à
 - **Simplifié** : Accueil · Facturer (factures, devis) · Achats · Chantiers (chantiers, clients, fournisseurs, prix) · Moi.
 - Ordinateur : capsule des espaces en haut, rubriques en pastilles, recherche (⌘K), « Créer » et le compte (avatar) à droite. Téléphone : espaces en bas, « + Créer » en haut à droite, compte en haut à gauche.
 
+## Espace terrain (ouvriers, sous-traitants) et notifications
+- *Paramètres → Utilisateurs → Nouvel accès* : rôle **Ouvrier** (lié à sa fiche RH) ou **Sous-traitant** (lié à sa fiche contact). Ils voient uniquement leurs chantiers, encodent leurs heures, envoient rapports et photos, lisent les rapports du bureau, voient leurs bons de commande (facturés ou non) et leur planning. Le serveur ne leur envoie rien d'autre (ni prix, ni devis, ni factures, ni clients).
+- **Notifications** (*Paramètres → Notifications*) : à chaque ajout du terrain (heures, rapport, photos), rapport ou bon de commande envoyé, affectation au planning ; en fin de journée, rappel à ceux qui n'ont pas encodé leurs heures et liste envoyée au bureau. Dans l'application, sur le téléphone (push : sur iPhone, application installée sur l'écran d'accueil) et, au choix, par e-mail. Pour un rappel à l'heure exacte : tâche cron `php …/cron.php` toutes les 15 minutes.
+
 ## Module
 - **Aujourd'hui**: une seule liste d'actions triées par urgence (factures en retard à relancer, tâches, interventions du jour, achats à payer ou à vérifier, devis acceptés à facturer, devis sans réponse), « Votre argent » et chantiers en cours.
 - **Contacts**: clients, prospects, fournisseurs, sous-traitants, architectes – fiche avec tout l'historique.

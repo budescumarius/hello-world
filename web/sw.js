@@ -12,3 +12,29 @@ self.addEventListener('fetch', (e) => {
     return r;
   }).catch(() => caches.match(e.request).then((r) => r || caches.match('./') || caches.match('index.html'))));
 });
+
+// Notifications : le serveur envoie un push vide ; on lit ici les dernières notifications (sur votre serveur) et on les affiche
+self.addEventListener('push', (e) => {
+  e.waitUntil((async () => {
+    let list = [];
+    try { const r = await fetch('api.php?r=notifs/latest', { credentials: 'include' }); if (r.ok) list = (await r.json()).list || []; } catch (err) { /* hors connexion */ }
+    const n = list[0];
+    const more = list.length > 1 ? `\n+ ${list.length - 1} autre${list.length > 2 ? 's' : ''} notification${list.length > 2 ? 's' : ''}` : '';
+    await self.registration.showNotification(n ? n.title : 'BâtiPro', {
+      body: (n ? n.body || '' : 'Vous avez une nouvelle notification') + more,
+      icon: 'assets/icon-192.png', badge: 'assets/icon-192.png', tag: 'batipro', renotify: true,
+      data: { href: n ? n.href || '#/' : '#/', id: n ? n.id : 0 },
+    });
+  })());
+});
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const { href = '#/', id = 0 } = e.notification.data || {};
+  e.waitUntil((async () => {
+    if (id) fetch(`api.php?r=notifs/read/${id}`, { method: 'POST', credentials: 'include', headers: { 'X-Requested-With': 'batipro' } }).catch(() => {});
+    const url = new URL('./' + href, self.registration.scope).href;
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const w of wins) { if ('focus' in w) { await w.focus(); w.postMessage({ go: href }); return; } }
+    await self.clients.openWindow(url);
+  })());
+});

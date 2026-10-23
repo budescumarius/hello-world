@@ -509,3 +509,171 @@ function http_get(string $url, int $timeout = 15, string $accept = 'application/
 function edition_default(): string { $e = config()['edition'] ?? 'avance'; return $e === 'simple' ? 'simple' : 'avance'; }
 function edition(?int $company = null): string { $e = setting('edition', null, $company); return in_array($e, ['simple', 'avance'], true) ? $e : edition_default(); }
 
+
+// ---------------------------------------------------------------- Notifications : dans l'application, push sur le téléphone, e-mail
+// Le push est envoyé SANS contenu (rien ne transite par Google / Apple) : le téléphone réveille l'application,
+// qui lit ses notifications sur votre serveur et les affiche.
+function notif_tables(): void {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    db()->exec("CREATE TABLE IF NOT EXISTS notifs (id INT AUTO_INCREMENT PRIMARY KEY, company_id INT NOT NULL, user_id INT NOT NULL, kind VARCHAR(30) NOT NULL, title VARCHAR(190) NOT NULL, body VARCHAR(500) NOT NULL DEFAULT '', href VARCHAR(190) NOT NULL DEFAULT '', created_at DATETIME NOT NULL, read_at DATETIME NULL, KEY u (user_id, read_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    db()->exec('CREATE TABLE IF NOT EXISTS push_subs (id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, endpoint VARCHAR(700) NOT NULL, created_at DATETIME NOT NULL, KEY u (user_id), UNIQUE KEY ep (endpoint(250))) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+}
+function notif_cfg(): array {
+    return (setting('notif', []) ?: []) + ['hour' => '17:30', 'remind' => true, 'summary' => true, 'events' => true, 'emailRemind' => true, 'emailSummary' => true, 'emailEvents' => false];
+}
+function b64url(string $s): string { return rtrim(strtr(base64_encode($s), '+/', '-_'), '='); }
+// Clés VAPID (une paire pour toute l'installation), créées au premier besoin
+function vapid_keys(): array {
+    $k = setting('vapid', null, 1);
+    if (!$k || empty($k['pem'])) {
+        $res = openssl_pkey_new(['curve_name' => 'prime256v1', 'private_key_type' => OPENSSL_KEYTYPE_EC]);
+        if (!$res) throw new RuntimeException('OpenSSL ne peut pas créer les clés de notification.');
+        openssl_pkey_export($res, $pem);
+        $det = openssl_pkey_get_details($res);
+        $pub = "\x04" . str_pad($det['ec']['x'], 32, "\0", STR_PAD_LEFT) . str_pad($det['ec']['y'], 32, "\0", STR_PAD_LEFT);
+        $k = ['pem' => $pem, 'pub' => b64url($pub)];
+        set_setting('vapid', $k, 1);
+    }
+    return $k;
+}
+// Jeton VAPID (JWT ES256) pour le service de push du navigateur
+function vapid_jwt(string $endpoint, array $k): string {
+    $p = parse_url($endpoint);
+    $aud = $p['scheme'] . '://' . $p['host'] . (isset($p['port']) ? ':' . $p['port'] : '');
+    $co = setting('company', [], 1) ?: [];
+    $mail = filter_var($co['email'] ?? '', FILTER_VALIDATE_EMAIL) ? $co['email'] : 'admin@' . preg_replace('/:\d+$/', '', (string)($_SERVER['HTTP_HOST'] ?? 'localhost'));
+    $h = b64url(json_encode(['typ' => 'JWT', 'alg' => 'ES256']));
+    $c = b64url(json_encode(['aud' => $aud, 'exp' => time() + 12 * 3600, 'sub' => 'mailto:' . $mail]));
+    openssl_sign("$h.$c", $der, $k['pem'], OPENSSL_ALGO_SHA256);
+    // signature DER (SEQUENCE { INTEGER r, INTEGER s }) → r || s sur 64 octets
+    $i = 2 + ((ord($der[1]) & 0x80) ? (ord($der[1]) & 0x7f) : 0);
+    $rl = ord($der[$i + 1]); $r = substr($der, $i + 2, $rl); $i += 2 + $rl;
+    $sl = ord($der[$i + 1]); $s = substr($der, $i + 2, $sl);
+    $fix = fn($x) => str_pad(substr(ltrim($x, "\0"), -32), 32, "\0", STR_PAD_LEFT);
+    return "$h.$c." . b64url($fix($r) . $fix($s));
+}
+// Services de push des navigateurs acceptés (jamais d'adresse interne)
+function push_endpoint_ok(string $url): bool {
+    $p = parse_url($url);
+    if (($p['scheme'] ?? '') !== 'https' || empty($p['host'])) return defined('PUSH_TEST_HOST') && ($p['host'] ?? '') === PUSH_TEST_HOST;
+    return (bool)preg_match('/(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com)$/i', $p['host'])
+        || (defined('PUSH_TEST_HOST') && $p['host'] === PUSH_TEST_HOST);
+}
+function push_send(string $endpoint): int {
+    if (!function_exists('curl_init') || !push_endpoint_ok($endpoint)) return 0;
+    $k = vapid_keys();
+    $ch = curl_init($endpoint);
+    curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => '', CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 3, CURLOPT_TIMEOUT => 6,
+        CURLOPT_HTTPHEADER => ['TTL: 86400', 'Urgency: high', 'Content-Length: 0', 'Authorization: vapid t=' . vapid_jwt($endpoint, $k) . ', k=' . $k['pub']]]);
+    curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return $code;
+}
+// Les push partent après la réponse (l'utilisateur n'attend pas les serveurs de Google / Apple)
+function push_flush(): void {
+    $q = $GLOBALS['BP_PUSHQ'] ?? [];
+    $GLOBALS['BP_PUSHQ'] = [];
+    if (!$q) return;
+    if (function_exists('fastcgi_finish_request')) @fastcgi_finish_request();
+    foreach (q('SELECT id, endpoint FROM push_subs WHERE user_id IN (' . implode(',', array_map('intval', array_unique($q))) . ')')->fetchAll() as $s) {
+        try { $code = push_send($s['endpoint']); } catch (Throwable $e) { $code = 0; }
+        if ($code === 404 || $code === 410) q('DELETE FROM push_subs WHERE id = ?', [$s['id']]);
+    }
+}
+function notify(array $uids, string $kind, string $title, string $body = '', string $href = '', bool $email = false): void {
+    notif_tables();
+    $uids = array_values(array_unique(array_filter(array_map('intval', $uids))));
+    if (!$uids) return;
+    foreach ($uids as $u) q('INSERT INTO notifs (company_id, user_id, kind, title, body, href, created_at) VALUES (?,?,?,?,?,?,?)', [cid(), $u, $kind, mb_substr($title, 0, 190), mb_substr($body, 0, 500), mb_substr($href, 0, 190), now()]);
+    if (!isset($GLOBALS['BP_PUSHQ'])) { $GLOBALS['BP_PUSHQ'] = []; register_shutdown_function('push_flush'); }
+    array_push($GLOBALS['BP_PUSHQ'], ...$uids);
+    if (!$email) return;
+    $base = (!empty($_SERVER['HTTP_HOST']) ? ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://') . $_SERVER['HTTP_HOST'] . rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/'), '/') . '/' : '');
+    foreach (q('SELECT name, email FROM users WHERE id IN (' . implode(',', $uids) . ') AND active = 1')->fetchAll() as $u) {
+        try { send_mail([['email' => $u['email'], 'name' => $u['name']]], [], $title, "Bonjour {$u['name']},\n\n" . ($body ? "$body\n\n" : '') . ($base && $href ? "Ouvrir : $base$href\n" : ''), []); }
+        catch (Throwable $e) { error_log('[batipro notif mail] ' . $e->getMessage()); }
+    }
+}
+// Bureau à prévenir : administrateurs actifs (+ conducteur du chantier)
+function office_ids(?int $pid = null): array {
+    $ids = array_map('intval', q("SELECT id FROM users WHERE company_id = ? AND active = 1 AND role = 'admin'", [cid()])->fetchAll(PDO::FETCH_COLUMN));
+    if ($pid) {
+        $p = q("SELECT data FROM items WHERE id = ? AND type = 'project' AND company_id = ?", [$pid, cid()])->fetch();
+        $m = (int)(($p ? json_decode($p['data'], true) : [])['managerId'] ?? 0);
+        if ($m) $ids[] = $m;
+    }
+    return array_values(array_unique($ids));
+}
+function item_label(string $type, int $id): string {
+    $r = q('SELECT data FROM items WHERE id = ? AND type = ? AND company_id = ?', [$id, $type, cid()])->fetch();
+    $d = $r ? (json_decode($r['data'], true) ?: []) : [];
+    return (string)($d['name'] ?? $d['title'] ?? $d['company'] ?? '');
+}
+// Ce qu'on signale quand quelqu'un ajoute quelque chose
+function notify_item(array $me, string $type, array $row, ?array $before = null): void {
+    $cfg = notif_cfg();
+    $d = json_decode((string)$row['data'], true) ?: [];
+    $pid = $row['project_id'] !== null ? (int)$row['project_id'] : null;
+    $site = $pid ? item_label('project', $pid) : '';
+    if (is_field($me) && !$before && $cfg['events']) {
+        if ($type === 'timesheet') notify(office_ids($pid), 'hours', "{$me['name']} a encodé " . rtrim(rtrim(number_format((float)($d['hours'] ?? 0), 2, ',', ''), '0'), ',') . ' h', trim($site . ((string)($d['task'] ?? '') !== '' ? ' – ' . $d['task'] : '')), $pid ? "#/project/$pid/hours" : '#/hr/timesheets', (bool)$cfg['emailEvents']);
+        if ($type === 'report') {
+            $n = count((array)($d['photos'] ?? []));
+            $title = ($d['kind'] ?? '') === 'photos' ? "{$me['name']} a envoyé $n photo" . ($n > 1 ? 's' : '') : "Nouveau rapport de {$me['name']}";
+            notify(office_ids($pid), 'report', $title, trim($site . (($d['text'] ?? '') !== '' ? ' – ' . mb_substr((string)$d['text'], 0, 160) : '')), '#/report/' . (int)$row['id'], (bool)$cfg['emailEvents']);
+        }
+        return;
+    }
+    if (is_field($me)) return;
+    // bureau → terrain
+    if ($type === 'report' && !$before && !empty($d['to'])) notify((array)$d['to'], 'report', 'Nouveau rapport du bureau : ' . ($d['title'] ?? ''), mb_substr((string)($d['text'] ?? ''), 0, 160), '#/t/rapport/' . (int)$row['id'], (bool)$cfg['emailEvents']);
+    if ($type === 'order' && ($d['status'] ?? 'brouillon') !== 'brouillon') {
+        $was = $before ? (json_decode((string)$before['data'], true) ?: []) : [];
+        $u = field_user_of('contact', (int)($d['supplierId'] ?? 0));
+        if ($u && (($was['status'] ?? 'brouillon') === 'brouillon')) notify([$u], 'order', 'Nouveau bon de commande ' . ($row['number'] ?? ''), $site, '#/print/order/' . (int)$row['id'], (bool)$cfg['emailEvents']);
+        elseif ($u && ($d['status'] ?? '') === 'facturee' && ($was['status'] ?? '') !== 'facturee') notify([$u], 'order', 'Bon de commande ' . ($row['number'] ?? '') . ' : facturé ✓', $site, '#/t/commandes');
+    }
+    if ($type === 'assign' && !$before) {
+        $u = field_user_of('employee', (int)($d['employeeId'] ?? 0));
+        if ($u && ($d['date'] ?? '') >= date('Y-m-d')) notify([$u], 'plan', 'Planning : ' . ($site ?: 'chantier') . ' le ' . date('d/m', strtotime((string)$d['date'])), (string)($d['note'] ?? ''), '#/t/planning');
+    }
+}
+function field_user_of(string $type, int $id): int {
+    if (!$id) return 0;
+    $r = q('SELECT data FROM items WHERE id = ? AND type = ? AND company_id = ?', [$id, $type, cid()])->fetch();
+    return $r ? (int)((json_decode($r['data'], true) ?: [])['userId'] ?? 0) : 0;
+}
+// Fin de journée (heure belge) : rappel à ceux qui n'ont pas encodé leurs heures, résumé au bureau. Une fois par jour.
+function daily_reminders(bool $force = false): array {
+    $cfg = notif_cfg();
+    $now = new DateTime('now', new DateTimeZone('Europe/Brussels'));
+    $day = $now->format('Y-m-d');
+    if (!$force) {
+        if ((int)$now->format('N') >= 6 || $now->format('H:i') < (string)$cfg['hour'] || (!$cfg['remind'] && !$cfg['summary'])) return [];
+        if (setting('remind_done') === $day) return [];
+    }
+    set_setting('remind_done', $day);
+    $items = q("SELECT type, project_id, data FROM items WHERE company_id = ? AND type IN ('timesheet', 'absence', 'phase', 'assign')", [cid()])->fetchAll();
+    $missing = [];
+    foreach (q("SELECT id, name, email, role, 0 AS super FROM users WHERE company_id = ? AND active = 1 AND role IN ('ouvrier', 'soustraitant')", [cid()])->fetchAll() as $u) {
+        $u['id'] = (int)$u['id']; $u['super'] = 0;
+        $sc = field_scope($u);
+        $expected = false; $hours = 0.0; $absent = false;
+        foreach ($items as $r) {
+            $d = json_decode($r['data'], true) ?: [];
+            if ($r['type'] === 'timesheet' && ($d['date'] ?? '') === $day && (($sc['employee'] && (int)($d['employeeId'] ?? 0) === $sc['employee']) || ($sc['contact'] && (int)($d['contactId'] ?? 0) === $sc['contact']))) $hours += (float)($d['hours'] ?? 0);
+            if ($r['type'] === 'absence' && $sc['employee'] && (int)($d['employeeId'] ?? 0) === $sc['employee'] && ($d['from'] ?? '') <= $day && ($d['to'] ?? '') >= $day) $absent = true;
+            if ($r['type'] === 'assign' && $sc['employee'] && (int)($d['employeeId'] ?? 0) === $sc['employee'] && ($d['date'] ?? '') === $day) $expected = true;
+            if ($r['type'] === 'phase' && ($d['start'] ?? '9') <= $day && ($d['end'] ?? '0') >= $day && (($sc['contact'] && (int)($d['companyId'] ?? 0) === $sc['contact']) || ($sc['employee'] && in_array($sc['employee'], array_map('intval', (array)($d['staff'] ?? [])), true)))) $expected = true;
+        }
+        if ($u['role'] === 'ouvrier' && $sc['employee']) $expected = true; // un ouvrier pointe chaque jour ouvrable
+        if (!$expected || $absent || $hours > 0) continue;
+        $missing[] = $u['name'];
+        if ($cfg['remind']) notify([$u['id']], 'remind', "N'oubliez pas vos heures d'aujourd'hui", 'Touchez ici pour les encoder (30 secondes).', '#/t/heures', (bool)$cfg['emailRemind']);
+    }
+    if ($missing && $cfg['summary']) notify(office_ids(), 'summary', count($missing) > 1 ? count($missing) . " personnes n'ont pas encodé leurs heures aujourd'hui" : "1 personne n'a pas encodé ses heures aujourd'hui", implode(', ', $missing), '#/hr/timesheets', (bool)$cfg['emailSummary']);
+    return $missing;
+}

@@ -69,6 +69,7 @@ switch ($seg[0] ?? '') {
     // ------------------------------------------------------------ Données de départ
     case 'bootstrap':
         $u = require_user();
+        try { daily_reminders(); } catch (Throwable $e) { error_log('[batipro rappels] ' . $e->getMessage()); }
         $users = q('SELECT id, name, email, role, active, color, last_login FROM users WHERE company_id = ? ORDER BY name', [cid()])->fetchAll();
         foreach ($users as &$x) { $x['id'] = (int)$x['id']; $x['active'] = (int)$x['active']; }
         unset($x);
@@ -234,7 +235,9 @@ switch ($seg[0] ?? '') {
             $nid = (int)db()->lastInsertId();
             db()->commit();
             log_activity($me['id'], 'create', $type, $nid, $pid ?? ($type === 'project' ? $nid : null), $data['name'] ?? $data['title'] ?? $number);
-            out(row_out(q('SELECT * FROM items WHERE id = ?', [$nid])->fetch()));
+            $row = q('SELECT * FROM items WHERE id = ?', [$nid])->fetch();
+            try { notify_item($me, $type, $row); } catch (Throwable $e) { error_log('[batipro notif] ' . $e->getMessage()); }
+            out(row_out($row));
         }
         if ($method === 'PUT' && $id) {
             $b = body();
@@ -257,7 +260,9 @@ switch ($seg[0] ?? '') {
               [$data, $pid, $number, $me['id'], now(), $id]);
             $d = json_decode($data, true) ?: [];
             if (empty($b['silent'])) log_activity($me['id'], 'update', $type, $id, $pid !== null ? (int)$pid : ($type === 'project' ? $id : null), $d['name'] ?? $d['title'] ?? $number);
-            out(row_out(q('SELECT * FROM items WHERE id = ?', [$id])->fetch()));
+            $row = q('SELECT * FROM items WHERE id = ?', [$id])->fetch();
+            if (in_array($type, ['order'], true)) { try { notify_item($me, $type, $row, $cur); } catch (Throwable $e) { error_log('[batipro notif] ' . $e->getMessage()); } }
+            out(row_out($row));
         }
         if ($method === 'DELETE' && $id) {
             $cur = q('SELECT * FROM items WHERE id = ? AND type = ? AND company_id = ?', [$id, $type, cid()])->fetch();
@@ -276,6 +281,57 @@ switch ($seg[0] ?? '') {
             log_activity($me['id'], 'delete', $type, $id, $cur['project_id'] !== null ? (int)$cur['project_id'] : null, $d['name'] ?? $d['title'] ?? $cur['number']);
             out(['ok' => true]);
         }
+        fail(404, 'Route inconnue');
+
+    // ------------------------------------------------------------ Notifications de l'utilisateur
+    case 'notifs':
+        $me = require_user();
+        notif_tables();
+        $act = $seg[1] ?? '';
+        if ($method === 'GET' && $act === '') {
+            try { daily_reminders(); } catch (Throwable $e) { error_log('[batipro rappels] ' . $e->getMessage()); }
+            $list = q('SELECT id, kind, title, body, href, created_at, read_at FROM notifs WHERE user_id = ? AND company_id = ? ORDER BY id DESC LIMIT 40', [$me['id'], cid()])->fetchAll();
+            foreach ($list as &$n) $n['id'] = (int)$n['id'];
+            unset($n);
+            $unread = (int)q('SELECT COUNT(*) FROM notifs WHERE user_id = ? AND company_id = ? AND read_at IS NULL', [$me['id'], cid()])->fetchColumn();
+            out(['list' => $list, 'unread' => $unread]);
+        }
+        // appelé par le téléphone quand un push arrive : les dernières non lues (sans les marquer lues)
+        if ($method === 'GET' && $act === 'latest') {
+            $list = q('SELECT id, title, body, href FROM notifs WHERE user_id = ? AND read_at IS NULL AND created_at >= ? ORDER BY id DESC LIMIT 5', [$me['id'], date('Y-m-d H:i:s', time() - 3 * 86400)])->fetchAll();
+            out(['list' => $list]);
+        }
+        if ($method === 'POST' && $act === 'read') {
+            $id = (int)($seg[2] ?? 0);
+            if ($id) q('UPDATE notifs SET read_at = ? WHERE id = ? AND user_id = ? AND read_at IS NULL', [now(), $id, $me['id']]);
+            else q('UPDATE notifs SET read_at = ? WHERE user_id = ? AND company_id = ? AND read_at IS NULL', [now(), $me['id'], cid()]);
+            out(['ok' => true]);
+        }
+        if ($method === 'POST' && $act === 'test') {
+            notify([$me['id']], 'test', 'Notifications activées ✓', 'Vous recevrez ici les rappels et les nouvelles du chantier.', is_field($me) ? '#/t' : '#/dashboard');
+            out(['ok' => true, 'devices' => (int)q('SELECT COUNT(*) FROM push_subs WHERE user_id = ?', [$me['id']])->fetchColumn()]);
+        }
+        if ($method === 'POST' && $act === 'remind') {
+            require_admin();
+            out(['missing' => daily_reminders(true)]);
+        }
+        fail(404, 'Route inconnue');
+
+    // ------------------------------------------------------------ Abonnement push d'un appareil
+    case 'push':
+        $me = require_user();
+        notif_tables();
+        if ($method === 'GET' && ($seg[1] ?? '') === 'key') {
+            try { out(['key' => vapid_keys()['pub']]); } catch (Throwable $e) { fail(503, $e->getMessage()); }
+        }
+        $ep = trim((string)(body()['endpoint'] ?? ''));
+        if ($method === 'POST') {
+            if (!push_endpoint_ok($ep)) fail(400, 'Service de notification non reconnu.');
+            q('DELETE FROM push_subs WHERE endpoint = ?', [$ep]);
+            q('INSERT INTO push_subs (user_id, endpoint, created_at) VALUES (?,?,?)', [$me['id'], $ep, now()]);
+            out(['ok' => true]);
+        }
+        if ($method === 'DELETE') { q('DELETE FROM push_subs WHERE endpoint = ? AND user_id = ?', [$ep, $me['id']]); out(['ok' => true]); }
         fail(404, 'Route inconnue');
 
     // ------------------------------------------------------------ Rapport lu (destinataire, sans modifier le rapport)

@@ -250,13 +250,66 @@ function secBar(cur) {
 }
 // Menu du compte (avatar) : profil, paramètres, plateforme, déconnexion
 function accountMenu() {
-  const items = [{ label: 'Mon profil', icon: 'user', run: () => editProfile() }];
+  const items = [{ label: `Notifications${S.unread ? ` (${S.unread} nouvelle${S.unread > 1 ? 's' : ''})` : ''}`, icon: 'bell', primary: !!S.unread, run: () => notifList() },
+    ...(pushState() === 'on' ? [] : [{ label: 'Activer les notifications sur cet appareil', icon: 'bell', run: () => pushEnable() }]),
+    { label: 'Mon profil', icon: 'user', run: () => editProfile() }];
   if (isField()) items.push({ label: 'Installer l\'application sur le téléphone', icon: 'download', run: () => installHelp() });
   if (isAdmin()) items.push({ label: 'Paramètres', icon: 'gear', run: () => go('#/settings') });
   if (S.me.super) items.push({ label: 'Plateforme (firmes)', icon: 'people', run: () => go('#/platform') });
   if (S.firm && S.firm.own === false) items.push({ label: 'Revenir à ma firme', icon: 'back', run: () => switchFirm(0) });
   items.push({ sep: true }, { label: 'Se déconnecter', icon: 'logout', danger: true, run: async () => { await api('POST', 'auth/logout').catch(() => {}); S.ready = false; showLogin(); } });
   menuSheet(S.me.name || 'Mon compte', items);
+}
+
+// ---------------------------------------------------------------- Notifications (pastille sur l'avatar, liste, push sur cet appareil)
+S.unread = 0;
+const b64u8 = (b) => { const s = atob(b.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (b.length % 4)) % 4)); return Uint8Array.from(s, (c) => c.charCodeAt(0)); };
+function pushState() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return 'unsupported';
+  return Notification.permission === 'granted' && localStorage.getItem('bp-push') ? 'on' : Notification.permission === 'denied' ? 'denied' : 'off';
+}
+async function pushEnable() {
+  if (pushState() === 'unsupported') {
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    modal(`${mhead('Activer les notifications')}<div class="m-body s-dict">${ios ? '<p>Sur iPhone, les notifications marchent quand l\'application est <b>installée</b> :</p><p>1. Dans Safari, touchez <b>Partager</b> (carré avec une flèche) puis <b>Sur l\'écran d\'accueil</b>.</p><p>2. Ouvrez l\'application depuis la nouvelle icône, puis revenez ici.</p>' : '<p>Ce navigateur ne permet pas les notifications. Utilisez Chrome, Edge, Firefox ou Safari récent.</p>'}</div>`);
+    return false;
+  }
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { toast('Notifications refusées : autorisez-les dans les réglages du téléphone (ou du navigateur)', 6000); return false; }
+    const reg = await navigator.serviceWorker.ready;
+    const { key } = await api('GET', 'push/key');
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u8(key) });
+    await api('POST', 'push', { endpoint: sub.endpoint });
+    try { localStorage.setItem('bp-push', '1'); } catch (e) { /* */ }
+    await api('POST', 'notifs/test');
+    toast('Notifications activées ✓', 3000); render();
+    return true;
+  } catch (e) { toast('Activation impossible : ' + e.message, 6000); return false; }
+}
+function notifBadge() { $$('.dock-me, .me-btn').forEach((b) => { if (S.unread) b.dataset.n = S.unread > 9 ? '9+' : S.unread; else delete b.dataset.n; }); }
+let notifLast = 0;
+async function notifRefresh() {
+  if (!S.ready || document.hidden) return;
+  try {
+    const r = await api('GET', 'notifs');
+    const top = (r.list[0] || {}).id || 0;
+    if (notifLast && top > notifLast && r.unread && !r.list[0].read_at) toast(`🔔 ${r.list[0].title}`, 4000);
+    notifLast = top; S.unread = r.unread; notifBadge();
+  } catch (e) { /* hors connexion */ }
+}
+setInterval(notifRefresh, 90000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) notifRefresh(); });
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', (e) => { if (e.data && e.data.go) { location.hash = e.data.go; notifRefresh(); } });
+async function notifList() {
+  const r = await api('GET', 'notifs');
+  const m = modal(`${mhead('Notifications')}<div class="m-body nf-list">
+    ${pushState() !== 'on' ? `<button class="t-alert soft" data-push>${I.bell}<span><b>Recevoir les notifications sur cet appareil</b><br><small>Rappels des heures, rapports, photos, commandes</small></span>${I.chevron}</button>` : ''}
+    ${r.list.map((n) => `<a class="nf ${n.read_at ? '' : 'new'}" href="${esc(n.href || '#/')}"><b>${esc(n.title)}</b>${n.body ? `<small>${esc(n.body)}</small>` : ''}<i>${fmtDT(n.created_at)}</i></a>`).join('') || '<p class="muted">Aucune notification pour l\'instant.</p>'}</div>`);
+  $$('.nf', m.el).forEach((a) => a.addEventListener('click', () => m.close()));
+  const pb = $('[data-push]', m.el); if (pb) pb.onclick = () => { m.close(); pushEnable(); };
+  if (r.unread) { api('POST', 'notifs/read').catch(() => {}); S.unread = 0; notifBadge(); }
 }
 
 // page = { active, title, icon, actions, body, back, sub, tabs }
@@ -279,6 +332,7 @@ function layout(p) {
     ${bottomNav(cur)}
   </div>`;
   bindShell();
+  notifBadge();
   mobileActions();
   tabSwitcher();
   const topEl = $('.top'); if (topEl) document.documentElement.style.setProperty('--top-h', `${topEl.offsetHeight}px`);
@@ -570,6 +624,7 @@ async function boot() {
     // relève des factures reçues via Peppol (toutes les 10 min au plus)
     if (typeof peppolSync === 'function' && !isField()) setTimeout(() => peppolSync(), 1500);
     if (typeof aiMount === 'function') aiMount();
+    notifRefresh();
   } catch (e) {
     if (e.status === 401) showLogin();
     else if (e.status === 503) app.innerHTML = `<div class="login"><div class="login-box"><h1>Installation requise</h1><p>${esc(e.message)}</p><a class="btn primary" href="install.php">Installer</a></div></div>`;

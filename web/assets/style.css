@@ -1623,3 +1623,13 @@ body.simple .s-owed.late { background: var(--brick); box-shadow: 6px 6px 0 var(-
 .rep-tx { min-width: 0; display: flex; flex-direction: column; } .rep-tx b { color: var(--ink); } .rep-tx small { color: var(--muted); }
 .rep-n { display: flex; align-items: center; gap: 4px; color: var(--muted); font-weight: 700; } .rep-n svg { width: 16px; height: 16px; }
 @media (max-width: 860px) { .t-acts.three { gap: 8px; } }
+
+/* ---------- Notifications */
+.dock-me, .me-btn { position: relative; }
+.dock-me[data-n]::after, .me-btn[data-n]::after { content: attr(data-n); position: absolute; top: -4px; right: -6px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px; background: var(--brick); color: #fff; font-size: 11px; font-weight: 800; line-height: 19px; text-align: center; box-shadow: 0 0 0 2px var(--paper); }
+.nf-list { display: flex; flex-direction: column; gap: 6px; }
+.nf { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); text-decoration: none !important; }
+.nf.new { border-color: var(--ochre); background: var(--ochre-soft); }
+.nf b { color: var(--ink); } .nf small { color: #5b5547; } .nf i { font-style: normal; font-size: 12px; color: var(--muted); }
+.t-alert.soft { width: 100%; text-align: left; font: inherit; border: 1.5px dashed var(--ochre-2); background: var(--ochre-soft); box-shadow: none; cursor: pointer; }
+.t-alert.soft small { color: var(--muted); }
