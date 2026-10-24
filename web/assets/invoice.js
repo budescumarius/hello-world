@@ -31,6 +31,11 @@ function invEInv(i, contacts) {
   return c && buyerInfo(c).peppolId && buyerInfo(c).isCompany ? badge('À envoyer', '#f08c00') : '<small class="muted">Hors Peppol</small>';
 }
 
+// Note de crédit qui annule une facture (mêmes lignes en négatif)
+const invCredit = (it) => { const d = it.data; return newInvoice({ project_id: it.project_id, data: { kind: 'avoir', clientId: d.clientId, quoteId: d.quoteId, reverse: d.reverse, discount: d.discount, defaultVat: d.defaultVat, title: `Annulation facture ${it.number}`, refInvoice: it.number, lines: d.lines.map((l) => (l.kind === 'item' ? { ...l, id: lid(), qty: -num(l.qty) } : { ...l, id: lid() })) } }); };
+// Facture validée : avertissement légal (note de crédit conseillée), puis modifier ou supprimer quand même
+const invChangeValidated = (it) => validatedInvoiceChange(it, null, { edit: `#/invoice/${it.id}/encodage`, credit: () => invCredit(it), afterDel: () => go('#/invoices') });
+
 // ---------------------------------------------------------------- Liste
 route('invoices', async () => {
   const [invoices, contacts, projects] = await Promise.all([db.list('invoice'), db.list('contact'), db.list('project')]);
@@ -88,6 +93,7 @@ function invMenu(it) {
       { label: 'Peppol – facture électronique', icon: 'file', run: () => peppolInvoice(it) },
       ...(d.kind !== 'avoir' && invState(it).rest > 0.005 ? [{ label: 'Ajouter un paiement', icon: 'coins', run: () => invPayment(it, null) }] : [])] : []),
     { label: 'Commentaires', icon: 'chat', run: () => invComments(it) },
+    ...(locked ? [{ sep: true }, { label: 'Modifier / supprimer la facture validée…', icon: 'edit', run: () => invChangeValidated(it) }] : []),
     ...(!locked ? [{ sep: true }, { label: 'Supprimer le brouillon', icon: 'trash', danger: true, run: async () => { if (confirm('Supprimer ce brouillon ?')) { await db.del('invoice', it.id); render(); } } }] : []),
   ]);
 }
@@ -208,10 +214,12 @@ route('invoice', async (id, tab = 'informations') => {
 
   if (tab === 'encodage') {
     body.innerHTML = `${prog ? `<div class="alert info">État d'avancement EA${d.situationNo || ''} : les lignes sont calculées depuis l'avancement du devis. ${!locked ? '<button class="btn sm" data-prog>Modifier l\'avancement</button>' : ''}</div>` : ''}
-      ${locked ? '<div class="alert info">Facture validée : les lignes ne sont plus modifiables. Pour corriger, créez une note de crédit.</div>' : ''}
+      ${locked ? '<div class="alert info">Facture validée : les lignes ne sont plus modifiables. Pour corriger, créez une note de crédit. <button type="button" class="btn sm" data-reopen>Modifier quand même…</button></div>' : ''}
+      ${d.reopened && !locked ? `<div class="alert warn">⚠ Facture n° ${esc(it.number || '')} rouverte le ${fmtDate(String(d.reopened.at).slice(0, 10))} : elle garde son numéro. Prévenez votre comptable et le client.</div>` : ''}
       <section class="card inv-enc"><div id="lines"></div><div class="inv-enc-foot"><span class="grow"></span><div data-marge></div><div><small class="muted">Total HT</small><b data-ht></b></div></div></section>`;
     const foot = () => { const t = totals(d); $('[data-ht]', body).textContent = money(t.base); const m = $('[data-marge]', body); m.innerHTML = t.cost > 0 ? `<small class="muted">Marge bénéficiaire</small><b>${fnum(t.base ? ((t.base - t.cost) / t.base) * 100 : 0, 1)} % / ${money(t.base - t.cost)}</b>` : ''; };
     linesEditor($('#lines', body), d, { showCost: false, defVat: d.defaultVat, readOnly: locked || prog, onChange: () => { foot(); changed(); } });
+    const ro = $('[data-reopen]', body); if (ro) ro.onclick = () => invChangeValidated(it);
     foot();
     const pg = $('[data-prog]', body);
     if (pg) pg.onclick = async () => { const e = eaState(it); if (['envoye', 'approuve'].includes(e.k) && !confirm(`Cet état a déjà été ${e.k === 'approuve' ? 'approuvé par' : 'envoyé à'} votre client. Le modifier ? Il faudra le lui renvoyer pour approbation.`)) return; const q = await db.get('quote', +d.quoteId); const others = (await db.list('invoice')).filter((x) => +x.data.quoteId === q.id && x.id !== it.id); progressInvoice(q, others, { project_id: it.project_id, data: {} }, it); };
@@ -258,8 +266,10 @@ route('invoice', async (id, tab = 'informations') => {
     if (!d.lines.some((l) => l.kind === 'item')) { toast('La facture ne contient aucune ligne (onglet Encodage)', 4000); return go(`#/invoice/${it.id}/encodage`); }
     if (d.reverse && !(c2() && c2().data.vat)) return toast('Autoliquidation : indiquez d\'abord le n° de TVA du client (obligatoire sur la facture)', 5000);
     if (isEA(it) && eaState(it).k !== 'approuve' && !eaState(it).late && !confirm('Le client n\'a pas encore approuvé cet état d\'avancement. Le facturer quand même ?')) return;
-    if (!confirm('Soumettre la facture ? Elle reçoit son numéro définitif et ne sera plus modifiable.')) return;
-    const r = await api('POST', `number/${d.kind === 'avoir' ? 'avoir' : 'invoice'}`);
+    if (!confirm(d.reopened && it.number ? `Valider à nouveau la facture n° ${it.number} (même numéro) ?` : 'Soumettre la facture ? Elle reçoit son numéro définitif et ne sera plus modifiable.')) return;
+    // facture rouverte : elle garde son numéro
+    const r = d.reopened && it.number ? { number: it.number } : await api('POST', `number/${d.kind === 'avoir' ? 'avoir' : 'invoice'}`);
+    if (d.reopened) d.reopened.revalidatedAt = new Date().toISOString();
     it.number = r.number; d.status = 'emise'; d.emittedAt = today();
     if (d.ea) d.ea.invoicedAt = today();
     if (!d.communication && company().country !== 'FR') d.communication = structComm(r.number.replace(/\D/g, ''));
@@ -274,7 +284,10 @@ route('invoice', async (id, tab = 'informations') => {
     { label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/invoice/${it.id}?mail=1`) },
     { label: 'Peppol – facture électronique', icon: 'file', primary: true, run: () => peppolInvoice(it) },
     ...(d.kind !== 'avoir' && invState(it).rest > 0.005 ? [{ label: 'Ajouter un paiement', icon: 'coins', run: () => invPayment(it, null) }] : []),
-    ...(d.kind !== 'avoir' ? [{ label: 'Créer une note de crédit', icon: 'copy', run: () => newInvoice({ project_id: it.project_id, data: { kind: 'avoir', clientId: d.clientId, quoteId: d.quoteId, reverse: d.reverse, discount: d.discount, defaultVat: d.defaultVat, title: `Annulation facture ${it.number}`, refInvoice: it.number, lines: d.lines.map((l) => (l.kind === 'item' ? { ...l, id: lid(), qty: -num(l.qty) } : { ...l, id: lid() })) } }) }] : []),
+    ...(d.kind !== 'avoir' ? [{ label: 'Créer une note de crédit', icon: 'copy', run: () => invCredit(it) }] : []),
+    { sep: true },
+    { label: 'Modifier la facture validée…', icon: 'edit', run: () => invChangeValidated(it) },
+    { label: 'Supprimer la facture validée…', icon: 'trash', danger: true, run: () => invChangeValidated(it) },
     ...(d.quoteId ? [{ label: 'Ouvrir le devis', icon: 'calc', run: () => go(`#/quote/${d.quoteId}`) }] : []),
     { label: 'Commentaires', icon: 'chat', run: () => invComments(it) },
   ] : [

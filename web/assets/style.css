@@ -1747,3 +1747,5 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .s-selecting a.s-card.picked::before { content: '✓'; display: grid; place-items: center; background: var(--ink); border-color: var(--ink); color: #fff; font-weight: 800; }
 .s-selbar { position: fixed; left: 12px; right: 12px; bottom: calc(96px + env(safe-area-inset-bottom)); z-index: 45; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 18px; background: var(--surface); border: 1.5px solid var(--ink); box-shadow: 5px 5px 0 var(--ochre); max-width: 640px; margin: 0 auto; }
 @media (min-width: 861px) { .s-selbar { bottom: 20px; } }
+.alert.warn { background: #fff4e0; border-color: #f0b44c; color: #7a4a00; }
+.s-btn.primary .s-tx b { color: #fff; }

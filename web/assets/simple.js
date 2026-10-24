@@ -660,7 +660,8 @@ async function docSimple(kind, id) {
   }; });
 }
 // Facture validée : modifier ou supprimer → avertissement (règles belges) et choix
-function validatedInvoiceChange(it, c) {
+// opt : { edit: adresse de l'éditeur, credit: () => note de crédit, afterDel: () => … } (édition complète)
+function validatedInvoiceChange(it, c, opt = {}) {
   const d = it.data; const st = invState(it); const cn = d.kind === 'avoir';
   const sentMail = (d.sent || []).length; const sentPep = d.peppol && d.peppol.sentAt;
   const facts = [
@@ -687,19 +688,20 @@ function validatedInvoiceChange(it, c) {
     const k = b.dataset.c; if (b.disabled) return;
     if (k === 'keep') return m.close();
     if (k === 'credit') {
-      m.close(); return makeCreditNote(it, { redo: true });
+      m.close(); return opt.credit ? opt.credit() : makeCreditNote(it, { redo: true });
     }
     if (k === 'edit') {
       d.reopened = { at: new Date().toISOString(), by: S.me.id, payments: (d.payments || []).length };
       d.status = 'brouillon'; await persist('invoice', it, { silent: true }); m.close();
-      return go(`#/s/facture/${it.id}/travail`);
+      toast('Facture rouverte : elle garde son numéro. Prévenez votre comptable et le client.', 5000);
+      return go(opt.edit || `#/s/facture/${it.id}/travail`);
     }
     if (k === 'del') {
       if (!confirm(`Supprimer définitivement la facture n° ${it.number}${st.paid > 0.005 ? ' et ses paiements' : ''} ?`)) return;
       m.close();
       // note de crédit supprimée : la facture d'origine n'est plus soldée par elle
       if (cn && d.refInvoiceId) { try { const o = await db.get('invoice', +d.refInvoiceId); o.data.payments = (o.data.payments || []).filter((p) => p.note !== `Note de crédit ${it.number}`); o.data.creditedBy = null; await persist('invoice', o, { silent: true }); } catch (e) { /* facture d'origine supprimée */ } }
-      return sDeleteDraft('invoice', it, null, () => go('#/s/liste/factures'));
+      return sDeleteDraft('invoice', it, null, opt.afterDel || (() => go('#/s/liste/factures')));
     }
   }; });
 }
