@@ -33,10 +33,12 @@ async function editArticle(a, preset = {}) {
   const f = $('form', m.el); const E = f.elements;
   const others = all.filter((x) => !a || x.id !== a.id);
   const recalc = (from) => {
-    if (E.kind.value === 'ouvrage') {
-      const c = articleCost({ data: { kind: 'ouvrage', components: d.components } }, others);
-      E.cost.value = c.cost; E.cost.readOnly = true;
-    } else E.cost.readOnly = false;
+    // ouvrage avec composants : déboursé calculé ; sans composant, on le tape soi-même
+    const auto = E.kind.value === 'ouvrage' && (d.components || []).length > 0;
+    if (auto) E.cost.value = articleCost({ data: { kind: 'ouvrage', components: d.components } }, others).cost;
+    E.cost.readOnly = auto;
+    const hint = E.cost.closest('.field').querySelector('small');
+    if (hint) hint.textContent = auto ? 'Calculé depuis la composition de l\'ouvrage' : 'Coût d\'achat ou de revient';
     const cost = num(E.cost.value);
     if (from === 'price') E.margin.value = cost > 0 ? r2((num(E.price.value) / cost - 1) * 100) : '';
     else if (cost > 0) E.price.value = r2(cost * (1 + num(E.margin.value) / 100));
