@@ -553,6 +553,7 @@ async function listSimple(kind) {
   const page = sPage(isInv ? 'Mes factures' : 'Mes devis', '#/dashboard');
   rows.sort((a, b) => (b.data.date || '').localeCompare(a.data.date || '') || b.id - a.id);
   page.innerHTML = `<button class="s-big primary" data-new>${I.plus} ${isInv ? 'Faire une facture' : 'Faire un devis'}</button>
+    ${rows.length ? `<button class="s-big" data-selmode>${I.check} Sélectionner plusieurs ${isInv ? 'factures' : 'devis'}</button>` : ''}
     ${isInv ? `<a class="s-note" href="#/s/avoir">${I.copy}<span>Annuler ou corriger une facture : <b>note de crédit</b></span><b>${I.chevron}</b></a>` : ''}
     <div class="s-chips s-filter">${filters.map(([k, l]) => `<a href="#/s/liste/${kind}${k ? '?f=' + k : ''}" class="${f === k ? 'on' : ''}">${l}</a>`).join('')}</div>
     <div class="s-cards">${rows.filter(match).map((x) => { const s = stOf(x); const t = totals(x.data); const rest = isInv ? invState(x).rest : 0;
@@ -562,6 +563,25 @@ async function listSimple(kind) {
       return (isInv ? x.data.status !== 'emise' : s === 'brouillon') ? `<div class="s-cardw" data-w="${x.id}">${card}<div class="s-cardacts"><a href="#/s/${isInv ? 'facture' : 'devis'}/${x.id}/travail">${I.edit} Modifier</a><button type="button" data-del="${x.id}">${I.trash} Supprimer</button></div></div>` : card; }).join('') || `<p class="muted s-empty">Rien ici pour l'instant.</p>`}</div>`;
   $('[data-new]', page).onclick = () => go(`#/s/${isInv ? 'facture' : 'devis'}/new`);
   $$('[data-del]', page).forEach((b) => { b.onclick = () => sDeleteDraft(typ, rows.find((x) => x.id === +b.dataset.del), b.closest('.s-cardw')); });
+  $('[data-selmode]', page)?.addEventListener('click', () => sSelectMode(page, rows, typ));
+}
+// Plusieurs factures ou devis à la fois : toucher les cartes pour les cocher, puis imprimer, PDF, supprimer…
+function sSelectMode(page, rows, typ) {
+  const sel = new Set();
+  page.classList.add('s-selecting');
+  const bar = document.createElement('div'); bar.className = 's-selbar';
+  page.appendChild(bar);
+  const draw = () => {
+    bar.innerHTML = `<button type="button" class="btn" data-sx>Annuler</button><button type="button" class="btn" data-sa>Tout</button><span class="grow"><b>${sel.size}</b> sélectionné${sel.size > 1 ? 's' : ''}</span><button type="button" class="btn primary" data-sg ${sel.size ? '' : 'disabled'}>Actions</button>`;
+    $('[data-sx]', bar).onclick = () => render();
+    $('[data-sa]', bar).onclick = () => { const all = sel.size === rows.length; rows.forEach((x) => (all ? sel.delete(x.id) : sel.add(x.id))); mark(); };
+    $('[data-sg]', bar).onclick = () => { const picked = rows.filter((x) => sel.has(x.id)); menuSheet(`${picked.length} sélectionné${picked.length > 1 ? 's' : ''}`, multiActions(typ, picked)); };
+  };
+  const idOf = (a) => +(a.closest('[data-w]')?.dataset.w || (a.getAttribute('href') || '').split('/').pop());
+  const mark = () => { $$('.s-cards a.s-card', page).forEach((a) => a.classList.toggle('picked', sel.has(idOf(a)))); draw(); };
+  $$('.s-cards a.s-card', page).forEach((a) => { a.addEventListener('click', (e) => { if (!page.classList.contains('s-selecting')) return; e.preventDefault(); const id = idOf(a); if (sel.has(id)) sel.delete(id); else sel.add(id); mark(); }); });
+  $('[data-selmode]', page).hidden = true;
+  mark();
 }
 
 // Supprimer un brouillon : disparaît tout de suite, « Annuler » pendant 6 secondes, puis suppression définitive

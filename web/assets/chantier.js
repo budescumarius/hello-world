@@ -210,7 +210,7 @@ async function tabPQuotes(p, el, contacts) {
   const quotes = await db.list('quote', { project: p.id });
   el.innerHTML = `<div class="toolbar"><span class="grow"></span><button class="btn primary" data-act="nq">${I.plus} Nouveau devis</button></div><div id="tbl"></div>`;
   dataTable($('#tbl', el), {
-    rows: quotes, columns: [{ l: 'N°', v: (q) => `<b>${esc(q.number)}</b>` }, { l: 'Objet', v: (q) => esc(q.data.title || '') }, { l: 'Date', v: (q) => fmtDate(q.data.date) }, { l: 'Statut', v: (q) => st(QST, q.data.status) },
+    rows: quotes, select: { actions: (x) => multiActions('quote', x) }, columns: [{ l: 'N°', v: (q) => `<b>${esc(q.number)}</b>` }, { l: 'Objet', v: (q) => esc(q.data.title || '') }, { l: 'Date', v: (q) => fmtDate(q.data.date) }, { l: 'Statut', v: (q) => st(QST, q.data.status) },
       { l: 'Déboursé', cls: 'r', v: (q) => money(totals(q.data).cost) }, { l: 'Total HT', cls: 'r', v: (q) => `<b>${money(totals(q.data).base)}</b>` }],
     onRow: (q) => go(`#/quote/${q.id}`), empty: 'Aucun devis pour ce chantier',
   });
@@ -220,7 +220,7 @@ async function tabPOrders(p, el, contacts) {
   const [orders, quotes] = await Promise.all([db.list('order', { project: p.id }), db.list('quote', { project: p.id })]);
   el.innerHTML = `<div class="toolbar"><span class="grow"></span>${quotes.length ? '<button class="btn" data-act="fq">Depuis un devis…</button>' : ''}<button class="btn primary" data-act="no">${I.plus} Nouvelle commande</button></div><div id="tbl"></div>`;
   dataTable($('#tbl', el), {
-    rows: orders, columns: [{ l: 'N°', v: (o) => `<b>${esc(o.number)}</b>` }, { l: 'Type', v: (o) => (o.data.kind === 'soustraitant' ? 'Sous-traitant' : 'Fournisseur') }, { l: 'Fournisseur', v: (o) => esc(contactName(byId(contacts, o.data.supplierId))) },
+    rows: orders, select: { actions: (x) => multiActions('order', x) }, columns: [{ l: 'N°', v: (o) => `<b>${esc(o.number)}</b>` }, { l: 'Type', v: (o) => (o.data.kind === 'soustraitant' ? 'Sous-traitant' : 'Fournisseur') }, { l: 'Fournisseur', v: (o) => esc(contactName(byId(contacts, o.data.supplierId))) },
       { l: 'Date', v: (o) => fmtDate(o.data.date) }, { l: 'Livraison', v: (o) => fmtDate(o.data.deliveryDate) }, { l: 'Statut', v: (o) => st(OST, o.data.status) }, { l: 'Total HT', cls: 'r', v: (o) => `<b>${money(totals(o.data).base)}</b>` }],
     onRow: (o) => go(`#/order/${o.id}`), empty: 'Aucune commande',
     footer: (l) => `<tr><td colspan="6">Total</td><td class="r"><b>${money(l.reduce((a, o) => a + totals(o.data).base, 0))}</b></td></tr>`,
@@ -233,7 +233,7 @@ async function tabPInvoices(p, el, contacts) {
   const acc = quotes.filter((q) => q.data.status === 'accepte');
   el.innerHTML = `<div class="toolbar"><span class="grow"></span>${acc.length ? '<button class="btn" data-act="fq">Facturer un devis…</button>' : ''}<button class="btn primary" data-act="ni">${I.plus} Facture libre</button></div><div id="tbl"></div>`;
   dataTable($('#tbl', el), {
-    rows: invoices.map((i) => ({ ...i, st: invState(i) })),
+    rows: invoices.map((i) => ({ ...i, st: invState(i) })), select: { actions: (x) => multiActions('invoice', x) },
     columns: [{ l: 'N°', v: (i) => `<b>${esc(i.number || 'Brouillon')}</b>` }, { l: 'Type', v: (i) => esc(IKIND[i.data.kind]) }, { l: 'Date', v: (i) => fmtDate(i.data.date) }, { l: 'Échéance', v: (i) => fmtDate(i.data.due) },
       { l: 'Statut', v: (i) => st(IST, i.st.s) }, { l: 'Total HT', cls: 'r', v: (i) => money(i.st.t.base) }, { l: 'Total TVAC', cls: 'r', v: (i) => `<b>${money(i.st.t.total)}</b>` }, { l: 'Reste', cls: 'r', v: (i) => (['brouillon', 'avoir'].includes(i.st.s) ? '' : money(i.st.rest)) }],
     onRow: (i) => go(`#/invoice/${i.id}`), empty: 'Aucune facture',
