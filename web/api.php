@@ -224,6 +224,7 @@ switch ($seg[0] ?? '') {
             if ($field) {
                 // compte terrain : uniquement ses heures (sur sa fiche) et ses rapports, sur ses chantiers
                 if ($type === 'timesheet' && is_array($data)) $data = field_timesheet($me, $data, $pid);
+                if ($type === 'timesheet' && !field_month_open($data['date'] ?? '')) fail(403, 'Ce mois est clôturé : demandez au bureau d\'encoder ces heures.');
                 if (!field_can_write($me, $type, $pid, is_array($data) ? $data : [], null)) fail(403, 'Action non autorisée pour votre compte.');
                 $parent = null;
             }
@@ -252,7 +253,11 @@ switch ($seg[0] ?? '') {
                     if (!field_can_read($me, $cur)) fail(403, 'Action non autorisée pour votre compte.');
                     $nd = field_point_update($me, $cur, $nd); unset($b['project_id']);
                 } else {
-                    if ($type === 'timesheet') $nd = field_timesheet($me, $nd, $npid);
+                    if ($type === 'timesheet') {
+                        $nd = field_timesheet($me, $nd, $npid);
+                        $was = json_decode((string)$cur['data'], true) ?: [];
+                        if (!field_month_open($nd['date'] ?? '') || !field_month_open($was['date'] ?? '')) fail(403, 'Ce mois est clôturé : demandez au bureau de corriger ces heures.');
+                    }
                     if (!field_can_write($me, $type, $npid, $nd, $cur)) fail(403, 'Action non autorisée pour votre compte.');
                 }
                 $b['data'] = $nd; unset($b['number']);
@@ -276,6 +281,7 @@ switch ($seg[0] ?? '') {
             if (!$cur) out(['ok' => true]);
             if ($field && (!in_array($type, ['timesheet', 'report'], true) || (int)$cur['created_by'] !== $me['id'])) fail(403, 'Action non autorisée pour votre compte.');
             $d = json_decode($cur['data'], true) ?: [];
+            if ($field && $type === 'timesheet' && !field_month_open($d['date'] ?? '')) fail(403, 'Ce mois est clôturé : demandez au bureau de corriger ces heures.');
             db()->beginTransaction();
             if ($type === 'project') {
                 // un chantier supprimé emporte tout son contenu et ses fichiers

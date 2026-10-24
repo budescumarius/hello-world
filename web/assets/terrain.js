@@ -100,8 +100,13 @@ async function tHours() {
   // « Encoder mes heures » depuis l'accueil : la fenêtre s'ouvre tout de suite (une seule fois)
   const direct = q.has('add'); if (direct) history.replaceState(null, '', `#/t/heures${pre ? `?p=${pre}` : ''}`);
   const [projects, sheets] = await Promise.all([tProjects(), db.list('timesheet')]);
+  const cur = today().slice(0, 7); const mo = q.get('m');
+  if (mo && mo < cur) return tHoursMonth(mo, projects, sheets);
   const page = tPage({ title: 'Mes heures', icon: 'clock', back: pre ? `#/t/chantier/${pre}` : '#/t' });
-  const days = Array.from({ length: 7 }, (_, i) => addDays(today(), i - 6));
+  // le mois en cours repart de zéro ; les mois passés sont dans les archives
+  const days = Array.from({ length: 7 }, (_, i) => addDays(today(), i - 6)).filter((d) => d.startsWith(cur));
+  const month = sheets.filter((t) => (t.data.date || '').startsWith(cur));
+  const past = {}; sheets.filter((t) => (t.data.date || '').slice(0, 7) < cur).forEach((t) => { const k = t.data.date.slice(0, 7); past[k] = (past[k] || 0) + num(t.data.hours); });
   const sumDay = (d) => sheets.filter((t) => t.data.date === d).reduce((x, t) => x + num(t.data.hours), 0);
   const list = sheets.filter((t) => t.data.date === day);
   const active = tActive(projects);
@@ -109,9 +114,11 @@ async function tHours() {
   const where = (t) => tName(projects, t.project_id) || (t.data.site ? `${t.data.site} (nouveau chantier)` : 'Chantier');
   const known = [...new Set(sheets.map((t) => t.data.site).filter(Boolean))];
   page.innerHTML = `<div class="t-days">${days.map((d) => `<a href="#/t/heures?d=${d}${pre ? `&p=${pre}` : ''}" class="${d === day ? 'on' : ''}"><small>${new Date(d + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'short' })}</small><b>${+d.slice(8)}</b><i>${sumDay(d) ? fnum(sumDay(d), 1) + ' h' : '·'}</i></a>`).join('')}</div>
-    <div class="t-sum"><span>${day === today() ? 'Aujourd\'hui' : esc(T_DAY(day))}</span><b>${fnum(sumDay(day), 1)} h</b></div>
+    <div class="t-sum"><span>${day === today() ? 'Aujourd\'hui' : esc(T_DAY(day))}</span><b>${fnum(sumDay(day), 1)} h</b><small>${esc(monthLabel(cur))} : ${fnum(sumHours(month), 1)} h</small></div>
     <div class="s-cards">${list.map((t) => `<button type="button" class="s-card t-line" data-e="${t.id}"><span class="s-ct"><b>${esc(where(t))}</b><small>${esc(t.data.task || 'Pas de remarque')}</small></span><span class="s-ca"><b>${fnum(num(t.data.hours), 2)} h</b></span></button>`).join('') || '<p class="muted s-empty">Rien d\'encodé ce jour-là.</p>'}</div>
-    <button class="s-big primary" data-add>${I.plus} Ajouter des heures</button>`;
+    <button class="s-big primary" data-add>${I.plus} Ajouter des heures</button>
+    ${Object.keys(past).length ? `<h3 class="t-h">Archives</h3><div class="s-list">${Object.keys(past).sort().reverse().map((k) => sBtn(`data-go="#/t/heures?m=${k}"`, 'calendar', esc(monthLabel(k)), `${fnum(past[k], 1)} h · mois clôturé`)).join('')}</div>` : ''}`;
+  $$('[data-go]', page).forEach((b) => { b.onclick = () => go(b.dataset.go); });
   const edit = (t) => {
     const d = t ? t.data : { hours: 8, task: '' };
     const sel = t ? (t.project_id || 'new') : (pre || (active[0] || {}).id || 'new');
@@ -144,6 +151,17 @@ async function tHours() {
   const add = $('[data-add]', page); if (add) add.onclick = () => edit(null);
   if (direct) edit(null);
   $$('[data-e]', page).forEach((b) => { b.onclick = () => edit(list.find((x) => x.id === +b.dataset.e)); });
+}
+
+// un mois archivé : consultable, plus modifiable depuis le téléphone
+function tHoursMonth(mo, projects, sheets) {
+  const page = tPage({ title: monthLabel(mo), icon: 'clock', back: '#/t/heures' });
+  const list = sheets.filter((t) => (t.data.date || '').startsWith(mo)).sort((a, b) => b.data.date.localeCompare(a.data.date));
+  const byDay = {}; list.forEach((t) => { (byDay[t.data.date] = byDay[t.data.date] || []).push(t); });
+  const where = (t) => tName(projects, t.project_id) || (t.data.site ? `${t.data.site} (nouveau chantier)` : 'Chantier');
+  page.innerHTML = `<div class="t-sum"><span>Total du mois</span><b>${fnum(sumHours(list), 1)} h</b><small>${Object.keys(byDay).length} jour(s) travaillé(s)</small></div>
+    <div class="s-note">${I.check}<span>Mois clôturé. Pour une correction, demandez au bureau.</span></div>
+    ${Object.entries(byDay).map(([d, l]) => `<h3 class="t-h">${esc(T_DAY(d))} · ${fnum(sumHours(l), 1)} h</h3><div class="s-cards">${l.map((t) => `<div class="s-card t-line"><span class="s-ct"><b>${esc(where(t))}</b><small>${esc(t.data.task || 'Pas de remarque')}</small></span><span class="s-ca"><b>${fnum(num(t.data.hours), 2)} h</b></span></div>`).join('')}</div>`).join('') || '<p class="muted s-empty">Aucune heure ce mois-là.</p>'}`;
 }
 
 // ---------------------------------------------------------------- Rapports

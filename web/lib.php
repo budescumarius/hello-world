@@ -171,6 +171,10 @@ function field_view(array $r): array {
     $r['data'] = json_encode(array_intersect_key($d, array_flip($keep)), JSON_UNESCAPED_UNICODE);
     return $r;
 }
+// Mois clôturé : le terrain n'encode et ne corrige que les heures du mois en cours (heure belge) ; le bureau garde la main sur les archives
+function field_month_open(?string $date): bool {
+    return substr((string)$date, 0, 7) === (new DateTime('now', new DateTimeZone('Europe/Brussels')))->format('Y-m');
+}
 // Point sur plan attribué à ce compte terrain (son entreprise sous-traitante, ou lui-même)
 function field_point_mine(array $me, array $sc, array $d): bool {
     return ($sc['contact'] && (int)($d['companyId'] ?? 0) === $sc['contact']) || (int)($d['assigneeId'] ?? 0) === $me['id'];

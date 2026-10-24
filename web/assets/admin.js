@@ -36,12 +36,17 @@ async function hrTimesheets() {
   const month = ui.tsMonth || today().slice(0, 7);
   const list = rows.filter((t) => (t.data.date || '').startsWith(month));
   const page = layout({ active: 'hr', icon: 'people', title: 'Pointage', actions: `<input type="month" class="in-month" value="${month}"><button class="btn" data-act="csv">Export (secrétariat social)</button><button class="btn primary" data-act="new">${I.plus} Encoder des heures</button>` });
-  const per = new Map(); list.forEach((t) => per.set(+t.data.employeeId, (per.get(+t.data.employeeId) || 0) + num(t.data.hours)));
-  page.innerHTML = `<div class="kpis">${kpi('Heures du mois', fnum(list.reduce((a, t) => a + num(t.data.hours), 0), 1) + ' h')}${kpi('Coût main d\'œuvre', money(list.reduce((a, t) => a + num(t.data.hours) * num(t.data.rate), 0)))}
-    ${[...per].slice(0, 6).map(([id, h]) => kpi((byId(staff, id) || { data: { name: '—' } }).data.name, fnum(h, 1) + ' h')).join('')}</div><div id="tbl"></div>`;
+  // heures par personne (ouvriers et sous-traitants) pour le mois affiché
+  const per = new Map(); list.forEach((t) => { const k = t.data.employeeId ? `e${t.data.employeeId}` : `c${t.data.contactId || t.data.who}`; const o = per.get(k) || { n: (byId(staff, t.data.employeeId) || { data: {} }).data.name || t.data.who || '—', h: 0 }; o.h += num(t.data.hours); per.set(k, o); });
+  const cur = today().slice(0, 7);
+  page.innerHTML = `<div class="kpis">${kpi(`Heures – ${monthLabel(month)}`, `${fnum(sumHours(list), 1)} h`, { sub: month < cur ? 'mois archivé' : month === cur ? 'mois en cours' : '' })}${kpi('Coût main d\'œuvre', money(sumCost(list)))}
+    ${[...per.values()].sort((a, b) => b.h - a.h).slice(0, 6).map((o) => kpi(o.n, `${fnum(o.h, 1)} h`)).join('')}</div>
+    <div class="mo-split"><div class="card"><div class="card-h"><h3>Par mois</h3><span class="muted">archives</span></div>${monthRows(rows, month)}</div>
+      <div><h3 class="mo-h">${esc(monthLabel(month))}${month < cur ? ' <small class="muted">archivé</small>' : ''}</h3><div id="tbl"></div></div></div>`;
+  $$('[data-mo]', page).forEach((b) => { b.onclick = () => { ui.tsMonth = b.dataset.mo; saveUi(); render(); }; });
   // heures encodées par le terrain sur des chantiers pas encore créés (tous les mois)
   const loose = {}; rows.filter((t) => !t.project_id && t.data.site).forEach((t) => { const k = t.data.site.trim().toLowerCase(); (loose[k] = loose[k] || []).push(t); });
-  if (Object.keys(loose).length) $('#tbl').insertAdjacentHTML('beforebegin', `<div class="card ts-loose"><div class="card-h"><h3>Chantiers à créer</h3><span class="muted">Heures encodées sur un chantier qui n'existe pas encore</span></div><div class="rows">
+  if (Object.keys(loose).length) $('.mo-split', page).insertAdjacentHTML('beforebegin', `<div class="card ts-loose"><div class="card-h"><h3>Chantiers à créer</h3><span class="muted">Heures encodées sur un chantier qui n'existe pas encore</span></div><div class="rows">
     ${Object.values(loose).map((l) => `<div class="row static"><span class="grow"><b>${esc(l[0].data.site)}</b><small class="muted">${esc([...new Set(l.map((t) => t.data.who).filter(Boolean))].join(', '))} · ${fnum(l.reduce((a, t) => a + num(t.data.hours), 0), 2)} h · ${[...new Set(l.map((t) => fmtDate(t.data.date)))].join(', ')}</small></span><button class="btn sm primary" data-loose="${l[0].id}">Créer / rattacher</button></div>`).join('')}</div></div>`);
   $$('[data-loose]', page).forEach((b) => { b.onclick = () => attachSite(rows.find((t) => t.id === +b.dataset.loose)); });
   const want = new URLSearchParams(location.hash.split('?')[1] || '').get('site');

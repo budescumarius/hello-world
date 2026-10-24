@@ -302,6 +302,19 @@ async function editTimesheet(t, preset = {}) {
     onDelete: t ? async () => { await db.del('timesheet', t.id); render(); } : null,
   });
 }
+// ---------------------------------------------------------------- Heures par mois
+// Chaque mois repart de zéro ; les mois passés restent consultables (archives) avec leur total, et le total général en bas.
+const monthLabel = (ym) => new Date(ym + '-15T12:00:00').toLocaleDateString('fr-BE', { month: 'long', year: 'numeric' }).replace(/^./, (c) => c.toUpperCase());
+const sumHours = (l) => l.reduce((a, t) => a + num(t.data.hours), 0);
+const sumCost = (l) => l.reduce((a, t) => a + num(t.data.hours) * num(t.data.rate), 0);
+function monthRows(rows, sel, cost = true) {
+  const cur = today().slice(0, 7);
+  const g = { [cur]: [] }; rows.forEach((t) => { const k = (t.data.date || '').slice(0, 7); if (k) (g[k] = g[k] || []).push(t); });
+  return `<div class="rows mo-list">${Object.keys(g).sort().reverse().map((k) => `<button type="button" class="row mo ${k === sel ? 'on' : ''}" data-mo="${k}">
+      <span class="grow"><b>${esc(monthLabel(k))}</b><small class="muted">${k === cur ? 'mois en cours' : k > cur ? 'à venir' : 'archivé'}</small></span>
+      <b>${fnum(sumHours(g[k]), 1)} h</b>${cost ? `<span class="mo-c muted">${money(sumCost(g[k]))}</span>` : ''}</button>`).join('')}
+    <div class="row static mo-tot"><span class="grow"><b>Total</b></span><b>${fnum(sumHours(rows), 1)} h</b>${cost ? `<span class="mo-c"><b>${money(sumCost(rows))}</b></span>` : ''}</div></div>`;
+}
 function hoursTable(el, rows, staff, projects, showProject) {
   dataTable(el, {
     rows, state: { sort: -1 },
@@ -355,7 +368,14 @@ async function attachSite(t) {
 }
 async function tabPHours(p, el) {
   const [rows, staff] = await Promise.all([db.list('timesheet', { project: p.id }), db.list('employee')]);
-  el.innerHTML = `<div class="toolbar"><span class="grow"></span><button class="btn primary" data-act="nh">${I.plus} Encoder des heures</button></div><div id="tbl"></div>`;
-  hoursTable($('#tbl', el), rows, staff, [], false);
+  const cur = today().slice(0, 7); const key = `phm_${p.id}`; const sel = ui[key] || cur;
+  const now = rows.filter((t) => (t.data.date || '').startsWith(cur));
+  const list = sel === 'all' ? rows : rows.filter((t) => (t.data.date || '').startsWith(sel));
+  el.innerHTML = `<div class="toolbar"><span class="grow"></span><button class="btn primary" data-act="nh">${I.plus} Encoder des heures</button></div>
+    <div class="kpis">${kpi(`Ce mois-ci (${monthLabel(cur)})`, `${fnum(sumHours(now), 1)} h`, { sub: money(sumCost(now)) })}${kpi('Total du chantier', `${fnum(sumHours(rows), 1)} h`, { sub: `${money(sumCost(rows))} · depuis le début` })}</div>
+    <div class="mo-split"><div class="card"><div class="card-h"><h3>Par mois</h3><button class="btn sm ${sel === 'all' ? 'primary' : ''}" data-mo="all">Tout voir</button></div>${monthRows(rows, sel)}</div>
+      <div><h3 class="mo-h">${sel === 'all' ? 'Toutes les heures du chantier' : `${esc(monthLabel(sel))}${sel < cur ? ' <small class="muted">archivé</small>' : ''}`}</h3><div id="tbl"></div></div></div>`;
+  hoursTable($('#tbl', el), list, staff, [], false);
+  $$('[data-mo]', el).forEach((b) => { b.onclick = () => { ui[key] = b.dataset.mo; saveUi(); render(); }; });
   $('[data-act=nh]', el).onclick = () => editTimesheet(null, { project_id: p.id });
 }
