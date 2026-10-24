@@ -198,7 +198,7 @@ const SPACES = [
   { k: 'today', l: "Aujourd'hui", i: 'sun', h: '#/dashboard', sec: [["Aujourd'hui", '#/dashboard'], ['Tâches', '#/tasks'], ['Planning chantiers', '#/planning/projects']] },
   { k: 'deals', l: 'Affaires', i: 'target', h: '#/quotes', sec: [['Devis', '#/quotes', '#/quote/'], ['Opportunités', '#/opportunities'], ['Prix et ouvrages', '#/library']] },
   { k: 'works', l: 'Chantiers', i: 'crane', h: '#/projects', sec: [['Chantiers', '#/projects', '#/project/'], ['Interventions', '#/interventions', '#/intervention/'], ['Installations', '#/installations', '#/installation/'], ['Fiches techniques', '#/fiches', '#/fiche/'], ['Dossiers de fin', '#/fiches/dossiers', '#/dossier/']] },
-  { k: 'money', l: 'Argent', i: 'coins', h: '#/invoices', sec: [['Factures', '#/invoices', '#/invoice/'], ['États d\'avancement', '#/progress'], ['Paiements', '#/payments'], ['Achats', '#/expenses', '#/purchase/', '#/expense/'], ['Commandes', '#/orders/fournisseur', '#/order/'], ['Sous-traitance', '#/orders/soustraitant'], ['Chiffres', '#/stats']] },
+  { k: 'money', l: 'Argent', i: 'coins', h: '#/invoices', sec: [['Factures', '#/invoices', '#/invoice/'], ['États d\'avancement', '#/progress'], ['Paiements', '#/payments'], ['Achats', '#/expenses', '#/purchase/', '#/expense/'], ['Commandes', '#/orders/fournisseur', '#/order/'], ['Sous-traitance', '#/orders/soustraitant'], ['Chiffres', '#/stats'], ['Export comptable', '#/export']] },
   { k: 'people', l: 'Carnet', i: 'people', h: '#/contacts/client', sec: [['Clients', '#/contacts/client', '#/contact/'], ['Prospects', '#/contacts/prospect'], ['Fournisseurs', '#/contacts/fournisseur'], ['Sous-traitants', '#/contacts/soustraitant'], ['Tous', '#/contacts/all']] },
   // ouvriers et sous-traitants : leurs chantiers, heures, bons de commande, rapports
   { k: 'crew', l: 'Équipe', i: 'helmet', h: '#/crew', sec: [['Personnes', '#/crew', '#/crew/'], ['Pointage', '#/hr/timesheets'], ['Planning équipes', '#/planning/team'], ['Rapports terrain', '#/reports', '#/report/'], ['Absences', '#/hr/absences'], ['Personnel (RH)', '#/hr/staff']] },
@@ -517,7 +517,16 @@ function formModal({ title, fields, values = {}, onSave, onDelete, onClose, extr
 // ---------------------------------------------------------------- Tableaux
 // columns: [{ l: 'Titre', v: (row) => html, sort: (row) => valeur, cls }]
 // pageSize : pagination (« Afficher 20 éléments ») ; le pied de tableau reçoit toute la liste filtrée
-function dataTable(el, { columns, rows, onRow, empty: emptyMsg = 'Aucun élément', search, filters, state: st = {}, toolbar = '', footer, pageSize }) {
+// select : cases à cocher + actions groupées sur les lignes cochées ({ actions: (lignes) => [{ label, icon, danger, run }] })
+function dataTable(el, { columns, rows, onRow, empty: emptyMsg = 'Aucun élément', search, filters, state: st = {}, toolbar = '', footer, pageSize, select }) {
+  if (select) {
+    if (!(st.sel instanceof Set)) st.sel = new Set(select.all ? rows.map((r) => r.id) : []);
+    [...st.sel].forEach((id) => { if (!rows.some((r) => r.id === id)) st.sel.delete(id); });
+    columns = [{ l: '', cls: 'sel', v: (r) => `<input type="checkbox" class="selbox" data-sel="${r.id}" ${st.sel.has(r.id) ? 'checked' : ''} aria-label="Sélectionner">` }, ...columns];
+    toolbar = `<div class="bulk" data-bulk></div>${toolbar}`;
+    if (footer) { const f0 = footer; footer = (l) => f0(l).replace(/<tr([^>]*)>/g, '<tr$1><td class="sel"></td>'); }
+  }
+  let shownList = [];
   st.q = st.q || ''; st.f = st.f ?? (filters ? filters.def ?? '' : ''); st.pg = st.pg || 1; if (pageSize) st.ps = st.ps || pageSize;
   const draw = () => {
     const q = st.q.toLowerCase();
@@ -543,12 +552,22 @@ function dataTable(el, { columns, rows, onRow, empty: emptyMsg = 'Aucun élémen
     $$('[data-s]', el).forEach((th) => { th.onclick = () => { const k = +th.dataset.s; st.sort = st.sort === k ? -k : k; draw(); }; });
     if (onRow) $$('tbody tr', el).forEach((tr) => { tr.onclick = (e) => { if (!e.target.closest('a,button,input,label,td.sel')) onRow(list[+tr.dataset.r]); }; });
     const cnt = $('.dt-count', el); if (cnt) cnt.textContent = `${list.length} élément${list.length > 1 ? 's' : ''}`;
+    shownList = list; drawBulk();
+  };
+  const drawBulk = () => {
+    const box = select && $('[data-bulk]', el); if (!box) return;
+    const sel = st.sel; const all = shownList.length && shownList.every((r) => sel.has(r.id));
+    box.innerHTML = `<label class="bulk-all"><input type="checkbox" data-selall ${all ? 'checked' : ''}> Tout</label>${sel.size ? `<button class="btn sm primary" data-bulkgo>${sel.size} sélectionné${sel.size > 1 ? 's' : ''} ${I.chevron}</button><button class="btn sm ghost" data-bulkx title="Tout désélectionner">✕</button>` : ''}`;
+    $('[data-selall]', box).onchange = (ev) => { shownList.forEach((r) => (ev.target.checked ? sel.add(r.id) : sel.delete(r.id))); $$('[data-sel]', el).forEach((c) => { c.checked = sel.has(+c.dataset.sel); }); drawBulk(); if (select.onChange) select.onChange(); };
+    const x = $('[data-bulkx]', box); if (x) x.onclick = () => { sel.clear(); $$('[data-sel]', el).forEach((c) => { c.checked = false; }); drawBulk(); if (select.onChange) select.onChange(); };
+    const g = $('[data-bulkgo]', box); if (g) g.onclick = () => { const picked = rows.filter((r) => sel.has(r.id)); menuSheet(`${picked.length} élément${picked.length > 1 ? 's' : ''} sélectionné${picked.length > 1 ? 's' : ''}`, select.actions(picked)); };
   };
   el.innerHTML = `<div class="card dt-card"><div class="dt-tools">
       ${search ? `<label class="search">${I.search}<input type="search" placeholder="Rechercher…" value="${esc(st.q)}"></label>` : ''}
       ${filters ? `<div class="chips">${filters.options.map(([k, l, c]) => `<button class="chip ${st.f === k ? 'on' : ''}" data-f="${esc(k)}" ${c ? `style="--c:${c}"` : ''}>${c ? '<i class="dot"></i>' : ''}${esc(l)}</button>`).join('')}</div>` : ''}
       <span class="grow"></span>${toolbar}<span class="dt-count muted"></span></div>
     <div class="dt-body"></div></div>`;
+  if (select) $('.dt-card', el).addEventListener('change', (ev) => { const c = ev.target.closest('[data-sel]'); if (!c) return; if (c.checked) st.sel.add(+c.dataset.sel); else st.sel.delete(+c.dataset.sel); drawBulk(); if (select.onChange) select.onChange(); });
   const s = $('.search input', el); if (s) s.oninput = () => { st.q = s.value; st.pg = 1; draw(); };
   $$('[data-f]', el).forEach((b) => { b.onclick = () => { st.f = b.dataset.f; st.pg = 1; $$('[data-f]', el).forEach((x) => x.classList.toggle('on', x === b)); draw(); }; });
   draw();

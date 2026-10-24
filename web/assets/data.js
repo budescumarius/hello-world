@@ -306,14 +306,16 @@ function loadScript(src) {
   return scriptCache[src];
 }
 // Génère un vrai PDF A4 dans le navigateur (fonctionne aussi sur iPhone, où l'impression est bloquée dans l'app installée)
-async function makePdf() {
-  toast('Création du PDF…', 60000);
+// src : HTML d'un document à convertir (par défaut, la page d'impression affichée)
+// opt.light : PDF plus léger (exports groupés, envoi au comptable)
+async function makePdf(src, opt = {}) {
+  if (src == null) toast('Création du PDF…', 60000);
   await Promise.all([loadScript('assets/vendor/html2canvas-1.4.1.min.js'), loadScript('assets/vendor/jspdf-2.5.1.umd.min.js')]);
   const page = $('.print-page');
   const W = 794; // largeur A4 à 96 dpi
   const holder = document.createElement('div');
   holder.style.cssText = `position:fixed;left:-20000px;top:0;width:${W}px;background:#fff;`;
-  holder.innerHTML = page.innerHTML;
+  holder.innerHTML = src ?? page.innerHTML;
   holder.querySelectorAll('.no-print').forEach((x) => x.remove());
   // modèle Madibu : la règle de chantier et le pied de page légal sont redessinés sur chaque page du PDF
   holder.querySelectorAll('.mb-foot, .mb-ruler').forEach((x) => x.remove());
@@ -340,7 +342,7 @@ async function makePdf() {
       cuts.sort((a, b) => a - b);
     };
     docEl.setAttribute('data-pdf-root', '1');
-    const scale = Math.min(2, window.devicePixelRatio > 1 ? 2 : 1.6);
+    const scale = opt.light ? 1.35 : Math.min(2, window.devicePixelRatio > 1 ? 2 : 1.6);
     // html2canvas ne connaît pas les couleurs « color(srgb …) » produites par color-mix() : conversion en rgba
     const toRgb = (v) => v.replace(/color\(srgb ([\d.e-]+) ([\d.e-]+) ([\d.e-]+)(?: \/ ([\d.e-]+))?\)/g, (m0, r, g, bl, a) => `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(bl * 255)}, ${a ?? 1})`);
     const onclone = (cdoc) => {
@@ -377,7 +379,7 @@ async function makePdf() {
       const ctx = part.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, part.width, part.height); ctx.drawImage(canvas, 0, -a);
       if (i) pdf.addPage();
       const top = brand ? m + 4 : m;
-      pdf.addImage(part.toDataURL('image/jpeg', 0.9), 'JPEG', m, top, pw, (b - a) * pw / canvas.width);
+      pdf.addImage(part.toDataURL('image/jpeg', opt.light ? 0.78 : 0.9), 'JPEG', m, top, pw, (b - a) * pw / canvas.width);
       if (brand) {
         // règle de chantier : bande, graduations tous les 2 mm (1 cm plus longues), segment d'accent
         pdf.setFillColor(brand.ink); pdf.rect(0, 0, 210, 3.2, 'F');
@@ -394,6 +396,35 @@ async function makePdf() {
     return pdf.output('blob');
   } finally { holder.remove(); const t = $('#toast'); if (t) t.classList.remove('show'); }
 }
+// ---------------------------------------------------------------- ZIP (sans compression) : plusieurs PDF en un seul téléchargement
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = (u8) => { let c = 0xffffffff; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+// files : [{ name: 'dossier/fichier.pdf', data: Uint8Array }] ; noms en UTF-8, doublons renommés
+function makeZip(files) {
+  const enc = new TextEncoder(); const parts = []; const central = []; let off = 0; const seen = new Set();
+  const d = new Date(); const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1); const date = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  for (const f of files) {
+    let nm = f.name; for (let k = 2; seen.has(nm); k++) nm = f.name.replace(/(\.[^./]+)?$/, ` (${k})$1`); seen.add(nm);
+    const name = enc.encode(nm); const data = f.data; const crc = crc32(data);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(10, time, true); h.setUint16(12, date, true);
+    h.setUint32(14, crc, true); h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, name.length, true);
+    parts.push(new Uint8Array(h.buffer), name, data);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(12, time, true); c.setUint16(14, date, true);
+    c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true); c.setUint16(28, name.length, true); c.setUint32(42, off, true);
+    central.push(new Uint8Array(c.buffer), name);
+    off += 30 + name.length + data.length;
+  }
+  const size = central.reduce((a, x) => a + x.length, 0);
+  const e = new DataView(new ArrayBuffer(22)); e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, size, true); e.setUint32(16, off, true);
+  return new Blob([...parts, ...central, new Uint8Array(e.buffer)], { type: 'application/zip' });
+}
+function downloadBlob(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+}
+const csvBytes = (rows) => new TextEncoder().encode('\ufeff' + rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'));
 async function sharePdf(title) {
   const blob = await makePdf();
   const name = fileTitle(title) + '.pdf';

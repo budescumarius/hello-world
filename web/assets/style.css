@@ -1731,3 +1731,11 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .doc.mb .mb-prog .mb-u { font-size: .8em; margin-left: 2px; }
 .doc.mb .mb-prog thead th { font-size: .74em; letter-spacing: .04em; }
 .doc.mb .mb-prog .mb-bar { min-width: 44px; }
+
+/* Plusieurs documents imprimés ensemble ; export comptable */
+.pm-doc + .pm-doc { margin-top: 28px; }
+@media print { .pm-doc + .pm-doc { margin-top: 0; break-before: page; page-break-before: always; } }
+.exp-per .chips { margin-bottom: 10px; } .exp-per .chip small { opacity: .7; margin-left: 4px; }
+.exp-go { display: flex; justify-content: flex-end; margin: 14px 0 30px; }
+.bulk .btn svg { width: 14px; height: 14px; }
+.exp-per .chips { flex-wrap: wrap !important; overflow: visible !important; }

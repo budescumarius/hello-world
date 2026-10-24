@@ -480,6 +480,11 @@ switch ($seg[0] ?? '') {
 
     case 'mail':
         $me = require_staff();
+        // taille maximale d'un envoi accepté par ce serveur (pour découper les gros exports)
+        if ($method === 'GET' && ($seg[1] ?? '') === 'limit') {
+            $b = function (string $v): int { $v = trim($v); $n = (int)$v; $u = strtolower(substr($v, -1)); return $u === 'g' ? $n << 30 : ($u === 'm' ? $n << 20 : ($u === 'k' ? $n << 10 : $n)); };
+            out(['max' => min($b((string)ini_get('upload_max_filesize')), $b((string)ini_get('post_max_size')), 20 << 20)]);
+        }
         if ($method !== 'POST') fail(404, 'Route inconnue');
         $parse = function ($v): array {
             $list = is_array($v) ? $v : (json_decode((string)$v, true) ?: []);
@@ -498,6 +503,7 @@ switch ($seg[0] ?? '') {
             catch (Throwable $e) { fail(502, $e->getMessage()); }
             out(['ok' => true, 'to' => $me['email']]);
         }
+        if (!$_POST && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) fail(413, 'Envoi trop volumineux pour le serveur (limite post_max_size de PHP).');
         $to = $parse($_POST['to'] ?? '[]');
         $cc = $parse($_POST['cc'] ?? '[]');
         $cc = array_values(array_filter($cc, fn($a) => !in_array($a['email'], array_column($to, 'email'), true)));

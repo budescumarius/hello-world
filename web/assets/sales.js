@@ -232,7 +232,7 @@ route('quotes', async () => {
   page.innerHTML = `<div class="kpis">${kpi('À envoyer', money(sum('brouillon')), { sub: `${quotes.filter((q) => q.data.status === 'brouillon').length} devis` })}${kpi('En cours (envoyés)', money(sum('envoye')), { sub: `${quotes.filter((q) => q.data.status === 'envoye').length} devis` })}
     ${kpi('Acceptés', money(sum('accepte')), { cls: 'good', sub: `${quotes.filter((q) => q.data.status === 'accepte').length} devis` })}${kpi('Taux de transformation', `${quotes.filter((q) => ['accepte', 'refuse'].includes(q.data.status)).length ? Math.round(quotes.filter((q) => q.data.status === 'accepte').length / quotes.filter((q) => ['accepte', 'refuse'].includes(q.data.status)).length * 100) : 0} %`)}</div><div id="tbl"></div>`;
   dataTable($('#tbl'), {
-    rows: quotes, state: ui.tbl_quotes || (ui.tbl_quotes = {}),
+    rows: quotes, state: ui.tbl_quotes || (ui.tbl_quotes = {}), select: { actions: (p) => multiActions('quote', p) },
     search: (q) => [q.number, q.data.title, contactName(byId(contacts, q.data.clientId)), (byId(projects, q.project_id) || { data: {} }).data.name].join(' '),
     filters: { def: '', options: [['', 'Tous'], ...Object.entries(QST).map(([k, [l, c]]) => [k, l, c])], match: (q, f) => q.data.status === f },
     columns: [
@@ -564,7 +564,7 @@ route('orders', async (kind = 'fournisseur') => {
   const rows = orders.filter((o) => (o.data.kind || 'fournisseur') === kind);
   const page = layout({ active: 'orders', icon: 'truck', title: kind === 'soustraitant' ? 'Commandes sous-traitants' : 'Commandes fournisseurs', actions: `<button class="btn primary" data-act="new">${I.plus} Nouvelle commande</button>` });
   dataTable(page, {
-    rows, state: ui.tbl_ord || (ui.tbl_ord = {}),
+    rows, state: ui.tbl_ord || (ui.tbl_ord = {}), select: { actions: (p) => multiActions('order', p) },
     search: (o) => [o.number, contactName(byId(contacts, o.data.supplierId)), (byId(projects, o.project_id) || { data: {} }).data.name].join(' '),
     filters: { def: '', options: [['', 'Toutes'], ...Object.entries(OST).map(([k, [l, c]]) => [k, l, c])], match: (o, f) => o.data.status === f },
     columns: [

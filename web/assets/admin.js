@@ -274,6 +274,7 @@ route('settings', async (tab = 'company') => {
     { name: 'street', label: 'Rue et numéro', cls: 'full' }, { name: 'zip', label: 'Code postal' }, { name: 'city', label: 'Localité' },
     { name: 'phone', label: 'Téléphone' }, { name: 'email', label: 'Email' }, { name: 'website', label: 'Site web' },
     { name: 'iban', label: 'IBAN' }, { name: 'bic', label: 'BIC' },
+    { name: 'accountantEmail', label: 'E-mail du comptable', type: 'email', hint: 'Pour lui envoyer les factures depuis Argent → Export comptable' },
     { name: 'country', label: 'Pays', type: 'select', options: [['BE', 'Belgique'], ['FR', 'France'], ['LU', 'Luxembourg'], ['CH', 'Suisse'], ['RO', 'Roumanie']] },
     { name: 'currency', label: 'Devise', type: 'select', options: [['EUR', 'EUR €'], ['CHF', 'CHF'], ['RON', 'RON lei']] },
     { name: 'logo', type: 'html', cls: 'full', html: `<span class="lbl">Logo (devis, factures, rapports)</span><div class="file-pick"><span data-logo>${co.logoId ? `<img src="${fileUrl(co.logoId)}" style="max-height:60px">` : '<span class="muted">Aucun logo</span>'}</span><button type="button" class="btn sm" data-uplogo>Choisir une image</button></div>` },

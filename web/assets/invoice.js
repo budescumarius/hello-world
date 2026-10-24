@@ -42,7 +42,7 @@ route('invoices', async () => {
     ${kpi('À recevoir TTC', money(rows.filter((r) => ['impayee', 'partielle', 'retard'].includes(r.st.s)).reduce((a, r) => a + r.st.rest, 0)))}${kpi('En retard', money(rows.filter((r) => r.st.s === 'retard').reduce((a, r) => a + r.st.rest, 0)), { cls: rows.some((r) => r.st.s === 'retard') ? 'bad' : '', sub: `${rows.filter((r) => r.st.s === 'retard').length} facture(s)` })}</div><div id="tbl"></div>`;
   const tbl = $('#tbl');
   dataTable(tbl, {
-    rows, state: ui.tbl_inv2 || (ui.tbl_inv2 = { sort: -2 }), pageSize: 20,
+    rows, state: ui.tbl_inv2 || (ui.tbl_inv2 = { sort: -2 }), pageSize: 20, select: { actions: (p) => multiActions('invoice', p) },
     search: (i) => [i.number, i.data.title, i.data.ref, contactName(byId(contacts, i.data.clientId)), (byId(projects, i.project_id) || { data: {} }).data.name, fnum(i.st.t.total)].join(' '),
     filters: { def: '', options: [['', 'Toutes'], ['brouillon', 'Brouillons', '#868e96'], ['aenvoyer', 'À envoyer', '#f08c00'], ['envoye', 'Envoyées', '#3b5bdb'], ['partielle', 'Part. payées', '#e8a10c'], ['payee', 'Payées', '#2f9e44'], ['retard', 'En retard', '#e5484d'], ['avoir', 'Notes de crédit', '#adb5bd']], match: (i, f) => invDisp(i).k === f },
     columns: [
@@ -76,8 +76,7 @@ route('invoices', async () => {
     { label: 'Facture d\'avancement ou depuis un devis…', icon: 'calc', run: () => go('#/quotes') },
     { label: 'Note de crédit', icon: 'copy', run: () => newInvoice({ data: { kind: 'avoir' } }) },
   ]);
-  $('[data-act=csv]').onclick = () => downloadCSV(`factures-${today()}.csv`, [['Numero', 'Type', 'Date', 'Echeance', 'Client', 'TVA client', 'Chantier', 'Reference', 'Base HT', 'TVA', 'Total TVAC', 'Paye', 'Reste', 'Statut', 'Peppol'],
-    ...rows.filter((r) => r.st.s !== 'brouillon').map((r) => { const c = byId(contacts, r.data.clientId) || { data: {} }; return [r.number, INV_TYPE[r.data.kind], fmtDate(r.data.date), fmtDate(r.data.due), contactName(c), c.data.vat, (byId(projects, r.project_id) || { data: {} }).data.name, r.data.title || '', fnum(r.st.t.base), fnum(r.st.t.vat), fnum(r.st.t.total), fnum(r.st.paid), fnum(r.st.rest), invDisp(r).l, r.data.peppol && r.data.peppol.sentAt ? 'envoyée' : '']; })]);
+  $('[data-act=csv]').onclick = () => go('#/export');
 });
 
 function invMenu(it) {
