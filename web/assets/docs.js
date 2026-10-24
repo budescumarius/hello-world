@@ -377,7 +377,7 @@ function templateSettings(page) {
   ];
   page.innerHTML = `<div class="card"><form>${fieldsGrid(fields, t)}
     <div class="btns"><button class="btn primary" type="submit">Enregistrer</button><button class="btn" type="button" data-prev="quote">Aperçu d'un devis</button><button class="btn" type="button" data-prev="invoice">Aperçu d'une facture</button><button class="btn danger ghost" type="button" data-reset>Rétablir les valeurs par défaut</button></div></form></div>
-    <div class="card"><div class="card-h"><h3>Numérotation</h3></div><div data-num></div></div>`;
+    <div class="card"><div class="card-h"><h3>Numérotation</h3></div><p class="muted">Préfixes et prochain numéro : <a href="#/settings/docs">Paramètres → Documents &amp; numérotation</a>.</p></div>`;
   const form = $('form', page);
   const save = async () => { const v = readFields(form, fields); S.settings.template = { ...t, ...v, style: 'madibu' }; await api('PUT', 'settings', { template: S.settings.template }); };
   form.onsubmit = async (e) => { e.preventDefault(); await save(); toast('Modèles enregistrés'); };
@@ -394,29 +394,5 @@ function templateSettings(page) {
     if (!confirm('Rétablir l\'apparence par défaut du modèle Madibu ? (mentions et conditions générales conservées)')) return;
     const keep = Object.fromEntries(['mention6', 'mention12', 'mention21', 'mentionAL', 'mentionsOnQuote', 'cgvTitle', 'cgv', 'cgvInvoice', 'cgvQuote', 'cgvOrder', 'cgvCols', 'footer'].filter((k) => k in (S.settings.template || {})).map((k) => [k, S.settings.template[k]]));
     S.settings.template = { ...keep, style: 'madibu' }; await api('PUT', 'settings', { template: S.settings.template }); render();
-  };
-  numberingSettings($('[data-num]', page));
-}
-async function numberingSettings(box) {
-  const c = await api('GET', 'counters');
-  const y = new Date().getFullYear();
-  const kinds = [['invoice', 'Factures'], ['avoir', 'Notes de crédit'], ['quote', 'Devis'], ['order', 'Commandes']];
-  const pre = S.settings.prefixes || {};
-  const values = { pad: S.settings.numpad ?? 4 };
-  kinds.forEach(([k]) => { values['n_' + k] = (c[`${k}-${y}`] || 0) + 1; values['p_' + k] = pre[k] ?? { invoice: 'FAC', avoir: 'NC', quote: 'DEV', order: 'BC' }[k]; });
-  const fields = [
-    { name: 'pad', label: 'Nombre de chiffres', type: 'select', options: [[3, '3 (2026-117)'], [4, '4 (2026-0117)'], [5, '5']] },
-    { name: 'hint', type: 'html', html: '<small class="muted">Préfixe vide = numéro « 2026-117 ». Le prochain numéro permet de continuer votre numérotation actuelle.</small>' },
-    ...kinds.flatMap(([k, l]) => [{ name: 'p_' + k, label: `Préfixe ${l.toLowerCase()}` }, { name: 'n_' + k, label: `Prochain n° ${l.toLowerCase()} ${y}`, type: 'number' }]),
-  ];
-  box.innerHTML = `<form>${fieldsGrid(fields, values)}<div class="btns"><button class="btn primary" type="submit">Enregistrer la numérotation</button></div></form>`;
-  $('form', box).onsubmit = async (e) => {
-    e.preventDefault();
-    const v = readFields($('form', box), fields);
-    const prefixes = { ...pre }; kinds.forEach(([k]) => { prefixes[k] = v['p_' + k]; });
-    await api('PUT', 'settings', { prefixes, numpad: +v.pad });
-    await api('PUT', 'counters', Object.fromEntries(kinds.map(([k]) => [`${k}-${y}`, Math.max(0, Math.round(num(v['n_' + k])) - 1)])));
-    S.settings.prefixes = prefixes; S.settings.numpad = +v.pad;
-    toast('Numérotation enregistrée');
   };
 }

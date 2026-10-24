@@ -281,8 +281,13 @@ route('settings', async (tab = 'company') => {
   ] : [
     { name: 'vatRates', label: 'Taux de TVA (séparés par ;)', hint: 'Belgique : 21; 12; 6; 0 · France : 20; 10; 5,5; 0' }, { name: 'defaultVat', label: 'Taux par défaut', type: 'number' },
     { name: 'quoteValidity', label: 'Validité des devis (jours)', type: 'number' }, { name: 'paymentDays', label: 'Délai de paiement (jours)', type: 'number' },
-    { name: 'p_quote', label: 'Préfixe devis' }, { name: 'p_invoice', label: 'Préfixe factures' }, { name: 'p_avoir', label: 'Préfixe notes de crédit' }, { name: 'p_order', label: 'Préfixe commandes' },
+    { name: 'numh', type: 'html', cls: 'full', html: `<h3 class="set-h">Numérotation ${new Date().getFullYear()}</h3><small class="muted">Le prochain numéro permet de continuer la numérotation de votre ancien logiciel (ex. 118 si la dernière facture était 117). Il repart à 1 chaque nouvelle année.</small>` },
+    { name: 'p_invoice', label: 'Préfixe factures' }, { name: 'n_invoice', label: 'Prochain n° de facture', type: 'number' },
+    { name: 'p_avoir', label: 'Préfixe notes de crédit' }, { name: 'n_avoir', label: 'Prochain n° de note de crédit', type: 'number' },
+    { name: 'p_quote', label: 'Préfixe devis' }, { name: 'n_quote', label: 'Prochain n° de devis', type: 'number' },
+    { name: 'p_order', label: 'Préfixe commandes' }, { name: 'n_order', label: 'Prochain n° de commande', type: 'number' },
     { name: 'p_project', label: 'Préfixe chantiers' }, { name: 'p_intervention', label: 'Préfixe interventions' },
+    { name: 'numpad', label: 'Nombre de chiffres du numéro', type: 'select', options: [[3, '3 (2026-117)'], [4, '4 (2026-0117)'], [5, '5 (2026-00117)']] }, { name: 'numex', type: 'html', html: '<div class="field"><span>Exemple</span><b data-numex></b></div>' },
     { name: 'quoteNotes', label: 'Mentions par défaut sur les devis', type: 'textarea', cls: 'full' }, { name: 'terms', label: 'Conditions générales', type: 'textarea', rows: 6, cls: 'full', hint: 'Imprimées sur une page à part (page 2) des devis et factures : choix dans Paramètres → Modèles de documents.' },
     { name: 'invoiceNotes', label: 'Mentions par défaut sur les factures', type: 'textarea', cls: 'full' },
     { name: 'footer', label: 'Pied de page des documents', cls: 'full' },
@@ -291,8 +296,13 @@ route('settings', async (tab = 'company') => {
   // ancienne adresse sur plusieurs lignes : découpée en rue / code postal / localité
   const a0 = splitAddress(co.address);
   const values = { ...co, street: co.street || a0.street, zip: co.zip || a0.zip, city: co.city || a0.city, vatRates: vatList().join('; '), defaultVat: defVat(), p_quote: pre.quote ?? 'DEV', p_invoice: pre.invoice ?? 'FAC', p_avoir: pre.avoir ?? 'NC', p_order: pre.order ?? 'BC', p_project: pre.project ?? 'CH', p_intervention: pre.intervention ?? 'INT' };
+  // compteurs de l'année : le prochain numéro = dernier attribué + 1
+  const NUMK = ['invoice', 'avoir', 'quote', 'order']; const yr = new Date().getFullYear();
+  if (tab === 'docs') { const cnt = await api('GET', 'counters'); NUMK.forEach((k) => { values['n_' + k] = (cnt[`${k}-${yr}`] || 0) + 1; }); values.numpad = S.settings.numpad ?? 4; }
   page.innerHTML = `<div class="card"><form>${fieldsGrid(fields, values)}<div class="btns"><button class="btn primary" type="submit">Enregistrer</button></div></form></div>`;
   const form = $('form', page);
+  const ex = $('[data-numex]', form);
+  if (ex) { const upd = () => { const p = form.elements.p_invoice.value.trim(); ex.textContent = `${p ? p + '-' : ''}${yr}-${String(Math.max(1, Math.round(num(form.elements.n_invoice.value)))).padStart(+form.elements.numpad.value, '0')}`; }; form.addEventListener('input', upd); form.addEventListener('change', upd); upd(); }
   const up = $('[data-uplogo]', form);
   if (up) up.onclick = async () => { const [f] = await pickFile('image/*'); if (!f) return; const r = await resizeImage(await blobToImg(f), 600, 'image/png'); const res = await upload(new File([r.blob], 'logo.png', { type: 'image/png' })); co.logoId = res.id; $('[data-logo]', form).innerHTML = `<img src="${fileUrl(res.id)}" style="max-height:60px">`; };
   if (tab === 'company') vatAutofill(form, { name: 'name', street: 'street', zip: 'zip', city: 'city', country: 'country', phone: 'phone', email: 'email', website: 'website' }, { countryCode: true });
@@ -303,7 +313,14 @@ route('settings', async (tab = 'company') => {
       const rates = String(v.vatRates).split(/[;\s]+/).map((x) => parseFloat(x.replace(',', '.'))).filter((x) => !isNaN(x));
       Object.assign(co, { vatRates: rates.length ? rates : [21, 6, 0], defaultVat: num(v.defaultVat), quoteValidity: num(v.quoteValidity), paymentDays: num(v.paymentDays), quoteNotes: v.quoteNotes, terms: v.terms, invoiceNotes: v.invoiceNotes, footer: v.footer });
       const prefixes = { quote: v.p_quote, invoice: v.p_invoice, avoir: v.p_avoir, order: v.p_order, project: v.p_project, intervention: v.p_intervention };
-      await api('PUT', 'settings', { company: co, prefixes }); S.settings.company = co; S.settings.prefixes = prefixes;
+      // un prochain numéro déjà utilisé donnerait des doublons
+      const used = await db.many(['invoice', 'quote', 'order']);
+      const last = (k) => Math.max(0, ...(k === 'quote' ? used.quote : k === 'order' ? used.order : used.invoice.filter((i) => (i.data.kind === 'avoir') === (k === 'avoir')))
+        .map((x) => String(x.number || '').match(new RegExp(`${yr}-(\\d+)$`))).filter(Boolean).map((m) => +m[1]));
+      const clash = NUMK.filter((k) => Math.round(num(v['n_' + k])) <= last(k));
+      if (clash.length && !confirm(`Attention : ${clash.map((k) => `le n° ${Math.round(num(v['n_' + k]))} (${{ invoice: 'facture', avoir: 'note de crédit', quote: 'devis', order: 'commande' }[k]}) existe déjà, le dernier est ${last(k)}`).join(' ; ')}.\n\nContinuer quand même ? (risque de numéros en double)`)) return;
+      await api('PUT', 'settings', { company: co, prefixes, numpad: +v.numpad }); S.settings.company = co; S.settings.prefixes = prefixes; S.settings.numpad = +v.numpad;
+      await api('PUT', 'counters', Object.fromEntries(NUMK.map((k) => [`${k}-${yr}`, Math.max(0, Math.round(num(v['n_' + k])) - 1)])));
     }
     toast('Paramètres enregistrés'); render();
   };

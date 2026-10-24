@@ -1749,3 +1749,4 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 @media (min-width: 861px) { .s-selbar { bottom: 20px; } }
 .alert.warn { background: #fff4e0; border-color: #f0b44c; color: #7a4a00; }
 .s-btn.primary .s-tx b { color: #fff; }
+.set-h { margin: 10px 0 2px; font-size: 16px; color: var(--ink); }
