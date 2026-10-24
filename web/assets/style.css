@@ -1758,3 +1758,21 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .code-in { width: 100%; font-size: 26px !important; letter-spacing: .3em; text-align: center; padding: 10px; border-radius: 12px; border: 1.5px solid var(--border); font-weight: 800; }
 .bk-card .card-h h3 { display: flex; align-items: center; gap: 6px; } .bk-card .card-h svg { width: 18px; height: 18px; }
 .bk-info { margin: 0 0 12px; padding-left: 18px; line-height: 1.7; } .bk-tip { margin-top: 10px; font-size: 13px; }
+
+/* Abonnements : inscription, bandeau, formules */
+.signup .su-box { max-width: 760px; }
+.su-per { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--surface-2); margin: 6px 0 12px; }
+.su-per button { font: inherit; border: 0; background: none; padding: 8px 14px; border-radius: 10px; font-weight: 700; color: var(--muted); cursor: pointer; }
+.su-per button.on { background: var(--ink); color: #fff; } .su-per small { font-weight: 600; opacity: .8; } .su-per.sm button { padding: 5px 10px; font-size: 13px; }
+.su-plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.su-plan { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left; padding: 14px; border-radius: 16px; border: 1.5px solid var(--border); background: var(--surface); font: inherit; color: var(--text); cursor: pointer; }
+.su-plan.on { border-color: var(--ink); box-shadow: 4px 4px 0 var(--ochre); }
+.su-plan b { color: var(--ink); font-size: 16px; } .su-price { font-size: 24px; font-weight: 800; color: var(--ink); } .su-price small { font-size: 12px; font-weight: 600; color: var(--muted); }
+.su-desc { font-size: 13px; margin: 4px 0; } .su-plan .btn, .su-plan .badge { margin-top: 8px; }
+.su-hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.su-acc { align-items: flex-start; font-size: 13.5px; } .login-legal { font-size: 12px; text-align: center; margin-top: 10px; } .login-legal a { color: var(--muted); }
+.sub-band { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; padding: 8px 14px; background: #e8f0fe; color: #1d3c9c; font-size: 14px; border-bottom: 1px solid #c9d7f8; }
+.sub-band.warn { background: #fff4e0; color: #7a4a00; border-color: #f0c98a; } .sub-band.bad { background: #fdecec; color: #b42318; border-color: #f3c0c0; }
+.sub-head p { margin: 4px 0; } .saas-tbl input, .saas-tbl select { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 13px; }
+.saas-tbl td { padding: 4px; } .saas-card .card-h h3, .sub-head h3 { display: flex; align-items: center; gap: 6px; } .saas-card .card-h svg { width: 18px; height: 18px; }
+@media (max-width: 600px) { .card-h:has(.su-per) { flex-wrap: wrap; gap: 8px; } .card-h:has(.su-per) h3 { flex: 1 0 100%; } }

@@ -14,7 +14,7 @@ DirectoryIndex index.html
 
 # Seuls api.php (l'application) et install.php (installation) s'ouvrent depuis le navigateur ;
 # configuration, code interne, schéma, documentation et fichiers de dépendances restent invisibles
-<FilesMatch "(\.(sql|md|lock|log|bak|gz|zip|ini|sh)|^composer\.json|^(config|lib|ai|peppol_ap|cron)\.php)$">
+<FilesMatch "(\.(sql|md|lock|log|bak|gz|zip|ini|sh)|^composer\.json|^(config|lib|ai|peppol_ap|cron|saas)\.php)$">
   <IfModule mod_authz_core.c>
     Require all denied
   </IfModule>

@@ -497,8 +497,10 @@ route('platform', async () => {
   if (!S.me.super) return go('#/dashboard');
   const rows = await api('GET', 'platform/companies');
   const page = layout({ active: '', icon: 'people', title: 'Plateforme – firmes', actions: `<button class="btn primary" data-act="new">${I.plus} Nouvelle firme</button>` });
-  page.innerHTML = `<div class="kpis">${kpi('Firmes', rows.length, { sub: `${rows.filter((c) => c.active).length} active(s)` })}${kpi('Utilisateurs', rows.reduce((a, c) => a + c.users_active, 0))}${kpi('Chantiers', rows.reduce((a, c) => a + c.projects, 0))}</div>
+  const mrr = rows.reduce((a, c) => a + num((c.sub || {}).mrr), 0); const nSub = (k) => rows.filter((c) => (c.sub || {}).status === k).length;
+  page.innerHTML = `<div class="kpis">${kpi('Revenu mensuel (abonnements)', money(mrr), { sub: `${nSub('active')} payant(s) · ${nSub('trial')} en essai · ${money(mrr * 12)} / an`, cls: 'good' })}${kpi('Firmes', rows.length, { sub: `${rows.filter((c) => c.active).length} active(s)` })}${kpi('Utilisateurs', rows.reduce((a, c) => a + c.users_active, 0))}${kpi('Chantiers', rows.reduce((a, c) => a + c.projects, 0))}</div>
     <div id="tbl"></div>
+    <div class="card saas-card" data-saas><p class="muted">Chargement…</p></div>
     <div class="card bk-card" data-bk><div class="card-h"><h3>${I.download} Sauvegardes</h3></div><p class="muted">Chargement…</p></div>
     <div class="card"><div class="card-h"><h3>Comment ça marche</h3></div><ol class="steps">
       <li>Chaque firme a ses propres données (clients, devis, factures, chantiers, achats, paramètres, Peppol) : les autres firmes ne les voient jamais.</li>
@@ -534,14 +536,16 @@ route('platform', async () => {
       { l: 'Utilisateurs', cls: 'r', v: (c) => `${c.users_active}${c.users !== c.users_active ? ` <small class="muted">/ ${c.users}</small>` : ''}` },
       { l: 'Chantiers', cls: 'r', v: (c) => c.projects },
       { l: 'Dernière connexion', v: (c) => fmtDT(c.last_login) },
+      { l: 'Abonnement', v: (c) => { const s = c.sub || {}; const st = SUB_ST[s.status] || SUB_ST.free; return `${badge(st[0], s.locked ? '#e5484d' : st[1])}${s.planName ? `<br><small class="muted">${esc(s.planName)}${s.until ? ` · ${s.locked ? 'expiré le' : "jusqu'au"} ${fmtDate(s.until)}` : ''}</small>` : ''}${s.deleteRequested ? '<br><small class="late">suppression demandée</small>' : s.purge ? '<br><small class="late">fin + 90 jours : données à supprimer</small>' : ''}`; }, sort: (c) => (c.sub || {}).status || '' },
       { l: 'Statut', v: (c) => (c.active ? badge('Active', '#2f9e44') : badge('Suspendue', '#e5484d')) },
-      { l: '', v: (c) => `<span class="nowrap"><button class="btn sm primary" data-in="${c.id}">Entrer</button> <button class="btn sm" data-ed="${c.id}">${I.edit}</button>${c.id === S.me.company_id ? '' : ` <button class="btn sm" data-tg="${c.id}">${c.active ? 'Suspendre' : 'Réactiver'}</button> <button class="btn sm danger ghost" data-del="${c.id}" title="Supprimer la firme">${I.trash}</button>`}</span>` },
+      { l: '', v: (c) => `<span class="nowrap"><button class="btn sm primary" data-in="${c.id}">Entrer</button> <button class="btn sm" data-ed="${c.id}">${I.edit}</button>${c.id === 1 ? '' : ` <button class="btn sm" data-sb="${c.id}" title="Abonnement">${I.coins}</button>`}${c.id === S.me.company_id ? '' : ` <button class="btn sm" data-tg="${c.id}">${c.active ? 'Suspendre' : 'Réactiver'}</button> <button class="btn sm danger ghost" data-del="${c.id}" title="Supprimer la firme">${I.trash}</button>`}</span>` },
     ],
     empty: 'Aucune firme',
   });
   const byC = (id) => rows.find((c) => c.id === +id);
   page.addEventListener('click', async (e) => {
-    const b = e.target.closest('[data-in],[data-ed],[data-tg],[data-del]'); if (!b) return;
+    const b = e.target.closest('[data-in],[data-ed],[data-tg],[data-del],[data-sb]'); if (!b) return;
+    if (b.dataset.sb) return editFirmSub(byC(b.dataset.sb));
     if (b.dataset.del) {
       const c = byC(b.dataset.del);
       return formModal({
@@ -562,5 +566,6 @@ route('platform', async () => {
   });
   $('[data-act=new]').onclick = () => edit(null);
   backupsCard($('[data-bk]', page));
+  saasCard($('[data-saas]', page));
 });
 boot();

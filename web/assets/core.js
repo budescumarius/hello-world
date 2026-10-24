@@ -61,6 +61,7 @@ async function api(method, path, body) {
   let data = null;
   try { data = await res.json(); } catch (e) { /* réponse vide */ }
   if (res.status === 401 && S.ready) { S.ready = false; showLogin(); }
+  if (res.status === 402 && S.ready && !(S.sub && S.sub.locked)) window.dispatchEvent(new Event('bp-locked'));
   if (!res.ok) { const err = new Error((data && data.error) || `Erreur ${res.status}`); err.status = res.status; err.conflict = data && data.conflict; throw err; }
   return data;
 }
@@ -255,9 +256,11 @@ function accountMenu() {
     ...(pushState() === 'on' ? [] : [{ label: 'Activer les notifications sur cet appareil', icon: 'bell', run: () => pushEnable() }]),
     { label: 'Mon profil', icon: 'user', run: () => editProfile() }];
   if (isField()) items.push({ label: 'Installer l\'application sur le téléphone', icon: 'download', run: () => installHelp() });
+  if (isAdmin() && S.sub && S.sub.status !== 'free') items.push({ label: 'Mon abonnement', icon: 'coins', run: () => go('#/abonnement') });
   if (isAdmin()) items.push({ label: 'Paramètres', icon: 'gear', run: () => go('#/settings') });
   if (S.me.super) items.push({ label: 'Plateforme (firmes)', icon: 'people', run: () => go('#/platform') });
   if (S.firm && S.firm.own === false) items.push({ label: 'Revenir à ma firme', icon: 'back', run: () => switchFirm(0) });
+  items.push({ label: 'Conditions et confidentialité', icon: 'file', run: () => window.open('legal.php', '_blank') });
   items.push({ sep: true }, { label: 'Se déconnecter', icon: 'logout', danger: true, run: async () => { await api('POST', 'auth/logout').catch(() => {}); S.ready = false; showLogin(); } });
   menuSheet(S.me.name || 'Mon compte', items);
 }
@@ -320,6 +323,7 @@ function layout(p) {
   app.innerHTML = `<div class="shell">
     ${dock(cur)}
     <main class="main">
+      ${typeof subBand === 'function' ? subBand() : ''}
       ${S.firm && S.firm.own === false ? `<div class="firm-band">Vous travaillez dans la firme <b>${esc(S.firm.name)}</b><button class="btn sm" data-act="firmback">Revenir à ma firme</button></div>` : ''}
       ${secBar(cur)}
       <header class="top">
@@ -590,15 +594,17 @@ async function render() {
   if (cleanupView) { try { await cleanupView(); } catch (e) { /* vue déjà détruite */ } cleanupView = null; }
   const parts = location.hash.replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean);
   // édition simplifiée : les modules absents renvoient au tableau de bord
-  const SIMPLE_ROUTES = ['s', 'dashboard', 'quotes', 'quote', 'invoices', 'invoice', 'payments', 'expenses', 'purchase', 'projects', 'project', 'contacts', 'contact', 'library', 'print', 'contract', 'contractpdf', 'export', 'security', 'settings', 'platform'];
+  const SIMPLE_ROUTES = ['s', 'dashboard', 'quotes', 'quote', 'invoices', 'invoice', 'payments', 'expenses', 'purchase', 'projects', 'project', 'contacts', 'contact', 'library', 'print', 'contract', 'contractpdf', 'export', 'security', 'abonnement', 'settings', 'platform'];
   if (isSimple() && parts[0] && !SIMPLE_ROUTES.includes(parts[0])) { location.hash = '#/dashboard'; return; }
   // compte terrain : uniquement son espace (et l'impression de ses bons de commande)
   if (isField() && !(parts[0] === 't' || (parts[0] === 'print' && parts[1] === 'order'))) { location.hash = '#/t'; return; }
+  // abonnement expiré : seule la page « Mon abonnement » reste ouverte (le serveur refuse le reste)
+  if (S.sub && S.sub.locked && !S.me.super && parts[0] !== 'abonnement') { if (typeof subLocked === 'function') return subLocked(); }
   const fn = ROUTES[parts[0] || 'dashboard'] || ROUTES.dashboard;
   const seq = ++renderSeq;
   try { await fn(...parts.slice(1)); } catch (e) {
     console.error(e);
-    if (seq === renderSeq) toast('Erreur : ' + e.message, 5000);
+    if (seq === renderSeq && e.status !== 402) toast('Erreur : ' + e.message, 5000);
   }
   if (seq === renderSeq) window.scrollTo(0, 0);
 }
@@ -617,8 +623,11 @@ function showLogin(msg = '') {
     <label class="field"><span>Email</span><input name="email" type="email" autocomplete="username" required></label>
     <label class="field"><span>Mot de passe</span><input name="password" type="password" autocomplete="current-password" required></label>
     <button class="btn primary block" type="submit">Se connecter</button>
-    <p class="muted">Pas de compte ? Demandez à l'administrateur de votre entreprise de vous en créer un.</p>
+    <p class="muted" data-noacc>Pas de compte ? Demandez à l'administrateur de votre entreprise de vous en créer un.</p>
+    <p class="login-legal"><a href="legal.php?doc=cgu" target="_blank" rel="noopener">Conditions</a> · <a href="legal.php?doc=confidentialite" target="_blank" rel="noopener">Confidentialité</a> · <a href="legal.php?doc=mentions" target="_blank" rel="noopener">Mentions légales</a></p>
   </form></div>`;
+  // vente en ligne ouverte : essai gratuit
+  api('GET', 'signup').then((p) => { const el = $('[data-noacc]'); if (p && p.enabled && el) { el.innerHTML = `Nouveau ? <a href="#/inscription" data-su><b>Essayez gratuitement ${p.trialDays} jours</b></a>, sans carte bancaire.`; $('[data-su]').onclick = (e) => { e.preventDefault(); location.hash = '#/inscription'; showSignup(p); }; } }).catch(() => {});
   const f = $('form', app);
   f.onsubmit = async (e) => {
     e.preventDefault();
@@ -659,7 +668,7 @@ async function switchFirm(id) {
 async function boot() {
   try {
     const b = await api('GET', 'bootstrap');
-    Object.assign(S, { me: b.user, users: b.users, settings: b.settings || {}, firm: b.firm || {}, edition: b.edition || 'avance', ai: !!b.ai, translate: !!b.translate, field: b.field || null, ready: true });
+    Object.assign(S, { me: b.user, users: b.users, settings: b.settings || {}, firm: b.firm || {}, edition: b.edition || 'avance', ai: !!b.ai, translate: !!b.translate, field: b.field || null, sub: b.sub || { status: 'free' }, ready: true });
     document.title = (S.settings.company || {}).appName || (S.settings.company || {}).name || 'BâtiPro';
     if (!location.hash) location.hash = isField() ? '#/t' : '#/dashboard';
     render();
@@ -668,7 +677,7 @@ async function boot() {
     if (typeof aiMount === 'function') aiMount();
     notifRefresh();
   } catch (e) {
-    if (e.status === 401) showLogin();
+    if (e.status === 401) (location.hash.startsWith('#/inscription') && typeof showSignup === 'function' ? showSignup() : showLogin());
     else if (e.status === 503) app.innerHTML = `<div class="login"><div class="login-box"><h1>Installation requise</h1><p>${esc(e.message)}</p><a class="btn primary" href="install.php">Installer</a></div></div>`;
     else app.innerHTML = `<div class="login"><div class="login-box"><h1>Erreur</h1><p>${esc(e.message)}</p><button class="btn" data-reload>Réessayer</button></div></div>`;
     const rl = $('[data-reload]'); if (rl) rl.onclick = () => location.reload();

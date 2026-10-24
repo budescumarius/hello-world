@@ -327,7 +327,7 @@ function migrate(): void {
 }
 
 // réglages réservés au serveur : jamais envoyés au navigateur ni modifiables par l'API (clé privée des notifications…)
-const SERVER_SETTINGS = ['vapid', 'remind_done', 'peppol_sync', 'backup'];
+const SERVER_SETTINGS = ['vapid', 'remind_done', 'peppol_sync', 'backup', 'sub', 'saas', 'saas_daily', 'legal'];
 
 function client_ip(): string { return substr($_SERVER['REMOTE_ADDR'] ?? '?', 0, 64); }
 

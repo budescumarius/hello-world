@@ -4,6 +4,7 @@ declare(strict_types=1);
 require __DIR__ . '/lib.php';
 require __DIR__ . '/peppol_ap.php';
 require __DIR__ . '/ai.php';
+require __DIR__ . '/saas.php';
 
 set_exception_handler(function (Throwable $e) {
     error_log('[batipro] ' . $e);
@@ -15,8 +16,14 @@ $path = trim((string)($_GET['r'] ?? ''), '/');
 $seg = $path === '' ? [] : explode('/', $path);
 
 // Les requêtes qui modifient des données doivent venir de l'application (protection CSRF avec le cookie SameSite)
-if ($method !== 'GET' && ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') !== 'batipro') fail(403, 'Requête refusée');
+// (sauf l'avis de paiement de Mollie : il ne contient qu'un identifiant, relu ensuite chez Mollie)
+if ($method !== 'GET' && ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') !== 'batipro' && $path !== 'mollie/webhook') fail(403, 'Requête refusée');
 migrate();
+
+// Abonnement expiré (essai fini, impayé) : seuls la connexion, l'abonnement et l'export des données restent ouverts
+if (!in_array($seg[0] ?? '', ['auth', 'bootstrap', 'billing', 'signup', 'mollie', 'notifs', 'push', 'export'], true) && ($gu = current_user()) && !$gu['super']) {
+    if (sub_state(cid())['locked']) fail(402, 'L\'abonnement de votre entreprise est expiré : ' . ($gu['role'] === 'admin' ? 'choisissez une formule dans « Mon abonnement ».' : 'contactez l\'administrateur de votre entreprise.'));
+}
 
 $TYPE_RE = '/^[a-z_]{2,32}$/';
 
@@ -127,6 +134,7 @@ switch ($seg[0] ?? '') {
         $u = require_user();
         try { daily_reminders(); } catch (Throwable $e) { error_log('[batipro rappels] ' . $e->getMessage()); }
         $bk = setting('backup', [], 1) ?: [];
+        if (saas_cfg()['enabled'] && (setting('saas_daily', '', 1) !== date('Y-m-d'))) { set_setting('saas_daily', date('Y-m-d'), 1); try { saas_daily(); } catch (Throwable $e) { error_log('[batipro abonnements] ' . $e->getMessage()); } }
         if (empty($bk['at']) || time() - strtotime((string)$bk['at']) > 26 * 3600) register_shutdown_function(function () { if (function_exists('fastcgi_finish_request')) fastcgi_finish_request(); try { backup_auto(); } catch (Throwable $e) { error_log('[batipro sauvegarde] ' . $e->getMessage()); } });
         $users = q('SELECT id, name, email, role, active, color, last_login, (totp IS NOT NULL) AS has2fa FROM users WHERE company_id = ? ORDER BY name', [cid()])->fetchAll();
         foreach ($users as &$x) { $x['id'] = (int)$x['id']; $x['active'] = (int)$x['active']; $x['has2fa'] = (int)$x['has2fa']; }
@@ -134,7 +142,7 @@ switch ($seg[0] ?? '') {
         // le super-administrateur entré dans une autre firme apparaît aussi (auteur de ses modifications)
         if (!in_array($u['id'], array_column($users, 'id'), true)) $users[] = ['id' => $u['id'], 'name' => $u['name'], 'email' => $u['email'], 'role' => 'admin', 'active' => 0, 'color' => $u['color'], 'last_login' => null];
         $settings = [];
-        foreach (q('SELECT k, v FROM settings WHERE company_id = ?', [cid()])->fetchAll() as $r) if (!in_array($r['k'], ['vapid', 'backup'], true)) $settings[$r['k']] = json_decode($r['v'], true);
+        foreach (q('SELECT k, v FROM settings WHERE company_id = ?', [cid()])->fetchAll() as $r) if (!in_array($r['k'], ['vapid', 'backup', 'sub', 'saas', 'legal'], true)) $settings[$r['k']] = json_decode($r['v'], true);
         // le mot de passe SMTP ne quitte jamais le serveur
         if (isset($settings['smtp']) && is_array($settings['smtp'])) { $settings['smtp']['hasPass'] = !empty($settings['smtp']['pass']); unset($settings['smtp']['pass']); }
         if (isset($settings['peppolap']) && is_array($settings['peppolap'])) { $settings['peppolap']['hasKey'] = !empty($settings['peppolap']['key']); unset($settings['peppolap']['key']); }
@@ -148,10 +156,11 @@ switch ($seg[0] ?? '') {
             $users = array_map(fn($x) => ['id' => $x['id'], 'name' => $x['name'], 'role' => $x['role'], 'active' => $x['active'], 'color' => $x['color']], $users);
             $sc = field_scope($u);
             out(['user' => $u, 'users' => $users, 'settings' => $settings, 'version' => APP_VERSION, 'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => true],
-                'edition' => edition(), 'ai' => false, 'translate' => ai_ready(), 'field' => ['employeeId' => $sc['employee'], 'contactId' => $sc['contact'], 'projects' => $sc['projects']]]);
+                'edition' => edition(), 'ai' => false, 'translate' => ai_ready(), 'sub' => ['status' => sub_state(cid())['status'], 'locked' => sub_state(cid())['locked']], 'field' => ['employeeId' => $sc['employee'], 'contactId' => $sc['contact'], 'projects' => $sc['projects']]]);
         }
         out(['user' => $u, 'users' => $users, 'settings' => $settings, 'version' => APP_VERSION,
-            'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => cid() === $u['company_id']], 'edition' => edition(), 'ai' => edition() === 'simple' ? false : ai_ready(), 'translate' => ai_ready()]);
+            'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => cid() === $u['company_id']], 'edition' => edition(), 'ai' => edition() === 'simple' ? false : ai_ready(), 'translate' => ai_ready(),
+            'sub' => sub_state(cid()) + ['super' => (bool)$u['super']]]);
 
     // ------------------------------------------------------------ Utilisateurs
     case 'users':
@@ -163,6 +172,7 @@ switch ($seg[0] ?? '') {
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) fail(400, 'Email invalide.');
             if (mb_strlen((string)($b['password'] ?? '')) < 8) fail(400, 'Le mot de passe doit contenir au moins 8 caractères.');
             if (q('SELECT id FROM users WHERE email = ?', [$email])->fetch()) fail(400, 'Cet email est déjà utilisé.');
+            if (!$me['super']) sub_check_users(cid(), in_array($b['role'] ?? '', USER_ROLES, true) ? (string)$b['role'] : 'user');
             q('INSERT INTO users (company_id, name, email, pass, role, color, created_at) VALUES (?,?,?,?,?,?,?)', [cid(),
                 trim((string)($b['name'] ?? $email)), $email, password_hash($b['password'], PASSWORD_DEFAULT),
                 in_array($b['role'] ?? '', USER_ROLES, true) ? $b['role'] : 'user', (string)($b['color'] ?? '#3b5bdb'), now()]);
@@ -191,7 +201,11 @@ switch ($seg[0] ?? '') {
                     $fields[] = 'email = ?'; $args[] = $em;
                 }
                 if (isset($b['role']) && $id !== $me['id']) { $fields[] = 'role = ?'; $args[] = in_array($b['role'], USER_ROLES, true) ? $b['role'] : 'user'; }
-                if (isset($b['active']) && $id !== $me['id']) { $fields[] = 'active = ?'; $args[] = $b['active'] ? 1 : 0; }
+                if (isset($b['active']) && $id !== $me['id']) {
+                    $cur = q('SELECT role, active FROM users WHERE id = ?', [$id])->fetch();
+                    if ($b['active'] && !$me['super'] && (!(int)$cur['active'] || (isset($b['role']) && $b['role'] !== $cur['role']))) sub_check_users(cid(), (string)($b['role'] ?? $cur['role']), $id);
+                    $fields[] = 'active = ?'; $args[] = $b['active'] ? 1 : 0;
+                }
                 // téléphone perdu : l'administrateur retire la validation en deux étapes d'un utilisateur
                 if (!empty($b['reset2fa']) && $id !== $me['id']) { $fields[] = 'totp = NULL, totp_step = ?'; $args[] = 0; }
                 if (!empty($b['password'])) {
@@ -596,6 +610,100 @@ switch ($seg[0] ?? '') {
         out(['ok' => true, 'sent' => count($to) + count($cc)]);
 
     // ------------------------------------------------------------ Plateforme : firmes clientes (super-administrateur)
+    // ------------------------------------------------------------ Inscription d'une nouvelle firme (essai gratuit) – public
+    case 'signup':
+        if ($method === 'GET') out(saas_public());
+        if ($method === 'POST') {
+            $uid = saas_signup(body());
+            start_session(); session_regenerate_id(true);
+            $u = q('SELECT pass FROM users WHERE id = ?', [$uid])->fetch();
+            $_SESSION = ['uid' => $uid, 'pv' => pass_version((string)$u['pass']), 'seen' => time()];
+            out(['ok' => true]);
+        }
+        fail(404, 'Route inconnue');
+
+    // ------------------------------------------------------------ Avis de paiement Mollie (public, relu chez Mollie)
+    case 'mollie':
+        if (($seg[1] ?? '') === 'webhook' && $method === 'POST') {
+            $pid = (string)($_POST['id'] ?? '');
+            if (!preg_match('/^tr_[A-Za-z0-9]{4,40}$/', $pid)) out(['ok' => true]);
+            // paiement inconnu chez Mollie : réponse 200 sans détail (rien à apprendre pour un curieux) ; autre erreur : 500, Mollie réessaiera
+            try { $r = sub_handle_payment($pid); } catch (Throwable $e) { if ($e->getCode() === 404) out(['ok' => true]); error_log('[batipro mollie] ' . $e->getMessage()); fail(500, 'Erreur'); }
+            out(['ok' => true, 'result' => $r]);
+        }
+        fail(404, 'Route inconnue');
+
+    // ------------------------------------------------------------ Mon abonnement (administrateur de la firme)
+    case 'billing':
+        $me = require_user();
+        $act = $seg[1] ?? '';
+        $cid = cid();
+        if ($act === 'invoice' && $method === 'GET') {
+            if ($me['role'] !== 'admin' && !$me['super']) fail(403, 'Réservé aux administrateurs.');
+            $iid = (int)($seg[2] ?? 0);
+            if (!in_array($iid, array_map(fn($x) => (int)$x['id'], (array)(sub_get($cid)['invoices'] ?? [])), true)) fail(404, 'Facture introuvable.');
+            header('Content-Type: text/html; charset=utf-8'); header('Cache-Control: no-store');
+            header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; script-src 'unsafe-inline'");
+            echo sub_invoice_html($iid); exit;
+        }
+        if ($me['role'] !== 'admin' && !$me['super']) fail(403, 'Réservé aux administrateurs de l\'entreprise.');
+        if ($method === 'GET' && $act === '') {
+            $s = sub_get($cid);
+            out(['state' => sub_state($cid), 'pub' => saas_public(), 'invoices' => array_reverse((array)($s['invoices'] ?? [])), 'pending' => $s['pending'] ?? null,
+                'prices' => array_map(fn($p) => ['id' => $p['id'], 'month' => sub_price($p, 'month', $cid), 'year' => sub_price($p, 'year', $cid)], saas_cfg()['plans']),
+                'counts' => ['users' => (int)q("SELECT COUNT(*) FROM users WHERE company_id = ? AND active = 1 AND role NOT IN ('ouvrier', 'soustraitant')", [$cid])->fetchColumn(), 'field' => (int)q("SELECT COUNT(*) FROM users WHERE company_id = ? AND active = 1 AND role IN ('ouvrier', 'soustraitant')", [$cid])->fetchColumn()]]);
+        }
+        if ($cid === 1) fail(400, 'La firme de la plateforme n\'a pas d\'abonnement.');
+        $b = $method === 'POST' ? body() : [];
+        if ($act === 'checkout' && $method === 'POST') out(sub_checkout($cid, (string)($b['plan'] ?? ''), (string)($b['period'] ?? 'month')));
+        if ($act === 'change' && $method === 'POST') out(sub_change($cid, (string)($b['plan'] ?? ''), (string)($b['period'] ?? 'month')));
+        if ($act === 'cancel' && $method === 'POST') { sub_cancel($cid, (string)($b['reason'] ?? '')); log_activity($me['id'], 'update', 'settings', null, null, 'Abonnement résilié'); out(['ok' => true]); }
+        // retour de la page de paiement : on vérifie le paiement en attente sans attendre l'avis de Mollie
+        if ($act === 'refresh' && $method === 'POST') {
+            $pend = sub_get($cid)['pending']['paymentId'] ?? '';
+            $r = $pend ? sub_handle_payment((string)$pend) : 'none';
+            out(['result' => $r, 'state' => sub_state($cid)]);
+        }
+        if ($act === 'delete-request' && $method === 'POST') {
+            $row = q('SELECT pass FROM users WHERE id = ?', [$me['id']])->fetch();
+            if (!password_verify((string)($b['password'] ?? ''), (string)$row['pass'])) fail(400, 'Mot de passe incorrect.');
+            $s = sub_get($cid); $s['deleteRequested'] = now(); sub_set($cid, $s);
+            sub_cancel($cid, 'Demande de suppression du compte');
+            sub_notify_supers('Demande de suppression : ' . ((setting('company', []) ?: [])['name'] ?? "firme $cid"), 'La firme demande la suppression définitive de son compte et de ses données (Plateforme → corbeille).');
+            log_activity($me['id'], 'update', 'settings', null, null, 'Demande de suppression du compte');
+            out(['ok' => true]);
+        }
+        fail(404, 'Route inconnue');
+
+    // ------------------------------------------------------------ Export de toutes les données de la firme (RGPD, portabilité)
+    case 'export':
+        $me = require_user();
+        if ($me['role'] !== 'admin' && !$me['super']) fail(403, 'Réservé aux administrateurs.');
+        if (($seg[1] ?? '') !== 'all' || $method !== 'GET') fail(404, 'Route inconnue');
+        if (!class_exists('ZipArchive')) fail(500, 'Extension PHP zip absente chez l\'hébergeur.');
+        set_time_limit(0);
+        $cid = cid();
+        $items = [];
+        foreach (q('SELECT * FROM items WHERE company_id = ? ORDER BY type, id', [$cid])->fetchAll() as $r) $items[$r['type']][] = row_out($r);
+        $sets = [];
+        foreach (q('SELECT k, v FROM settings WHERE company_id = ?', [$cid])->fetchAll() as $r) if (!in_array($r['k'], ['vapid', 'sub', 'saas', 'smtp', 'peppolap', 'ai'], true)) $sets[$r['k']] = json_decode($r['v'], true);
+        $tmp = tempnam(sys_get_temp_dir(), 'bpe');
+        $z = new ZipArchive(); $z->open($tmp, ZipArchive::OVERWRITE);
+        $z->addFromString('donnees.json', json_encode(['exporte_le' => now(), 'entreprise' => $sets['company']['name'] ?? '', 'parametres' => $sets, 'elements' => $items,
+            'utilisateurs' => q('SELECT id, name, email, role, active, created_at, last_login FROM users WHERE company_id = ?', [$cid])->fetchAll(),
+            'fichiers' => q('SELECT id, project_id, name, mime, size, path, created_at FROM files WHERE company_id = ?', [$cid])->fetchAll(),
+            'journal' => q('SELECT * FROM activity WHERE company_id = ? ORDER BY id', [$cid])->fetchAll()], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+        foreach (q('SELECT id, name, path FROM files WHERE company_id = ?', [$cid])->fetchAll() as $f) {
+            $src = __DIR__ . '/uploads/' . $f['path'];
+            if (is_file($src)) { $n = 'fichiers/' . $f['id'] . '-' . preg_replace('/[^\w.\- ]+/u', '_', (string)$f['name']); $z->addFile($src, $n); $z->setCompressionName($n, ZipArchive::CM_STORE); }
+        }
+        $z->addFromString('LISEZ-MOI.txt', "Export complet des donnees de votre entreprise (" . date('d/m/Y H:i') . ").\ndonnees.json : clients, devis, factures, chantiers, achats, heures, parametres (format JSON).\nfichiers/ : photos, PDF, plans et documents envoyes.\n");
+        $z->close();
+        log_activity($me['id'], 'update', 'settings', null, null, 'Export de toutes les données');
+        header('Content-Type: application/zip'); header('Content-Length: ' . filesize($tmp));
+        header('Content-Disposition: attachment; filename="export-donnees-' . date('Y-m-d') . '.zip"'); header('Cache-Control: no-store');
+        readfile($tmp); @unlink($tmp); exit;
+
     case 'platform':
         $me = require_super();
         $act = $seg[1] ?? '';
@@ -634,6 +742,54 @@ switch ($seg[0] ?? '') {
             header('Content-Disposition: attachment; filename="batipro-complet-' . date('Y-m-d') . '.zip"'); header('Cache-Control: no-store');
             readfile($tmp); @unlink($tmp); exit;
         }
+        // réglages de la vente en ligne : formules, prix, essai, clé Mollie (jamais renvoyée en clair)
+        if ($act === 'saas' && $method === 'GET') {
+            $c = saas_cfg(); $k = (string)$c['mollieKey'];
+            $c['mollieKey'] = ''; $c['hasKey'] = $k !== ''; $c['keyMode'] = str_starts_with($k, 'live_') ? 'live' : ($k !== '' ? 'test' : '');
+            $c['webhook'] = app_base_url() . '/api.php?r=mollie/webhook'; $c['signupUrl'] = app_base_url() . '/#/inscription';
+            out($c);
+        }
+        if ($act === 'saas' && $method === 'PUT') {
+            $b = body(); $c = setting('saas', [], 1) ?: [];
+            foreach (['enabled', 'trialDays', 'graceDays', 'vatRate'] as $k) if (array_key_exists($k, $b)) $c[$k] = $k === 'enabled' ? (bool)$b[$k] : max(0, (float)$b[$k]);
+            if (isset($b['mollieKey']) && trim((string)$b['mollieKey']) !== '') {
+                if (!preg_match('/^(test|live)_[A-Za-z0-9]{20,60}$/', trim((string)$b['mollieKey']))) fail(400, 'Clé Mollie invalide (elle commence par test_ ou live_).');
+                $c['mollieKey'] = trim((string)$b['mollieKey']);
+            }
+            if (isset($b['plans']) && is_array($b['plans'])) {
+                $plans = [];
+                foreach ($b['plans'] as $pl) {
+                    $id = preg_replace('/[^a-z0-9_]/', '', strtolower((string)($pl['id'] ?? '')));
+                    if ($id === '' || trim((string)($pl['name'] ?? '')) === '') continue;
+                    $plans[] = ['id' => $id, 'name' => trim((string)$pl['name']), 'edition' => ($pl['edition'] ?? '') === 'simple' ? 'simple' : 'avance', 'month' => max(0, (float)($pl['month'] ?? 0)), 'year' => max(0, (float)($pl['year'] ?? 0)),
+                        'users' => max(0, (int)($pl['users'] ?? 0)), 'field' => max(0, (int)($pl['field'] ?? 0)), 'desc' => mb_substr(trim((string)($pl['desc'] ?? '')), 0, 200)];
+                }
+                if (!$plans) fail(400, 'Au moins une formule est nécessaire.');
+                $c['plans'] = $plans;
+            }
+            set_setting('saas', $c, 1);
+            log_activity($me['id'], 'update', 'settings', null, null, 'Abonnements : réglages');
+            out(['ok' => true]);
+        }
+        // documents légaux publics (legal.php) : texte personnalisé ou modèle, tribunal, hébergeur, date d'entrée en vigueur
+        if ($act === 'legal') {
+            require_once __DIR__ . '/legal.php';
+            $l = setting('legal', [], 1) ?: [];
+            if ($method === 'PUT') {
+                $b = body();
+                foreach (['tribunal', 'hebergeur', 'date'] as $k) if (isset($b[$k])) $l[$k] = mb_substr(trim((string)$b[$k]), 0, 120);
+                foreach (array_keys(LEGAL_DOCS) as $d) if (isset($b['docs'][$d])) {
+                    $t = str_replace("\r\n", "\n", trim((string)$b['docs'][$d]));
+                    if ($t === '' || $t === trim(legal_default($d))) unset($l[$d]); else $l[$d] = mb_substr($t, 0, 60000);
+                }
+                set_setting('legal', $l, 1);
+                log_activity($me['id'], 'update', 'settings', null, null, 'Documents légaux');
+                out(['ok' => true]);
+            }
+            $v = legal_vars();
+            out(['tribunal' => $v['tribunal'], 'hebergeur' => $v['hebergeur'], 'date' => $v['date'], 'version' => SAAS_LEGAL_VERSION, 'vars' => array_keys($v),
+                'docs' => array_map(fn($d, $lab) => ['id' => $d, 'label' => $lab, 'text' => legal_text($d), 'custom' => trim((string)($l[$d] ?? '')) !== ''], array_keys(LEGAL_DOCS), LEGAL_DOCS)]);
+        }
         if ($act === 'companies' && $method === 'GET') {
             $rows = q("SELECT c.*, (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id) AS users,
                 (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id AND u.active = 1) AS users_active,
@@ -641,7 +797,11 @@ switch ($seg[0] ?? '') {
                 (SELECT MAX(u.last_login) FROM users u WHERE u.company_id = c.id) AS last_login,
                 (SELECT GROUP_CONCAT(u.email ORDER BY u.id SEPARATOR ', ') FROM users u WHERE u.company_id = c.id AND u.role = 'admin') AS admins
                 FROM companies c ORDER BY c.name")->fetchAll();
-            foreach ($rows as &$r) { foreach (['id', 'active', 'users', 'users_active', 'projects'] as $k) $r[$k] = (int)$r[$k]; $r['edition'] = edition((int)$r['id']); }
+            foreach ($rows as &$r) { foreach (['id', 'active', 'users', 'users_active', 'projects'] as $k) $r[$k] = (int)$r[$k]; $r['edition'] = edition((int)$r['id']);
+                $s = sub_get($r['id']); $r['sub'] = sub_state($r['id']) + ['cancelReason' => $s['cancelReason'] ?? null, 'terms' => $s['terms']['at'] ?? null, 'paidTotal' => array_sum(array_map(fn($x) => (float)($x['ttc'] ?? 0), (array)($s['invoices'] ?? []))), 'deleteRequested' => $s['deleteRequested'] ?? null];
+                // fin d'essai ou d'abonnement depuis plus de 90 jours : données à supprimer (CGU art. 11)
+                $r['sub']['purge'] = $r['sub']['locked'] && !empty($r['sub']['until']) && strtotime($r['sub']['until'] . ' +90 days') < time();
+                $pl = saas_plan($s['plan'] ?? null); $r['sub']['mrr'] = ($s['status'] ?? '') === 'active' && $pl ? round(($s['period'] ?? 'month') === 'year' ? $pl['year'] / 12 : $pl['month'], 2) : 0; }
             unset($r);
             out($rows);
         }
@@ -690,6 +850,16 @@ switch ($seg[0] ?? '') {
             if (isset($b['name']) && trim((string)$b['name']) !== '') q('UPDATE companies SET name = ? WHERE id = ?', [trim((string)$b['name']), $id]);
             if (array_key_exists('active', $b)) q('UPDATE companies SET active = ? WHERE id = ?', [$b['active'] ? 1 : 0, $id]);
             if (in_array($b['edition'] ?? '', ['simple', 'avance'], true)) set_setting('edition', $b['edition'], $id);
+            // abonnement réglé à la main par le gestionnaire (offert, prolongé, formule)
+            if (isset($b['sub']) && is_array($b['sub']) && $id !== 1) {
+                $s = sub_get($id); $n = $b['sub'];
+                if (in_array($n['status'] ?? '', ['free', 'trial', 'active', 'past_due', 'canceled'], true)) $s['status'] = $n['status'];
+                if (isset($n['plan']) && saas_plan((string)$n['plan'])) { $s['plan'] = (string)$n['plan']; set_setting('edition', saas_plan((string)$n['plan'])['edition'], $id); }
+                foreach (['trialUntil', 'paidUntil'] as $k) if (isset($n[$k]) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$n[$k])) $s[$k] = $n[$k];
+                if (isset($n['period'])) $s['period'] = $n['period'] === 'year' ? 'year' : 'month';
+                sub_set($id, $s);
+                log_activity($me['id'], 'update', 'company', $id, null, 'Abonnement modifié : ' . ($s['status'] ?? ''));
+            }
             out(['ok' => true]);
         }
         if ($act === 'switch' && $method === 'POST') {

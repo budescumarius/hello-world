@@ -58,7 +58,7 @@ Pas de menu latéral : 5 espaces, dans l'ordre de vie d'un chantier, toujours à
    - completează firma, logo-ul, IBAN-ul, cotele TVA și prefixele;
    - creează conturi pentru colegi din *Utilisateurs*;
    - în *Peppol*: lipește cheia API Peppyrus (cont gratuit pe peppyrus.be) – facturile furnizorilor intră singure în *Achats & dépenses*, iar facturile tale se trimit direct pe Peppol. Opțional, în cPanel › *Cron Jobs*, la fiecare 15 minute: `php /home/CONTUL_TAU/public_html/cron.php`;
-   - în *Assistant IA*: lipește o cheie API de pe console.anthropic.com (plătești consumul direct la Anthropic). Arhiva conține deja dosarul `vendor/` cu SDK-ul Anthropic – nu trebuie instalat nimic. Cheia platformei servește și firmelor care nu au cheia lor;
+   - în *Assistant IA*: lipește o cheie API de pe console.anthropic.com (plătești consumul direct la Anthropic). Arhiva conține deja dosarul `vendor/` cu SDK-ul Anthropic – nu trebuie instalat nimic. Cheia platformei servește și firmelor care nu au cheia lor (bifează « Réserver cette clé à ma firme » dacă vinzi abonamente, altfel plătești tu consumul lor);
    - în *Email*: pune serverul SMTP al unei adrese create în cPanel (ex. `mail.domeniultau.be`, port 465 SSL, adresa completă + parola) și apasă „Envoyer un test”. PV-urile, rapoartele de puncte, devizele, facturile și comenzile se trimit apoi direct din aplicație, cu PDF-ul atașat.
 
 **Cerințe:** PHP 8.1+ (cPanel › *Select PHP Version*) cu PDO MySQL, MySQL 5.7+ sau MariaDB 10.3+ și HTTPS (certificatul gratuit AutoSSL din cPanel). Fișierele încărcate stau în `uploads/` și sunt servite numai utilizatorilor conectați.
@@ -71,6 +71,14 @@ Pas de menu latéral : 5 espaces, dans l'ordre de vie d'un chantier, toujours à
 - *Suspendre* blochează conectarea unei firme fără să-i șteargă datele.
 - Fiecare firmă are propriul identificator Peppol (numărul ei de întreprindere), deci propriul cont Peppyrus și propria cheie API. Serverul de email al platformei e folosit pentru firmele care nu și-au configurat unul.
 - La actualizarea unei instalări existente, baza de date se transformă automat la prima deschidere (datele existente devin firma n° 1).
+
+## Vânzare pe abonament (alte firme)
+- **Plateforme → Vente en ligne**: cheia Mollie (`test_…`, apoi `live_…`), formulele și prețurile, zilele de probă (14) și de grație (7), apoi **Ouvrir les inscriptions**: pe pagina de conectare apare « Essayez gratuitement 14 jours » (`/#/inscription`).
+- Firma nouă își creează singură contul (fără card) → probă → **Mon abonnement** → plată Mollie (Bancontact, card, domiciliere) → reînnoire automată lunară/anuală. La fiecare plată: factură creată automat în firma n° 1 (seria normală), vizibilă pentru client; plată eșuată → 7 zile de grație, apoi acces blocat (datele rămân, export posibil).
+- Limite pe formulă (utilizatori birou / accese teren) verificate la crearea utilizatorilor. Firmele existente rămân « Sans abonnement » (gratuit); butonul 🪙 din Plateforme oferă, prelungește sau schimbă formula unei firme. MRR și starea fiecărei firme în Plateforme.
+- Clientul: export complet al datelor (ZIP), reziliere (cu motiv), cerere de ștergere a contului. După 90 de zile de la final, Plateforme semnalează firma « à supprimer ».
+- Documente legale publice (`legal.php`): mențiuni legale, CGU/CGV, confidențialitate, DPA (RGPD art. 28), completate automat cu datele firmei n° 1 și modificabile în *Plateforme → Documents légaux*. Acceptarea e salvată (versiune, dată, IP).
+- Fonturile sunt găzduite local (fără Google Fonts). Ghid complet de lansare, legal și hosting: **HOSTING.md**.
 
 ## Securitate
 - HTTPS obligatoriu (redirecționare automată + HSTS), antete de securitate, politică CSP (doar scripturi proprii).
