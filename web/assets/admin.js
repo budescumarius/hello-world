@@ -138,6 +138,8 @@ route('dashboard', async () => {
   const loose = {}; all.timesheet.filter((t) => !t.project_id && t.data.site).forEach((t) => { const k = t.data.site.trim().toLowerCase(); (loose[k] = loose[k] || []).push(t); });
   many(Object.values(loose), 3, 1, (l) => ({ tone: 'todo', icon: 'crane', title: `Chantier à créer : « ${l[0].data.site} »`, sub: `${[...new Set(l.map((t) => t.data.who).filter(Boolean))].join(', ') || 'Le terrain'} y a encodé ${fnum(l.reduce((a, t) => a + num(t.data.hours), 0), 1)} h`, href: '#/hr/timesheets', act: ['Créer', `#/hr/timesheets?site=${encodeURIComponent(l[0].data.site)}`] }),
     (l) => ({ tone: 'todo', icon: 'crane', title: `${l.length} chantiers à créer`, sub: 'Le terrain y a encodé des heures', href: '#/hr/timesheets', act: ['Voir', '#/hr/timesheets'] }));
+  // compte administrateur sans validation en deux étapes : le plus gros risque de piratage
+  if (isAdmin() && !S.me.has2fa) add(1, { tone: 'todo', icon: 'key', title: 'Protégez votre compte : validation en deux étapes', sub: 'Un code du téléphone en plus du mot de passe (2 minutes)', href: '#/security', act: ['Activer', '#/security'] });
   const pLate = all.point.filter(isLatePt);
   if (pLate.length) add(4, { tone: 'info', icon: 'pin', title: `${pLate.length} point(s) de chantier en retard`, sub: 'Réserves et remarques à lever', href: '#/projects', act: ['Voir', '#/projects'] });
   items.sort((a, b) => a.rank - b.rank);
@@ -339,7 +341,8 @@ async function settingsUsers(page) {
         { name: 'contactId', label: 'Fiche du sous-traitant (Carnet)', type: 'select', options: [['', subs.length ? '— choisir —' : '— ajoutez-le d\'abord dans Carnet → Sous-traitants —'], ...subs.map((c) => [c.id, contactName(c)])], cls: 'full', hint: 'Il voit les chantiers où il est prévu, ses bons de commande (envoyés) et leur statut de facturation.' },
         { name: 'info', type: 'html', cls: 'full', html: '<div class="s-info" data-fi>Espace terrain : il voit uniquement ses chantiers, encode ses heures, envoie des rapports et des photos, lit les rapports que vous lui envoyez et son planning. Il ne voit ni prix, ni devis, ni factures, ni clients.</div>' },
         { name: 'password', label: u ? 'Nouveau mot de passe (laisser vide pour ne pas changer)' : 'Mot de passe (8 caractères min.)', type: 'password', required: !u },
-        ...(u && u.id !== S.me.id ? [{ name: 'active', label: 'Compte actif', type: 'check' }] : [])],
+        ...(u && u.id !== S.me.id ? [{ name: 'active', label: 'Compte actif', type: 'check' }] : []),
+        ...(u && u.id !== S.me.id && u.has2fa ? [{ name: 'reset2fa', label: 'Téléphone perdu : retirer sa validation en deux étapes (il pourra la réactiver)', type: 'check', cls: 'full' }] : [])],
       async onSave(v) {
         if (v.role === 'ouvrier' && !v.employeeId) throw new Error('Choisissez sa fiche du personnel (RH → Personnel)');
         if (v.role === 'soustraitant' && !v.contactId) throw new Error('Choisissez la fiche du sous-traitant');
@@ -358,7 +361,7 @@ async function settingsUsers(page) {
   };
   dataTable(page, {
     rows: S.users.filter((u) => S.firm.own !== false || u.id !== S.me.id), toolbar: `<button class="btn primary" data-act="new">${I.plus} Nouvel accès</button>`,
-    columns: [{ l: '', v: (u) => avatar(u.id) }, { l: 'Nom', v: (u) => `<b>${esc(u.name)}</b>` }, { l: 'Email', v: (u) => esc(u.email) }, { l: 'Rôle', v: (u) => badge(...(ROLE_LABELS[u.role] || ROLE_LABELS.user)) },
+    columns: [{ l: '', v: (u) => avatar(u.id) }, { l: 'Nom', v: (u) => `<b>${esc(u.name)}</b>` }, { l: 'Email', v: (u) => esc(u.email) }, { l: 'Rôle', v: (u) => badge(...(ROLE_LABELS[u.role] || ROLE_LABELS.user)) }, { l: '2 étapes', v: (u) => (u.has2fa ? badge('Activée ✓', '#2f9e44') : '<small class="muted">non</small>') },
       { l: 'Statut', v: (u) => (u.active ? badge('Actif', '#2f9e44') : badge('Désactivé', '#868e96')) }, { l: 'Dernière connexion', v: (u) => fmtDT(u.last_login) }],
     onRow: edit,
   });
@@ -390,7 +393,7 @@ function settingsNotifs(page) {
   $('[data-act=now]', page).onclick = async () => { const r = await api('POST', 'notifs/remind'); toast(r.missing.length ? `Rappel envoyé à : ${r.missing.join(', ')}` : 'Tout le monde a encodé ses heures aujourd\'hui ✓', 5000); notifRefresh(); };
 }
 function editProfile() {
-  formModal({
+  const m = formModal({
     title: 'Mon profil', values: { name: S.me.name, color: S.me.color },
     fields: [{ name: 'name', label: 'Nom', required: true }, { name: 'color', label: 'Couleur', type: 'color' }, { name: 'old', label: 'Mot de passe actuel', type: 'password', hint: 'Uniquement pour changer de mot de passe' }, { name: 'new', label: 'Nouveau mot de passe', type: 'password' }],
     async onSave(v) {
@@ -399,7 +402,52 @@ function editProfile() {
       Object.assign(S.me, { name: v.name, color: v.color }); const u = S.users.find((x) => x.id === S.me.id); if (u) Object.assign(u, { name: v.name, color: v.color });
       toast('Profil enregistré'); render();
     },
+    extra: `<div class="sec-2fa"><b>${I.key} Validation en deux étapes</b><p class="muted">${S.me.has2fa ? 'Activée ✓ : à chaque connexion, un code à 6 chiffres de votre téléphone est demandé en plus du mot de passe.' : 'Fortement conseillé : même si quelqu\'un vole votre mot de passe, il ne pourra pas entrer sans votre téléphone.'}</p>
+      <button type="button" class="btn sm ${S.me.has2fa ? '' : 'primary'}" data-2fa>${S.me.has2fa ? 'Désactiver' : 'Activer'}</button></div>`,
   });
+  $('[data-2fa]', m.el).onclick = () => { m.close(); if (S.me.has2fa) disable2fa(); else enable2fa(); };
+}
+
+route('security', () => { go('#/dashboard'); setTimeout(() => (S.me.has2fa ? editProfile() : enable2fa()), 400); });
+// Activer la validation en deux étapes : QR code à scanner, puis un code pour confirmer
+async function enable2fa() {
+  const r = await api('POST', 'auth/2fa-setup');
+  const qr = await qrDataUrl(r.uri);
+  const m = modal(`${mhead('Activer la validation en deux étapes')}<div class="m-body s-legal">
+    <p><b>1.</b> Installez une application d'authentification sur votre téléphone : <b>Google Authenticator</b> ou <b>Microsoft Authenticator</b> (gratuites).</p>
+    <p><b>2.</b> Dans l'application, touchez « + » puis scannez ce code :</p>
+    <p class="qr-2fa"><img src="${qr}" alt="QR code"></p>
+    <p class="muted">Pas de scan possible ? Entrez cette clé : <code class="key-2fa">${esc(r.secret.replace(/(.{4})/g, '$1 ').trim())}</code></p>
+    <p><b>3.</b> Tapez le code à 6 chiffres affiché pour BâtiPro :</p>
+    <input class="code-in" data-code inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123 456"></div>
+    <div class="m-foot"><span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-ok>Activer</button></div>`);
+  $('[data-ok]', m.el).onclick = async () => {
+    try { await api('POST', 'auth/2fa-enable', { code: $('[data-code]', m.el).value }); S.me.has2fa = 1; m.close(); toast('Validation en deux étapes activée ✓', 4000); render(); } catch (e) { toast(e.message, 4000); }
+  };
+  setTimeout(() => $('[data-code]', m.el).focus(), 200);
+}
+async function disable2fa() {
+  const v = await ask('Désactiver la validation en deux étapes', [{ name: 'password', label: 'Votre mot de passe', type: 'password', required: true, cls: 'full' }]);
+  if (!v) return;
+  try { await api('POST', 'auth/2fa-disable', { password: v.password }); S.me.has2fa = 0; toast('Validation en deux étapes désactivée', 3000); render(); } catch (e) { toast(e.message, 4000); }
+}
+
+// Plateforme → Sauvegardes : copies automatiques de la base, copie par e-mail, téléchargement complet
+async function backupsCard(box) {
+  const r = await api('GET', 'platform/backups');
+  const mo = (n) => (n < 1048576 ? `${fnum(n / 1024, 0)} Ko` : `${fnum(n / 1048576, 1)} Mo`);
+  box.innerHTML = `<div class="card-h"><h3>${I.download} Sauvegardes</h3><button class="btn sm" data-bknow>Sauvegarder maintenant</button></div>
+    <ul class="bk-info">
+      <li>${r.last ? `✓ Dernière sauvegarde automatique : <b>${fmtDT(r.last)}</b>` : '⚠ Aucune sauvegarde pour l\'instant'} · une par jour, 14 jours + 1 par mois pendant un an.</li>
+      <li>${r.mailed ? `✓ Copie envoyée par e-mail le <b>${fmtDT(r.mailed)}</b> (chaque semaine, à ${esc(S.me.email)}) : <b>hors de l'hébergement</b>.` : `⚠ Pas encore de copie par e-mail${r.mailError ? ` : ${esc(r.mailError)}` : ' (vérifiez Paramètres → Email)'}.`}</li>
+      <li>${r.outside ? '✓ Les sauvegardes sont rangées hors du site public.' : 'Les sauvegardes sont dans le dossier « backups », fermé au public.'}</li>
+    </ul>
+    <div class="btns"><button class="btn primary" data-bkfull ${r.zip ? '' : 'disabled'}>${I.download} Tout télécharger (données + photos, PDF, plans)</button></div>
+    ${r.list.length ? `<div class="rows">${r.list.slice(0, 8).map((f) => `<div class="row static"><span class="grow">${esc(f.name)}<small class="muted">${fmtDT(f.at)} · ${mo(f.size)}</small></span><button class="btn sm" data-bkf="${esc(f.name)}">Télécharger</button></div>`).join('')}</div>` : ''}
+    <p class="muted bk-tip">Conseil : une fois par mois, « Tout télécharger » et gardez le fichier sur votre ordinateur ou un disque (Google Drive, OneDrive…). Ainsi, même si l'hébergeur perd tout, vous pouvez tout remettre en ligne ailleurs.</p>`;
+  $('[data-bknow]', box).onclick = async (e) => { e.target.disabled = true; toast('Sauvegarde en cours…', 60000); try { await api('POST', 'platform/backups'); toast('Sauvegarde faite ✓', 3000); } catch (err) { toast(err.message, 5000); } backupsCard(box); };
+  $('[data-bkfull]', box).onclick = () => { toast('Préparation du fichier complet… le téléchargement va démarrer', 6000); location.href = 'api.php?r=platform/backup-full'; };
+  $$('[data-bkf]', box).forEach((b) => { b.onclick = () => { location.href = `api.php?r=platform/backup-file&name=${encodeURIComponent(b.dataset.bkf)}`; }; });
 }
 
 const EDITIONS = [['simple', 'BâtiPro Simplifié (indépendants)'], ['avance', 'BâtiPro Avancé (complet)']];
@@ -451,6 +499,7 @@ route('platform', async () => {
   const page = layout({ active: '', icon: 'people', title: 'Plateforme – firmes', actions: `<button class="btn primary" data-act="new">${I.plus} Nouvelle firme</button>` });
   page.innerHTML = `<div class="kpis">${kpi('Firmes', rows.length, { sub: `${rows.filter((c) => c.active).length} active(s)` })}${kpi('Utilisateurs', rows.reduce((a, c) => a + c.users_active, 0))}${kpi('Chantiers', rows.reduce((a, c) => a + c.projects, 0))}</div>
     <div id="tbl"></div>
+    <div class="card bk-card" data-bk><div class="card-h"><h3>${I.download} Sauvegardes</h3></div><p class="muted">Chargement…</p></div>
     <div class="card"><div class="card-h"><h3>Comment ça marche</h3></div><ol class="steps">
       <li>Chaque firme a ses propres données (clients, devis, factures, chantiers, achats, paramètres, Peppol) : les autres firmes ne les voient jamais.</li>
       <li>« Nouvelle firme » crée la firme et son premier <b>administrateur</b>. Communiquez-lui l'adresse de l'application, son email et son mot de passe.</li>
@@ -512,5 +561,6 @@ route('platform', async () => {
     await api('PUT', `platform/companies/${c.id}`, { active: !c.active }); render();
   });
   $('[data-act=new]').onclick = () => edit(null);
+  backupsCard($('[data-bk]', page));
 });
 boot();

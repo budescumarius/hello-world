@@ -454,7 +454,7 @@ async function buyWizard(id, step) {
   const ttc = purchTtc(d);
   const cats = [['mat', 'Matériaux', 'download'], ['materiel', 'Outils / location', 'tool'], ['st', 'Sous-traitant', 'people'], ['divers', 'Autre', 'more']];
   page.innerHTML = `${d.fileId ? `<div class="s-thumb" data-view></div>` : ''}
-    <form class="s-form" autocomplete="off" onsubmit="return false">
+    <form class="s-form" autocomplete="off" data-nosubmit>
       <label class="field"><span>Magasin / fournisseur</span><input name="sup" list="s-sups" value="${esc(sup ? sName(sup) : guess.name || '')}" placeholder="Ex. : Brico, Gedimat…"></label>
       <datalist id="s-sups">${contacts.filter((c) => ['fournisseur', 'soustraitant'].includes(c.data.kind)).map((c) => `<option value="${esc(sName(c))}">`).join('')}</datalist>
       <label class="field s-amount"><span>Montant payé (avec TVA)</span><input name="ttc" inputmode="decimal" value="${ttc ? famt(ttc) : ''}" placeholder="0,00"><em>€</em></label>
@@ -786,7 +786,7 @@ async function meSimple() {
   const page = sPage('Mes informations', '#/dashboard');
   const co = { ...company() }; const a0 = splitAddress(co.address);
   page.innerHTML = `<p class="s-lead">Ces informations sont imprimées sur vos devis et factures.</p>
-    <form class="s-form" autocomplete="off" onsubmit="return false">
+    <form class="s-form" autocomplete="off" data-nosubmit>
       <label class="field"><span>Votre n° de TVA</span><input name="vat" value="${esc(co.vat || '')}" placeholder="BE0123456789"><small class="muted">Tapez-le : le nom et l'adresse se remplissent tout seuls.</small></label>
       <label class="field"><span>Nom de votre entreprise</span><input name="name" value="${esc(co.name || '')}"></label>
       <label class="field"><span>Adresse (rue et numéro)</span><input name="street" value="${esc(co.street || a0.street || '')}"></label>
@@ -825,7 +825,7 @@ async function peppolSimple() {
         <li><b>Créez votre compte gratuit</b> chez Peppyrus et inscrivez votre entreprise.<a class="s-big" href="https://www.peppyrus.be" target="_blank" rel="noopener">${I.send} Ouvrir peppyrus.be</a></li>
         <li><b>Dans Peppyrus, créez une « clé API »</b> et copiez-la.</li>
         <li><b>Collez la clé ici</b> puis touchez « Activer ».
-          <form class="s-form" data-ap autocomplete="off" onsubmit="return false"><label class="field"><span>Clé API Peppyrus</span><input name="key" type="password" placeholder="collez la clé ici"></label></form>
+          <form class="s-form" data-ap autocomplete="off" data-nosubmit><label class="field"><span>Clé API Peppyrus</span><input name="key" type="password" placeholder="collez la clé ici"></label></form>
           <button class="s-big primary" data-on>${I.check} Activer Peppol</button></li>
       </ol>
       <p class="s-help">Déjà inscrit ailleurs (autre logiciel, comptable…) ? Demandez-leur de « libérer votre identifiant Peppol », puis activez-le chez Peppyrus.</p>`}

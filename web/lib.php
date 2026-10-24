@@ -26,8 +26,42 @@ function db(): PDO {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,
         ]);
+        // colonnes de la validation en deux étapes (ajoutées une seule fois sur les installations existantes)
+        $flag = __DIR__ . '/uploads/.db-2fa';
+        if (!is_file($flag)) {
+            try { $pdo->exec('ALTER TABLE users ADD COLUMN totp VARCHAR(64) NULL, ADD COLUMN totp_step BIGINT NOT NULL DEFAULT 0'); } catch (Throwable $e) { /* déjà là */ }
+            @file_put_contents($flag, '1');
+        }
     }
     return $pdo;
+}
+
+// ---------------------------------------------------------------- Validation en deux étapes (TOTP, RFC 6238 : Google Authenticator, Microsoft Authenticator…)
+function b32_encode(string $bin): string {
+    $a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; $bits = ''; $out = '';
+    foreach (str_split($bin) as $c) $bits .= str_pad(decbin(ord($c)), 8, '0', STR_PAD_LEFT);
+    foreach (str_split($bits, 5) as $chunk) $out .= $a[bindec(str_pad($chunk, 5, '0'))];
+    return $out;
+}
+function b32_decode(string $s): string {
+    $a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; $bits = ''; $out = '';
+    foreach (str_split(strtoupper(preg_replace('/[^A-Za-z2-7]/', '', $s))) as $c) $bits .= str_pad(decbin(strpos($a, $c)), 5, '0', STR_PAD_LEFT);
+    foreach (str_split($bits, 8) as $byte) if (strlen($byte) === 8) $out .= chr(bindec($byte));
+    return $out;
+}
+function totp_code(string $secret, int $step): string {
+    $h = hash_hmac('sha1', pack('N2', 0, $step), b32_decode($secret), true);
+    $o = ord($h[19]) & 0xf;
+    $n = ((ord($h[$o]) & 0x7f) << 24) | (ord($h[$o + 1]) << 16) | (ord($h[$o + 2]) << 8) | ord($h[$o + 3]);
+    return str_pad((string)($n % 1000000), 6, '0', STR_PAD_LEFT);
+}
+// renvoie le pas de temps accepté (±30 s de décalage d'horloge), 0 si le code est faux ou déjà utilisé
+function totp_verify(string $secret, string $code, int $lastStep = 0): int {
+    $code = preg_replace('/\D/', '', $code);
+    if (strlen($code) !== 6) return 0;
+    $now = intdiv(time(), 30);
+    for ($d = -1; $d <= 1; $d++) if ($now + $d > $lastStep && hash_equals(totp_code($secret, $now + $d), $code)) return $now + $d;
+    return 0;
 }
 
 function q(string $sql, array $args = []): PDOStatement {
@@ -62,8 +96,12 @@ function start_session(): void {
     if (session_status() === PHP_SESSION_ACTIVE) return;
     $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
     session_name('BPSESS');
+    ini_set('session.use_strict_mode', '1'); ini_set('session.use_only_cookies', '1');
     session_set_cookie_params(['lifetime' => 0, 'path' => '/', 'secure' => $secure, 'httponly' => true, 'samesite' => 'Lax']);
     session_start();
+}
+// empreinte du mot de passe gardée en session : un changement de mot de passe déconnecte les autres appareils
+function pass_version(string $hash): string { return substr(hash('sha256', $hash), 0, 16);
 }
 
 function current_user(): ?array {
@@ -71,10 +109,13 @@ function current_user(): ?array {
     if (empty($_SESSION['uid'])) return null;
     static $u = false;
     if ($u === false) {
-        $u = q('SELECT u.id, u.name, u.email, u.role, u.active, u.color, u.company_id, u.super, c.active AS company_active FROM users u LEFT JOIN companies c ON c.id = u.company_id WHERE u.id = ?', [$_SESSION['uid']])->fetch() ?: null;
+        $u = q('SELECT u.id, u.name, u.email, u.role, u.active, u.color, u.company_id, u.super, u.pass, (u.totp IS NOT NULL) AS has2fa, c.active AS company_active FROM users u LEFT JOIN companies c ON c.id = u.company_id WHERE u.id = ?', [$_SESSION['uid']])->fetch() ?: null;
         if ($u && (!$u['active'] || (!$u['super'] && !(int)$u['company_active']))) $u = null;
+        // mot de passe changé ailleurs, ou plus de 30 jours sans utiliser l'application : reconnexion
+        if ($u && ((isset($_SESSION['pv']) && $_SESSION['pv'] !== pass_version((string)$u['pass'])) || (isset($_SESSION['seen']) && time() - (int)$_SESSION['seen'] > 30 * 86400))) { $_SESSION = []; $u = null; }
+        if ($u) { unset($u['pass']); if (time() - (int)($_SESSION['seen'] ?? 0) > 300) $_SESSION['seen'] = time(); }
         if ($u) {
-            foreach (['id', 'active', 'company_id', 'super'] as $k) $u[$k] = (int)$u[$k];
+            foreach (['id', 'active', 'company_id', 'super', 'has2fa'] as $k) $u[$k] = (int)$u[$k];
             unset($u['company_active']);
             // le super-administrateur peut travailler dans une autre firme
             $GLOBALS['BP_CID'] = $u['super'] && !empty($_SESSION['cid']) ? (int)$_SESSION['cid'] : $u['company_id'];
@@ -284,6 +325,9 @@ function migrate(): void {
     $pdo->exec('ALTER TABLE settings ADD company_id INT NOT NULL DEFAULT 1, DROP PRIMARY KEY, ADD PRIMARY KEY (company_id, k)');
     $pdo->exec('ALTER TABLE counters ADD company_id INT NOT NULL DEFAULT 1, DROP PRIMARY KEY, ADD PRIMARY KEY (company_id, k)');
 }
+
+// réglages réservés au serveur : jamais envoyés au navigateur ni modifiables par l'API (clé privée des notifications…)
+const SERVER_SETTINGS = ['vapid', 'remind_done', 'peppol_sync', 'backup'];
 
 function client_ip(): string { return substr($_SERVER['REMOTE_ADDR'] ?? '?', 0, 64); }
 
@@ -757,4 +801,74 @@ function daily_reminders(bool $force = false): array {
     }
     if ($missing && $cfg['summary']) notify(office_ids(), 'summary', count($missing) > 1 ? count($missing) . " personnes n'ont pas encodé leurs heures aujourd'hui" : "1 personne n'a pas encodé ses heures aujourd'hui", implode(', ', $missing), '#/hr/timesheets', (bool)$cfg['emailSummary']);
     return $missing;
+}
+
+// ---------------------------------------------------------------- Sauvegardes
+// Dossier des sauvegardes : à côté de l'application (hors du site public) si possible, sinon web/backups (fermé par .htaccess)
+function backup_dir(): string {
+    $d = (string)(config()['backup_dir'] ?? '');
+    if ($d === '') {
+        $out = dirname(__DIR__) . '/batipro-sauvegardes';
+        $d = ((is_dir($out) || @mkdir($out, 0700, true)) && is_writable($out)) ? $out : __DIR__ . '/backups';
+    }
+    if (!is_dir($d)) @mkdir($d, 0700, true);
+    if (!is_file("$d/.htaccess")) @file_put_contents("$d/.htaccess", "Require all denied\nDeny from all\n");
+    if (!is_file("$d/index.html")) @file_put_contents("$d/index.html", '');
+    return $d;
+}
+// Copie complète de la base de données (toutes les firmes) en SQL compressé, restaurable dans phpMyAdmin
+function backup_db(string $file): void {
+    $gz = gzopen($file, 'wb6');
+    if (!$gz) throw new RuntimeException('Impossible d\'écrire la sauvegarde.');
+    gzwrite($gz, "-- Sauvegarde BatiPro du " . date('Y-m-d H:i:s') . "\nSET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS = 0;\n");
+    foreach (db()->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN) as $t) {
+        $create = db()->query("SHOW CREATE TABLE `$t`")->fetch(PDO::FETCH_NUM)[1];
+        gzwrite($gz, "\nDROP TABLE IF EXISTS `$t`;\n$create;\n");
+        $st = db()->query("SELECT * FROM `$t`", PDO::FETCH_NUM);
+        $rows = [];
+        $flush = function () use (&$rows, $gz, $t) { if ($rows) gzwrite($gz, "INSERT INTO `$t` VALUES\n" . implode(",\n", $rows) . ";\n"); $rows = []; };
+        while ($r = $st->fetch(PDO::FETCH_NUM)) {
+            $rows[] = '(' . implode(',', array_map(fn($v) => $v === null ? 'NULL' : db()->quote((string)$v), $r)) . ')';
+            if (count($rows) >= 200) $flush();
+        }
+        $flush();
+    }
+    gzwrite($gz, "\nSET FOREIGN_KEY_CHECKS = 1;\n");
+    gzclose($gz);
+}
+// Sauvegarde du jour (une fois par 24 h) : garde 14 jours + le 1er de chaque mois pendant un an ;
+// une fois par semaine, la copie part par e-mail aux gestionnaires de la plateforme (copie hors de l'hébergement)
+function backup_auto(bool $force = false): ?string {
+    $st = setting('backup', [], 1) ?: [];
+    if (!$force && !empty($st['at']) && time() - strtotime((string)$st['at']) < 20 * 3600) return null;
+    set_setting('backup', ['at' => date('Y-m-d H:i:s')] + $st, 1); // verrou : une seule sauvegarde à la fois
+    $dir = backup_dir();
+    $file = "$dir/batipro-" . date('Y-m-d-His') . '.sql.gz';
+    backup_db($file);
+    $all = glob("$dir/batipro-*.sql.gz") ?: []; rsort($all);
+    $keepMonths = [];
+    foreach ($all as $i => $f) {
+        $m = substr(basename($f), 8, 7);
+        if ($i < 14) continue;
+        if (!isset($keepMonths[$m]) && count($keepMonths) < 12) { $keepMonths[$m] = 1; continue; }
+        @unlink($f);
+    }
+    $st = ['at' => date('Y-m-d H:i:s'), 'file' => basename($file), 'size' => filesize($file)] + $st;
+    if (empty($st['mailed']) || time() - strtotime((string)$st['mailed']) > 6.5 * 86400) {
+        $to = q('SELECT name, email FROM users WHERE super = 1 AND active = 1')->fetchAll();
+        if ($to && filesize($file) < 15 * 1024 * 1024) {
+            $prevCid = $GLOBALS['BP_CID'] ?? null;
+            try {
+                $GLOBALS['BP_CID'] = 1;
+                send_mail(array_map(fn($u) => ['email' => $u['email'], 'name' => $u['name']], $to), [], 'Sauvegarde BâtiPro du ' . date('d/m/Y'),
+                    "Bonjour,\n\nVoici la sauvegarde hebdomadaire de la base de données BâtiPro (toutes les firmes).\nGardez cet e-mail : en cas de problème chez l'hébergeur, ce fichier permet de tout restaurer (phpMyAdmin → Importer).\n\nLes fichiers envoyés (photos, PDF, plans) se téléchargent depuis Plateforme → Sauvegardes → « Tout télécharger ».\n",
+                    [['name' => basename($file), 'mime' => 'application/gzip', 'data' => file_get_contents($file)]]);
+                $st['mailed'] = date('Y-m-d H:i:s');
+                unset($st['mailError']);
+            } catch (Throwable $e) { $st['mailError'] = $e->getMessage(); error_log('[batipro sauvegarde] ' . $e->getMessage()); }
+            finally { $GLOBALS['BP_CID'] = $prevCid; }
+        }
+    }
+    set_setting('backup', $st, 1);
+    return $file;
 }

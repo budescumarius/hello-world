@@ -32,4 +32,6 @@ foreach (q('SELECT id, name FROM companies WHERE active = 1')->fetchAll() as $c)
         echo date('c') . " {$c['name']} : " . $e->getMessage() . "\n";
     }
 }
+// sauvegarde quotidienne de la base (toutes les firmes) + copie hebdomadaire par e-mail
+try { $b = backup_auto(); if ($b) echo date('c') . ' sauvegarde : ' . basename($b) . "\n"; } catch (Throwable $e) { echo date('c') . ' sauvegarde : ' . $e->getMessage() . "\n"; }
 push_flush();

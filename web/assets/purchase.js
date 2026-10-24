@@ -264,7 +264,7 @@ route('purchase', async (id) => {
       ${d.readNote && st === 'avalider' ? `<div class="hint-box">${esc(d.readNote)}${/\.pdf$/i.test(d.fileName || '') ? ` <button type="button" class="link-btn" data-reread>Relire la facture</button>` : ''}</div>` : ''}
       ${dup ? `<div class="hint-box warn">⚠ Doublon probable : la facture ${esc(d.ref)} de ce fournisseur existe déjà (${fmtDate(dup.data.date)}, ${money(dup.data.amount)} HT). <a href="#/purchase/${dup.id}">Ouvrir l'autre</a></div>` : ''}
       <div class="pi-grid">
-        <form class="pi-form" autocomplete="off" onsubmit="return false">
+        <form class="pi-form" autocomplete="off" data-nosubmit>
           <div class="section-t">Détails de la facture</div>
           ${fieldsGrid([
             { name: 'category', label: 'Type de facture *', type: 'select', options: optsOf(TYPES), cls: 'full' },

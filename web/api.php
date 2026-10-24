@@ -28,21 +28,75 @@ switch ($seg[0] ?? '') {
             $b = body();
             $ip = client_ip();
             q('DELETE FROM logins WHERE at < ?', [date('Y-m-d H:i:s', time() - 900)]);
+            // 10 essais ratés en 15 minutes : bloqué par adresse IP, et aussi par compte (attaque depuis plusieurs IP)
+            $email = mb_strtolower(trim((string)($b['email'] ?? '')));
+            $acc = 'u:' . substr(hash('sha256', $email), 0, 40);
             $tries = (int)q('SELECT COUNT(*) FROM logins WHERE ip = ?', [$ip])->fetchColumn();
-            if ($tries >= 10) fail(429, 'Trop de tentatives. Réessayez dans 15 minutes.');
-            $u = q('SELECT * FROM users WHERE email = ?', [mb_strtolower(trim((string)($b['email'] ?? '')))])->fetch();
+            $triesAcc = (int)q('SELECT COUNT(*) FROM logins WHERE ip = ?', [$acc])->fetchColumn();
+            if ($tries >= 10 || $triesAcc >= 10) fail(429, 'Trop de tentatives. Réessayez dans 15 minutes.');
+            $u = q('SELECT * FROM users WHERE email = ?', [$email])->fetch();
             if (!$u || !$u['active'] || !password_verify((string)($b['password'] ?? ''), $u['pass'])) {
-                q('INSERT INTO logins (ip, at) VALUES (?, ?)', [$ip, now()]);
+                q('INSERT INTO logins (ip, at) VALUES (?, ?), (?, ?)', [$ip, now(), $acc, now()]);
                 usleep(600000);
                 fail(401, 'Email ou mot de passe incorrect.');
             }
             if (!$u['super'] && !(int)q('SELECT active FROM companies WHERE id = ?', [$u['company_id']])->fetchColumn()) fail(403, 'Le compte de votre entreprise est suspendu. Contactez le gestionnaire de la plateforme.');
             start_session();
             session_regenerate_id(true);
+            // validation en deux étapes : le mot de passe ne suffit pas, il faut encore le code du téléphone
+            if (!empty($u['totp'])) {
+                $_SESSION = ['pending' => (int)$u['id'], 'pending_at' => time()];
+                out(['need2fa' => true]);
+            }
             $_SESSION['uid'] = (int)$u['id'];
+            $_SESSION['pv'] = pass_version((string)$u['pass']); $_SESSION['seen'] = time();
             unset($_SESSION['cid']);
+            if (password_needs_rehash($u['pass'], PASSWORD_DEFAULT)) q('UPDATE users SET pass = ? WHERE id = ?', [password_hash((string)$b['password'], PASSWORD_DEFAULT), $u['id']]);
             q('UPDATE users SET last_login = ? WHERE id = ?', [now(), $u['id']]);
-            q('DELETE FROM logins WHERE ip = ?', [$ip]);
+            q('DELETE FROM logins WHERE ip IN (?, ?)', [$ip, $acc]);
+            out(['ok' => true]);
+        }
+        // 2e étape de la connexion : code à 6 chiffres de l'application d'authentification
+        if ($act === '2fa' && $method === 'POST') {
+            start_session();
+            $uid = (int)($_SESSION['pending'] ?? 0);
+            if (!$uid || time() - (int)($_SESSION['pending_at'] ?? 0) > 300) { $_SESSION = []; fail(401, 'Délai dépassé : reconnectez-vous.'); }
+            $acc = 'u2:' . $uid; $ip = client_ip();
+            q('DELETE FROM logins WHERE at < ?', [date('Y-m-d H:i:s', time() - 900)]);
+            if ((int)q('SELECT COUNT(*) FROM logins WHERE ip IN (?, ?)', [$ip, $acc])->fetchColumn() >= 10) { $_SESSION = []; fail(429, 'Trop de tentatives. Réessayez dans 15 minutes.'); }
+            $u = q('SELECT * FROM users WHERE id = ? AND active = 1', [$uid])->fetch();
+            $step = $u && $u['totp'] ? totp_verify((string)$u['totp'], (string)(body()['code'] ?? ''), (int)$u['totp_step']) : 0;
+            if (!$step) { q('INSERT INTO logins (ip, at) VALUES (?, ?), (?, ?)', [$ip, now(), $acc, now()]); usleep(600000); fail(400, 'Code incorrect.'); }
+            q('UPDATE users SET totp_step = ?, last_login = ? WHERE id = ?', [$step, now(), $uid]);
+            session_regenerate_id(true);
+            $_SESSION = ['uid' => $uid, 'pv' => pass_version((string)$u['pass']), 'seen' => time()];
+            q('DELETE FROM logins WHERE ip IN (?, ?)', [$ip, $acc]);
+            out(['ok' => true]);
+        }
+        // activer / désactiver la validation en deux étapes sur son propre compte
+        if ($act === '2fa-setup' && $method === 'POST') {
+            $u = require_user();
+            $secret = b32_encode(random_bytes(20));
+            $_SESSION['totp_new'] = $secret;
+            $issuer = rawurlencode('BâtiPro ' . (string)((setting('company', []) ?: [])['name'] ?? ''));
+            out(['secret' => $secret, 'uri' => "otpauth://totp/$issuer:" . rawurlencode($u['email']) . "?secret=$secret&issuer=$issuer&digits=6&period=30"]);
+        }
+        if ($act === '2fa-enable' && $method === 'POST') {
+            $u = require_user();
+            $secret = (string)($_SESSION['totp_new'] ?? '');
+            $step = $secret ? totp_verify($secret, (string)(body()['code'] ?? '')) : 0;
+            if (!$step) fail(400, 'Code incorrect : vérifiez l\'heure du téléphone et recommencez.');
+            q('UPDATE users SET totp = ?, totp_step = ? WHERE id = ?', [$secret, $step, $u['id']]);
+            unset($_SESSION['totp_new']);
+            log_activity($u['id'], 'update', 'user', $u['id'], null, 'Validation en deux étapes activée');
+            out(['ok' => true]);
+        }
+        if ($act === '2fa-disable' && $method === 'POST') {
+            $u = require_user();
+            $row = q('SELECT pass FROM users WHERE id = ?', [$u['id']])->fetch();
+            if (!password_verify((string)(body()['password'] ?? ''), $row['pass'])) fail(400, 'Mot de passe incorrect.');
+            q('UPDATE users SET totp = NULL, totp_step = 0 WHERE id = ?', [$u['id']]);
+            log_activity($u['id'], 'update', 'user', $u['id'], null, 'Validation en deux étapes désactivée');
             out(['ok' => true]);
         }
         if ($act === 'logout' && $method === 'POST') {
@@ -61,7 +115,9 @@ switch ($seg[0] ?? '') {
             $row = q('SELECT pass FROM users WHERE id = ?', [$u['id']])->fetch();
             if (!password_verify((string)($b['old'] ?? ''), $row['pass'])) fail(400, 'Mot de passe actuel incorrect.');
             if (mb_strlen((string)($b['new'] ?? '')) < 8) fail(400, 'Le nouveau mot de passe doit contenir au moins 8 caractères.');
-            q('UPDATE users SET pass = ? WHERE id = ?', [password_hash($b['new'], PASSWORD_DEFAULT), $u['id']]);
+            $hash = password_hash($b['new'], PASSWORD_DEFAULT);
+            q('UPDATE users SET pass = ? WHERE id = ?', [$hash, $u['id']]);
+            $_SESSION['pv'] = pass_version($hash);
             out(['ok' => true]);
         }
         fail(404, 'Route inconnue');
@@ -70,13 +126,15 @@ switch ($seg[0] ?? '') {
     case 'bootstrap':
         $u = require_user();
         try { daily_reminders(); } catch (Throwable $e) { error_log('[batipro rappels] ' . $e->getMessage()); }
-        $users = q('SELECT id, name, email, role, active, color, last_login FROM users WHERE company_id = ? ORDER BY name', [cid()])->fetchAll();
-        foreach ($users as &$x) { $x['id'] = (int)$x['id']; $x['active'] = (int)$x['active']; }
+        $bk = setting('backup', [], 1) ?: [];
+        if (empty($bk['at']) || time() - strtotime((string)$bk['at']) > 26 * 3600) register_shutdown_function(function () { if (function_exists('fastcgi_finish_request')) fastcgi_finish_request(); try { backup_auto(); } catch (Throwable $e) { error_log('[batipro sauvegarde] ' . $e->getMessage()); } });
+        $users = q('SELECT id, name, email, role, active, color, last_login, (totp IS NOT NULL) AS has2fa FROM users WHERE company_id = ? ORDER BY name', [cid()])->fetchAll();
+        foreach ($users as &$x) { $x['id'] = (int)$x['id']; $x['active'] = (int)$x['active']; $x['has2fa'] = (int)$x['has2fa']; }
         unset($x);
         // le super-administrateur entré dans une autre firme apparaît aussi (auteur de ses modifications)
         if (!in_array($u['id'], array_column($users, 'id'), true)) $users[] = ['id' => $u['id'], 'name' => $u['name'], 'email' => $u['email'], 'role' => 'admin', 'active' => 0, 'color' => $u['color'], 'last_login' => null];
         $settings = [];
-        foreach (q('SELECT k, v FROM settings WHERE company_id = ?', [cid()])->fetchAll() as $r) $settings[$r['k']] = json_decode($r['v'], true);
+        foreach (q('SELECT k, v FROM settings WHERE company_id = ?', [cid()])->fetchAll() as $r) if (!in_array($r['k'], ['vapid', 'backup'], true)) $settings[$r['k']] = json_decode($r['v'], true);
         // le mot de passe SMTP ne quitte jamais le serveur
         if (isset($settings['smtp']) && is_array($settings['smtp'])) { $settings['smtp']['hasPass'] = !empty($settings['smtp']['pass']); unset($settings['smtp']['pass']); }
         if (isset($settings['peppolap']) && is_array($settings['peppolap'])) { $settings['peppolap']['hasKey'] = !empty($settings['peppolap']['key']); unset($settings['peppolap']['key']); }
@@ -120,6 +178,8 @@ switch ($seg[0] ?? '') {
             if (!$isAdmin && $me['id'] !== $id) fail(403, 'Réservé aux administrateurs.');
             // un administrateur ne gère que les utilisateurs de sa firme
             if ($me['id'] !== $id && !q('SELECT id FROM users WHERE id = ? AND company_id = ?', [$id, cid()])->fetch()) fail(404, 'Utilisateur introuvable.');
+            // le compte du gestionnaire de la plateforme ne se modifie que par lui-même
+            if ($me['id'] !== $id && !$me['super'] && (int)q('SELECT super FROM users WHERE id = ?', [$id])->fetchColumn()) fail(403, 'Ce compte ne peut être modifié que par son titulaire.');
             $fields = []; $args = [];
             if (isset($b['name'])) { $fields[] = 'name = ?'; $args[] = trim((string)$b['name']); }
             if (isset($b['color'])) { $fields[] = 'color = ?'; $args[] = (string)$b['color']; }
@@ -132,6 +192,8 @@ switch ($seg[0] ?? '') {
                 }
                 if (isset($b['role']) && $id !== $me['id']) { $fields[] = 'role = ?'; $args[] = in_array($b['role'], USER_ROLES, true) ? $b['role'] : 'user'; }
                 if (isset($b['active']) && $id !== $me['id']) { $fields[] = 'active = ?'; $args[] = $b['active'] ? 1 : 0; }
+                // téléphone perdu : l'administrateur retire la validation en deux étapes d'un utilisateur
+                if (!empty($b['reset2fa']) && $id !== $me['id']) { $fields[] = 'totp = NULL, totp_step = ?'; $args[] = 0; }
                 if (!empty($b['password'])) {
                     if (mb_strlen((string)$b['password']) < 8) fail(400, 'Le mot de passe doit contenir au moins 8 caractères.');
                     $fields[] = 'pass = ?'; $args[] = password_hash($b['password'], PASSWORD_DEFAULT);
@@ -148,7 +210,7 @@ switch ($seg[0] ?? '') {
         if ($method === 'PUT') {
             $me = require_admin();
             foreach (body() as $k => $v) {
-                if (!preg_match('/^[a-z_]{2,40}$/', (string)$k) || $k === 'edition') continue; // l'édition se choisit dans Plateforme
+                if (!preg_match('/^[a-z_]{2,40}$/', (string)$k) || $k === 'edition' || in_array($k, SERVER_SETTINGS, true)) continue; // l'édition se choisit dans Plateforme ; réglages internes au serveur
                 if ($k === 'smtp' && is_array($v)) {
                     // mot de passe vide = conserver l'ancien
                     $old = setting('smtp', []) ?: [];
@@ -538,6 +600,40 @@ switch ($seg[0] ?? '') {
         $me = require_super();
         $act = $seg[1] ?? '';
         $id = isset($seg[2]) ? (int)$seg[2] : 0;
+        // ---- sauvegardes (gestionnaire de la plateforme uniquement)
+        if ($act === 'backups') {
+            if ($method === 'POST') { set_time_limit(0); backup_auto(true); }
+            $dir = backup_dir();
+            $list = array_map(fn($f) => ['name' => basename($f), 'size' => filesize($f), 'at' => date('Y-m-d H:i:s', filemtime($f))], glob("$dir/batipro-*.sql.gz") ?: []);
+            usort($list, fn($a, $b) => strcmp($b['name'], $a['name']));
+            $st = setting('backup', [], 1) ?: [];
+            out(['list' => $list, 'last' => $st['at'] ?? null, 'mailed' => $st['mailed'] ?? null, 'mailError' => $st['mailError'] ?? null, 'outside' => strpos((string)realpath($dir), (string)realpath(__DIR__)) !== 0, 'zip' => class_exists('ZipArchive')]);
+        }
+        if ($act === 'backup-file' && $method === 'GET') {
+            $name = (string)($_GET['name'] ?? '');
+            $f = backup_dir() . '/' . $name;
+            if (!preg_match('/^batipro-[0-9-]+\.sql\.gz$/', $name) || !is_file($f)) fail(404, 'Sauvegarde introuvable.');
+            header('Content-Type: application/gzip'); header('Content-Length: ' . filesize($f));
+            header('Content-Disposition: attachment; filename="' . $name . '"'); header('Cache-Control: no-store');
+            readfile($f); exit;
+        }
+        // tout : base de données du moment + tous les fichiers envoyés (photos, PDF, plans), dans un ZIP
+        if ($act === 'backup-full' && $method === 'GET') {
+            if (!class_exists('ZipArchive')) fail(500, 'Extension PHP zip absente chez l\'hébergeur.');
+            set_time_limit(0);
+            $tmp = tempnam(sys_get_temp_dir(), 'bpz'); $sql = tempnam(sys_get_temp_dir(), 'bps');
+            backup_db($sql);
+            $z = new ZipArchive(); $z->open($tmp, ZipArchive::OVERWRITE);
+            $z->addFile($sql, 'base-de-donnees.sql.gz');
+            $root = realpath(__DIR__ . '/uploads');
+            $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
+            foreach ($it as $f) { if ($f->isFile() && $f->getFilename()[0] !== '.') { $z->addFile($f->getPathname(), 'uploads/' . substr($f->getPathname(), strlen($root) + 1)); $z->setCompressionName('uploads/' . substr($f->getPathname(), strlen($root) + 1), ZipArchive::CM_STORE); } }
+            $z->addFromString('LISEZ-MOI.txt', "Sauvegarde complete BatiPro du " . date('d/m/Y H:i') . "\n\n1. base-de-donnees.sql.gz : phpMyAdmin > Importer (toutes les firmes).\n2. uploads/ : a remettre dans le dossier uploads de l'application.\n3. config.php : a recreer avec install.php ou a reprendre de l'ancienne installation.\n");
+            $z->close(); @unlink($sql);
+            header('Content-Type: application/zip'); header('Content-Length: ' . filesize($tmp));
+            header('Content-Disposition: attachment; filename="batipro-complet-' . date('Y-m-d') . '.zip"'); header('Cache-Control: no-store');
+            readfile($tmp); @unlink($tmp); exit;
+        }
         if ($act === 'companies' && $method === 'GET') {
             $rows = q("SELECT c.*, (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id) AS users,
                 (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id AND u.active = 1) AS users_active,

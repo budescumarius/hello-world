@@ -1750,3 +1750,11 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .alert.warn { background: #fff4e0; border-color: #f0b44c; color: #7a4a00; }
 .s-btn.primary .s-tx b { color: #fff; }
 .set-h { margin: 10px 0 2px; font-size: 16px; color: var(--ink); }
+/* Validation en deux étapes */
+.sec-2fa { margin-top: 12px; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--border); }
+.sec-2fa b { display: flex; align-items: center; gap: 6px; color: var(--ink); } .sec-2fa svg { width: 18px; height: 18px; } .sec-2fa p { margin: 6px 0 8px; font-size: 13.5px; }
+.qr-2fa { text-align: center; } .qr-2fa img { width: 200px; height: 200px; image-rendering: pixelated; border: 8px solid #fff; border-radius: 10px; }
+.key-2fa { font-size: 14px; letter-spacing: .06em; word-break: break-all; }
+.code-in { width: 100%; font-size: 26px !important; letter-spacing: .3em; text-align: center; padding: 10px; border-radius: 12px; border: 1.5px solid var(--border); font-weight: 800; }
+.bk-card .card-h h3 { display: flex; align-items: center; gap: 6px; } .bk-card .card-h svg { width: 18px; height: 18px; }
+.bk-info { margin: 0 0 12px; padding-left: 18px; line-height: 1.7; } .bk-tip { margin-top: 10px; font-size: 13px; }

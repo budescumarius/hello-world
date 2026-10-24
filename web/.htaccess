@@ -1,7 +1,20 @@
 Options -Indexes
 DirectoryIndex index.html
 
-<FilesMatch "^(config\.php|lib\.php|schema\.sql)$">
+# HTTPS obligatoire (sauf en local)
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTPS} !=on
+  RewriteCond %{HTTP:X-Forwarded-Proto} !https
+  RewriteCond %{HTTP_HOST} !^(localhost|127\.0\.0\.1)(:\d+)?$
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+  # dossiers internes : bibliothèques PHP, fichiers envoyés, sauvegardes
+  RewriteRule ^(vendor|uploads|backups)(/|$) - [F,L]
+</IfModule>
+
+# Seuls api.php (l'application) et install.php (installation) s'ouvrent depuis le navigateur ;
+# configuration, code interne, schéma, documentation et fichiers de dépendances restent invisibles
+<FilesMatch "(\.(sql|md|lock|log|bak|gz|zip|ini|sh)|^composer\.json|^(config|lib|ai|peppol_ap|cron)\.php)$">
   <IfModule mod_authz_core.c>
     Require all denied
   </IfModule>
@@ -12,12 +25,18 @@ DirectoryIndex index.html
 </FilesMatch>
 
 <IfModule mod_headers.c>
-  Header set X-Content-Type-Options "nosniff"
-  Header set X-Frame-Options "SAMEORIGIN"
-  Header set Referrer-Policy "same-origin"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Referrer-Policy "same-origin"
+  Header always set Permissions-Policy "camera=(self), microphone=(self), geolocation=(self), payment=()"
+  # le navigateur n'accepte plus que HTTPS pour ce site pendant un an
+  Header always set Strict-Transport-Security "max-age=31536000" "expr=%{HTTPS} == 'on'"
+  Header always unset X-Powered-By
 </IfModule>
 
 <IfModule mod_php.c>
   php_value upload_max_filesize 32M
   php_value post_max_size 34M
+  php_flag display_errors off
+  php_flag expose_php off
 </IfModule>

@@ -589,7 +589,7 @@ async function render() {
   if (cleanupView) { try { await cleanupView(); } catch (e) { /* vue déjà détruite */ } cleanupView = null; }
   const parts = location.hash.replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean);
   // édition simplifiée : les modules absents renvoient au tableau de bord
-  const SIMPLE_ROUTES = ['s', 'dashboard', 'quotes', 'quote', 'invoices', 'invoice', 'payments', 'expenses', 'purchase', 'projects', 'project', 'contacts', 'contact', 'library', 'print', 'contract', 'contractpdf', 'export', 'settings', 'platform'];
+  const SIMPLE_ROUTES = ['s', 'dashboard', 'quotes', 'quote', 'invoices', 'invoice', 'payments', 'expenses', 'purchase', 'projects', 'project', 'contacts', 'contact', 'library', 'print', 'contract', 'contractpdf', 'export', 'security', 'settings', 'platform'];
   if (isSimple() && parts[0] && !SIMPLE_ROUTES.includes(parts[0])) { location.hash = '#/dashboard'; return; }
   // compte terrain : uniquement son espace (et l'impression de ses bons de commande)
   if (isField() && !(parts[0] === 't' || (parts[0] === 'print' && parts[1] === 'order'))) { location.hash = '#/t'; return; }
@@ -602,6 +602,8 @@ async function render() {
   if (seq === renderSeq) window.scrollTo(0, 0);
 }
 window.addEventListener('hashchange', render);
+// formulaires dont la touche Entrée ne doit rien envoyer (pas de gestionnaire en ligne : politique de sécurité CSP)
+document.addEventListener('submit', (e) => { if (e.target.matches('form[data-nosubmit]')) e.preventDefault(); });
 
 // ---------------------------------------------------------------- Connexion
 function showLogin(msg = '') {
@@ -621,11 +623,30 @@ function showLogin(msg = '') {
     e.preventDefault();
     const btn = $('button', f); btn.disabled = true;
     try {
-      await api('POST', 'auth/login', { email: f.email.value, password: f.password.value });
+      const r = await api('POST', 'auth/login', { email: f.email.value, password: f.password.value });
+      if (r && r.need2fa) return showLogin2fa();
       await boot();
     } catch (err) { showLogin(err.message); }
   };
   setTimeout(() => f.email.focus(), 50);
+}
+// 2e étape : le code à 6 chiffres de l'application d'authentification du téléphone
+function showLogin2fa(msg = '') {
+  app.innerHTML = `<div class="login"><form class="login-box">
+    <h1>Code de sécurité</h1>
+    ${msg ? `<div class="alert">${esc(msg)}</div>` : ''}
+    <p class="muted">Ouvrez votre application d'authentification (Google Authenticator, Microsoft Authenticator…) et tapez le code à 6 chiffres de BâtiPro.</p>
+    <label class="field"><span>Code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" pattern="[0-9 ]*" required class="code-in"></label>
+    <button class="btn primary block" type="submit">Valider</button>
+    <button class="btn ghost block" type="button" data-back>Retour</button>
+  </form></div>`;
+  const f = $('form', app);
+  f.onsubmit = async (e) => {
+    e.preventDefault(); $('button', f).disabled = true;
+    try { await api('POST', 'auth/2fa', { code: f.code.value }); await boot(); } catch (err) { if (err.status === 401) showLogin(err.message); else showLogin2fa(err.message); }
+  };
+  $('[data-back]', f).onclick = () => showLogin();
+  setTimeout(() => f.code.focus(), 50);
 }
 
 // super-administrateur : entrer dans une firme cliente (0 = revenir à la sienne)
@@ -648,7 +669,8 @@ async function boot() {
   } catch (e) {
     if (e.status === 401) showLogin();
     else if (e.status === 503) app.innerHTML = `<div class="login"><div class="login-box"><h1>Installation requise</h1><p>${esc(e.message)}</p><a class="btn primary" href="install.php">Installer</a></div></div>`;
-    else app.innerHTML = `<div class="login"><div class="login-box"><h1>Erreur</h1><p>${esc(e.message)}</p><button class="btn" onclick="location.reload()">Réessayer</button></div></div>`;
+    else app.innerHTML = `<div class="login"><div class="login-box"><h1>Erreur</h1><p>${esc(e.message)}</p><button class="btn" data-reload>Réessayer</button></div></div>`;
+    const rl = $('[data-reload]'); if (rl) rl.onclick = () => location.reload();
   }
 }
 

@@ -72,9 +72,21 @@ Pas de menu latéral : 5 espaces, dans l'ordre de vie d'un chantier, toujours à
 - Fiecare firmă are propriul identificator Peppol (numărul ei de întreprindere), deci propriul cont Peppyrus și propria cheie API. Serverul de email al platformei e folosit pentru firmele care nu și-au configurat unul.
 - La actualizarea unei instalări existente, baza de date se transformă automat la prima deschidere (datele existente devin firma n° 1).
 
-## Backup
-- cPanel → *Sauvegarde*: descarcă baza de date.
-- Păstrează și o copie a dosarului `uploads/`.
+## Securitate
+- HTTPS obligatoriu (redirecționare automată + HSTS), antete de securitate, politică CSP (doar scripturi proprii).
+- Parole hash-uite (bcrypt), sesiune cu cookie `HttpOnly`/`Secure`/`SameSite`, deconectare automată după 30 de zile de inactivitate și pe toate celelalte aparate la schimbarea parolei.
+- Blocare după 10 încercări greșite în 15 minute (pe IP și pe cont).
+- **Validare în doi pași (2FA)**: Mon profil → Activer (Google / Microsoft Authenticator). Administratorul poate retrage 2FA unui utilizator care și-a pierdut telefonul (Paramètres → Utilisateurs).
+- Fiecare firmă își vede doar datele ei; conturile de șantier văd doar ce le privește (fără prețuri, clienți, devize).
+- Fișierele încărcate: doar tipuri permise, nume aleatorii, servite numai după autentificare; dosarele `uploads/`, `vendor/`, `backups/` și fișierele interne (`config.php`, `lib.php`, `.sql`, `.md`…) sunt închise publicului.
+- Contul gestionarului platformei nu poate fi modificat de alt administrator.
+
+## Sauvegardes (backup)
+- **Automat, zilnic**: copie completă a bazei de date (toate firmele) în `../batipro-sauvegardes/` (în afara site-ului public; dacă nu se poate, în `backups/`, închis). Se păstrează 14 zile + o copie pe lună timp de un an.
+- **Săptămânal prin e-mail** către gestionarul platformei: copie în afara Hostico.
+- **Plateforme → Sauvegardes**: listă, „Sauvegarder maintenant", descărcare, și **„Tout télécharger"** (baza de date + toate fișierele: poze, PDF, planuri) într-un ZIP, cu instrucțiuni de restaurare.
+- Restaurare: phpMyAdmin → Import `base-de-donnees.sql.gz`, apoi copiați `uploads/` și refaceți `config.php` (install.php).
+- Recomandat: tâche cron `php …/cron.php` la 15 minute (backup la oră fixă) și, o dată pe lună, „Tout télécharger" păstrat pe calculator / Google Drive.
 
 ## Rulare locală (dezvoltare)
 ```bash
