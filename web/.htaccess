@@ -1,0 +1,23 @@
+Options -Indexes
+DirectoryIndex index.html
+
+<FilesMatch "^(config\.php|lib\.php|schema\.sql)$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order deny,allow
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-Frame-Options "SAMEORIGIN"
+  Header set Referrer-Policy "same-origin"
+</IfModule>
+
+<IfModule mod_php.c>
+  php_value upload_max_filesize 32M
+  php_value post_max_size 34M
+</IfModule>

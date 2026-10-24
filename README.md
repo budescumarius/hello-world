@@ -1,3 +1,8 @@
+# Aplicații pentru construcții
+
+- **`web/` – BâtiPro**: aplicație web multi-utilizator (PHP + MySQL) în stilul **Vertuoza**, cu partea **Aproplan** integrată pe fiecare șantier. Se instalează pe un domeniu propriu (cPanel). Vezi [`web/README.md`](web/README.md).
+- **`app/` – Șantier**: aplicația offline (PWA) pentru iPhone/iPad, descrisă mai jos.
+
 # Șantier – aplicație pentru iPhone și iPad
 
 Aplicație web instalabilă (PWA) pentru urmărirea șantierelor: planuri, puncte de observație/defecte, fotografii, firme, ședințe și rapoarte PDF. Funcționează **offline**, iar datele rămân pe dispozitiv.

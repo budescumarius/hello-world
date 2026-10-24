@@ -1,0 +1,84 @@
+CREATE TABLE IF NOT EXISTS companies (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(190) NOT NULL,
+  active TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  company_id INT NOT NULL DEFAULT 1,
+  super TINYINT NOT NULL DEFAULT 0,
+  name VARCHAR(120) NOT NULL,
+  email VARCHAR(190) NOT NULL UNIQUE,
+  pass VARCHAR(255) NOT NULL,
+  role VARCHAR(20) NOT NULL DEFAULT 'user',
+  active TINYINT NOT NULL DEFAULT 1,
+  color VARCHAR(16) NOT NULL DEFAULT '#3b5bdb',
+  created_at DATETIME NOT NULL,
+  last_login DATETIME NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  company_id INT NOT NULL DEFAULT 1,
+  type VARCHAR(32) NOT NULL,
+  project_id INT NULL,
+  parent_id INT NULL,
+  number VARCHAR(40) NULL,
+  data LONGTEXT NOT NULL,
+  version INT NOT NULL DEFAULT 1,
+  created_by INT NULL,
+  updated_by INT NULL,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  KEY company_type (company_id, type),
+  KEY type_project (type, project_id),
+  KEY type_parent (type, parent_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS files (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  company_id INT NOT NULL DEFAULT 1,
+  project_id INT NULL,
+  name VARCHAR(255) NOT NULL,
+  mime VARCHAR(100) NOT NULL,
+  size INT NOT NULL,
+  path VARCHAR(255) NOT NULL,
+  created_by INT NULL,
+  created_at DATETIME NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS counters (
+  company_id INT NOT NULL DEFAULT 1,
+  k VARCHAR(80) NOT NULL,
+  n INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (company_id, k)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS settings (
+  company_id INT NOT NULL DEFAULT 1,
+  k VARCHAR(40) NOT NULL,
+  v LONGTEXT NOT NULL,
+  PRIMARY KEY (company_id, k)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS activity (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  company_id INT NOT NULL DEFAULT 1,
+  user_id INT NULL,
+  action VARCHAR(20) NOT NULL,
+  type VARCHAR(32) NOT NULL,
+  item_id INT NULL,
+  project_id INT NULL,
+  label VARCHAR(255) NULL,
+  created_at DATETIME NOT NULL,
+  KEY project (project_id),
+  KEY company (company_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS logins (
+  ip VARCHAR(64) NOT NULL,
+  at DATETIME NOT NULL,
+  KEY ip_at (ip, at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
