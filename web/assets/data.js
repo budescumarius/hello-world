@@ -104,7 +104,8 @@ const lid = () => Math.random().toString(36).slice(2, 10);
 // Prix d'un article de bibliothèque ; un ouvrage additionne ses composants
 function articleCost(a, all, depth = 0) {
   const d = a.data;
-  if (d.kind !== 'ouvrage' || depth > 4) return { cost: num(d.cost), costBy: { [d.kind === 'ouvrage' ? 'divers' : d.kind || 'divers']: num(d.cost) } };
+  // article simple, ou ouvrage sans composant : le déboursé encodé tel quel
+  if (d.kind !== 'ouvrage' || !(d.components || []).length || depth > 4) return { cost: num(d.cost), costBy: { [d.kind === 'ouvrage' ? 'divers' : d.kind || 'divers']: num(d.cost) } };
   const costBy = {}; let cost = 0;
   for (const c of d.components || []) {
     const sub = all.find((x) => x.id === +c.articleId);
@@ -120,7 +121,9 @@ function articleCost(a, all, depth = 0) {
 function articlePrice(a, all) {
   const d = a.data;
   if (d.priceMode === 'fixed' && num(d.price)) return num(d.price);
-  return r2(articleCost(a, all).cost * (1 + num(d.margin) / 100));
+  const cost = articleCost(a, all).cost;
+  // sans déboursé connu : le prix de vente encodé dans la bibliothèque
+  return cost > 0 ? r2(cost * (1 + num(d.margin) / 100)) : num(d.price);
 }
 function lineFromArticle(a, all) {
   const c = articleCost(a, all);
