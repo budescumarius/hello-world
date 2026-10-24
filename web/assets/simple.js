@@ -118,6 +118,7 @@ async function homeSimple() {
       ${sBtn('data-go="#/s/liste/factures"', 'coins', 'Mes factures', `${all.invoice.length} facture(s)`)}
       ${sBtn('data-go="#/s/liste/devis"', 'calc', 'Mes devis', `${all.quote.length} devis`)}
       ${sBtn('data-go="#/s/liste/achats"', 'download', 'Mes achats', `${all.expense.length} achat(s)`)}
+      ${sBtn('data-go="#/export"', 'mail', 'Envoyer au comptable', 'Factures et achats du trimestre, en PDF')}
       ${sBtn('data-go="#/projects"', 'crane', 'Mes chantiers', `${all.project.filter((p) => !['termine', 'annule'].includes(p.data.status)).length} en cours`)}
       ${sBtn('data-go="#/contacts/client"', 'contacts', 'Mes clients')}
       ${sBtn('data-go="#/s/peppol"', 'send', 'Factures électroniques (Peppol)', peppolApOn() ? '✓ activé – envoyer et recevoir' : 'pas encore activé')}

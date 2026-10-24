@@ -37,7 +37,7 @@ route('invoices', async () => {
   const rows = invoices.map((i) => ({ ...i, st: invState(i) }));
   const y = String(new Date().getFullYear());
   const yr = rows.filter((r) => (r.data.date || '').startsWith(y) && r.st.s !== 'brouillon');
-  const page = layout({ active: 'finances', icon: 'coins', title: 'Factures clients', actions: `<button class="btn" data-act="csv">Export comptable</button><button class="btn primary" data-act="new">${I.plus} Nouveau</button>` });
+  const page = layout({ active: 'finances', icon: 'coins', title: 'Factures clients', actions: `<button class="btn" data-act="csv">${I.mail} Envoyer au comptable</button><button class="btn primary" data-act="new">${I.plus} Nouveau</button>` });
   page.innerHTML = `<div class="kpis">${kpi(`Facturé ${y} HT`, money(yr.reduce((a, r) => a + r.st.t.base, 0)))}${kpi('Brouillons', rows.filter((r) => r.st.s === 'brouillon').length, { sub: money(rows.filter((r) => r.st.s === 'brouillon').reduce((a, r) => a + r.st.t.total, 0)) + ' TTC' })}
     ${kpi('À recevoir TTC', money(rows.filter((r) => ['impayee', 'partielle', 'retard'].includes(r.st.s)).reduce((a, r) => a + r.st.rest, 0)))}${kpi('En retard', money(rows.filter((r) => r.st.s === 'retard').reduce((a, r) => a + r.st.rest, 0)), { cls: rows.some((r) => r.st.s === 'retard') ? 'bad' : '', sub: `${rows.filter((r) => r.st.s === 'retard').length} facture(s)` })}</div><div id="tbl"></div>`;
   const tbl = $('#tbl');

@@ -198,7 +198,7 @@ const SPACES = [
   { k: 'today', l: "Aujourd'hui", i: 'sun', h: '#/dashboard', sec: [["Aujourd'hui", '#/dashboard'], ['Tâches', '#/tasks'], ['Planning chantiers', '#/planning/projects']] },
   { k: 'deals', l: 'Affaires', i: 'target', h: '#/quotes', sec: [['Devis', '#/quotes', '#/quote/'], ['Opportunités', '#/opportunities'], ['Prix et ouvrages', '#/library']] },
   { k: 'works', l: 'Chantiers', i: 'crane', h: '#/projects', sec: [['Chantiers', '#/projects', '#/project/'], ['Interventions', '#/interventions', '#/intervention/'], ['Installations', '#/installations', '#/installation/'], ['Fiches techniques', '#/fiches', '#/fiche/'], ['Dossiers de fin', '#/fiches/dossiers', '#/dossier/']] },
-  { k: 'money', l: 'Argent', i: 'coins', h: '#/invoices', sec: [['Factures', '#/invoices', '#/invoice/'], ['États d\'avancement', '#/progress'], ['Paiements', '#/payments'], ['Achats', '#/expenses', '#/purchase/', '#/expense/'], ['Commandes', '#/orders/fournisseur', '#/order/'], ['Sous-traitance', '#/orders/soustraitant'], ['Chiffres', '#/stats'], ['Export comptable', '#/export']] },
+  { k: 'money', l: 'Argent', i: 'coins', h: '#/invoices', sec: [['Factures', '#/invoices', '#/invoice/'], ['États d\'avancement', '#/progress'], ['Paiements', '#/payments'], ['Achats', '#/expenses', '#/purchase/', '#/expense/'], ['Commandes', '#/orders/fournisseur', '#/order/'], ['Sous-traitance', '#/orders/soustraitant'], ['Chiffres', '#/stats'], ['Envoyer au comptable', '#/export']] },
   { k: 'people', l: 'Carnet', i: 'people', h: '#/contacts/client', sec: [['Clients', '#/contacts/client', '#/contact/'], ['Prospects', '#/contacts/prospect'], ['Fournisseurs', '#/contacts/fournisseur'], ['Sous-traitants', '#/contacts/soustraitant'], ['Tous', '#/contacts/all']] },
   // ouvriers et sous-traitants : leurs chantiers, heures, bons de commande, rapports
   { k: 'crew', l: 'Équipe', i: 'helmet', h: '#/crew', sec: [['Personnes', '#/crew', '#/crew/'], ['Pointage', '#/hr/timesheets'], ['Planning équipes', '#/planning/team'], ['Rapports terrain', '#/reports', '#/report/'], ['Absences', '#/hr/absences'], ['Personnel (RH)', '#/hr/staff']] },
@@ -207,7 +207,7 @@ const SPACES = [
 const isSimple = () => S.edition === 'simple';
 const SPACES_SIMPLE = [
   { k: 'home', l: 'Accueil', i: 'sun', h: '#/dashboard', sec: [] },
-  { k: 'bill', l: 'Facturer', i: 'coins', h: '#/s/liste/factures', sec: [['Factures', '#/s/liste/factures', '#/s/facture', '#/s/doc/facture', '#/s/paye', '#/s/avoir', '#/invoice'], ['Devis', '#/s/liste/devis', '#/s/devis', '#/s/doc/devis', '#/quote']] },
+  { k: 'bill', l: 'Facturer', i: 'coins', h: '#/s/liste/factures', sec: [['Factures', '#/s/liste/factures', '#/s/facture', '#/s/doc/facture', '#/s/paye', '#/s/avoir', '#/invoice'], ['Devis', '#/s/liste/devis', '#/s/devis', '#/s/doc/devis', '#/quote'], ['Comptable', '#/export']] },
   { k: 'buy', l: 'Achats', i: 'download', h: '#/s/liste/achats', sec: [['Achats', '#/s/liste/achats', '#/s/achat', '#/expenses', '#/purchase']] },
   { k: 'works', l: 'Chantiers', i: 'crane', h: '#/projects', sec: [['Chantiers', '#/projects', '#/project/'], ['Clients', '#/contacts/client', '#/contact/'], ['Fournisseurs', '#/contacts/fournisseur'], ['Mes prix', '#/library']] },
   { k: 'me', l: 'Moi', i: 'user', h: '#/s/moi', sec: [['Mes informations', '#/s/moi'], ['Peppol', '#/s/peppol']] },
@@ -589,7 +589,7 @@ async function render() {
   if (cleanupView) { try { await cleanupView(); } catch (e) { /* vue déjà détruite */ } cleanupView = null; }
   const parts = location.hash.replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean);
   // édition simplifiée : les modules absents renvoient au tableau de bord
-  const SIMPLE_ROUTES = ['s', 'dashboard', 'quotes', 'quote', 'invoices', 'invoice', 'payments', 'expenses', 'purchase', 'projects', 'project', 'contacts', 'contact', 'library', 'print', 'contract', 'contractpdf', 'settings', 'platform'];
+  const SIMPLE_ROUTES = ['s', 'dashboard', 'quotes', 'quote', 'invoices', 'invoice', 'payments', 'expenses', 'purchase', 'projects', 'project', 'contacts', 'contact', 'library', 'print', 'contract', 'contractpdf', 'export', 'settings', 'platform'];
   if (isSimple() && parts[0] && !SIMPLE_ROUTES.includes(parts[0])) { location.hash = '#/dashboard'; return; }
   // compte terrain : uniquement son espace (et l'impression de ses bons de commande)
   if (isField() && !(parts[0] === 't' || (parts[0] === 'print' && parts[1] === 'order'))) { location.hash = '#/t'; return; }

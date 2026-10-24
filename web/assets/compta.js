@@ -70,7 +70,7 @@ route('export', async () => {
     ...expenses.filter((e) => purchState(e) !== 'refusee' && inP(e.data.date)).map((e) => purchRow(e, contacts)),
   ].sort((a, b) => a.typ.localeCompare(b.typ) || (a.date || '').localeCompare(b.date || '') || String(a.n).localeCompare(String(b.n)));
   const TYP = { vente: ['Facture émise', '#3b5bdb'], avoir: ['Note de crédit', '#7048e8'], achat: ['Facture d\'achat', '#e8590c'] };
-  const page = layout({ title: 'Export comptable', icon: 'download', sub: `Du ${fmtDate(from)} au ${fmtDate(to)}` });
+  const page = layout({ title: 'Envoyer au comptable', icon: 'mail', back: isSimple() ? '#/dashboard' : null, sub: `Du ${fmtDate(from)} au ${fmtDate(to)}`, actions: `<button class="btn" data-zip2>${I.download} ZIP</button><button class="btn primary" data-send2>${I.mail} Envoyer au comptable</button>` });
   const years = [y, y - 1, y - 2];
   page.innerHTML = `<div class="card exp-per"><div class="card-h"><h3>Période</h3></div>
       <div class="chips">${years.map((yy) => `<button class="chip ${+P.y === yy && P.q !== 'x' ? 'on' : ''}" data-y="${yy}">${yy}</button>`).join('')}</div>
@@ -100,6 +100,7 @@ route('export', async () => {
   });
   sum();
   $('[data-zip]', page).onclick = () => exportZip(rows.filter((r) => st.sel.has(r.id)), from, to);
+  $('[data-zip2]').onclick = () => $('[data-zip]', page).click(); $('[data-send2]').onclick = () => $('[data-send]', page).click();
   $('[data-send]', page).onclick = () => sendToAccountant(rows.filter((r) => st.sel.has(r.id)), perLabel);
   $$('[data-y]', page).forEach((b) => { b.onclick = () => { P.y = +b.dataset.y; if (P.q === 'x') P.q = 1; saveUi(); render(); }; });
   $$('[data-q]', page).forEach((b) => { b.onclick = () => { P.q = b.dataset.q === 'x' ? 'x' : +b.dataset.q; saveUi(); render(); }; });
