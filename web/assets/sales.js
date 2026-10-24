@@ -409,15 +409,16 @@ async function progressInvoice(q, prev, base, existing) {
   const nos = numbering(rows);
   const amt = (r, pct) => r2(r.qty * r.price * pct / 100);
   const m = modal(`${mhead(`État d'avancement n° ${n} (EA${n}) – devis ${q.number}`)}<div class="m-body">
-    <p class="muted">Encodez l'avancement <b>cumulé</b> de chaque poste, en % ou en quantité. La facture reprend uniquement la différence avec les états précédents. Sur un chapitre, le % s'applique à toutes ses lignes.</p>
-    <div class="btns"><button class="btn sm" data-all="100">Tout à 100 %</button><button class="btn sm" data-all="prev">Revenir à l'état précédent</button></div>
+    <p class="muted">Encodez ce que vous avez <b>avancé depuis l'état précédent</b> (en % ou en quantité) : le cumul total et ce qui reste se calculent tout seuls. Ex. : EA1 15 % → cumul 15 %, reste 85 % ; EA2 + 10 % → cumul 25 %, reste 75 %. Sur un chapitre, le % s'applique à toutes ses lignes.</p>
+    <div class="btns"><button class="btn sm" data-all="100">Tout terminer (cumul 100 %)</button><button class="btn sm" data-all="prev">Tout à 0 % pour cet état</button></div>
     <div class="pg-list">
     ${rows.map((r, i) => (r.kind === 'title'
-    ? `<div class="pg-sec ${r.level === 2 ? 'lv2' : ''}" ${String(r.desc || '').trim() ? '' : 'hidden'}><span class="pg-no">${esc(String(nos[i]).replace(/(\.0)+$/, ''))}</span><b class="pg-t">${esc(r.desc)}</b><label class="pg-chap" title="Appliquer un % à tout le chapitre"><input class="pct" data-ch="${i}" inputmode="decimal" placeholder="—"><em>%</em></label><b class="pg-amt" data-ct="${i}"></b></div>`
+    ? `<div class="pg-sec ${r.level === 2 ? 'lv2' : ''}" ${String(r.desc || '').trim() ? '' : 'hidden'}><span class="pg-no">${esc(String(nos[i]).replace(/(\.0)+$/, ''))}</span><b class="pg-t">${esc(r.desc)}</b><label class="pg-chap" title="Avancement de cet état, appliqué à tout le chapitre"><input class="pct" data-ch="${i}" inputmode="decimal" placeholder="—"><em>%</em></label><b class="pg-amt" data-ct="${i}"></b></div>`
     : `<div class="pg-row" data-r="${i}">
         <div class="pg-desc"><span class="pg-no">${esc(String(nos[i]).replace(/(\.0)+$/, ''))}</span><span class="pg-d" title="${esc(r.desc)}">${esc(r.desc.split('\n')[0])}</span></div>
-        <div class="pg-meta"><span>Prévu <b>${fnum(r.qty, 3)} ${esc(r.unit || '')}</b></span><span>PU <b>${money(r.price)}</b></span><span>Marché <b>${money(amt(r, 100))}</b></span><span>Avant <b>${fnum(r.prev, 1)} %</b></span></div>
-        <div class="pg-in"><label><span>Cumul</span><input class="pct" data-p="${i}" inputmode="decimal" value="${r2(r.cum)}"><em>%</em></label><label><span>ou</span><input class="pct" data-q="${i}" inputmode="decimal" value="${r2(r.qty * r.cum / 100)}"><em>${esc(r.unit || 'qté')}</em></label><span class="pg-per"><small>Cet état</small><b data-per="${i}"></b></span></div>
+        <div class="pg-meta"><span>Prévu <b>${fnum(r.qty, 3)} ${esc(r.unit || '')}</b></span><span>PU <b>${money(r.price)}</b></span><span>Marché <b>${money(amt(r, 100))}</b></span><span>Déjà fait (états précédents) <b>${fnum(r.prev, 1)} %</b></span></div>
+        <div class="pg-in"><label><span>Cet état +</span><input class="pct" data-p="${i}" inputmode="decimal" value="${r2(r.cum - r.prev)}"><em>%</em></label><label><span>ou</span><input class="pct" data-q="${i}" inputmode="decimal" value="${r2(r.qty * (r.cum - r.prev) / 100)}"><em>${esc(r.unit || 'qté')}</em></label>
+          <span class="pg-cum"><small>Cumul total</small><b data-cum="${i}"></b></span><span class="pg-cum"><small>Reste</small><b data-rest="${i}"></b></span><span class="pg-per"><small>Montant cet état</small><b data-per="${i}"></b></span></div>
       </div>`)).join('')}
     </div>
     ${ac.advTotal ? `<div class="card flat"><b>Acomptes facturés : ${money(ac.advTotal)} HT</b> · déjà déduits ${money(ac.doneTotal)} · reste ${money(ac.advTotal - ac.doneTotal)}
@@ -453,6 +454,7 @@ async function progressInvoice(q, prev, base, existing) {
       if (r.kind !== 'item') return;
       const p = amt(r, r.cum - r.prev); t1 += p;
       $(`[data-per="${i}"]`, m.el).textContent = money(p);
+      $(`[data-cum="${i}"]`, m.el).textContent = `${fnum(r.cum, 1)} %`; $(`[data-rest="${i}"]`, m.el).textContent = `${fnum(100 - r.cum, 1)} %`;
       $(`[data-r="${i}"]`, m.el).classList.toggle('neg', r.cum < r.prev);
     });
     rows.forEach((r, i) => { if (r.kind === 'title') { const end = blockEnd(rows, i); $(`[data-ct="${i}"]`, m.el).textContent = money(rows.slice(i + 1, end).filter((x) => x.kind === 'item').reduce((a, x) => a + amt(x, x.cum - x.prev), 0)); } });
@@ -463,17 +465,19 @@ async function progressInvoice(q, prev, base, existing) {
     $('[data-t3]', m.el).textContent = money(t1 - ded);
     $('[data-t4]', m.el).textContent = `${fnum(market ? (cum / market) * 100 : 0, 1)} % – ${money(cum)} / ${money(market)}`;
   };
-  $$('[data-p]', m.el).forEach((inp) => { inp.oninput = () => { const r = rows[+inp.dataset.p]; r.cum = clamp(num(inp.value)); $(`[data-q="${inp.dataset.p}"]`, m.el).value = r2(r.qty * r.cum / 100); upd(); }; });
-  $$('[data-q]', m.el).forEach((inp) => { inp.oninput = () => { const r = rows[+inp.dataset.q]; r.cum = r.qty ? clamp(num(inp.value) / r.qty * 100) : 0; $(`[data-p="${inp.dataset.q}"]`, m.el).value = r2(r.cum); upd(); }; });
+  // saisie de l'avancement de cet état (différence) ; le cumul = états précédents + cet état, jamais au-delà de 100 %
+  const setRow = (i, cum) => { const r = rows[i]; r.cum = clamp(cum); $(`[data-p="${i}"]`, m.el).value = r2(r.cum - r.prev); $(`[data-q="${i}"]`, m.el).value = r2(r.qty * (r.cum - r.prev) / 100); };
+  $$('[data-p]', m.el).forEach((inp) => { inp.oninput = () => { const r = rows[+inp.dataset.p]; r.cum = clamp(r.prev + num(inp.value)); $(`[data-q="${inp.dataset.p}"]`, m.el).value = r2(r.qty * (r.cum - r.prev) / 100); upd(); }; inp.onblur = () => setRow(+inp.dataset.p, rows[+inp.dataset.p].cum); });
+  $$('[data-q]', m.el).forEach((inp) => { inp.oninput = () => { const r = rows[+inp.dataset.q]; r.cum = r.qty ? clamp(r.prev + num(inp.value) / r.qty * 100) : r.prev; $(`[data-p="${inp.dataset.q}"]`, m.el).value = r2(r.cum - r.prev); upd(); }; inp.onblur = () => setRow(+inp.dataset.q, rows[+inp.dataset.q].cum); });
   $$('[data-ch]', m.el).forEach((inp) => {
     inp.onchange = () => {
       if (inp.value.trim() === '') return;
       const i = +inp.dataset.ch; const v = clamp(num(inp.value));
-      rows.slice(i + 1, blockEnd(rows, i)).forEach((r, k) => { if (r.kind !== 'item') return; r.cum = v; const j = i + 1 + k; $(`[data-p="${j}"]`, m.el).value = r2(v); $(`[data-q="${j}"]`, m.el).value = r2(r.qty * v / 100); });
+      rows.slice(i + 1, blockEnd(rows, i)).forEach((r, k) => { if (r.kind === 'item') setRow(i + 1 + k, r.prev + v); });
       upd();
     };
   });
-  $$('[data-all]', m.el).forEach((b) => { b.onclick = () => { rows.forEach((r, i) => { if (r.kind !== 'item') return; r.cum = b.dataset.all === 'prev' ? r.prev : 100; $(`[data-p="${i}"]`, m.el).value = r2(r.cum); $(`[data-q="${i}"]`, m.el).value = r2(r.qty * r.cum / 100); }); upd(); }; });
+  $$('[data-all]', m.el).forEach((b) => { b.onclick = () => { rows.forEach((r, i) => { if (r.kind === 'item') setRow(i, b.dataset.all === 'prev' ? r.prev : 100); }); upd(); }; });
   ['dmode', 'damount'].forEach((k) => { const e = $(`[name=${k}]`, m.el); if (e) e.addEventListener(k === 'dmode' ? 'change' : 'input', upd); });
   upd();
   $('[data-ok]', m.el).onclick = async () => {

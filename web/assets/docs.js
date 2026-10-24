@@ -159,16 +159,16 @@ function progressTable(d, t) {
   const nos = numbering(rows.map((r) => ({ kind: r.kind, level: r.level })));
   const period = (r) => { const l = (d.lines || []).find((x) => x.srcId === r.lineId && !isDeduction(x)); return l ? r2(num(l.qty) * num(l.price)) : 0; };
   const code = (i) => (t.showCodes && nos[i] ? `<span class="mb-code">${esc(String(nos[i]).replace(/(\.0)+$/, ''))}</span>` : '');
-  return `<table class="mb-lines mb-prog"><thead><tr><th>Description</th><th class="r">Prévu</th><th class="r">Avancement</th><th class="r">Prix unit. HT</th><th class="r">Période HT</th></tr></thead><tbody>
-    <tr class="mb-txt"><td colspan="5">Avancement ${esc(d.ref || `EA${d.situationNo || ''}`)}${d.title ? ` · ${esc(d.title)}` : ''}</td></tr>
+  return `<table class="mb-lines mb-prog"><thead><tr><th>Description</th><th class="r">Prévu</th><th class="r">Précédent</th><th class="r">Cet état</th><th class="r">Cumul total</th><th class="r">Reste</th><th class="r">Prix unit. HT</th><th class="r">Période HT</th></tr></thead><tbody>
+    <tr class="mb-txt"><td colspan="8">Avancement ${esc(d.ref || `EA${d.situationNo || ''}`)}${d.title ? ` · ${esc(d.title)}` : ''}</td></tr>
     ${rows.map((r, i) => {
       if (r.kind === 'title') {
         const sub = rows.slice(i + 1, blockEnd(rows.map((x) => ({ kind: x.kind, level: x.level })), i)).filter((x) => x.kind === 'item');
-        return `<tr class="${+r.level === 2 ? 'mb-sub' : 'mb-ch'}"><td colspan="4"><div class="mb-dl">${code(i)}<span>${esc(r.desc)}</span></div></td><td class="r">${dmoney(sub.reduce((a, x) => a + period(x), 0), t)}</td></tr>`;
+        return `<tr class="${+r.level === 2 ? 'mb-sub' : 'mb-ch'}"><td colspan="7"><div class="mb-dl">${code(i)}<span>${esc(r.desc)}</span></div></td><td class="r">${dmoney(sub.reduce((a, x) => a + period(x), 0), t)}</td></tr>`;
       }
       const pc = Math.max(0, Math.min(100, num(r.cum)));
       return `<tr><td><div class="mb-dl">${code(i)}<span class="pre">${esc(r.desc)}</span></div></td><td class="r">${dnum2(r.qty)}<span class="mb-u">${esc(r.unit || '')}</span></td>
-        <td class="r">${dnum2(num(r.qty) * num(r.cum) / 100)} · <b>${pctS(r.cum)}</b><div class="mb-bar"><i style="width:${pc}%"></i></div></td><td class="r">${dmoney(r.price, t)}</td><td class="r">${dmoney(period(r), t)}</td></tr>`;
+        <td class="r">${pctS(r.prev)}</td><td class="r"><b>+ ${pctS(num(r.cum) - num(r.prev))}</b></td><td class="r"><b>${pctS(r.cum)}</b><div class="mb-bar"><i style="width:${pc}%"></i></div></td><td class="r">${pctS(100 - num(r.cum))}</td><td class="r">${dmoney(r.price, t)}</td><td class="r">${dmoney(period(r), t)}</td></tr>`;
     }).join('')}</tbody></table>`;
 }
 function progressRecap(d, t) {

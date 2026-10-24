@@ -1723,3 +1723,11 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .mo-tot { border-top: 2px solid var(--ink) !important; margin-top: 4px; padding: 10px 8px; }
 .mo-h { margin: 0 2px 10px; font-size: 17px; color: var(--ink); } .mo-h small { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
 @media (max-width: 860px) { .mo-split { grid-template-columns: 1fr; } }
+.pg-cum { display: flex; flex-direction: column; align-items: flex-end; min-width: 70px; } .pg-cum small { font-size: 11px; color: var(--muted); } .pg-cum b { color: var(--ink); white-space: nowrap; }
+/* état d'avancement : description large, colonnes de % compactes */
+.doc.mb .mb-prog th:first-child, .doc.mb .mb-prog td:first-child { width: 34%; }
+.doc.mb .mb-prog th.r, .doc.mb .mb-prog td.r { width: 1%; white-space: nowrap; padding-left: 4px; padding-right: 4px; font-size: .86em; }
+.doc.mb .mb-prog thead th.r { white-space: normal; }
+.doc.mb .mb-prog .mb-u { font-size: .8em; margin-left: 2px; }
+.doc.mb .mb-prog thead th { font-size: .74em; letter-spacing: .04em; }
+.doc.mb .mb-prog .mb-bar { min-width: 44px; }
