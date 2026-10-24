@@ -175,15 +175,16 @@ function mkDist(m, pl, x, y) {
 // ---------------------------------------------------------------- Visionneuse de plan
 const PIN = (c) => `<svg viewBox="0 0 34 44"><path d="M17 1C8.2 1 1 8 1 16.6 1 28.4 17 43 17 43s16-14.6 16-26.4C33 8 25.8 1 17 1z" fill="${c}" stroke="#fff" stroke-width="2"/></svg>`;
 let planIntent = null;
-async function viewPlan(p, planId) {
+// opt.field : compte terrain – plan en lecture, toucher un point ouvre sa fiche (opt.onPin)
+async function viewPlan(p, planId, opt = {}) {
   const pl = await db.get('plan', planId);
   const d = pl.data; d.markups = d.markups || [];
   let points = (await db.list('point', { project: p.id })).filter((x) => +x.data.planId === pl.id);
   const intent = planIntent; planIntent = null;
-  const vis = ui.pinStatus || (ui.pinStatus = Object.keys(PTS).filter((k) => k !== 'closed'));
+  const vis = opt.field ? Object.keys(PTS) : ui.pinStatus || (ui.pinStatus = Object.keys(PTS).filter((k) => k !== 'closed'));
   app.innerHTML = `<div class="viewer-wrap">
-    <header class="top"><a class="icon-btn" href="#/project/${p.id}/plans">${I.back}</a><div class="top-title"><div><h1>${esc(d.name)}</h1><div class="top-sub">${esc(p.data.name)} · v${d.version || 1}</div></div></div>
-      <div class="top-actions"><button class="btn" data-act="filter">${I.filter} Filtres</button><button class="btn" data-act="draw">${I.pencil} Annoter</button><button class="btn primary" data-act="add">${I.plus} Point</button></div></header>
+    <header class="top"><a class="icon-btn" href="${opt.back || `#/project/${p.id}/plans`}">${I.back}</a><div class="top-title"><div><h1>${esc(d.name)}</h1><div class="top-sub">${esc(p.data.name)}${opt.field ? '' : ` · v${d.version || 1}`}</div></div></div>
+      <div class="top-actions" ${opt.field ? 'hidden' : ''}><button class="btn" data-act="filter">${I.filter} Filtres</button><button class="btn" data-act="draw">${I.pencil} Annoter</button><button class="btn primary" data-act="add">${I.plus} Point</button></div></header>
     <div class="viewer" id="vp"><div class="plan-inner" id="inner" style="width:${d.w}px;height:${d.h}px"><img src="${fileUrl(d.fileId)}" alt="" draggable="false">
       <svg class="markups" id="mk" viewBox="0 0 ${d.w} ${d.h}" preserveAspectRatio="none"></svg><div id="pins"></div></div>
       <div class="banner" id="banner" hidden></div>
@@ -205,7 +206,7 @@ async function viewPlan(p, planId) {
     const pinEl = target && target.closest && target.closest('.pin');
     if (mode === 'add' && inside) { setMode('view'); editPoint(p, null, { planId: pl.id, x, y }, () => reload()); } else if (mode === 'move' && inside) {
       const pt = await db.get('point', intent.move); pt.data.planId = pl.id; pt.data.x = x; pt.data.y = y; await persist('point', pt); toast(`Point ${pt.number} positionné`); setMode('view'); reload(pt.id);
-    } else if (mode === 'view' && pinEl) { const pt = points.find((q) => q.id === +pinEl.dataset.id); if (pt) editPoint(p, pt, null, () => reload()); }
+    } else if (mode === 'view' && pinEl) { const pt = points.find((q) => q.id === +pinEl.dataset.id); if (pt && opt.onPin) opt.onPin(pt); else if (pt) editPoint(p, pt, null, () => reload()); }
   }
   // gestes : un doigt = déplacer, deux doigts = zoom, toucher court = action
   const ptrs = new Map(); let g = null;
@@ -321,7 +322,7 @@ async function editPoint(p, pt, preset = {}, onDone) {
       { name: 'title', label: 'Titre', required: true, cls: 'full', placeholder: 'ex. Fissure mur cage d\'escalier' },
       { name: 'desc', label: 'Description', type: 'textarea', cls: 'full' },
       { name: 'companyId', label: 'Intervenant responsable', type: 'select', options: [['', '— non attribué —'], ...subs.map((c) => [c.id, contactName(c)])] },
-      { name: 'assigneeId', label: 'Suivi par', type: 'user' },
+      { name: 'assigneeId', label: 'Attribué à (ouvrier ou bureau)', type: 'user' },
       { name: 'due', label: 'Échéance', type: 'date' }, { name: 'priority', label: 'Priorité', type: 'select', options: optsOf(PRIO) },
       { name: 'category', label: 'Catégorie', list: 'ptcats' }, { name: 'location', label: 'Localisation', placeholder: 'ex. Étage 2, app. 7' },
     ], d)}

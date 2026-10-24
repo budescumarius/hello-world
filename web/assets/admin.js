@@ -375,7 +375,6 @@ const QA_ICONS = ['calc', 'crane', 'contacts', 'target', 'tool', 'tasks', 'peopl
 const quickActionsSimple = () => [['Faire une facture', 'coins', () => go('#/s/facture/new')], ['Faire un devis', 'calc', () => go('#/s/devis/new')], ['J\'ai acheté (photo du ticket)', 'camera', () => go('#/s/achat')],
   ['On m\'a payé', 'check', () => go('#/s/paye')], ['Note de crédit', 'copy', () => go('#/s/avoir')], ['Nouveau chantier', 'crane', () => editProject()], ['Nouveau client', 'contacts', () => sNewClient().then((c) => c && go(`#/contact/${c.id}`))]];
 function quickAddMenu() {
-  if (isField()) return menuSheet('Créer', [{ label: 'Encoder mes heures', icon: 'clock', primary: true, run: () => go('#/t/heures') }, { label: 'Envoyer des photos', icon: 'camera', run: () => go('#/t/photos') }, { label: 'Faire un rapport', icon: 'fiche', run: () => go('#/t/rapport/new') }]);
   if (isSimple()) return menuSheet('Créer', quickActionsSimple().map(([label, icon, run], i) => ({ label, icon, run, primary: i === 0 })));
   menuSheet('Créer', [...quickActions().map(([label, run], i) => ({ label, icon: QA_ICONS[i] || 'plus', run })),
     ...(S.ai ? [{ sep: true }, { label: 'Demander à l\'assistant IA', icon: 'spark', run: () => aiToggle(true) }] : [])]);

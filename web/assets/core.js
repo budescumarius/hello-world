@@ -180,6 +180,9 @@ const I = {
   filter: ic('<path d="M3 5h18l-7 8v6l-4-2v-4z"/>'),
   mail: ic('<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 6l-10 7L2 6"/>'),
   pin: ic('<path d="M12 22s7-6.2 7-12a7 7 0 10-14 0c0 5.8 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/>'),
+  helmet: ic('<path d="M2 18h20M4 18v-2a8 8 0 0116 0v2"/><path d="M10 8.5V5h4v3.5M7.5 10.5V13M16.5 10.5V13"/>'),
+  phone: ic('<path d="M22 16.9v3a2 2 0 01-2.2 2 19.8 19.8 0 01-8.6-3.1 19.5 19.5 0 01-6-6A19.8 19.8 0 012.1 4.2 2 2 0 014.1 2h3a2 2 0 012 1.7c.1.9.4 1.8.7 2.7a2 2 0 01-.5 2.1L8 9.8a16 16 0 006 6l1.3-1.3a2 2 0 012.1-.4c.9.3 1.8.6 2.7.7a2 2 0 011.7 2z"/>'),
+  key: ic('<circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3L21 2M16 7l3 3M18.5 4.5l2 2"/>'),
   copy: ic('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>'),
   bell: ic('<path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0"/>'),
   collapse: ic('<path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/>'),
@@ -192,11 +195,13 @@ const I = {
 // et sur téléphone (barre du bas). Chaque espace a ses rubriques (pastilles sous la barre). « + Créer » est séparé de la navigation.
 // Rubrique : [libellé, lien, ...autres débuts d'adresse qui appartiennent à la rubrique]
 const SPACES = [
-  { k: 'today', l: "Aujourd'hui", i: 'sun', h: '#/dashboard', sec: [["Aujourd'hui", '#/dashboard'], ['Tâches', '#/tasks'], ['Planning chantiers', '#/planning/projects'], ['Planning équipes', '#/planning/team']] },
+  { k: 'today', l: "Aujourd'hui", i: 'sun', h: '#/dashboard', sec: [["Aujourd'hui", '#/dashboard'], ['Tâches', '#/tasks'], ['Planning chantiers', '#/planning/projects']] },
   { k: 'deals', l: 'Affaires', i: 'target', h: '#/quotes', sec: [['Devis', '#/quotes', '#/quote/'], ['Opportunités', '#/opportunities'], ['Prix et ouvrages', '#/library']] },
-  { k: 'works', l: 'Chantiers', i: 'crane', h: '#/projects', sec: [['Chantiers', '#/projects', '#/project/'], ['Interventions', '#/interventions', '#/intervention/'], ['Installations', '#/installations', '#/installation/'], ['Fiches techniques', '#/fiches', '#/fiche/'], ['Dossiers de fin', '#/fiches/dossiers', '#/dossier/'], ['Rapports terrain', '#/reports', '#/report/']] },
+  { k: 'works', l: 'Chantiers', i: 'crane', h: '#/projects', sec: [['Chantiers', '#/projects', '#/project/'], ['Interventions', '#/interventions', '#/intervention/'], ['Installations', '#/installations', '#/installation/'], ['Fiches techniques', '#/fiches', '#/fiche/'], ['Dossiers de fin', '#/fiches/dossiers', '#/dossier/']] },
   { k: 'money', l: 'Argent', i: 'coins', h: '#/invoices', sec: [['Factures', '#/invoices', '#/invoice/'], ['États d\'avancement', '#/progress'], ['Paiements', '#/payments'], ['Achats', '#/expenses', '#/purchase/', '#/expense/'], ['Commandes', '#/orders/fournisseur', '#/order/'], ['Sous-traitance', '#/orders/soustraitant'], ['Chiffres', '#/stats']] },
-  { k: 'people', l: 'Carnet', i: 'people', h: '#/contacts/client', sec: [['Clients', '#/contacts/client', '#/contact/'], ['Prospects', '#/contacts/prospect'], ['Fournisseurs', '#/contacts/fournisseur'], ['Sous-traitants', '#/contacts/soustraitant'], ['Tous', '#/contacts/all'], ['Équipe', '#/hr/staff'], ['Pointage', '#/hr/timesheets'], ['Absences', '#/hr/absences']] },
+  { k: 'people', l: 'Carnet', i: 'people', h: '#/contacts/client', sec: [['Clients', '#/contacts/client', '#/contact/'], ['Prospects', '#/contacts/prospect'], ['Fournisseurs', '#/contacts/fournisseur'], ['Sous-traitants', '#/contacts/soustraitant'], ['Tous', '#/contacts/all']] },
+  // ouvriers et sous-traitants : leurs chantiers, heures, bons de commande, rapports
+  { k: 'crew', l: 'Équipe', i: 'helmet', h: '#/crew', sec: [['Personnes', '#/crew', '#/crew/'], ['Pointage', '#/hr/timesheets'], ['Planning équipes', '#/planning/team'], ['Rapports terrain', '#/reports', '#/report/'], ['Absences', '#/hr/absences'], ['Personnel (RH)', '#/hr/staff']] },
 ];
 // « BâtiPro Simplifié » (indépendants) : devis, factures, achats par chantier, contacts – sans planning, commandes, RH, assistant…
 const isSimple = () => S.edition === 'simple';
@@ -209,13 +214,8 @@ const SPACES_SIMPLE = [
 ];
 // Espace terrain (ouvriers, sous-traitants) : uniquement leurs chantiers, heures, rapports, commandes et planning
 const isField = () => !!(S.me && ['ouvrier', 'soustraitant'].includes(S.me.role) && !S.me.super);
-const SPACES_FIELD = () => [
-  { k: 'site', l: 'Chantiers', i: 'crane', h: '#/t', sec: [['Mes chantiers', '#/t', '#/t/chantier']] },
-  { k: 'hours', l: 'Heures', i: 'clock', h: '#/t/heures', sec: [['Mes heures', '#/t/heures']] },
-  { k: 'rep', l: 'Rapports', i: 'fiche', h: '#/t/rapports', sec: [['Rapports', '#/t/rapports', '#/t/rapport', '#/t/photos']] },
-  ...(S.me.role === 'soustraitant' ? [{ k: 'orders', l: 'Commandes', i: 'truck', h: '#/t/commandes', sec: [['Bons de commande', '#/t/commandes', '#/print/order']] }] : []),
-  { k: 'plan', l: 'Planning', i: 'calendar', h: '#/t/planning', sec: [['Mon planning', '#/t/planning']] },
-];
+// compte terrain : pas d'onglets, l'accueil (ses chantiers) mène à tout
+const SPACES_FIELD = () => [];
 const spaces = () => (isField() ? SPACES_FIELD() : isSimple() ? SPACES_SIMPLE : SPACES);
 const ui = (() => { try { return JSON.parse(localStorage.getItem('bp-ui') || '{}'); } catch (e) { return {}; } })();
 const saveUi = () => { try { localStorage.setItem('bp-ui', JSON.stringify(ui)); } catch (e) { /* stockage indisponible */ } };
@@ -240,7 +240,7 @@ function dock(cur) {
     <div class="dock-tools">
       ${isField() ? '' : `<button class="dock-cmd" data-act="search" title="Rechercher ou faire une action">${I.search}<span>Rechercher ou faire…</span><kbd>⌘K</kbd></button>`}
       ${S.ai ? `<button class="dock-ai" data-act="ai" title="Assistant IA">${I.spark}</button>` : ''}
-      <button class="dock-add" data-act="qadd">${I.plus}<span>Créer</span></button>
+      ${isField() ? '' : `<button class="dock-add" data-act="qadd">${I.plus}<span>Créer</span></button>`}
       <button class="dock-me" data-act="account" title="Mon compte">${avatar(S.me.id)}</button>
     </div></header>`;
 }
@@ -343,6 +343,7 @@ function layout(p) {
 }
 // Téléphone : les cinq espaces en bas de l'écran (comme une application), même ordre que sur ordinateur
 function bottomNav(cur) {
+  if (isField()) return '';
   return `<nav class="bnav" aria-label="Espaces" style="grid-template-columns:repeat(${spaces().length},1fr)">${spaces().map((sp) => `<a class="bn-it ${cur && cur.sp === sp ? 'on' : ''}" href="${sp.h}">${I[sp.i]}<span>${sp.l}</span></a>`).join('')}</nav>`;
 }
 // Téléphone : plus de 4 onglets → un bouton « section actuelle ▾ » qui ouvre toutes les sections d'un coup (grille d'icônes)
@@ -368,7 +369,7 @@ function mobileActions() {
   const box = $('.top-actions'); if (!box || !isPhone()) return;
   let items = [...box.querySelectorAll('a, button')].filter((x) => !x.closest('label'));
   // pas de bouton principal sur la page : « + Créer » à sa place (en haut à droite, comme sur iPhone)
-  if (!items.some((x) => x.classList.contains('primary'))) {
+  if (!isField() && !items.some((x) => x.classList.contains('primary'))) {
     box.insertAdjacentHTML('beforeend', `<button class="btn primary m-create" data-act="qadd">${I.plus}<span>Créer</span></button>`);
     $('.m-create', box).onclick = () => quickAddMenu();
     items = [...box.querySelectorAll('a, button')].filter((x) => !x.closest('label'));

@@ -190,6 +190,7 @@ switch ($seg[0] ?? '') {
         $id = isset($seg[2]) ? (int)$seg[2] : 0;
         $field = is_field($me);
         $see = fn(array $r) => !$field || field_can_read($me, $r);
+        $view = fn(array $r) => row_out($field ? field_view($r) : $r);
 
         if ($method === 'GET' && $type === '') {
             // plusieurs types en une requête : ?types=a,b&project=ID
@@ -199,7 +200,7 @@ switch ($seg[0] ?? '') {
             $args = array_merge([cid()], $types);
             if (isset($_GET['project'])) { $sql .= ' AND project_id = ?'; $args[] = (int)$_GET['project']; }
             $res = array_fill_keys($types, []);
-            foreach (q($sql . ' ORDER BY id', $args)->fetchAll() as $r) if ($see($r)) $res[$r['type']][] = row_out($r);
+            foreach (q($sql . ' ORDER BY id', $args)->fetchAll() as $r) if ($see($r)) $res[$r['type']][] = $view($r);
             out($res);
         }
         if (!preg_match($TYPE_RE, $type)) fail(400, 'Type invalide');
@@ -208,12 +209,12 @@ switch ($seg[0] ?? '') {
             $sql = 'SELECT * FROM items WHERE company_id = ? AND type = ?'; $args = [cid(), $type];
             if (isset($_GET['project'])) { $sql .= ' AND project_id = ?'; $args[] = (int)$_GET['project']; }
             if (isset($_GET['parent'])) { $sql .= ' AND parent_id = ?'; $args[] = (int)$_GET['parent']; }
-            out(array_map('row_out', array_values(array_filter(q($sql . ' ORDER BY id', $args)->fetchAll(), $see))));
+            out(array_map($view, array_values(array_filter(q($sql . ' ORDER BY id', $args)->fetchAll(), $see))));
         }
         if ($method === 'GET') {
             $r = q('SELECT * FROM items WHERE id = ? AND type = ? AND company_id = ?', [$id, $type, cid()])->fetch();
             if (!$r || !$see($r)) fail(404, 'Élément introuvable (supprimé ?)');
-            out(row_out($r));
+            out($view($r));
         }
         if ($method === 'POST' && !$id) {
             $b = body();
@@ -237,7 +238,7 @@ switch ($seg[0] ?? '') {
             log_activity($me['id'], 'create', $type, $nid, $pid ?? ($type === 'project' ? $nid : null), $data['name'] ?? $data['title'] ?? $number);
             $row = q('SELECT * FROM items WHERE id = ?', [$nid])->fetch();
             try { notify_item($me, $type, $row); } catch (Throwable $e) { error_log('[batipro notif] ' . $e->getMessage()); }
-            out(row_out($row));
+            out($view($row));
         }
         if ($method === 'PUT' && $id) {
             $b = body();
@@ -246,12 +247,18 @@ switch ($seg[0] ?? '') {
             if ($field) {
                 $nd = array_key_exists('data', $b) && is_array($b['data']) ? $b['data'] : (json_decode($cur['data'], true) ?: []);
                 $npid = array_key_exists('project_id', $b) ? ($b['project_id'] === null || $b['project_id'] === '' ? null : (int)$b['project_id']) : ($cur['project_id'] !== null ? (int)$cur['project_id'] : null);
-                if ($type === 'timesheet') $nd = field_timesheet($me, $nd);
-                if (!field_can_write($me, $type, $npid, $nd, $cur)) fail(403, 'Action non autorisée pour votre compte.');
+                if ($type === 'point') {
+                    // point attribué : statut, photos et commentaires seulement
+                    if (!field_can_read($me, $cur)) fail(403, 'Action non autorisée pour votre compte.');
+                    $nd = field_point_update($me, $cur, $nd); unset($b['project_id']);
+                } else {
+                    if ($type === 'timesheet') $nd = field_timesheet($me, $nd);
+                    if (!field_can_write($me, $type, $npid, $nd, $cur)) fail(403, 'Action non autorisée pour votre compte.');
+                }
                 $b['data'] = $nd; unset($b['number']);
             }
             if (isset($b['version']) && (int)$b['version'] !== (int)$cur['version'] && empty($b['force'])) {
-                out(['error' => 'Cet élément a été modifié par un autre utilisateur entre-temps.', 'conflict' => row_out($cur)], 409);
+                out(['error' => 'Cet élément a été modifié par un autre utilisateur entre-temps.', 'conflict' => $view($cur)], 409);
             }
             $data = array_key_exists('data', $b) ? json_encode($b['data'], JSON_UNESCAPED_UNICODE) : $cur['data'];
             $pid = array_key_exists('project_id', $b) ? ($b['project_id'] === null || $b['project_id'] === '' ? null : (int)$b['project_id']) : $cur['project_id'];
@@ -261,8 +268,8 @@ switch ($seg[0] ?? '') {
             $d = json_decode($data, true) ?: [];
             if (empty($b['silent'])) log_activity($me['id'], 'update', $type, $id, $pid !== null ? (int)$pid : ($type === 'project' ? $id : null), $d['name'] ?? $d['title'] ?? $number);
             $row = q('SELECT * FROM items WHERE id = ?', [$id])->fetch();
-            if (in_array($type, ['order'], true)) { try { notify_item($me, $type, $row, $cur); } catch (Throwable $e) { error_log('[batipro notif] ' . $e->getMessage()); } }
-            out(row_out($row));
+            if (in_array($type, ['order', 'point'], true)) { try { notify_item($me, $type, $row, $cur); } catch (Throwable $e) { error_log('[batipro notif] ' . $e->getMessage()); } }
+            out($view($row));
         }
         if ($method === 'DELETE' && $id) {
             $cur = q('SELECT * FROM items WHERE id = ? AND type = ? AND company_id = ?', [$id, $type, cid()])->fetch();

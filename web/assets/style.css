@@ -1660,3 +1660,52 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .ct-vars { max-height: 150px; overflow-y: auto; padding: 2px; }
 .ct-vars .chip { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
 @media (max-width: 1100px) { .ct-edit { grid-template-columns: 1fr; } .ct-edit > .card { position: static; } .ct-ta { min-height: 40vh; } }
+
+/* Espace terrain simplifié : l'accueil = ses chantiers */
+.t-sites { display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px; }
+.t-site { display: grid; grid-template-columns: 52px minmax(0, 1fr) 22px; gap: 14px; align-items: center; padding: 16px; border-radius: 20px; background: var(--surface); border: 1.5px solid var(--border); box-shadow: 4px 4px 0 rgba(28, 37, 80, .06); color: var(--text); text-decoration: none !important; }
+.t-site:active { transform: scale(.99); }
+.t-site.now { border-color: var(--ink); box-shadow: 5px 5px 0 var(--ochre); }
+.t-site-ic { width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; background: var(--ochre-soft); color: var(--ink); }
+.t-site.now .t-site-ic { background: var(--ink); color: var(--ochre); }
+.t-site-ic svg { width: 28px; height: 28px; }
+.t-site-tx { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.t-site-tx b { font-size: 18.5px; line-height: 1.25; color: var(--ink); font-weight: 800; }
+.t-site-tx small { font-size: 14.5px; color: var(--muted); }
+.t-site-go svg { width: 22px; height: 22px; transform: rotate(-90deg); color: var(--muted); }
+.t-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.tg { font-style: normal; font-size: 13px; font-weight: 800; padding: 3px 10px; border-radius: 10px; background: var(--surface-2); color: var(--ink); }
+.tg.now { background: var(--ink); color: #fff; } .tg.new { background: var(--ochre); color: var(--ink); } .tg.pt { background: #fde3e3; color: #b42318; }
+.t-more { margin-top: 4px; }
+.s-tile.hot { box-shadow: 5px 5px 0 #e5484d; }
+/* À faire : points sur plan */
+.t-pt .t-pin { flex: none; width: 38px; height: 38px; display: grid; place-items: center; background: var(--c); color: #fff; font-weight: 800; font-size: 14px; border-radius: 12px; }
+.t-plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.t-plan-c { display: flex; flex-direction: column; border-radius: 18px; overflow: hidden; background: var(--surface); border: 1.5px solid var(--border); color: var(--text); text-decoration: none !important; }
+.t-plan-c img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #fff; border-bottom: 1px solid var(--border); }
+.t-plan-c span { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; } .t-plan-c b { color: var(--ink); }
+.t-ptv { padding: 18px; } .t-ptv h2 { margin: 10px 0 6px; font-size: 21px; color: var(--ink); line-height: 1.25; }
+.t-st { display: inline-block; font-style: normal; font-weight: 800; font-size: 13.5px; padding: 4px 12px; border-radius: 10px; color: var(--c); background: color-mix(in srgb, var(--c) 14%, #fff); }
+.t-dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 12px 0 0; font-size: 15.5px; } .t-dl dt { color: var(--muted); font-weight: 700; } .t-dl dd { margin: 0; }
+.t-crop { display: block; margin-top: 14px; border-radius: 16px; overflow: hidden; border: 1.5px solid var(--border); text-decoration: none !important; }
+.t-crop img { display: block; width: 100%; max-height: 260px; object-fit: cover; background: #fff; }
+.t-crop span { display: flex; align-items: center; gap: 6px; padding: 10px 12px; font-weight: 800; color: var(--ink); background: var(--surface-2); } .t-crop svg { width: 18px; height: 18px; }
+.t-ptv .t-photos { margin-top: 14px; }
+.t-hist { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.t-hist > div { padding: 10px 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); font-size: 15.5px; }
+.t-hist > div.sys { background: transparent; border-style: dashed; color: var(--muted); font-size: 14px; }
+.t-hist small { display: block; color: var(--muted); font-size: 12.5px; margin-bottom: 2px; }
+
+/* Équipe (bureau) : ouvriers et sous-traitants */
+.crew-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.crew-card { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 16px; border-radius: 18px; background: var(--surface); border: 1.5px solid var(--border); box-shadow: 4px 4px 0 rgba(28, 37, 80, .05); color: var(--text); text-decoration: none !important; }
+.crew-card:hover { border-color: var(--ink); box-shadow: 5px 5px 0 var(--ochre); }
+.crew-av { grid-row: span 2; width: 48px; height: 48px; border-radius: 15px; display: grid; place-items: center; background: var(--c); color: #fff; font-weight: 800; font-size: 16px; letter-spacing: .02em; }
+.crew-tx { min-width: 0; display: flex; flex-direction: column; } .crew-tx b { color: var(--ink); font-size: 16.5px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .crew-tx small { color: var(--muted); }
+.crew-acc { font-size: 12px; font-weight: 800; padding: 3px 9px; border-radius: 9px; background: var(--surface-2); color: var(--muted); white-space: nowrap; } .crew-acc.on { background: #e3f4e8; color: #2b8a3e; }
+.crew-now { grid-column: 2 / -1; display: flex; align-items: center; gap: 5px; font-size: 13.5px; font-weight: 700; color: var(--ink); } .crew-now svg { width: 15px; height: 15px; color: var(--ochre-2); }
+.crew-stats { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 13.5px; color: var(--muted); }
+.crew-stats b { color: var(--ink); } .crew-stats b.warn { color: var(--warn); } .crew-stats .late b { color: var(--danger); }
+.crew-foot { margin-top: 16px; font-size: 13px; }
+.crew-contact { margin-bottom: 12px; } .crew-contact svg { width: 15px; height: 15px; }
+.crew-num { text-align: right; font-size: 13px; color: var(--muted); white-space: nowrap; min-width: 70px; }

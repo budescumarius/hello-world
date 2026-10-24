@@ -151,8 +151,54 @@ function field_can_read(array $me, array $row): bool {
         case 'order': return $sc['contact'] && (int)($d['supplierId'] ?? 0) === $sc['contact'] && ($d['status'] ?? 'brouillon') !== 'brouillon';
         case 'contact': return $sc['contact'] && (int)$row['id'] === $sc['contact'];
         case 'employee': return $sc['employee'] && (int)$row['id'] === $sc['employee'];
+        case 'plan': return $inProj;
+        case 'point': return $inProj && field_point_mine($me, $sc, $d);
         default: return false;
     }
+}
+// Ce qu'un compte terrain reçoit d'un élément lisible : jamais le client, le budget, les devis ni les coûts internes
+const FIELD_KEEP = [
+    'project' => ['name', 'address', 'zip', 'city', 'status', 'start', 'end', 'access', 'color'],
+    'phase' => ['name', 'start', 'end', 'progress', 'staff', 'companyId'],
+    'employee' => ['name', 'firstname', 'userId', 'active'],
+    'contact' => ['company', 'firstname', 'name', 'kind', 'email', 'phone', 'mobile', 'userId'],
+    'timesheet' => ['date', 'hours', 'task', 'employeeId', 'contactId', 'who'],
+];
+function field_view(array $r): array {
+    $keep = FIELD_KEEP[$r['type']] ?? null;
+    if ($keep === null) return $r;
+    $d = json_decode((string)$r['data'], true) ?: [];
+    $r['data'] = json_encode(array_intersect_key($d, array_flip($keep)), JSON_UNESCAPED_UNICODE);
+    return $r;
+}
+// Point sur plan attribué à ce compte terrain (son entreprise sous-traitante, ou lui-même)
+function field_point_mine(array $me, array $sc, array $d): bool {
+    return ($sc['contact'] && (int)($d['companyId'] ?? 0) === $sc['contact']) || (int)($d['assigneeId'] ?? 0) === $me['id'];
+}
+// Point modifié par le terrain : statut (jamais « clôturé », réservé au bureau), photos qu'il a envoyées, commentaires ajoutés.
+// Tout le reste (titre, attribution, échéance, position…) reste tel que le bureau l'a écrit.
+function field_point_update(array $me, array $cur, array $new): array {
+    $d = json_decode((string)$cur['data'], true) ?: [];
+    $labels = ['open' => 'Ouvert', 'progress' => 'En cours', 'done' => 'Levé', 'closed' => 'Clôturé'];
+    $hist = array_values((array)($d['history'] ?? []));
+    $stamp = gmdate('Y-m-d H:i:s');
+    // commentaires ajoutés à la suite de l'historique connu
+    foreach (array_slice(array_values((array)($new['history'] ?? [])), count($hist)) as $h) {
+        $txt = trim((string)(is_array($h) ? ($h['text'] ?? '') : ''));
+        if ($txt !== '' && ($h['kind'] ?? '') === 'comment') $hist[] = ['t' => $stamp, 'uid' => $me['id'], 'kind' => 'comment', 'text' => mb_substr($txt, 0, 2000)];
+    }
+    $was = (string)($d['status'] ?? 'open'); $st = (string)($new['status'] ?? $was);
+    if ($st !== $was && $was !== 'closed' && in_array($st, ['open', 'progress', 'done'], true)) {
+        $d['status'] = $st;
+        $hist[] = ['t' => $stamp, 'uid' => $me['id'], 'kind' => 'sys', 'text' => 'Statut : ' . ($labels[$was] ?? $was) . ' → ' . $labels[$st]];
+    }
+    $photos = array_map('intval', (array)($d['photos'] ?? []));
+    foreach ((array)($new['photos'] ?? []) as $fid) {
+        $fid = (int)$fid;
+        if ($fid && !in_array($fid, $photos, true) && q('SELECT 1 FROM files WHERE id = ? AND company_id = ? AND created_by = ?', [$fid, cid(), $me['id']])->fetchColumn()) $photos[] = $fid;
+    }
+    $d['photos'] = $photos; $d['history'] = $hist;
+    return $d;
 }
 // Ce que la fiche d'un élément terrain peut contenir quand c'est le compte terrain qui l'écrit
 function field_can_write(array $me, string $type, ?int $pid, array $data, ?array $cur): bool {
@@ -169,10 +215,12 @@ function field_can_file(array $me, array $f): bool {
     if ((int)$f['created_by'] === $me['id']) return true;
     $co = setting('company', []) ?: [];
     if ((int)($co['logoId'] ?? 0) === (int)$f['id']) return true;
-    foreach (q("SELECT * FROM items WHERE company_id = ? AND type = 'report'", [cid()])->fetchAll() as $r) {
+    // fichiers d'un rapport, d'un plan (version actuelle) ou d'un point qu'il peut lire
+    foreach (q("SELECT * FROM items WHERE company_id = ? AND type IN ('report', 'plan', 'point')", [cid()])->fetchAll() as $r) {
         if (!field_can_read($me, $r)) continue;
         $d = json_decode($r['data'], true) ?: [];
-        $ids = array_map(fn($x) => (int)(is_array($x) ? ($x['id'] ?? 0) : $x), array_merge((array)($d['photos'] ?? []), (array)($d['files'] ?? [])));
+        $ids = $r['type'] === 'plan' ? [(int)($d['fileId'] ?? 0), (int)($d['thumbId'] ?? 0)]
+            : array_map(fn($x) => (int)(is_array($x) ? ($x['id'] ?? 0) : $x), array_merge((array)($d['photos'] ?? []), (array)($d['files'] ?? [])));
         if (in_array((int)$f['id'], $ids, true)) return true;
     }
     return false;
@@ -618,6 +666,19 @@ function notify_item(array $me, string $type, array $row, ?array $before = null)
     $d = json_decode((string)$row['data'], true) ?: [];
     $pid = $row['project_id'] !== null ? (int)$row['project_id'] : null;
     $site = $pid ? item_label('project', $pid) : '';
+    // le terrain lève, commente ou photographie un point qui lui est attribué
+    if (is_field($me) && $before && $type === 'point') {
+        if (!$cfg['events']) return;
+        $was = json_decode((string)$before['data'], true) ?: [];
+        $no = 'n° ' . ($row['number'] ?? '') . ' – ' . ($d['title'] ?? '');
+        if (($d['status'] ?? '') !== ($was['status'] ?? '')) $title = (($d['status'] ?? '') === 'done' ? "{$me['name']} a levé le point " : "{$me['name']} a mis à jour le point ") . $no;
+        elseif (count((array)($d['photos'] ?? [])) > count((array)($was['photos'] ?? []))) $title = "{$me['name']} a ajouté une photo au point $no";
+        elseif (count((array)($d['history'] ?? [])) > count((array)($was['history'] ?? []))) $title = "{$me['name']} a commenté le point $no";
+        else return;
+        $last = (array)($d['history'] ?? []); $last = $last ? end($last) : [];
+        notify(office_ids($pid), 'point', $title, trim($site . (($last['kind'] ?? '') === 'comment' ? ' – ' . mb_substr((string)$last['text'], 0, 160) : '')), $pid ? "#/project/$pid/points" : '#/dashboard', (bool)$cfg['emailEvents']);
+        return;
+    }
     if (is_field($me) && !$before && $cfg['events']) {
         if ($type === 'timesheet') notify(office_ids($pid), 'hours', "{$me['name']} a encodé " . rtrim(rtrim(number_format((float)($d['hours'] ?? 0), 2, ',', ''), '0'), ',') . ' h', trim($site . ((string)($d['task'] ?? '') !== '' ? ' – ' . $d['task'] : '')), $pid ? "#/project/$pid/hours" : '#/hr/timesheets', (bool)$cfg['emailEvents']);
         if ($type === 'report') {
@@ -635,6 +696,16 @@ function notify_item(array $me, string $type, array $row, ?array $before = null)
         $u = field_user_of('contact', (int)($d['supplierId'] ?? 0));
         if ($u && (($was['status'] ?? 'brouillon') === 'brouillon')) notify([$u], 'order', 'Nouveau bon de commande ' . ($row['number'] ?? ''), $site, '#/print/order/' . (int)$row['id'], (bool)$cfg['emailEvents']);
         elseif ($u && ($d['status'] ?? '') === 'facturee' && ($was['status'] ?? '') !== 'facturee') notify([$u], 'order', 'Bon de commande ' . ($row['number'] ?? '') . ' : facturé ✓', $site, '#/t/commandes');
+    }
+    // point sur plan attribué à un sous-traitant (son entreprise) ou à un ouvrier
+    if ($type === 'point') {
+        $was = $before ? (json_decode((string)$before['data'], true) ?: []) : [];
+        $to = [];
+        $u = field_user_of('contact', (int)($d['companyId'] ?? 0));
+        if ($u && (int)($was['companyId'] ?? 0) !== (int)($d['companyId'] ?? 0)) $to[] = $u;
+        $a = (int)($d['assigneeId'] ?? 0);
+        if ($a && $a !== (int)($was['assigneeId'] ?? 0) && in_array((string)q('SELECT role FROM users WHERE id = ? AND company_id = ?', [$a, cid()])->fetchColumn(), FIELD_ROLES, true)) $to[] = $a;
+        if ($to && $pid) notify(array_values(array_unique($to)), 'point', 'Point à traiter : n° ' . ($row['number'] ?? '') . ' – ' . ($d['title'] ?? ''), $site, '#/t/point/' . (int)$row['id'], (bool)$cfg['emailEvents']);
     }
     if ($type === 'assign' && !$before) {
         $u = field_user_of('employee', (int)($d['employeeId'] ?? 0));
