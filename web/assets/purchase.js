@@ -58,7 +58,8 @@ function expensesTable(el, rows, contacts, projects, showProject, pid) {
   S.purchSupKind = Object.fromEntries(contacts.map((c) => [c.id, c.data.kind]));
   const key = `exp_${pid || 'all'}`;
   const st = ui[key] || (ui[key] = { sort: 7 });
-  const sel = st.sel || (st.sel = new Set());
+  if (!(st.sel instanceof Set)) st.sel = new Set(); // la sélection n'est pas gardée d'une visite à l'autre
+  const sel = st.sel;
   [...sel].forEach((id) => { if (!rows.some((r) => r.id === id)) sel.delete(id); });
   const search = (e) => [e.data.ref, e.data.desc, contactName(byId(contacts, e.data.supplierId)), fnum(num(e.data.amount)), String(e.data.amount)].join(' ');
   const filters = { def: '', options: [['', 'Toutes'], ...Object.entries(PURCH_ST).map(([k, [l, c]]) => [k, l, c])], match: (e, f) => purchState(e) === f };

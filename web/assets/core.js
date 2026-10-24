@@ -218,7 +218,8 @@ const isField = () => !!(S.me && ['ouvrier', 'soustraitant'].includes(S.me.role)
 const SPACES_FIELD = () => [];
 const spaces = () => (isField() ? SPACES_FIELD() : isSimple() ? SPACES_SIMPLE : SPACES);
 const ui = (() => { try { return JSON.parse(localStorage.getItem('bp-ui') || '{}'); } catch (e) { return {}; } })();
-const saveUi = () => { try { localStorage.setItem('bp-ui', JSON.stringify(ui)); } catch (e) { /* stockage indisponible */ } };
+// les sélections (Set) ne sont pas enregistrées : elles repartent vides à la prochaine visite
+const saveUi = () => { try { localStorage.setItem('bp-ui', JSON.stringify(ui, (k, v) => (v instanceof Set ? undefined : v))); } catch (e) { /* stockage indisponible */ } };
 // Espace et rubrique de l'adresse actuelle : la correspondance la plus longue gagne
 function spaceOf(hash = location.hash) {
   const h = hash.split('?')[0] || '#/dashboard';
