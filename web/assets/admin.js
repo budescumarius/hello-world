@@ -39,10 +39,17 @@ async function hrTimesheets() {
   const per = new Map(); list.forEach((t) => per.set(+t.data.employeeId, (per.get(+t.data.employeeId) || 0) + num(t.data.hours)));
   page.innerHTML = `<div class="kpis">${kpi('Heures du mois', fnum(list.reduce((a, t) => a + num(t.data.hours), 0), 1) + ' h')}${kpi('Coût main d\'œuvre', money(list.reduce((a, t) => a + num(t.data.hours) * num(t.data.rate), 0)))}
     ${[...per].slice(0, 6).map(([id, h]) => kpi((byId(staff, id) || { data: { name: '—' } }).data.name, fnum(h, 1) + ' h')).join('')}</div><div id="tbl"></div>`;
+  // heures encodées par le terrain sur des chantiers pas encore créés (tous les mois)
+  const loose = {}; rows.filter((t) => !t.project_id && t.data.site).forEach((t) => { const k = t.data.site.trim().toLowerCase(); (loose[k] = loose[k] || []).push(t); });
+  if (Object.keys(loose).length) $('#tbl').insertAdjacentHTML('beforebegin', `<div class="card ts-loose"><div class="card-h"><h3>Chantiers à créer</h3><span class="muted">Heures encodées sur un chantier qui n'existe pas encore</span></div><div class="rows">
+    ${Object.values(loose).map((l) => `<div class="row static"><span class="grow"><b>${esc(l[0].data.site)}</b><small class="muted">${esc([...new Set(l.map((t) => t.data.who).filter(Boolean))].join(', '))} · ${fnum(l.reduce((a, t) => a + num(t.data.hours), 0), 2)} h · ${[...new Set(l.map((t) => fmtDate(t.data.date)))].join(', ')}</small></span><button class="btn sm primary" data-loose="${l[0].id}">Créer / rattacher</button></div>`).join('')}</div></div>`);
+  $$('[data-loose]', page).forEach((b) => { b.onclick = () => attachSite(rows.find((t) => t.id === +b.dataset.loose)); });
+  const want = new URLSearchParams(location.hash.split('?')[1] || '').get('site');
+  if (want) { history.replaceState(null, '', '#/hr/timesheets'); const t = rows.find((x) => !x.project_id && (x.data.site || '').trim().toLowerCase() === want.trim().toLowerCase()); if (t) attachSite(t); }
   hoursTable($('#tbl'), list, staff, projects, true);
   $('.in-month').onchange = (e) => { ui.tsMonth = e.target.value; saveUi(); render(); };
   $('[data-act=new]').onclick = () => editTimesheet();
-  $('[data-act=csv]').onclick = () => downloadCSV(`pointage-${month}.csv`, [['Date', 'Ouvrier', 'Chantier', 'Heures', 'Travail'], ...list.sort((a, b) => a.data.date.localeCompare(b.data.date)).map((t) => [fmtDate(t.data.date), (byId(staff, t.data.employeeId) || { data: {} }).data.name, (byId(projects, t.project_id) || { data: {} }).data.name, fnum(num(t.data.hours), 2), t.data.task])]);
+  $('[data-act=csv]').onclick = () => downloadCSV(`pointage-${month}.csv`, [['Date', 'Ouvrier', 'Chantier', 'Heures', 'Travail'], ...list.sort((a, b) => a.data.date.localeCompare(b.data.date)).map((t) => [fmtDate(t.data.date), (byId(staff, t.data.employeeId) || { data: {} }).data.name || t.data.who, (byId(projects, t.project_id) || { data: {} }).data.name || (t.data.site ? `${t.data.site} (à créer)` : ''), fnum(num(t.data.hours), 2), t.data.task])]);
 }
 async function hrAbsences() {
   const [rows, staff] = await Promise.all([db.list('absence'), db.list('employee')]);
@@ -70,7 +77,7 @@ async function hrAbsences() {
 // chaque ligne avec son action (relancer, payer, facturer, c'est fait) ; à côté, l'argent et les chantiers en cours.
 route('dashboard', async () => {
   if (isSimple()) return homeSimple();
-  const all = await db.many(['opportunity', 'quote', 'invoice', 'project', 'task', 'point', 'intervention', 'expense', 'contact', 'report']);
+  const all = await db.many(['opportunity', 'quote', 'invoice', 'project', 'task', 'point', 'intervention', 'expense', 'contact', 'report', 'timesheet']);
   const team = !!ui.dashAll;
   const page = layout({ active: 'dashboard', icon: 'sun', title: 'Aujourd\'hui', sub: esc(longDate(today())),
     actions: `<div class="tseg" role="group" aria-label="Afficher"><button type="button" data-team="0" class="${team ? '' : 'on'}">Moi</button><button type="button" data-team="1" class="${team ? 'on' : ''}">Toute l'équipe</button></div>` });
@@ -122,6 +129,10 @@ route('dashboard', async () => {
   const newRep = all.report.filter((r) => fieldIds.includes(+r.created_by) && !(r.data.readBy || []).map(Number).includes(S.me.id));
   many(newRep, 3, 1, (r) => ({ tone: 'todo', icon: r.data.kind === 'photos' ? 'camera' : 'fiche', title: `${(S.users.find((u) => u.id === +r.created_by) || {}).name || 'Terrain'} : ${r.data.kind === 'photos' ? `${(r.data.photos || []).length} photo(s)` : 'nouveau rapport'}`, sub: `${byId(all.project, r.project_id) ? byId(all.project, r.project_id).data.name + ' · ' : ''}${(r.data.text || '').split('\n')[0] || fmtDate(r.data.date)}`, href: `#/report/${r.id}`, act: ['Lire', `#/report/${r.id}`] }),
     (l) => ({ tone: 'todo', icon: 'fiche', title: `${l.length} rapports du terrain à lire`, sub: 'Remarques et photos de vos équipes', href: '#/reports', act: ['Lire', '#/reports'] }));
+  // heures du terrain sur un chantier pas encore créé
+  const loose = {}; all.timesheet.filter((t) => !t.project_id && t.data.site).forEach((t) => { const k = t.data.site.trim().toLowerCase(); (loose[k] = loose[k] || []).push(t); });
+  many(Object.values(loose), 3, 1, (l) => ({ tone: 'todo', icon: 'crane', title: `Chantier à créer : « ${l[0].data.site} »`, sub: `${[...new Set(l.map((t) => t.data.who).filter(Boolean))].join(', ') || 'Le terrain'} y a encodé ${fnum(l.reduce((a, t) => a + num(t.data.hours), 0), 1)} h`, href: '#/hr/timesheets', act: ['Créer', `#/hr/timesheets?site=${encodeURIComponent(l[0].data.site)}`] }),
+    (l) => ({ tone: 'todo', icon: 'crane', title: `${l.length} chantiers à créer`, sub: 'Le terrain y a encodé des heures', href: '#/hr/timesheets', act: ['Voir', '#/hr/timesheets'] }));
   const pLate = all.point.filter(isLatePt);
   if (pLate.length) add(4, { tone: 'info', icon: 'pin', title: `${pLate.length} point(s) de chantier en retard`, sub: 'Réserves et remarques à lever', href: '#/projects', act: ['Voir', '#/projects'] });
   items.sort((a, b) => a.rank - b.rank);

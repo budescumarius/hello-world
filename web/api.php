@@ -223,7 +223,7 @@ switch ($seg[0] ?? '') {
             $parent = isset($b['parent_id']) && $b['parent_id'] ? (int)$b['parent_id'] : null;
             if ($field) {
                 // compte terrain : uniquement ses heures (sur sa fiche) et ses rapports, sur ses chantiers
-                if ($type === 'timesheet' && is_array($data)) $data = field_timesheet($me, $data);
+                if ($type === 'timesheet' && is_array($data)) $data = field_timesheet($me, $data, $pid);
                 if (!field_can_write($me, $type, $pid, is_array($data) ? $data : [], null)) fail(403, 'Action non autorisée pour votre compte.');
                 $parent = null;
             }
@@ -252,7 +252,7 @@ switch ($seg[0] ?? '') {
                     if (!field_can_read($me, $cur)) fail(403, 'Action non autorisée pour votre compte.');
                     $nd = field_point_update($me, $cur, $nd); unset($b['project_id']);
                 } else {
-                    if ($type === 'timesheet') $nd = field_timesheet($me, $nd);
+                    if ($type === 'timesheet') $nd = field_timesheet($me, $nd, $npid);
                     if (!field_can_write($me, $type, $npid, $nd, $cur)) fail(403, 'Action non autorisée pour votre compte.');
                 }
                 $b['data'] = $nd; unset($b['number']);

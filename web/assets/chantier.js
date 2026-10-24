@@ -308,12 +308,49 @@ function hoursTable(el, rows, staff, projects, showProject) {
     search: (t) => [(byId(staff, t.data.employeeId) || { data: {} }).data.name || t.data.who, t.data.task].join(' '),
     columns: [
       { l: 'Date', v: (t) => fmtDate(t.data.date), sort: (t) => t.data.date }, { l: 'Ouvrier', v: (t) => `${esc((byId(staff, t.data.employeeId) || { data: { name: t.data.who || '—' } }).data.name)}${t.data.contactId ? ' <small class="muted">(sous-traitant)</small>' : ''}` },
-      ...(showProject ? [{ l: 'Chantier', v: (t) => esc((byId(projects, t.project_id) || { data: {} }).data.name || '') }] : []),
+      ...(showProject ? [{ l: 'Chantier', v: (t) => (t.project_id ? esc((byId(projects, t.project_id) || { data: {} }).data.name || '') : t.data.site ? `${badge('à créer', '#e8590c')} ${esc(t.data.site)}` : '') }] : []),
       { l: 'Travail', v: (t) => esc(t.data.task || '') }, { l: 'Heures', cls: 'r', v: (t) => fnum(num(t.data.hours), 2), sort: (t) => num(t.data.hours) },
       { l: 'Coût', cls: 'r', v: (t) => money(num(t.data.hours) * num(t.data.rate)), sort: (t) => num(t.data.hours) * num(t.data.rate) },
     ],
-    onRow: (t) => (t.data.employeeId ? editTimesheet(t) : menuSheet(`${t.data.who || 'Sous-traitant'} – ${fnum(num(t.data.hours), 2)} h`, [{ label: 'Supprimer ces heures', icon: 'trash', danger: true, run: async () => { await db.del('timesheet', t.id); render(); } }])), empty: 'Aucune heure encodée',
+    onRow: (t) => (!t.project_id && t.data.site ? attachSite(t) : t.data.employeeId ? editTimesheet(t) : menuSheet(`${t.data.who || 'Sous-traitant'} – ${fnum(num(t.data.hours), 2)} h`, [{ label: 'Supprimer ces heures', icon: 'trash', danger: true, run: async () => { await db.del('timesheet', t.id); render(); } }])), empty: 'Aucune heure encodée',
     footer: (l) => `<tr><td colspan="${showProject ? 4 : 3}">Total</td><td class="r"><b>${fnum(l.reduce((a, t) => a + num(t.data.hours), 0), 2)} h</b></td><td class="r"><b>${money(l.reduce((a, t) => a + num(t.data.hours) * num(t.data.rate), 0))}</b></td></tr>`,
+  });
+}
+// Heures encodées par le terrain sur un chantier pas encore créé (nom écrit par l'ouvrier ou le sous-traitant) :
+// créer ce chantier ou rattacher les heures à un chantier existant ; il rejoint alors l'équipe du chantier.
+async function attachSite(t) {
+  const [rows, projects] = await Promise.all([db.list('timesheet'), db.list('project')]);
+  const key = (x) => String(x || '').trim().toLowerCase();
+  const same = rows.filter((x) => !x.project_id && key(x.data.site) === key(t.data.site));
+  const who = [...new Set(same.map((x) => x.data.who).filter(Boolean))].join(', ') || 'le terrain';
+  const days = [...new Set(same.map((x) => x.data.date))].sort();
+  formModal({
+    title: `Chantier « ${t.data.site} »`, saveLabel: 'Valider',
+    extra: `<p class="muted">${same.length} ligne(s) · <b>${fnum(same.reduce((a, x) => a + num(x.data.hours), 0), 2)} h</b> encodées par ${esc(who)} (${days.map(fmtDate).join(', ')}) sur un chantier qui n'existe pas encore dans l'application.</p>`,
+    values: { mode: 'new', name: t.data.site, project_id: '' },
+    fields: [
+      { name: 'mode', label: 'Que faire ?', type: 'select', options: [['new', 'Créer ce chantier'], ['link', 'Rattacher à un chantier existant']], cls: 'full' },
+      { name: 'name', label: 'Nom du nouveau chantier', cls: 'full', hint: 'Vous compléterez ensuite le client, l\'adresse et les dates.' },
+      { name: 'project_id', label: 'Chantier existant', type: 'select', options: [['', '—'], ...projects.map((p) => [p.id, `${p.number || ''} · ${p.data.name}`])], cls: 'full' },
+    ],
+    after(form) { const sync = () => { const n = form.elements.mode.value === 'new'; form.elements.name.closest('.field').style.display = n ? '' : 'none'; form.elements.project_id.closest('.field').style.display = n ? 'none' : ''; }; form.elements.mode.onchange = sync; sync(); },
+    async onSave(v) {
+      // ceux qui ont encodé ces heures voient ensuite le chantier dans leur espace
+      const users = [...new Set(same.map((x) => +x.created_by).filter((id) => S.users.some((u) => u.id === id && ['ouvrier', 'soustraitant'].includes(u.role))))];
+      const subs = [...new Set(same.map((x) => +x.data.contactId).filter(Boolean))];
+      let p;
+      if (v.mode === 'new') {
+        if (!v.name.trim()) throw new Error('Indiquez le nom du chantier');
+        p = await persist('project', { data: { name: v.name.trim(), status: 'encours', start: days[0] || today(), managerId: S.me.id, team: users, subs, color: '#3b5bdb' } });
+      } else {
+        p = byId(projects, v.project_id); if (!p) throw new Error('Choisissez le chantier');
+        p.data.team = [...new Set([...(p.data.team || []).map(Number), ...users])]; p.data.subs = [...new Set([...(p.data.subs || []).map(Number), ...subs])];
+        await persist('project', p, { silent: true });
+      }
+      for (const x of same) { x.project_id = p.id; delete x.data.site; await persist('timesheet', x, { silent: true }); }
+      toast(v.mode === 'new' ? 'Chantier créé, heures rattachées ✓' : 'Heures rattachées au chantier ✓', 3000);
+      go(`#/project/${p.id}/hours`);
+    },
   });
 }
 async function tabPHours(p, el) {

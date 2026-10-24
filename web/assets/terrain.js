@@ -41,7 +41,7 @@ const tPage = (p) => { const page = layout(p); page.classList.add('s-page', 't-p
 
 // ---------------------------------------------------------------- Accueil : mes chantiers (et c'est tout)
 async function tHome() {
-  const [projects, m] = await Promise.all([tProjects(), db.many(['report', 'assign', 'point', ...(isSub() ? ['order'] : [])])]);
+  const [projects, m] = await Promise.all([tProjects(), db.many(['report', 'assign', 'point', 'timesheet', ...(isSub() ? ['order'] : [])])]);
   const page = tPage({ title: 'Mes chantiers', icon: 'crane' });
   const unread = tUnread(m.report); const todo = m.point.filter(isOpenPt);
   const next = m.assign.filter((x) => x.data.date >= today()).sort((x, y) => x.data.date.localeCompare(y.data.date));
@@ -49,7 +49,9 @@ async function tHome() {
   const list = tActive(projects).sort((a, b) => (here.has(b.id) - here.has(a.id)) || (a.data.name || '').localeCompare(b.data.name || ''));
   const loose = tGot(m.report).filter((r) => !r.project_id);
   const due = (m.order || []).filter((o) => !['facturee', 'annulee'].includes(o.data.status));
+  const hToday = m.timesheet.filter((t) => t.data.date === today()).reduce((x, t) => x + num(t.data.hours), 0);
   page.innerHTML = `<div class="today-hello"><b>Bonjour ${esc((S.me.name || '').split(' ')[0])}</b><span>${esc(T_DAY(today()))}</span></div>
+    <a class="s-big primary t-hbtn" href="#/t/heures?add=1">${I.clock}<span>Encoder mes heures<small>${hToday ? `${fnum(hToday, 1)} h encodées aujourd'hui` : 'sur un de mes chantiers ou un nouveau'}</small></span></a>
     ${pushState() !== 'on' && pushState() !== 'denied' ? `<button type="button" class="t-alert soft" data-push>${I.bell}<span><b>Activer les notifications</b><br><small>Pour ne rien rater du bureau</small></span>${I.chevron}</button>` : ''}
     <div class="t-sites">${list.map((p) => { const u = unread.filter((r) => +r.project_id === p.id).length; const n = todo.filter((x) => +x.project_id === p.id).length;
       return `<a class="t-site ${here.has(p.id) ? 'now' : ''}" href="#/t/chantier/${p.id}"><span class="t-site-ic">${I.crane}</span>
@@ -95,35 +97,52 @@ async function tSite(id) {
 async function tHours() {
   const q = new URLSearchParams(location.hash.split('?')[1] || '');
   const day = q.get('d') || today(); const pre = +q.get('p') || 0;
+  // « Encoder mes heures » depuis l'accueil : la fenêtre s'ouvre tout de suite (une seule fois)
+  const direct = q.has('add'); if (direct) history.replaceState(null, '', `#/t/heures${pre ? `?p=${pre}` : ''}`);
   const [projects, sheets] = await Promise.all([tProjects(), db.list('timesheet')]);
   const page = tPage({ title: 'Mes heures', icon: 'clock', back: pre ? `#/t/chantier/${pre}` : '#/t' });
   const days = Array.from({ length: 7 }, (_, i) => addDays(today(), i - 6));
   const sumDay = (d) => sheets.filter((t) => t.data.date === d).reduce((x, t) => x + num(t.data.hours), 0);
   const list = sheets.filter((t) => t.data.date === day);
   const active = tActive(projects);
+  // chantier pas encore créé au bureau : le nom qu'il a écrit
+  const where = (t) => tName(projects, t.project_id) || (t.data.site ? `${t.data.site} (nouveau chantier)` : 'Chantier');
+  const known = [...new Set(sheets.map((t) => t.data.site).filter(Boolean))];
   page.innerHTML = `<div class="t-days">${days.map((d) => `<a href="#/t/heures?d=${d}${pre ? `&p=${pre}` : ''}" class="${d === day ? 'on' : ''}"><small>${new Date(d + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'short' })}</small><b>${+d.slice(8)}</b><i>${sumDay(d) ? fnum(sumDay(d), 1) + ' h' : '·'}</i></a>`).join('')}</div>
     <div class="t-sum"><span>${day === today() ? 'Aujourd\'hui' : esc(T_DAY(day))}</span><b>${fnum(sumDay(day), 1)} h</b></div>
-    <div class="s-cards">${list.map((t) => `<button type="button" class="s-card t-line" data-e="${t.id}"><span class="s-ct"><b>${esc(tName(projects, t.project_id) || 'Chantier')}</b><small>${esc(t.data.task || 'Travail non précisé')}</small></span><span class="s-ca"><b>${fnum(num(t.data.hours), 2)} h</b></span></button>`).join('') || '<p class="muted s-empty">Rien d\'encodé ce jour-là.</p>'}</div>
-    ${active.length ? `<button class="s-big primary" data-add>${I.plus} Ajouter des heures</button>` : '<p class="muted">Aucun chantier attribué : le bureau doit d\'abord vous ajouter à un chantier.</p>'}`;
+    <div class="s-cards">${list.map((t) => `<button type="button" class="s-card t-line" data-e="${t.id}"><span class="s-ct"><b>${esc(where(t))}</b><small>${esc(t.data.task || 'Pas de remarque')}</small></span><span class="s-ca"><b>${fnum(num(t.data.hours), 2)} h</b></span></button>`).join('') || '<p class="muted s-empty">Rien d\'encodé ce jour-là.</p>'}</div>
+    <button class="s-big primary" data-add>${I.plus} Ajouter des heures</button>`;
   const edit = (t) => {
     const d = t ? t.data : { hours: 8, task: '' };
+    const sel = t ? (t.project_id || 'new') : (pre || (active[0] || {}).id || 'new');
     const m = modal(`${mhead(t ? 'Modifier mes heures' : 'Ajouter des heures')}<div class="m-body s-form">
-      <label class="field"><span>Chantier</span><select name="pid">${active.map((p) => `<option value="${p.id}" ${(t ? t.project_id : pre || (active[0] || {}).id) === p.id ? 'selected' : ''}>${esc(p.data.name)}</option>`).join('')}</select></label>
+      <label class="field"><span>Chantier</span><select name="pid">${active.map((p) => `<option value="${p.id}" ${sel === p.id ? 'selected' : ''}>${esc(p.data.name)}</option>`).join('')}
+        <option value="new" ${sel === 'new' ? 'selected' : ''}>➕ Autre chantier (pas dans la liste)</option></select></label>
+      <label class="field" data-site><span>Nom ou adresse du chantier</span><input name="site" list="t-sites" value="${esc(d.site || '')}" placeholder="Ex. : Rue de la Loi 12, Bruxelles" autocomplete="off">
+        <small class="muted">Un chantier où le bureau vous a envoyé et qui n'est pas encore dans l'application : le bureau le créera.</small></label>
+      <datalist id="t-sites">${known.map((x) => `<option value="${esc(x)}">`).join('')}</datalist>
       <div class="field"><span>Heures</span><div class="s-step"><button type="button" data-m="-0.5">−</button><input name="h" inputmode="decimal" value="${fnum(num(d.hours), 2)}"><button type="button" data-m="0.5">+</button></div></div>
-      <label class="field"><span>Travail fait</span><div class="s-desc"><textarea name="task" rows="3" placeholder="Ex. : pose du carrelage salle de bain">${esc(d.task || '')}</textarea><button type="button" class="s-mic" data-mic aria-label="Dicter">🎤</button></div></label></div>
+      <label class="field"><span>Travail fait / remarque</span><div class="s-desc"><textarea name="task" rows="3" placeholder="Ex. : intervention fuite chez le client, pose du carrelage…">${esc(d.task || '')}</textarea><button type="button" class="s-mic" data-mic aria-label="Dicter">🎤</button></div></label></div>
       <div class="m-foot">${t ? `<button class="btn danger ghost" data-del>${I.trash} Supprimer</button>` : ''}<span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-ok>Enregistrer</button></div>`);
-    const h = $('[name=h]', m.el);
+    const h = $('[name=h]', m.el); const ps = $('[name=pid]', m.el); const siteBox = $('[data-site]', m.el);
+    const sync = () => { siteBox.style.display = ps.value === 'new' ? '' : 'none'; };
+    ps.onchange = () => { sync(); if (ps.value === 'new') $('[name=site]', m.el).focus(); }; sync();
     $$('[data-m]', m.el).forEach((b) => { b.onclick = () => { h.value = fnum(Math.max(0, Math.min(24, r2(num(h.value) + +b.dataset.m))), 2); }; });
     micFor($('[data-mic]', m.el), $('[name=task]', m.el));
     $('[data-ok]', m.el).onclick = async () => {
       const hours = num(h.value); if (!(hours > 0 && hours <= 24)) return toast('Indiquez les heures (entre 0,5 et 24)', 3000);
+      const site = $('[name=site]', m.el).value.trim();
+      if (ps.value === 'new' && !site) { $('[name=site]', m.el).focus(); return toast('Écrivez le nom ou l\'adresse du chantier', 3000); }
       const it = t || { data: { date: day } };
-      it.project_id = +$('[name=pid]', m.el).value; Object.assign(it.data, { hours, task: $('[name=task]', m.el).value.trim(), date: it.data.date || day });
+      it.project_id = ps.value === 'new' ? null : +ps.value;
+      Object.assign(it.data, { hours, task: $('[name=task]', m.el).value.trim(), date: it.data.date || day });
+      if (it.project_id) delete it.data.site; else it.data.site = site;
       try { await persist('timesheet', it, { silent: true }); m.close(); toast('Heures enregistrées ✓', 2000); render(); } catch (e) { toast('Erreur : ' + e.message, 4000); }
     };
     const del = $('[data-del]', m.el); if (del) del.onclick = async () => { if (!confirm('Supprimer ces heures ?')) return; await db.del('timesheet', t.id); m.close(); render(); };
   };
   const add = $('[data-add]', page); if (add) add.onclick = () => edit(null);
+  if (direct) edit(null);
   $$('[data-e]', page).forEach((b) => { b.onclick = () => edit(list.find((x) => x.id === +b.dataset.e)); });
 }
 

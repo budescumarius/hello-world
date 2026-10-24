@@ -162,7 +162,7 @@ const FIELD_KEEP = [
     'phase' => ['name', 'start', 'end', 'progress', 'staff', 'companyId'],
     'employee' => ['name', 'firstname', 'userId', 'active'],
     'contact' => ['company', 'firstname', 'name', 'kind', 'email', 'phone', 'mobile', 'userId'],
-    'timesheet' => ['date', 'hours', 'task', 'employeeId', 'contactId', 'who'],
+    'timesheet' => ['date', 'hours', 'task', 'site', 'employeeId', 'contactId', 'who'],
 ];
 function field_view(array $r): array {
     $keep = FIELD_KEEP[$r['type']] ?? null;
@@ -205,7 +205,8 @@ function field_can_write(array $me, string $type, ?int $pid, array $data, ?array
     $sc = field_scope($me);
     if ($cur && (int)$cur['created_by'] !== $me['id']) return false;
     if ($pid && !in_array($pid, $sc['projects'], true)) return false;
-    if ($type === 'timesheet') return $pid && (!$sc['employee'] || (int)($data['employeeId'] ?? 0) === $sc['employee']);
+    // heures sur un de ses chantiers, ou sur un chantier pas encore créé au bureau (nom écrit par lui)
+    if ($type === 'timesheet') return ($pid || (string)($data['site'] ?? '') !== '') && (!$sc['employee'] || (int)($data['employeeId'] ?? 0) === $sc['employee']);
     if ($type === 'report') return true;
     return false;
 }
@@ -239,9 +240,11 @@ function link_field_user(int $uid, string $role, $link): void {
 }
 
 // Heures encodées par un compte terrain : rattachées à sa fiche, avec son coût horaire (jamais celui envoyé par le téléphone)
-function field_timesheet(array $me, array $data): array {
+function field_timesheet(array $me, array $data, ?int $pid = null): array {
     $sc = field_scope($me);
     unset($data['employeeId'], $data['contactId'], $data['rate']);
+    $site = mb_substr(trim(preg_replace('/\s+/u', ' ', (string)($data['site'] ?? ''))), 0, 120);
+    if ($pid || $site === '') unset($data['site']); else $data['site'] = $site;
     foreach (['employee' => 'employeeId', 'contact' => 'contactId'] as $t => $k) {
         if (!$sc[$t]) continue;
         $r = q('SELECT data FROM items WHERE id = ? AND company_id = ?', [$sc[$t], cid()])->fetch();
@@ -680,7 +683,10 @@ function notify_item(array $me, string $type, array $row, ?array $before = null)
         return;
     }
     if (is_field($me) && !$before && $cfg['events']) {
-        if ($type === 'timesheet') notify(office_ids($pid), 'hours', "{$me['name']} a encodé " . rtrim(rtrim(number_format((float)($d['hours'] ?? 0), 2, ',', ''), '0'), ',') . ' h', trim($site . ((string)($d['task'] ?? '') !== '' ? ' – ' . $d['task'] : '')), $pid ? "#/project/$pid/hours" : '#/hr/timesheets', (bool)$cfg['emailEvents']);
+        if ($type === 'timesheet') {
+            $where = $site !== '' ? $site : ((string)($d['site'] ?? '') !== '' ? 'Chantier pas encore créé : ' . $d['site'] : '');
+            notify(office_ids($pid), 'hours', "{$me['name']} a encodé " . rtrim(rtrim(number_format((float)($d['hours'] ?? 0), 2, ',', ''), '0'), ',') . ' h', trim($where . ((string)($d['task'] ?? '') !== '' ? ' – ' . $d['task'] : '')), $pid ? "#/project/$pid/hours" : '#/hr/timesheets', (bool)$cfg['emailEvents']);
+        }
         if ($type === 'report') {
             $n = count((array)($d['photos'] ?? []));
             $title = ($d['kind'] ?? '') === 'photos' ? "{$me['name']} a envoyé $n photo" . ($n > 1 ? 's' : '') : "Nouveau rapport de {$me['name']}";
