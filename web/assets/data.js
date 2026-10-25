@@ -138,17 +138,21 @@ function linesEditor(el, doc, opts) {
   doc.lines = doc.lines || [];
   const showCost = opts.showCost && ui.showCost !== false;
   const draw = () => {
+    // colonne « TM » (type de marché : QF, QP, FT…) affichée dès qu'une ligne en a un
+    const showTm = doc.lines.some((l) => l.kind === 'item' && String(l.tm || '').trim());
+    const span = (showCost ? 7 : 5) + (showTm ? 1 : 0);
     const nos = numbering(doc.lines);
     const st = sectionTotals(doc.lines);
     el.innerHTML = `<div class="lines-wrap"><table class="lines ${showCost ? 'with-cost' : ''}">
-      <thead><tr><th class="c-no">N°</th><th>Désignation</th><th class="c-u">Unité</th><th class="c-n">Qté</th>
+      <thead><tr><th class="c-no">N°</th><th>Désignation</th>${showTm ? '<th class="c-tm" title="Type de marché">TM</th>' : ''}<th class="c-u">Unité</th><th class="c-n">Qté</th>
         ${showCost ? '<th class="c-n">Déboursé u.</th><th class="c-n">Marge %</th>' : ''}<th class="c-n">PU HT</th><th class="c-v">TVA</th><th class="c-n">Total HT</th><th class="c-a"></th></tr></thead>
       <tbody>${doc.lines.map((l, i) => {
-        if (l.kind === 'title') return `<tr class="l-title ${tlevel(l) === 2 ? 'lv2' : ''}" data-i="${i}"><td class="c-no">${nos[i]}</td><td colspan="${showCost ? 7 : 5}"><input class="in" data-k="desc" value="${esc(l.desc)}" placeholder="${tlevel(l) === 2 ? 'Titre du sous-chapitre' : 'Titre du chapitre'}" ${opts.readOnly ? 'readonly' : ''}></td><td class="c-n"><b data-sec="${l.id}">${money(st[l.id])}</b></td><td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
-        if (l.kind === 'text') return `<tr class="l-text" data-i="${i}"><td></td><td colspan="${showCost ? 8 : 6}"><textarea class="in" data-k="desc" rows="1" placeholder="Texte libre / commentaire" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea></td><td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
+        if (l.kind === 'title') return `<tr class="l-title ${tlevel(l) === 2 ? 'lv2' : ''}" data-i="${i}"><td class="c-no">${nos[i]}</td><td colspan="${span}"><input class="in" data-k="desc" value="${esc(l.desc)}" placeholder="${tlevel(l) === 2 ? 'Titre du sous-chapitre' : 'Titre du chapitre'}" ${opts.readOnly ? 'readonly' : ''}></td><td class="c-n"><b data-sec="${l.id}">${money(st[l.id])}</b></td><td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
+        if (l.kind === 'text') return `<tr class="l-text" data-i="${i}"><td></td><td colspan="${span + 1}"><textarea class="in" data-k="desc" rows="1" placeholder="Texte libre / commentaire" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea></td><td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
         const m = num(l.cost) > 0 ? r2((num(l.price) / num(l.cost) - 1) * 100) : '';
         return `<tr class="l-item ${l.option ? 'opt' : ''}" data-i="${i}"><td class="c-no">${nos[i]}${l.type ? `<i class="tdot" style="--c:${TYPE_COLORS[l.type] || '#999'}" title="${esc(TYPES[l.type] || 'Ouvrage')}"></i>` : ''}</td>
           <td class="c-d"><textarea class="in" data-k="desc" rows="1" placeholder="Désignation" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea>${l.option ? '<small class="muted">En option – non compris dans le total</small>' : ''}</td>
+          ${showTm ? `<td class="c-tm" data-l="TM"><input class="in" data-k="tm" value="${esc(l.tm || '')}" maxlength="6" ${opts.readOnly ? 'readonly' : ''}></td>` : ''}
           <td class="c-u" data-l="Unité"><input class="in" data-k="unit" value="${esc(l.unit)}" list="units" ${opts.readOnly ? 'readonly' : ''}></td>
           <td class="c-n" data-l="Qté"><input class="in r" data-k="qty" inputmode="decimal" value="${esc(l.qty)}" ${opts.readOnly ? 'readonly' : ''}></td>
           ${showCost ? `<td class="c-n" data-l="Déboursé u."><input class="in r" data-k="cost" inputmode="decimal" value="${esc(l.cost ?? '')}" ${opts.readOnly || l.costBy ? 'readonly' : ''} title="${l.costBy ? 'Ouvrage : ' + Object.entries(l.costBy).map(([k, v]) => `${TYPES[k] || k} ${money(v)}`).join(', ') : ''}"></td>
@@ -157,7 +161,7 @@ function linesEditor(el, doc, opts) {
           <td class="c-v" data-l="TVA"><select class="in" data-k="vat" ${opts.readOnly ? 'disabled' : ''}>${vatOptions(l.vat).map(([v, t]) => `<option value="${v}" ${num(v) === num(l.vat) ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
           <td class="c-n tot" data-l="Total HT">${money(num(l.qty) * num(l.price))}</td>
           <td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
-      }).join('') || `<tr><td colspan="${showCost ? 10 : 8}" class="empty">Aucune ligne. Ajoutez un chapitre, une ligne ou des éléments de la bibliothèque.</td></tr>`}</tbody></table></div>
+      }).join('') || `<tr><td colspan="${span + 3}" class="empty">Aucune ligne. Ajoutez un chapitre, une ligne ou des éléments de la bibliothèque.</td></tr>`}</tbody></table></div>
       <datalist id="units">${UNITS.map((u) => `<option value="${u}">`).join('')}</datalist>
       ${opts.readOnly ? '' : `<div class="btns lines-add"><button class="btn" data-add="title">${I.plus} Chapitre</button><button class="btn" data-add="sub">${I.plus} Sous-chapitre</button><button class="btn" data-add="item">${I.plus} Ligne</button><button class="btn" data-add="text">${I.plus} Texte</button>
         ${opts.library !== false ? `<button class="btn primary" data-add="lib">${I.book} Depuis la bibliothèque</button>` : ''}<button class="btn" data-add="xls">${I.file} Importer Excel</button>
@@ -176,6 +180,7 @@ function linesEditor(el, doc, opts) {
           const k = inp.dataset.k;
           if (inp.tagName === 'TEXTAREA') autoGrow(inp);
           if (k === 'desc' || k === 'unit') l[k] = inp.value;
+          else if (k === 'tm') l.tm = inp.value.trim().toUpperCase();
           else if (k === 'vat') l.vat = num(inp.value);
           else if (k === 'margin') { if (num(l.cost) > 0) { l.price = r2(num(l.cost) * (1 + num(inp.value) / 100)); $('[data-k=price]', tr).value = l.price; } }
           else {
@@ -189,7 +194,7 @@ function linesEditor(el, doc, opts) {
           $$('[data-sec]', el).forEach((x) => { x.textContent = money(secs[x.dataset.sec]); });
           changed();
         });
-        if (inp.dataset.k !== 'desc') inp.addEventListener('blur', () => { if (inp.dataset.k !== 'unit') drawSoon(); });
+        if (inp.dataset.k !== 'desc') inp.addEventListener('blur', () => { if (!['unit', 'tm'].includes(inp.dataset.k)) drawSoon(); });
       });
     });
     $$('[data-menu]', el).forEach((b) => { b.onclick = () => lineMenu(+b.dataset.menu); });

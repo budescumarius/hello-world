@@ -60,7 +60,22 @@ async function importWizard({ title, fields, file, bytes }) {
     const autoMap = () => {
       const hdr = st.header >= 0 ? sheets[st.sheet][st.header] : [];
       st.map = {};
-      fields.forEach((f) => { const i = hdr.findIndex((c) => f.syn.includes(normKey(c))); st.map[f.key] = i; });
+      fields.forEach((f) => { const i = hdr.findIndex((c) => f.syn.length && f.syn.includes(normKey(c)) && !Object.values(st.map).includes(hdr.indexOf(c))); st.map[f.key] = i; });
+      if (fields.some((f) => f.key === 'desc2')) guessText();
+    };
+    // métrés sans en-tête sur les colonnes de texte : N° (1., 1.1…) et colonnes de désignation devinés d'après le contenu
+    const guessText = () => {
+      const data = sheets[st.sheet].slice(st.header + 1, st.header + 300);
+      const used = new Set(Object.values(st.map).filter((i) => i >= 0));
+      const ncol = Math.max(...data.map((r) => r.length), 0);
+      const cnt = (i, re) => data.filter((r) => re.test(String(r[i] ?? '').trim())).length;
+      if (st.map.no < 0) { for (let i = 0; i < ncol; i++) if (!used.has(i) && cnt(i, /^\d+(\.\d+)*\.?$/) >= 3) { st.map.no = i; used.add(i); break; } }
+      if (st.map.unit < 0) { for (let i = 0; i < ncol; i++) if (!used.has(i) && cnt(i, /^(m|m2|m²|m3|m³|ml|mct|pce|pc|pcs|p|u|un|h|kg|t|l|ff|fft|forfait|ens|st|stuk)$/i) >= 3) { st.map.unit = i; used.add(i); break; } }
+      const text = []; for (let i = 0; i < ncol; i++) if (!used.has(i)) { const n = cnt(i, /^(?=.{8,})(?=.*[A-Za-zÀ-ÿ]{3})/); if (n >= 3) text.push([i, n]); }
+      if (st.map.desc >= 0) { used.delete(st.map.desc); text.push([st.map.desc, Infinity]); }
+      const best = Math.max(0, ...text.map((x) => (x[1] === Infinity ? 0 : x[1])));
+      const cols = text.filter((x) => x[1] === Infinity || x[1] >= Math.max(3, best * 0.15)).map((x) => x[0]).sort((a, b) => a - b).slice(0, 3);
+      if (cols.length) { st.map.desc = cols[0]; st.map.desc2 = cols[1] ?? -1; st.map.desc3 = cols[2] ?? -1; }
     };
     const draw = () => {
       const rows = sheets[st.sheet];
@@ -93,25 +108,31 @@ async function importWizard({ title, fields, file, bytes }) {
 
 // ---------------------------------------------------------------- Lignes de devis depuis Excel
 const QUOTE_FIELDS = [
-  { key: 'no', label: 'N°', syn: ['n', 'no', 'num', 'numero', 'nr', 'pos', 'poste', 'ref', 'reference', 'code', 'art', 'article'] },
+  { key: 'no', label: 'N°', syn: ['n', 'no', 'num', 'numero', 'nr', 'pos', 'poste', 'ref', 'reference', 'art', 'article'] },
   { key: 'desc', label: 'Désignation', syn: ['description', 'designation', 'libelle', 'intitule', 'omschrijving', 'denumire', 'descriere', 'travaux', 'prestation', 'objet'] },
+  { key: 'desc2', label: 'Désignation – 2e colonne', syn: ['detail', 'details', 'precision', 'sousposte', 'complement'] },
+  { key: 'desc3', label: 'Désignation – 3e colonne', syn: [] },
+  { key: 'tm', label: 'Type de marché (QF, QP, FT…)', syn: ['code', 'tm', 'typemarche', 'typedemarche', 'marche', 'nature', 'aard', 'type'] },
   { key: 'qty', label: 'Quantité', syn: ['qte', 'qt', 'qty', 'quantite', 'quantity', 'hoeveelheid', 'aantal', 'cantitate', 'cant', 'qteprevu'] },
   { key: 'unit', label: 'Unité', syn: ['u', 'un', 'unite', 'unit', 'eenheid', 'um'] },
   { key: 'price', label: 'Prix unitaire HT', syn: ['pu', 'pue', 'puht', 'prixunitaire', 'prixunitaireht', 'prix', 'eenheidsprijs', 'pret', 'pretunitar', 'unitprice', 'puhtva'] },
-  { key: 'total', label: 'Total HT', syn: ['total', 'totalht', 'montant', 'montantht', 'totaal', 'valoare', 'prixtotal'] },
+  { key: 'total', label: 'Total HT', syn: ['total', 'totalht', 'montant', 'montantht', 'totaal', 'valoare', 'prixtotal', 'prix', 'bedrag'] },
   { key: 'vat', label: 'TVA %', syn: ['tva', 'btw', 'vat', 'tauxtva', 'tvaht'] },
   { key: 'cost', label: 'Déboursé unitaire', syn: ['debourse', 'cout', 'coutunitaire', 'prixachat', 'cost', 'kost'] },
 ];
 // Classe chaque ligne : chapitre (1), sous-chapitre (2), ligne, texte ou ignorée
 function classifyRows(rows) {
+  // avec une colonne N° remplie, une ligne sans numéro ni prix continue le texte de la ligne précédente
+  const numbered = rows.some((r) => String(r.no ?? '').trim());
   return rows.map((r) => {
-    const desc = String(r.desc ?? '').trim();
+    const desc = [r.desc, r.desc2, r.desc3].map((v) => String(v ?? '').trim()).filter(Boolean).join(' – ');
     const no = String(r.no ?? '').trim();
     const qty = xnum(r.qty); const price = xnum(r.price); const total = xnum(r.total);
     if (!desc && !has(qty) && !has(price)) return { kind: 'skip', desc, no };
     if (/^(sous[- ]?)?total|^tva\b|^total\s*(ht|ttc|tvac)|^montant total|^remise|^acompte/i.test(desc) && !has(qty)) return { kind: 'skip', desc, no };
     const isItem = (has(qty) && qty !== 0) || has(price);
-    if (isItem) return { kind: 'item', desc, no, qty, price, total, unit: String(r.unit ?? '').trim(), vat: xnum(r.vat), cost: xnum(r.cost) };
+    if (isItem) return { kind: 'item', desc, no, qty, price, total, unit: String(r.unit ?? '').trim(), vat: xnum(r.vat), cost: xnum(r.cost), tm: String(r.tm ?? '').trim().toUpperCase().slice(0, 6) };
+    if (numbered && !no && !has(total)) return { kind: 'cont', desc, no };
     const parts = no.split(/[.\s]/).filter((x) => x !== '');
     while (parts.length > 1 && /^0+$/.test(parts[parts.length - 1])) parts.pop();
     if (/^\d+(\.\d+)*\.?$/.test(no) && parts.length) return { kind: parts.length >= 2 ? 'sub' : 'title', desc, no, total };
@@ -128,12 +149,12 @@ async function importLinesExcel(onLines) {
   if (!res) return;
   const cls = classifyRows(res.rows).filter((x) => x.kind !== 'skip' || x.desc);
   if (!cls.length) return toast('Aucune ligne reconnue');
-  const KL = [['title', 'Chapitre'], ['sub', 'Sous-chapitre'], ['item', 'Ligne'], ['text', 'Texte'], ['skip', 'Ignorer']];
+  const KL = [['title', 'Chapitre'], ['sub', 'Sous-chapitre'], ['item', 'Ligne'], ['cont', 'Suite du texte'], ['text', 'Texte'], ['skip', 'Ignorer']];
   const m = modal(`${mhead('Vérifier l\'import')}<div class="m-body">
-    <p class="muted">Vérifiez la nature de chaque ligne (chapitre, sous-chapitre, ligne chiffrée, texte) avant l'import. Les lignes de totaux sont ignorées automatiquement.</p>
+    <p class="muted">Vérifiez la nature de chaque ligne (chapitre, sous-chapitre, ligne chiffrée, texte) avant l'import. « Suite du texte » est ajouté à la description de la ligne au-dessus. Les lignes de totaux sont ignorées automatiquement.</p>
     <div class="grid-form">${fieldHTML({ name: 'vat', label: 'TVA si la colonne est absente ou vide', type: 'select', options: vatOptions(defVat()) }, defVat())}${fieldHTML({ name: 'type', label: 'Type de déboursé par défaut', type: 'select', options: optsOf(TYPES) }, 'divers')}</div>
-    <div class="dt-body"><table class="dt imp"><thead><tr><th>Type</th><th>N°</th><th>Désignation</th><th class="r">Qté</th><th>U</th><th class="r">PU HT</th><th class="r">Total HT</th></tr></thead><tbody>
-    ${cls.map((x, i) => `<tr class="k-${x.kind}" data-row="${i}"><td><select data-k="${i}">${KL.map(([k, l]) => `<option value="${k}" ${x.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td><td>${esc(x.no)}</td><td>${esc(x.desc.slice(0, 120))}</td>
+    <div class="dt-body"><table class="dt imp"><thead><tr><th>Type</th><th>N°</th><th>Désignation</th><th>TM</th><th class="r">Qté</th><th>U</th><th class="r">PU HT</th><th class="r">Total HT</th></tr></thead><tbody>
+    ${cls.map((x, i) => `<tr class="k-${x.kind}" data-row="${i}"><td><select data-k="${i}">${KL.map(([k, l]) => `<option value="${k}" ${x.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td><td>${esc(x.no)}</td><td>${esc(x.desc.slice(0, 120))}</td><td>${esc(x.tm || '')}</td>
       <td class="r">${has(x.qty) ? fnum(x.qty, 3) : ''}</td><td>${esc(x.unit || '')}</td><td class="r">${has(x.price) ? money(x.price) : ''}</td><td class="r">${has(x.total) ? money(x.total) : ''}</td></tr>`).join('')}
     </tbody></table></div></div>
     <div class="m-foot"><span class="muted" data-sum></span><span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-ok>Importer</button></div>`, { wide: true });
@@ -142,12 +163,19 @@ async function importLinesExcel(onLines) {
     const lines = [];
     for (const x of cls) {
       if (x.kind === 'skip') continue;
+      // suite : ajoutée à la ligne ou au texte précédent (après un chapitre : nouveau texte)
+      if (x.kind === 'cont') {
+        const prev = lines[lines.length - 1];
+        if (prev && (prev.kind === 'item' || prev.kind === 'text')) prev.desc += '\n' + x.desc;
+        else lines.push({ id: lid(), kind: 'text', desc: x.desc });
+        continue;
+      }
       if (x.kind === 'title' || x.kind === 'sub') { lines.push({ id: lid(), kind: 'title', ...(x.kind === 'sub' ? { level: 2 } : {}), desc: x.desc }); continue; }
       if (x.kind === 'text') { lines.push({ id: lid(), kind: 'text', desc: x.desc }); continue; }
       let qty = has(x.qty) ? x.qty : 1; let price = has(x.price) ? x.price : NaN;
       if (!has(price) && has(x.total)) price = qty ? r2(x.total / qty * 10000) / 10000 : x.total;
       let v = has(x.vat) ? x.vat : vat; if (v > 0 && v < 1) v = r2(v * 100);
-      lines.push({ id: lid(), kind: 'item', desc: x.desc, unit: x.unit || 'u', qty, price: has(price) ? price : 0, cost: has(x.cost) ? x.cost : '', vat: v, type });
+      lines.push({ id: lid(), kind: 'item', desc: x.desc, ...(x.tm ? { tm: x.tm } : {}), unit: x.unit || 'u', qty, price: has(price) ? price : 0, cost: has(x.cost) ? x.cost : '', vat: v, type });
     }
     return lines;
   };

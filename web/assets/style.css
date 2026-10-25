@@ -233,7 +233,7 @@ table.lines { width: 100%; border-collapse: collapse; min-width: 760px; }
 .lines th { font-size: 12px; color: var(--muted); text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--border); background: #fafbfd; white-space: nowrap; }
 .lines td { padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .lines .c-no { width: 54px; color: var(--muted); font-weight: 700; font-size: 12.5px; padding-top: 12px; white-space: nowrap; }
-.lines .c-u { width: 72px; } .lines .c-n { width: 104px; text-align: right; } .lines .c-v { width: 84px; } .lines .c-a { width: 40px; }
+.lines .c-u { width: 72px; } .lines .c-tm { width: 58px; } .lines .c-tm .in { text-transform: uppercase; text-align: center; } .lines .c-n { width: 104px; text-align: right; } .lines .c-v { width: 84px; } .lines .c-a { width: 40px; }
 .lines .tot { padding-top: 12px; font-weight: 600; white-space: nowrap; }
 .lines .in { width: 100%; border: 1px solid transparent; background: transparent; border-radius: 7px; padding: 6px 7px; outline: none; resize: none; overflow: hidden; }
 .lines .in:hover { border-color: var(--border); }
@@ -512,6 +512,7 @@ table.lines { width: 100%; border-collapse: collapse; min-width: 760px; }
 .dt.imp tr.k-title td { background: #e8ebf8; font-weight: 700; }
 .dt.imp tr.k-sub td { background: #f3f4fb; font-weight: 600; }
 .dt.imp tr.k-text td { color: var(--muted); font-style: italic; }
+.dt.imp tr.k-cont td { color: var(--muted); } .dt.imp tr.k-cont td:nth-child(3) { padding-left: 28px; }
 .dt.imp tr.k-skip td { opacity: .4; text-decoration: line-through; }
 .dt.imp tbody tr { cursor: default; }
 .map-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }

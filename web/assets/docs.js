@@ -38,7 +38,7 @@ const TPL_DEF = {
   style: 'madibu',
   ink: '#1f2a5a', accent: '#e0a12a', tint: '#f4f5fa', font: 'Manrope', size: 9.5, tagline: '',
   quoteTitle: 'Devis', invoiceTitle: 'Facture', creditTitle: 'Note de crédit', orderTitle: 'Bon de commande',
-  showCodes: true, showTM: false, tmLabel: 'TM', showManager: true, thousands: '.',
+  showCodes: true, showTM: true, tmLabel: '', showManager: true, thousands: '.',
   qr: true, payText: 'Merci de régler ce montant au plus tard le {date} sur le compte indiqué, avec la communication structurée.', payTerms: '{jours} jours après la date de facture',
   mention6: MENTION_6, mention12: '', mention21: MENTION_21, mentionAL: MENTION_AL, mentionsOnQuote: true,
   recap: true, footer: '', css: '',
@@ -148,7 +148,7 @@ function linesTable(d, t, kind) {
       if (l.kind === 'title' && !String(l.desc || '').trim()) return '';
       if (l.kind === 'title') return `<tr class="${tlevel(l) === 2 ? 'mb-sub' : 'mb-ch'}"><td colspan="${n - 1}"><div class="mb-dl">${code(i)}<span>${esc(l.desc)}</span></div></td><td class="r">${dmoney(st[l.id], t)}</td></tr>`;
       if (l.kind === 'text') return `<tr class="mb-txt"><td colspan="${n}" class="pre">${esc(l.desc)}</td></tr>`;
-      return `<tr class="${l.option ? 'mb-opt' : ''}"><td><div class="mb-dl">${code(i)}<span class="pre">${esc(l.desc)}${t.showTM && l.tm ? `<span class="mb-tag">${esc(t.tmLabel)} ${esc(l.tm)}</span>` : ''}${l.option ? '<em class="mb-pill">Option</em>' : ''}</span></div></td>
+      return `<tr class="${l.option ? 'mb-opt' : ''}"><td><div class="mb-dl">${code(i)}<span class="pre">${esc(l.desc)}${t.showTM && l.tm ? `<span class="mb-tag">${esc([t.tmLabel, l.tm].filter(Boolean).join(' '))}</span>` : ''}${l.option ? '<em class="mb-pill">Option</em>' : ''}</span></div></td>
         <td class="r">${dnum2(l.qty)}<span class="mb-u">${esc(l.unit || '')}</span></td><td class="r">${dmoney(l.price, t)}</td>${vat ? `<td class="r c-v">${fnum(num(l.vat))} %</td>` : ''}<td class="r">${dmoney(num(l.qty) * num(l.price), t)}</td></tr>`;
     }).join('')}</tbody></table>`;
 }
@@ -356,7 +356,7 @@ function templateSettings(page) {
     { name: 'h2', type: 'html', cls: 'full', html: '<div class="section-t">Intitulés et colonnes</div>' },
     { name: 'quoteTitle', label: 'Intitulé des devis' }, { name: 'invoiceTitle', label: 'Intitulé des factures' },
     { name: 'creditTitle', label: 'Intitulé des notes de crédit' }, { name: 'orderTitle', label: 'Intitulé des bons de commande' },
-    { name: 'showCodes', label: 'Codes de ligne (1.1.1) devant les descriptions', type: 'check' }, { name: 'showTM', label: 'Afficher le code TM des lignes', type: 'check' },
+    { name: 'showCodes', label: 'Codes de ligne (1.1.1) devant les descriptions', type: 'check' }, { name: 'showTM', label: 'Afficher le type de marché des lignes (QF, QP, FT…)', type: 'check' },
     { name: 'showManager', label: 'Afficher le gestionnaire du chantier sur les devis', type: 'check' }, { name: 'recap', label: 'Récapitulatif sous les états d\'avancement', type: 'check' },
     { name: 'h3', type: 'html', cls: 'full', html: '<div class="section-t">Paiement</div><small class="muted">Variables : {societe}, {iban}, {jours}, {date}</small>' },
     { name: 'qr', label: 'QR code de paiement sur les factures (scanné par l\'app bancaire du client : montant, IBAN et communication déjà remplis)', type: 'check', cls: 'full' },
