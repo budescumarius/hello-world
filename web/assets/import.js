@@ -178,13 +178,13 @@ async function importLinesExcel(onLines) {
         else lines.push({ id: lid(), kind: 'text', desc: x.desc });
         continue;
       }
-      if (x.kind === 'title' || x.kind === 'sub') { lines.push({ id: lid(), kind: 'title', ...(x.kind === 'sub' ? { level: 2 } : {}), desc: x.desc }); continue; }
+      if (x.kind === 'title' || x.kind === 'sub') { lines.push({ id: lid(), kind: 'title', ...(x.kind === 'sub' ? { level: 2 } : {}), ...(x.no ? { no: x.no } : {}), desc: x.desc }); continue; }
       if (x.kind === 'text') { lines.push({ id: lid(), kind: 'text', desc: x.desc }); continue; }
       // sans quantité : déduite du total Excel (total 0 = ligne barrée / supprimée → quantité 0)
       let qty = has(x.qty) ? x.qty : (has(x.total) && has(x.price) ? (x.price ? r2(x.total / x.price * 1000) / 1000 : 0) : 1); let price = has(x.price) ? x.price : NaN;
       if (!has(price) && has(x.total)) price = qty ? r2(x.total / qty * 10000) / 10000 : x.total;
       let v = has(x.vat) ? x.vat : vat; if (v > 0 && v < 1) v = r2(v * 100);
-      lines.push({ id: lid(), _src: cls.indexOf(x), kind: 'item', desc: x.desc, ...(x.tm ? { tm: x.tm } : {}), unit: x.unit || 'u', qty, price: has(price) ? price : 0, cost: has(x.cost) ? x.cost : '', vat: v, type });
+      lines.push({ id: lid(), _src: cls.indexOf(x), kind: 'item', desc: x.desc, ...(x.no ? { no: x.no } : {}), ...(x.tm ? { tm: x.tm } : {}), unit: x.unit || 'u', qty, price: has(price) ? price : 0, cost: has(x.cost) ? x.cost : '', vat: v, type });
     }
     closeChap();
     return lines;

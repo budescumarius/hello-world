@@ -399,8 +399,8 @@ async function progressInvoice(q, prev, base, existing) {
   const d = q.data; const disc = num(d.discount) / 100;
   const src = d.lines.filter((l) => l.kind === 'title' || (l.kind === 'item' && !l.option));
   const old = existing ? existing.data.progressRows || [] : [];
-  const rows = src.map((l) => (l.kind === 'title' ? { lineId: l.id, kind: 'title', level: tlevel(l), desc: l.desc } : {
-    lineId: l.id, kind: 'item', desc: l.desc, unit: l.unit, vat: num(l.vat), type: l.type, qty: num(l.qty), price: r2(num(l.price) * (1 - disc)),
+  const rows = src.map((l) => (l.kind === 'title' ? { lineId: l.id, kind: 'title', level: tlevel(l), desc: l.desc, ...(l.no ? { no: l.no } : {}) } : {
+    lineId: l.id, kind: 'item', desc: l.desc, ...(l.no ? { no: l.no } : {}), unit: l.unit, vat: num(l.vat), type: l.type, qty: num(l.qty), price: r2(num(l.price) * (1 - disc)),
     prev: prevProgress(prev, l.id, existing && existing.id),
   }));
   rows.forEach((r) => { if (r.kind === 'item') { const o = old.find((x) => x.lineId === r.lineId); r.cum = o ? num(o.cum) : r.prev; } });

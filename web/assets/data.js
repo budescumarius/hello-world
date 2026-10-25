@@ -58,7 +58,10 @@ function totals(doc) {
 }
 // Numérotation à 3 niveaux : chapitre 1.0.0, sous-chapitre 1.1.0, ligne 1.1.1 (ou 1.0.1 sans sous-chapitre)
 const tlevel = (l) => (l.kind === 'title' ? (+l.level === 2 ? 2 : 1) : 3);
+// Numéros repris du métré (l.no, import Excel) : gardés tels quels, même si on supprime ou ajoute des lignes
+const ownNos = (lines) => lines.some((l) => l.no != null && String(l.no).trim() !== '');
 function numbering(lines) {
+  if (ownNos(lines)) return lines.map((l) => (l.kind === 'text' ? '' : String(l.no ?? '').trim()));
   const hasT = lines.some((l) => l.kind === 'title');
   let c = 0; let s = 0; let n = 0;
   return lines.map((l) => {
@@ -141,16 +144,17 @@ function linesEditor(el, doc, opts) {
     // colonne « TM » (type de marché : QF, QP, FT…) affichée dès qu'une ligne en a un
     const showTm = doc.lines.some((l) => l.kind === 'item' && String(l.tm || '').trim());
     const span = (showCost ? 7 : 5) + (showTm ? 1 : 0);
-    const nos = numbering(doc.lines);
+    const nos = numbering(doc.lines); const own = ownNos(doc.lines);
+    const noCell = (l, i) => (own && !opts.readOnly ? `<input class="in no" data-k="no" value="${esc(l.no ?? '')}" placeholder="—">` : nos[i]);
     const st = sectionTotals(doc.lines);
     el.innerHTML = `<div class="lines-wrap"><table class="lines ${showCost ? 'with-cost' : ''}">
       <thead><tr><th class="c-no">N°</th><th>Désignation</th>${showTm ? '<th class="c-tm" title="Type de marché">TM</th>' : ''}<th class="c-u">Unité</th><th class="c-n">Qté</th>
         ${showCost ? '<th class="c-n">Déboursé u.</th><th class="c-n">Marge %</th>' : ''}<th class="c-n">PU HT</th><th class="c-v">TVA</th><th class="c-n">Total HT</th><th class="c-a"></th></tr></thead>
       <tbody>${doc.lines.map((l, i) => {
-        if (l.kind === 'title') return `<tr class="l-title ${tlevel(l) === 2 ? 'lv2' : ''}" data-i="${i}"><td class="c-no">${nos[i]}</td><td colspan="${span}"><input class="in" data-k="desc" value="${esc(l.desc)}" placeholder="${tlevel(l) === 2 ? 'Titre du sous-chapitre' : 'Titre du chapitre'}" ${opts.readOnly ? 'readonly' : ''}></td><td class="c-n"><b data-sec="${l.id}">${money(st[l.id])}</b></td><td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
+        if (l.kind === 'title') return `<tr class="l-title ${tlevel(l) === 2 ? 'lv2' : ''}" data-i="${i}"><td class="c-no">${noCell(l, i)}</td><td colspan="${span}"><input class="in" data-k="desc" value="${esc(l.desc)}" placeholder="${tlevel(l) === 2 ? 'Titre du sous-chapitre' : 'Titre du chapitre'}" ${opts.readOnly ? 'readonly' : ''}></td><td class="c-n"><b data-sec="${l.id}">${money(st[l.id])}</b></td><td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
         if (l.kind === 'text') return `<tr class="l-text" data-i="${i}"><td></td><td colspan="${span + 1}"><textarea class="in" data-k="desc" rows="1" placeholder="Texte libre / commentaire" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea></td><td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
         const m = num(l.cost) > 0 ? r2((num(l.price) / num(l.cost) - 1) * 100) : '';
-        return `<tr class="l-item ${l.option ? 'opt' : ''}" data-i="${i}"><td class="c-no">${nos[i]}${l.type ? `<i class="tdot" style="--c:${TYPE_COLORS[l.type] || '#999'}" title="${esc(TYPES[l.type] || 'Ouvrage')}"></i>` : ''}</td>
+        return `<tr class="l-item ${l.option ? 'opt' : ''}" data-i="${i}"><td class="c-no">${noCell(l, i)}${l.type ? `<i class="tdot" style="--c:${TYPE_COLORS[l.type] || '#999'}" title="${esc(TYPES[l.type] || 'Ouvrage')}"></i>` : ''}</td>
           <td class="c-d"><textarea class="in" data-k="desc" rows="1" placeholder="Désignation" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea>${l.option ? '<small class="muted">En option – non compris dans le total</small>' : ''}</td>
           ${showTm ? `<td class="c-tm" data-l="TM"><input class="in" data-k="tm" value="${esc(l.tm || '')}" maxlength="6" ${opts.readOnly ? 'readonly' : ''}></td>` : ''}
           <td class="c-u" data-l="Unité"><input class="in" data-k="unit" value="${esc(l.unit)}" list="units" ${opts.readOnly ? 'readonly' : ''}></td>
@@ -164,7 +168,7 @@ function linesEditor(el, doc, opts) {
       }).join('') || `<tr><td colspan="${span + 3}" class="empty">Aucune ligne. Ajoutez un chapitre, une ligne ou des éléments de la bibliothèque.</td></tr>`}</tbody></table></div>
       <datalist id="units">${UNITS.map((u) => `<option value="${u}">`).join('')}</datalist>
       ${opts.readOnly ? '' : `<div class="btns lines-add"><button class="btn" data-add="title">${I.plus} Chapitre</button><button class="btn" data-add="sub">${I.plus} Sous-chapitre</button><button class="btn" data-add="item">${I.plus} Ligne</button><button class="btn" data-add="text">${I.plus} Texte</button>
-        ${opts.library !== false ? `<button class="btn primary" data-add="lib">${I.book} Depuis la bibliothèque</button>` : ''}<button class="btn" data-add="xls">${I.file} Importer Excel</button>${doc.lines.some((l) => l.kind === 'item') ? `<button class="btn" data-allvat>${I.percent || ''} TVA de toutes les lignes</button>` : ''}
+        ${opts.library !== false ? `<button class="btn primary" data-add="lib">${I.book} Depuis la bibliothèque</button>` : ''}<button class="btn" data-add="xls">${I.file} Importer Excel</button>${own ? '<button class="btn" data-autono title="Numéros du métré remplacés par 1.1.1, 1.1.2…">Numérotation automatique</button>' : ''}${doc.lines.some((l) => l.kind === 'item') ? `<button class="btn" data-allvat>${I.percent || ''} TVA de toutes les lignes</button>` : ''}
         ${opts.showCost ? `<label class="chk small"><input type="checkbox" data-showcost ${showCost ? 'checked' : ''}>Afficher déboursés et marges</label>` : ''}</div>`}`;
     bind();
   };
@@ -180,6 +184,7 @@ function linesEditor(el, doc, opts) {
           const k = inp.dataset.k;
           if (inp.tagName === 'TEXTAREA') autoGrow(inp);
           if (k === 'desc' || k === 'unit') l[k] = inp.value;
+          else if (k === 'no') l.no = inp.value.trim();
           else if (k === 'tm') l.tm = inp.value.trim().toUpperCase();
           else if (k === 'vat') l.vat = num(inp.value);
           else if (k === 'margin') { if (num(l.cost) > 0) { l.price = r2(num(l.cost) * (1 + num(inp.value) / 100)); $('[data-k=price]', tr).value = l.price; } }
@@ -194,11 +199,12 @@ function linesEditor(el, doc, opts) {
           $$('[data-sec]', el).forEach((x) => { x.textContent = money(secs[x.dataset.sec]); });
           changed();
         });
-        if (inp.dataset.k !== 'desc') inp.addEventListener('blur', () => { if (!['unit', 'tm'].includes(inp.dataset.k)) drawSoon(); });
+        if (inp.dataset.k !== 'desc') inp.addEventListener('blur', () => { if (!['unit', 'tm', 'no'].includes(inp.dataset.k)) drawSoon(); });
       });
     });
     $$('[data-menu]', el).forEach((b) => { b.onclick = () => lineMenu(+b.dataset.menu); });
     $$('[data-add]', el).forEach((b) => { b.onclick = () => add(b.dataset.add); });
+    const an = $('[data-autono]', el); if (an) an.onclick = () => { if (!confirm('Remplacer les numéros du métré par une numérotation automatique (1.1.1, 1.1.2…) ?')) return; doc.lines.forEach((l) => { delete l.no; }); draw(); changed(); };
     const av = $('[data-allvat]', el); if (av) av.onclick = () => setVat(0, doc.lines.length, 'toutes les lignes');
     const sc = $('[data-showcost]', el); if (sc) sc.onchange = () => { ui.showCost = sc.checked; saveUi(); linesEditor(el, doc, opts); };
   }

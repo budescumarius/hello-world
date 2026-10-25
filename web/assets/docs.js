@@ -156,7 +156,7 @@ function linesTable(d, t, kind) {
 // État d'avancement : prévu, avancement (avec barre), prix, montant de la période
 function progressTable(d, t) {
   const rows = d.progressRows || [];
-  const nos = numbering(rows.map((r) => ({ kind: r.kind, level: r.level })));
+  const nos = numbering(rows.map((r) => ({ kind: r.kind, level: r.level, no: r.no })));
   const period = (r) => { const l = (d.lines || []).find((x) => x.srcId === r.lineId && !isDeduction(x)); return l ? r2(num(l.qty) * num(l.price)) : 0; };
   const code = (i) => (t.showCodes && nos[i] ? `<span class="mb-code">${esc(String(nos[i]).replace(/(\.0)+$/, ''))}</span>` : '');
   return `<table class="mb-lines mb-prog"><thead><tr><th>Description</th><th class="r">Prévu</th><th class="r">Précédent</th><th class="r">Cet état</th><th class="r">Cumul total</th><th class="r">Reste</th><th class="r">Prix unit. HT</th><th class="r">Période HT</th></tr></thead><tbody>
