@@ -208,6 +208,8 @@ kbd { font: 11px/1 inherit; border: 1px solid var(--navy-3); border-radius: 5px;
 .field.chk { flex-direction: row; align-items: center; gap: 8px; }
 .field.inline { flex-direction: row; align-items: center; }
 .field.inline input { width: auto; }
+.multi-q { width: 100%; margin-bottom: 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; font: inherit; }
+.multi label[hidden] { display: none; }
 .multi { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; max-height: 220px; overflow-y: auto; }
 .field.scroll .multi { flex-direction: column; flex-wrap: nowrap; }
 .file-pick { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

@@ -480,7 +480,9 @@ function fieldHTML(f, val) {
     case 'users': case 'multi': {
       const opts = f.type === 'users' ? S.users.filter((u) => u.active).map((u) => [u.id, u.name]) : (typeof f.options === 'function' ? f.options() : f.options);
       const sel = (val || []).map(String);
-      input = `<div class="multi" data-multi="${f.name}">${opts.map(([v, l]) => `<label class="chk"><input type="checkbox" value="${esc(v)}" ${sel.includes(String(v)) ? 'checked' : ''}>${esc(l)}</label>`).join('') || '<span class="muted">—</span>'}</div>`;
+      // longue liste : recherche, et les éléments cochés en premier
+      const ord = opts.length > 6 ? [...opts.filter(([v]) => sel.includes(String(v))), ...opts.filter(([v]) => !sel.includes(String(v)))] : opts;
+      input = `${opts.length > 6 ? `<input type="search" class="multi-q" placeholder="Rechercher (${opts.length})…" aria-label="Rechercher" autocomplete="off">` : ''}<div class="multi" data-multi="${f.name}">${ord.map(([v, l]) => `<label class="chk" data-q="${esc(String(l).toLowerCase())}"><input type="checkbox" value="${esc(v)}" ${sel.includes(String(v)) ? 'checked' : ''}>${esc(l)}</label>`).join('') || '<span class="muted">—</span>'}</div>`;
       break;
     }
     case 'check': return `<label class="field chk ${f.cls || ''}"><input type="checkbox" name="${f.name}" ${val ? 'checked' : ''}><span>${esc(f.label)}</span></label>`;
@@ -625,6 +627,12 @@ async function render() {
   if (seq === renderSeq) window.scrollTo(0, 0);
 }
 window.addEventListener('hashchange', render);
+// recherche dans les listes à cocher (sous-traitants, équipe…)
+document.addEventListener('input', (e) => {
+  if (!e.target.matches || !e.target.matches('.multi-q')) return;
+  const q = normKey(e.target.value); const box = e.target.nextElementSibling;
+  if (box) box.querySelectorAll('label[data-q]').forEach((l) => { l.hidden = !!q && !normKey(l.dataset.q).includes(q) && !l.querySelector('input').checked; });
+});
 // formulaires dont la touche Entrée ne doit rien envoyer (pas de gestionnaire en ligne : politique de sécurité CSP)
 document.addEventListener('submit', (e) => { if (e.target.matches('form[data-nosubmit]')) e.preventDefault(); });
 
