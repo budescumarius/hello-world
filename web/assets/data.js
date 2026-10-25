@@ -168,7 +168,7 @@ function linesEditor(el, doc, opts) {
       }).join('') || `<tr><td colspan="${span + 3}" class="empty">Aucune ligne. Ajoutez un chapitre, une ligne ou des éléments de la bibliothèque.</td></tr>`}</tbody></table></div>
       <datalist id="units">${UNITS.map((u) => `<option value="${u}">`).join('')}</datalist>
       ${opts.readOnly ? '' : `<div class="btns lines-add"><button class="btn" data-add="title">${I.plus} Chapitre</button><button class="btn" data-add="sub">${I.plus} Sous-chapitre</button><button class="btn" data-add="item">${I.plus} Ligne</button><button class="btn" data-add="text">${I.plus} Texte</button>
-        ${opts.library !== false ? `<button class="btn primary" data-add="lib">${I.book} Depuis la bibliothèque</button>` : ''}<button class="btn" data-add="xls">${I.file} Importer Excel</button>${own ? '<button class="btn" data-autono title="Numéros du métré remplacés par 1.1.1, 1.1.2…">Numérotation automatique</button>' : ''}${doc.lines.some((l) => l.kind === 'item') ? `<button class="btn" data-allvat>${I.percent || ''} TVA de toutes les lignes</button>` : ''}
+        ${opts.library !== false ? `<button class="btn primary" data-add="lib">${I.book} Depuis la bibliothèque</button>` : ''}<button class="btn" data-add="xls">${I.file} Importer Excel / PDF</button>${own ? '<button class="btn" data-autono title="Numéros du métré remplacés par 1.1.1, 1.1.2…">Numérotation automatique</button>' : ''}${doc.lines.some((l) => l.kind === 'item') ? `<button class="btn" data-allvat>${I.percent || ''} TVA de toutes les lignes</button>` : ''}
         ${opts.showCost ? `<label class="chk small"><input type="checkbox" data-showcost ${showCost ? 'checked' : ''}>Afficher déboursés et marges</label>` : ''}</div>`}`;
     bind();
   };

@@ -1,5 +1,5 @@
 'use strict';
-/* Import de fichiers Excel / CSV / ODS : lignes de devis (chapitres, sous-chapitres, lignes) et liste de contacts. */
+/* Import de fichiers Excel / CSV / ODS / PDF : lignes de devis (chapitres, sous-chapitres, lignes) et liste de contacts. */
 
 let xlsxP;
 function loadXLSX() {
@@ -32,6 +32,59 @@ async function readSheets(file, bytes) {
   }
   return out;
 }
+// Devis / métré en PDF : le texte est remis en tableau (lignes d'après la hauteur, colonnes d'après les espaces
+// verticaux toujours vides entre les montants), puis passe par le même assistant que les fichiers Excel
+async function readPdfSheets(buf) {
+  const pdfjs = await loadPdfJs();
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
+  const lines = [];
+  for (let pn = 1; pn <= Math.min(doc.numPages, 60); pn++) {
+    const tc = await (await doc.getPage(pn)).getTextContent();
+    const rows = [];
+    for (const it of tc.items) {
+      if (!it.str || !it.str.trim()) continue;
+      const fs = Math.hypot(it.transform[0], it.transform[1]) || 10; const x = it.transform[4]; const w = it.width || it.str.length * fs * 0.5;
+      const y = Math.round(it.transform[5]);
+      let row = rows.find((r) => Math.abs(r.y - y) <= 3);
+      if (!row) { row = { y, parts: [] }; rows.push(row); }
+      // plusieurs colonnes dans un seul morceau de texte (« 1.1   Béton   m³   12,00 ») : découpé sur les grands espaces
+      let at = 0;
+      for (const seg of it.str.split(/(\s{2,})/)) {
+        if (seg.trim() && !/^\s+$/.test(seg)) { const lead = seg.length - seg.trimStart().length; row.parts.push({ x: x + w * (at + lead) / it.str.length, x1: x + w * (at + seg.trimEnd().length) / it.str.length, fs, s: seg.trim() }); }
+        at += seg.length;
+      }
+    }
+    rows.sort((a, b) => b.y - a.y).forEach((r) => {
+      // morceaux proches (mots d'une même cellule) regroupés
+      const ps = r.parts.sort((a, b) => a.x - b.x); const ch = [];
+      for (const p of ps) { const last = ch[ch.length - 1]; if (last && p.x - last.x1 < p.fs * 0.6) { last.s += (p.x - last.x1 < p.fs * 0.15 ? '' : ' ') + p.s; last.x1 = Math.max(last.x1, p.x1); } else ch.push({ ...p }); }
+      if (ch.some((c) => /[\p{L}\d]/u.test(c.s))) lines.push(ch); // traits de séparation (« ------ ») ignorés
+    });
+  }
+  if (!lines.some((l) => l.length)) throw new Error('aucun texte dans ce PDF (document scanné ?). Demandez la version Excel ou un PDF « texte ».');
+  // colonnes : zones couvertes par les lignes chiffrées (au moins un montant) ; les espaces jamais couverts les séparent
+  const isNum = (t) => /\d/.test(t) && /^[-+]?[\d\s.,\u00a0]+\s?(€|%|eur)?$/i.test(t);
+  // lignes de tableau : au moins deux nombres (quantité, prix, total) – pas les dates ou n° isolés de l'en-tête
+  const tab = lines.filter((l) => l.length >= 3 && l.filter((c) => isNum(c.s)).length >= 2);
+  const cov = new Map(); let maxX = 0;
+  for (const l of tab) for (const c of l) for (let x = Math.floor(c.x); x <= Math.ceil(c.x1); x++) { cov.set(x, (cov.get(x) || 0) + 1); maxX = Math.max(maxX, x); }
+  const thr = Math.max(tab.length >= 12 ? 1 : 0, Math.floor(tab.length * 0.03)); // quelques lignes « débordantes » tolérées
+  const cols = []; let cur = null;
+  for (let x = 0; x <= maxX + 1; x++) {
+    const on = (cov.get(x) || 0) > thr;
+    if (on && !cur) cur = { a: x, b: x }; else if (on) cur.b = x; else if (cur) { cols.push(cur); cur = null; }
+  }
+  if (!cols.length) return { PDF: lines.map((l) => [l.map((c) => c.s).join(' ')]) };
+  const colOf = (c) => {
+    const mid = (c.x + c.x1) / 2; let best = 0; let bd = Infinity;
+    cols.forEach((k, i) => { const ov = Math.min(c.x1, k.b) - Math.max(c.x, k.a); const d = ov > 0 ? -ov : Math.min(Math.abs(mid - k.a), Math.abs(mid - k.b)); if (d < bd) { bd = d; best = i; } });
+    return best;
+  };
+  const out = lines.filter((l) => l.length).map((l) => { const r = cols.map(() => ''); for (const c of l) { const i = colOf(c); r[i] = r[i] ? `${r[i]} ${c.s}` : c.s; } return r; });
+  // en-tête répété en haut de chaque page : gardé une seule fois
+  const seen = new Set();
+  return { PDF: out.filter((r) => { const k = r.join('|'); if (!/[a-z]/i.test(k) || r.some(isNum)) return true; if (seen.has(k) && r.filter(Boolean).length >= 3) return false; seen.add(k); return true; }) };
+}
 // Nombre au format belge / français / anglais : « 1.500,00 € », « 1 500.5 », « 6% »
 function xnum(v) {
   if (typeof v === 'number') return v;
@@ -49,11 +102,11 @@ const has = (v) => v !== '' && v != null && !(typeof v === 'number' && isNaN(v))
 async function importWizard({ title, fields, file, bytes }) {
   const bytesP = bytes || readBytes(file);
   let sheets;
-  try { toast('Lecture du fichier…', 15000); sheets = await readSheets(file, await bytesP); toast('Fichier lu', 800); } catch (e) { toast('Lecture impossible : ' + e.message, 9000); return null; }
+  try { toast('Lecture du fichier…', 15000); sheets = /\.pdf$/i.test(file.name) ? await readPdfSheets(await bytesP) : await readSheets(file, await bytesP); toast('Fichier lu', 800); } catch (e) { toast('Lecture impossible : ' + e.message, 9000); return null; }
   const names = Object.keys(sheets).filter((n) => sheets[n].length);
   if (!names.length) { toast('Le fichier est vide'); return null; }
   const score = (row) => fields.reduce((a, f) => a + (row.some((c) => f.syn.includes(normKey(c))) ? 1 : 0), 0);
-  const guessHeader = (rows) => { let best = 0; let bi = 0; rows.slice(0, 30).forEach((r, i) => { const s = score(r); if (s > best) { best = s; bi = i; } }); return best >= 2 ? bi : -1; };
+  const guessHeader = (rows) => { let best = 0; let bi = 0; rows.slice(0, 60).forEach((r, i) => { const s = score(r); if (s > best) { best = s; bi = i; } }); return best >= 2 ? bi : -1; };
   return new Promise((resolve) => {
     let done = false;
     const st = { sheet: names[0], header: guessHeader(sheets[names[0]]), map: {} };
@@ -86,7 +139,7 @@ async function importWizard({ title, fields, file, bytes }) {
       const body = rows.slice(st.header + 1, st.header + 9);
       $('[data-b]', m.el).innerHTML = `<div class="grid-form">
           ${names.length > 1 ? fieldHTML({ name: 'sheet', label: 'Feuille', type: 'select', options: names.map((n) => [n, n]) }, st.sheet) : ''}
-          ${fieldHTML({ name: 'header', label: 'Ligne des en-têtes', type: 'select', options: [[-1, 'Aucune (pas d\'en-têtes)'], ...rows.slice(0, 30).map((r, i) => [i, `Ligne ${i + 1} : ${r.filter(has).slice(0, 5).join(' | ').slice(0, 70)}`])] }, st.header)}
+          ${fieldHTML({ name: 'header', label: 'Ligne des en-têtes', type: 'select', options: [[-1, 'Aucune (pas d\'en-têtes)'], ...rows.slice(0, 60).map((r, i) => [i, `Ligne ${i + 1} : ${r.filter(has).slice(0, 5).join(' | ').slice(0, 70)}`])] }, st.header)}
         </div>
         <div class="section-t">Correspondance des colonnes</div>
         <div class="grid-form map-grid">${fields.map((f) => fieldHTML({ name: 'm_' + f.key, label: f.label, type: 'select', options: [[-1, '— ignorer —'], ...Array.from({ length: ncol }, (_, i) => [i, colName(i)])] }, st.map[f.key] ?? -1)).join('')}</div>
@@ -114,10 +167,10 @@ const QUOTE_FIELDS = [
   { key: 'desc2', label: 'Désignation – 2e colonne', syn: ['detail', 'details', 'precision', 'sousposte', 'complement'] },
   { key: 'desc3', label: 'Désignation – 3e colonne', syn: [] },
   { key: 'tm', label: 'Type de marché (QF, QP, FT…)', syn: ['code', 'tm', 'typemarche', 'typedemarche', 'marche', 'nature', 'aard', 'type'] },
-  { key: 'qty', label: 'Quantité', syn: ['qte', 'qt', 'qty', 'quantite', 'quantity', 'hoeveelheid', 'aantal', 'cantitate', 'cant', 'qteprevu'] },
-  { key: 'unit', label: 'Unité', syn: ['u', 'un', 'unite', 'unit', 'eenheid', 'um'] },
-  { key: 'price', label: 'Prix unitaire HT', syn: ['pu', 'pue', 'puht', 'prixunitaire', 'prixunitaireht', 'prix', 'eenheidsprijs', 'pret', 'pretunitar', 'unitprice', 'puhtva'] },
-  { key: 'total', label: 'Total HT', syn: ['total', 'totalht', 'montant', 'montantht', 'totaal', 'valoare', 'prixtotal', 'prix', 'bedrag'] },
+  { key: 'qty', label: 'Quantité', syn: ['qte', 'qt', 'qty', 'quantite', 'quantites', 'quantity', 'hoeveelheid', 'aantal', 'cantitate', 'cant', 'qteprevu'] },
+  { key: 'unit', label: 'Unité', syn: ['u', 'un', 'unite', 'unites', 'unit', 'eenheid', 'um'] },
+  { key: 'price', label: 'Prix unitaire HT', syn: ['pu', 'pue', 'puht', 'prixunitaire', 'prixunitaireht', 'prix', 'eenheidsprijs', 'pret', 'pretunitar', 'unitprice', 'puhtva', 'prixunitairehtva', 'prixunithtva', 'prixunitht', 'pxht', 'pxunit', 'eenheidsprijsexcl', 'eenheidsprijsexclbtw'] },
+  { key: 'total', label: 'Total HT', syn: ['total', 'totalht', 'montant', 'montantht', 'totaal', 'valoare', 'prixtotal', 'prix', 'bedrag', 'totalhtva', 'totalhtv', 'totalhorstva', 'montanthtva', 'prixtotalht', 'prixtotalhtva', 'totaalexcl', 'totaalexclbtw', 'totaalprijs', 'htnet', 'totalnet'] },
   { key: 'chap', label: 'Sous-total des chapitres (contrôle)', syn: ['soustotal', 'totalchapitre', 'subtotal', 'subtotaal'] },
   { key: 'vat', label: 'TVA %', syn: ['tva', 'btw', 'vat', 'tauxtva', 'tvaht'] },
   { key: 'cost', label: 'Déboursé unitaire', syn: ['debourse', 'cout', 'coutunitaire', 'prixachat', 'cost', 'kost'] },
@@ -143,7 +196,7 @@ function classifyRows(rows) {
   });
 }
 async function importLinesExcel(onLines) {
-  const [file] = await pickFile('.xlsx,.xls,.xlsm,.ods,.csv');
+  const [file] = await pickFile('.xlsx,.xls,.xlsm,.ods,.csv,.pdf,application/pdf');
   if (!file) return;
   const bytes = readBytes(file);
   bytes.catch(() => {});

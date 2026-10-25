@@ -227,7 +227,7 @@ async function newQuote(preset = {}) {
 route('quotes', async () => {
   const [quotes, contacts, projects] = await Promise.all([db.list('quote'), db.list('contact'), db.list('project')]);
   const sum = (s) => quotes.filter((q) => q.data.status === s).reduce((a, q) => a + totals(q.data).base, 0);
-  const page = layout({ active: 'quotes', icon: 'calc', title: 'Devis', actions: `<button class="btn" data-act="xls">${I.file} Devis depuis Excel</button><button class="btn primary" data-act="new">${I.plus} Nouveau devis</button>` });
+  const page = layout({ active: 'quotes', icon: 'calc', title: 'Devis', actions: `<button class="btn" data-act="xls">${I.file} Devis depuis Excel / PDF</button><button class="btn primary" data-act="new">${I.plus} Nouveau devis</button>` });
   $('[data-act=xls]').onclick = () => quoteFromExcel();
   page.innerHTML = `<div class="kpis">${kpi('À envoyer', money(sum('brouillon')), { sub: `${quotes.filter((q) => q.data.status === 'brouillon').length} devis` })}${kpi('En cours (envoyés)', money(sum('envoye')), { sub: `${quotes.filter((q) => q.data.status === 'envoye').length} devis` })}
     ${kpi('Acceptés', money(sum('accepte')), { cls: 'good', sub: `${quotes.filter((q) => q.data.status === 'accepte').length} devis` })}${kpi('Taux de transformation', `${quotes.filter((q) => ['accepte', 'refuse'].includes(q.data.status)).length ? Math.round(quotes.filter((q) => q.data.status === 'accepte').length / quotes.filter((q) => ['accepte', 'refuse'].includes(q.data.status)).length * 100) : 0} %`)}</div><div id="tbl"></div>`;
