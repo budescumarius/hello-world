@@ -637,8 +637,8 @@ const BUY_UNITS = { pc: 'pc', pce: 'pc', pcs: 'pc', st: 'pc', stk: 'pc', u: 'u',
 async function learnPrices(e, { quiet = false } = {}) {
   const d = e.data;
   let items = (d.items || []).filter((x) => num(x.qty) > 0 && num(x.price) > 0);
-  // articles pas encore lus : lecture du PDF de la facture
-  if (!(d.items || []).length && d.fileId && /\.pdf$/i.test(d.fileName || '')) {
+  // articles pas encore lus, ou lus avant la v96 (sans quantité ni prix unitaire) : lecture du PDF de la facture
+  if (!items.length && d.fileId && /\.pdf$/i.test(d.fileName || '')) {
     try { items = invoiceItemsFromText(await pdfFileText(d.fileId, 20)).filter((x) => num(x.qty) > 0 && num(x.price) > 0); } catch (err) { items = []; }
   }
   if (!items.length) return { n: 0 };

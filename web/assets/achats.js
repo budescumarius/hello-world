@@ -146,7 +146,8 @@ function invoiceItemsFromText(text) {
     const amount = num(tk[tk.length - 1].replace(/[ .\u00a0](?=\d{3}\b)/g, '').replace(',', '.'));
     // désignation : sans les colonnes de fin (unité, quantité, prix, remise, totaux)
     let nums = 0; const ns = [];
-    while (tk.length > 1 && (/^-?[\d.,%]+$/.test(tk[tk.length - 1]) || /^[€%]$/.test(tk[tk.length - 1]))) { const t = tk.pop(); nums++; if (/\d/.test(t) && !/%$/.test(t)) ns.unshift(t); }
+    // colonnes chiffrées de fin ; une lettre seule entre deux nombres (« 11,32 B 11,32 » : code remise / prix net) est sautée
+    while (tk.length > 1 && (/^-?[\d.,%]+$/.test(tk[tk.length - 1]) || /^[€%]$/.test(tk[tk.length - 1]) || (/^[A-Z]$/.test(tk[tk.length - 1]) && nums > 0 && /^-?[\d.,]+$/.test(tk[tk.length - 2] || '')))) { const t = tk.pop(); nums++; if (/\d/.test(t) && !/%$/.test(t)) ns.unshift(t); }
     let unit = '';
     if (nums >= 2 && tk.length > 1 && /^[A-Za-z²³]{1,4}\.?$/.test(tk[tk.length - 1])) unit = tk.pop().replace(/\.$/, ''); // unité (PC, BTE, m², kg…)
     const desc = tk.join(' ').trim();

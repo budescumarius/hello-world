@@ -132,7 +132,7 @@ route('library', async () => {
     if (!confirm(`Lire les ${exps.length} facture(s) d'achat validée(s) et enregistrer leurs prix dans la bibliothèque ?\n\nLes nouvelles factures validées sont ajoutées automatiquement.`)) return;
     ev.target.disabled = true; let n = 0; let c = 0; let u = 0;
     for (const x of exps) { ev.target.textContent = `Lecture… ${++n}/${exps.length}`; const r = await learnPrices(x, { quiet: true }).catch(() => ({})); c += r.created || 0; u += r.updated || 0; }
-    toast(`Bibliothèque : ${c} nouvel(s) article(s), ${u} prix mis à jour`, 6000); render();
+    toast(c || u ? `Bibliothèque : ${c} nouvel(s) article(s), ${u} prix mis à jour` : 'Aucun nouveau prix : déjà lus, ou factures scannées / sans quantité et prix unitaire par article', 7000); render();
   };
   $('[data-act=exp]').onclick = () => downloadCSV('bibliotheque.csv', [['Code', 'Designation', 'Type', 'Categorie', 'Unite', 'Debourse', 'Marge', 'Prix', 'TVA', 'Description'],
     ...all.map((a) => [a.data.code, a.data.name, a.data.kind, a.data.category, a.data.unit, fnum(articleCost(a, all).cost, 4), fnum(num(a.data.margin)), fnum(articlePrice(a, all)), fnum(num(a.data.vat)), a.data.desc])]);
