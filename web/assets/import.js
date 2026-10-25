@@ -153,9 +153,9 @@ async function importLinesExcel(onLines) {
   const m = modal(`${mhead('Vérifier l\'import')}<div class="m-body">
     <p class="muted">Vérifiez la nature de chaque ligne (chapitre, sous-chapitre, ligne chiffrée, texte) avant l'import. « Suite du texte » est ajouté à la description de la ligne au-dessus. Les lignes de totaux sont ignorées automatiquement.</p>
     <div class="grid-form">${fieldHTML({ name: 'vat', label: 'TVA si la colonne est absente ou vide', type: 'select', options: vatOptions(defVat()) }, defVat())}${fieldHTML({ name: 'type', label: 'Type de déboursé par défaut', type: 'select', options: optsOf(TYPES) }, 'divers')}</div>
-    <div class="dt-body"><table class="dt imp"><thead><tr><th>Type</th><th>N°</th><th>Désignation</th><th>TM</th><th class="r">Qté</th><th>U</th><th class="r">PU HT</th><th class="r">Total HT</th></tr></thead><tbody>
+    <div class="dt-body"><table class="dt imp"><thead><tr><th>Type</th><th>N°</th><th>Désignation</th><th>TM</th><th class="r">Qté</th><th>U</th><th class="r">PU HT</th><th class="r">Total HT</th><th class="r">Calculé</th></tr></thead><tbody>
     ${cls.map((x, i) => `<tr class="k-${x.kind}" data-row="${i}"><td><select data-k="${i}">${KL.map(([k, l]) => `<option value="${k}" ${x.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td><td>${esc(x.no)}</td><td>${esc(x.desc.slice(0, 120))}</td><td>${esc(x.tm || '')}</td>
-      <td class="r">${has(x.qty) ? fnum(x.qty, 3) : ''}</td><td>${esc(x.unit || '')}</td><td class="r">${has(x.price) ? money(x.price) : ''}</td><td class="r">${has(x.total) ? money(x.total) : ''}</td></tr>`).join('')}
+      <td class="r">${has(x.qty) ? fnum(x.qty, 3) : ''}</td><td>${esc(x.unit || '')}</td><td class="r">${has(x.price) ? money(x.price) : ''}</td><td class="r">${has(x.total) ? money(x.total) : ''}</td><td class="r" data-calc="${i}"></td></tr>`).join('')}
     </tbody></table></div></div>
     <div class="m-foot"><span class="muted" data-sum></span><span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-ok>Importer</button></div>`, { wide: true });
   const build = () => {
@@ -172,17 +172,32 @@ async function importLinesExcel(onLines) {
       }
       if (x.kind === 'title' || x.kind === 'sub') { lines.push({ id: lid(), kind: 'title', ...(x.kind === 'sub' ? { level: 2 } : {}), desc: x.desc }); continue; }
       if (x.kind === 'text') { lines.push({ id: lid(), kind: 'text', desc: x.desc }); continue; }
-      let qty = has(x.qty) ? x.qty : 1; let price = has(x.price) ? x.price : NaN;
+      // sans quantité : déduite du total Excel (total 0 = ligne barrée / supprimée → quantité 0)
+      let qty = has(x.qty) ? x.qty : (has(x.total) && has(x.price) ? (x.price ? r2(x.total / x.price * 1000) / 1000 : 0) : 1); let price = has(x.price) ? x.price : NaN;
       if (!has(price) && has(x.total)) price = qty ? r2(x.total / qty * 10000) / 10000 : x.total;
       let v = has(x.vat) ? x.vat : vat; if (v > 0 && v < 1) v = r2(v * 100);
-      lines.push({ id: lid(), kind: 'item', desc: x.desc, ...(x.tm ? { tm: x.tm } : {}), unit: x.unit || 'u', qty, price: has(price) ? price : 0, cost: has(x.cost) ? x.cost : '', vat: v, type });
+      lines.push({ id: lid(), _src: cls.indexOf(x), kind: 'item', desc: x.desc, ...(x.tm ? { tm: x.tm } : {}), unit: x.unit || 'u', qty, price: has(price) ? price : 0, cost: has(x.cost) ? x.cost : '', vat: v, type });
     }
     return lines;
   };
-  const sum = () => { const ls = build(); $('[data-sum]', m.el).textContent = `${ls.filter((l) => l.kind === 'title').length} chapitre(s) · ${ls.filter((l) => l.kind === 'item').length} ligne(s) · ${money(totals({ lines: ls }).net)} HT`; };
+  // contrôle : chaque ligne recalculée (quantité × prix) comparée au total de la colonne Excel
+  const sum = () => {
+    const ls = build(); let xl = 0; let bad = 0;
+    cls.forEach((x, i) => {
+      const td = $(`[data-calc="${i}"]`, m.el); if (!td) return;
+      if (x.kind !== 'item') { td.textContent = ''; td.className = 'r'; return; }
+      const l = ls.find((y) => y._src === i); const calc = l ? r2(num(l.qty) * num(l.price)) : 0;
+      if (has(x.total)) xl += x.total;
+      const diff = has(x.total) && Math.abs(calc - x.total) > 0.01;
+      if (diff) bad++;
+      td.textContent = money(calc); td.className = 'r' + (diff ? ' late' : ''); td.title = diff ? `Différent du total Excel (${money(x.total)})` : '';
+    });
+    const net = totals({ lines: ls }).net;
+    $('[data-sum]', m.el).innerHTML = `${ls.filter((l) => l.kind === 'title').length} chapitre(s) · ${ls.filter((l) => l.kind === 'item').length} ligne(s) · <b>${money(net)} HT</b>${xl ? ` · Excel : ${money(r2(xl))}${Math.abs(net - xl) > 0.01 ? ` <b class="late">(écart ${money(r2(net - xl))}${bad ? `, ${bad} ligne(s) en rouge` : ''})</b>` : ' ✓'}` : ''}`;
+  };
   $$('[data-k]', m.el).forEach((s) => { s.onchange = () => { cls[+s.dataset.k].kind = s.value; s.closest('tr').className = 'k-' + s.value; sum(); }; });
   $('[name=vat]', m.el).onchange = sum; sum();
-  $('[data-ok]', m.el).onclick = () => { const ls = build(); m.close(); onLines(ls, res.fileName); toast(`${ls.filter((l) => l.kind === 'item').length} ligne(s) importée(s)`); };
+  $('[data-ok]', m.el).onclick = () => { const ls = build().map(({ _src, ...l }) => l); m.close(); onLines(ls, res.fileName); toast(`${ls.filter((l) => l.kind === 'item').length} ligne(s) importée(s)`); };
 }
 // Nouveau devis directement depuis un fichier Excel
 function quoteFromExcel(preset = {}) {
