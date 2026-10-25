@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="assets/gsap.min.js"></script>
+    <!--
+      Reclama BâtiPro (16:9, 67,5 s).
+      CE POȚI MODIFICA:
+        - textele: tot ce e între <h1>, <h2>, <p> (în franceză);
+        - momentul și durata unei scene: data-start / data-duration pe <section class="scene clip">;
+        - ce apare și când într-o scenă: data-at="1.4" = la câte secunde după începutul scenei;
+        - vocea: fișierele assets/voce/01.wav … 09.wav (textul lor e în assets/voce/textes.txt);
+          le refaci cu: npx hyperframes tts "text" -v ff_siwis -o assets/voce/03.wav
+        - ecranele aplicației: assets/ecrane/*.jpg
+      Previzualizare: npm run dev   ·   Video final: npm run render
+    -->
+    <style>
+      @font-face { font-family: 'Manrope'; font-weight: 200 800; src: url('assets/fonts/manrope-latin.woff2') format('woff2'); }
+      @font-face { font-family: 'Manrope'; font-weight: 200 800; src: url('assets/fonts/manrope-latin-ext.woff2') format('woff2'); unicode-range: U+0100-024F; }
+      :root { --navy: #1c2550; --gold: #e8aa28; --cream: #f4f2ec; --soft: #c8cee6; --muted: #505878; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #000; font-family: 'Manrope', sans-serif; }
+      #root { position: relative; width: 1920px; height: 1080px; }
+      .scene { position: absolute; inset: 0; overflow: hidden; }
+      .scene.cream { background: var(--cream); background-image: linear-gradient(#eae7de 1px, transparent 1px), linear-gradient(90deg, #eae7de 1px, transparent 1px); background-size: 48px 48px; border-top: 10px solid var(--navy); }
+      .scene.navy { background: radial-gradient(ellipse 60% 70% at 85% 10%, #3c4c96 0%, transparent 70%), var(--navy); }
+      .stage { position: absolute; inset: 0; transform-origin: 50% 50%; }
+      .abs { position: absolute; }
+      .cap { position: absolute; left: 100px; width: 640px; }
+      .cap .bar { width: 90px; height: 10px; background: var(--gold); margin-bottom: 30px; }
+      .cap h2 { font-size: 62px; line-height: 1.22; font-weight: 800; color: var(--navy); letter-spacing: -0.01em; }
+      .cap p { margin-top: 26px; font-size: 32px; line-height: 1.35; font-weight: 500; color: var(--muted); }
+      .navy .cap h2 { color: #fff; } .navy .cap p { color: var(--soft); }
+      .win { position: absolute; border-radius: 14px; overflow: hidden; background: #ece9e3; box-shadow: 0 30px 70px rgba(10, 15, 40, .28); }
+      .win .bar { height: 34px; display: flex; align-items: center; gap: 9px; padding-left: 16px; position: relative; }
+      .win .bar i { width: 12px; height: 12px; border-radius: 50%; background: #ed6a5e; } .win .bar i:nth-child(2) { background: #f5bf4f; } .win .bar i:nth-child(3) { background: #62c554; }
+      .win .bar span { position: absolute; left: 50%; transform: translateX(-50%); background: #faf9f6; border-radius: 8px; padding: 2px 70px; font-size: 14px; color: #6d7288; }
+      .win img { display: block; width: 100%; }
+      .phone { position: absolute; border: 14px solid #12141c; border-radius: 58px; overflow: hidden; background: #12141c; box-shadow: 0 30px 70px rgba(5, 8, 25, .4); }
+      .phone img { display: block; width: 100%; border-radius: 44px; }
+      .phone::after { content: ''; position: absolute; top: 8px; left: 50%; width: 120px; height: 26px; margin-left: -60px; border-radius: 14px; background: #12141c; }
+      .pill { position: absolute; background: var(--gold); color: var(--navy); font-weight: 800; border-radius: 999px; padding: 18px 36px; box-shadow: 0 8px 0 #96690f; white-space: nowrap; }
+      .brand { position: absolute; display: flex; align-items: center; gap: 22px; font-weight: 800; }
+      .brand img { border-radius: 24%; }
+      .center { left: 0; right: 0; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="67.5" data-width="1920" data-height="1080">
+
+      <!-- 1 · Accroche -->
+      <section id="s1" class="scene clip navy" data-start="0" data-duration="6.5" data-track-index="0"><div class="stage" data-hold>
+        <h1 class="abs center in" data-at="0.3" style="top:300px;font-size:120px;color:#fff;font-weight:800">21 h.</h1>
+        <h2 class="abs center in" data-at="1.3" style="top:480px;font-size:76px;color:#fff;font-weight:700">Le chantier est fini…</h2>
+        <h2 class="abs center in" data-at="3.0" style="top:590px;font-size:76px;color:var(--gold);font-weight:800">…mais pas la paperasse.</h2>
+      </div></section>
+
+      <!-- 2 · Logo -->
+      <section id="s2" class="scene clip cream" data-start="6" data-duration="5" data-track-index="0"><div class="stage" data-hold>
+        <div class="brand in" data-at="0.2" style="top:320px;left:0;right:0;justify-content:center;font-size:96px;color:var(--navy)"><img src="assets/logo-batipro.png" width="150" height="150" alt="">BâtiPro</div>
+        <p class="abs center in" data-at="0.9" style="top:560px;font-size:50px;line-height:1.25;font-weight:700;color:var(--navy)">Tout votre chantier, du devis à la facture,<br>dans une seule application.</p>
+      </div></section>
+
+      <!-- 3 · Devis -->
+      <section id="s3" class="scene clip cream" data-start="10.5" data-duration="8.5" data-track-index="0"><div class="stage" data-hold>
+        <div class="cap" style="top:300px"><div class="bar in" data-at="0.3"></div><h2 class="in" data-at="0.4">Devis en<br>quelques<br>minutes</h2><p class="in" data-at="0.75">Vos prix sont déjà là.<br>Le PDF part au client<br>avec votre logo.</p></div>
+        <div class="win in" data-at="0.2" style="left:850px;top:190px;width:1000px"><div class="bar"><i></i><i></i><i></i><span data-layout-ignore>batipro.madibugroup.be</span></div><img src="assets/ecrane/d-quote.jpg" alt=""></div>
+        <div class="win in" data-at="3.2" style="left:1330px;top:360px;width:520px"><div class="bar"><i></i><i></i><i></i></div><img src="assets/ecrane/d-quote-pdf.jpg" alt=""></div>
+      </div></section>
+
+      <!-- 4 · Factures -->
+      <section id="s4" class="scene clip cream" data-start="18.5" data-duration="8.5" data-track-index="0"><div class="stage" data-hold>
+        <div class="cap" style="top:300px"><div class="bar in" data-at="0.3"></div><h2 class="in" data-at="0.4">Du devis<br>à la facture<br>en 1 clic</h2><p class="in" data-at="0.75">Acomptes, états<br>d'avancement, notes de<br>crédit : tout est calculé.</p></div>
+        <div class="win in" data-at="0.2" style="left:850px;top:190px;width:1000px"><div class="bar"><i></i><i></i><i></i><span data-layout-ignore>batipro.madibugroup.be</span></div><img src="assets/ecrane/d-invoices.jpg" alt=""></div>
+        <div class="pill in" data-at="3.0" style="left:1380px;top:860px;font-size:34px">Facture validée</div>
+      </div></section>
+
+      <!-- 5 · Terrain -->
+      <section id="s5" class="scene clip navy" data-start="26.5" data-duration="10.5" data-track-index="0"><div class="stage" data-hold>
+        <div class="cap" style="top:330px"><div class="bar in" data-at="0.3"></div><h2 class="in" data-at="0.4">Vos équipes sur<br>leur téléphone</h2><p class="in" data-at="0.75">Heures, rapports photo,<br>points sur le plan.<br>Sans jamais voir vos prix.</p></div>
+        <div class="phone in" data-at="0.3" style="left:690px;top:240px;width:360px"><img src="assets/ecrane/m-site.jpg" alt=""></div>
+        <div class="phone in" data-at="1.4" style="left:1080px;top:240px;width:360px"><img src="assets/ecrane/m-hours.jpg" alt=""></div>
+        <div class="phone in" data-at="2.6" style="left:1470px;top:240px;width:360px"><img src="assets/ecrane/m-plan.jpg" alt=""></div>
+      </div></section>
+
+      <!-- 6 · Bureau -->
+      <section id="s6" class="scene clip cream" data-start="36.5" data-duration="8.5" data-track-index="0"><div class="stage" data-hold>
+        <div class="cap" style="top:300px"><div class="bar in" data-at="0.3"></div><h2 class="in" data-at="0.4">Au bureau,<br>tout en<br>temps réel</h2><p class="in" data-at="0.75">Qui travaille où,<br>les heures par chantier,<br>les bons de commande.</p></div>
+        <div class="win in" data-at="0.2" style="left:850px;top:190px;width:1000px"><div class="bar"><i></i><i></i><i></i><span data-layout-ignore>batipro.madibugroup.be</span></div><img src="assets/ecrane/d-planning.jpg" alt=""></div>
+        <div class="win in" data-at="3.0" style="left:1170px;top:450px;width:700px"><div class="bar"><i></i><i></i><i></i></div><img src="assets/ecrane/d-crew-karim.jpg" alt=""></div>
+      </div></section>
+
+      <!-- 7 · Peppol + comptable -->
+      <section id="s7" class="scene clip cream" data-start="44.5" data-duration="8.5" data-track-index="0"><div class="stage" data-hold>
+        <div class="cap" style="top:280px"><div class="bar in" data-at="0.3"></div><h2 class="in" data-at="0.4">Peppol et<br>comptable<br>en 1 clic</h2><p class="in" data-at="0.75">Les factures fournisseurs<br>arrivent toutes seules.<br>Le trimestre part chez<br>le comptable en 1 clic.</p></div>
+        <div class="win in" data-at="0.2" style="left:850px;top:190px;width:1000px"><div class="bar"><i></i><i></i><i></i><span data-layout-ignore>batipro.madibugroup.be</span></div><img src="assets/ecrane/d-expenses.jpg" alt=""></div>
+        <div class="win in" data-at="3.0" style="left:1170px;top:450px;width:700px"><div class="bar"><i></i><i></i><i></i></div><img src="assets/ecrane/d-export.jpg" alt=""></div>
+      </div></section>
+
+      <!-- 8 · Sécurité -->
+      <section id="s8" class="scene clip navy" data-start="52.5" data-duration="6.5" data-track-index="0"><div class="stage" data-hold>
+        <div class="cap" style="top:330px"><div class="bar in" data-at="0.3"></div><h2 class="in" data-at="0.4">Vos données<br>en Europe</h2><p class="in" data-at="0.75">Sauvegardées chaque jour.<br>Protégées par la validation<br>en deux étapes.</p></div>
+        <div class="phone in" data-at="0.4" style="left:1180px;top:110px;width:520px"><img src="assets/ecrane/m-security.jpg" alt=""></div>
+      </div></section>
+
+      <!-- 9 · Offre -->
+      <section id="s9" class="scene clip navy" data-start="58.5" data-duration="9" data-track-index="0"><div class="stage" data-hold>
+        <div class="brand in" data-at="0.2" style="left:120px;top:170px;font-size:76px;color:#fff"><img src="assets/logo-batipro.png" width="120" height="120" alt="">BâtiPro</div>
+        <h2 class="abs in" data-at="0.6" style="left:120px;top:350px;font-size:84px;line-height:1.2;color:#fff;font-weight:800">Moins de paperasse,<br>plus de chantier.</h2>
+        <div class="pill in" data-at="1.4" style="left:120px;top:640px;font-size:46px">Essai gratuit 14 jours</div>
+        <p class="abs in" data-at="1.8" style="left:120px;top:790px;font-size:36px;font-weight:700;color:var(--soft)">Sans carte bancaire · dès 5 € HTVA / mois</p>
+        <p class="abs in" data-at="2.2" style="left:120px;top:860px;font-size:44px;font-weight:800;color:var(--gold)">batipro.madibugroup.be</p>
+        <div class="phone in" data-at="0.6" style="left:1260px;top:110px;width:500px"><img src="assets/ecrane/m-signup.jpg" alt=""></div>
+      </div></section>
+
+      <!-- Voix off : un fichier par scène (data-start = moment où la phrase commence) -->
+      <audio id="v1" class="clip" src="assets/voce/01.wav" data-start="0.5" data-duration="3.2" data-track-index="2"></audio>
+      <audio id="v2" class="clip" src="assets/voce/02.wav" data-start="6.35" data-duration="3.6" data-track-index="2"></audio>
+      <audio id="v3" class="clip" src="assets/voce/03.wav" data-start="10.85" data-duration="5.7" data-track-index="2"></audio>
+      <audio id="v4" class="clip" src="assets/voce/04.wav" data-start="18.85" data-duration="6.3" data-track-index="2"></audio>
+      <audio id="v5" class="clip" src="assets/voce/05.wav" data-start="26.85" data-duration="7.7" data-track-index="2"></audio>
+      <audio id="v6" class="clip" src="assets/voce/06.wav" data-start="36.85" data-duration="4.3" data-track-index="2"></audio>
+      <audio id="v7" class="clip" src="assets/voce/07.wav" data-start="44.85" data-duration="5.5" data-track-index="2"></audio>
+      <audio id="v8" class="clip" src="assets/voce/08.wav" data-start="52.85" data-duration="2.7" data-track-index="2"></audio>
+      <audio id="v9" class="clip" src="assets/voce/09.wav" data-start="58.85" data-duration="6.2" data-track-index="2"></audio>
+      <!-- Musique (optionnel) : ajoutez un fichier sous licence commerciale, par ex. :
+      <audio id="music" class="clip" src="assets/musique.mp3" data-start="0" data-duration="67.5" data-volume="0.18" data-fade-in="1" data-fade-out="2" data-track-index="3"></audio> -->
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      document.querySelectorAll('section.scene').forEach((sc, i) => {
+        const t0 = parseFloat(sc.dataset.start), dur = parseFloat(sc.dataset.duration);
+        tl.fromTo(sc, { opacity: 0 }, { opacity: 1, duration: i === 0 ? 0.4 : 0.5, ease: 'none' }, t0);
+        tl.fromTo(sc.querySelector('.stage'), { scale: 1 }, { scale: 1.035, duration: dur, ease: 'none' }, t0);
+        sc.querySelectorAll('.in').forEach((el) => {
+          tl.fromTo(el, { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.6, ease: 'power3.out' }, t0 + parseFloat(el.dataset.at || 0));
+        });
+      });
+      tl.to('#root', { opacity: 0, duration: 0.6, ease: 'none' }, 66.9);
+      window.__timelines['main'] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>
