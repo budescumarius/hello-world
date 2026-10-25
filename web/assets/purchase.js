@@ -441,6 +441,7 @@ route('purchase', async (id) => {
     const tot = r2(items.reduce((a, x) => a + x.amount, 0)); const per = {}; let none = 0;
     items.forEach((x) => { if (x.pid) per[x.pid] = r2((per[x.pid] || 0) + x.amount); else none = r2(none + x.amount); });
     const gap = r2(ht() - tot);
+    const oldList = $('.pi-it-list', box); const keepTop = oldList ? oldList.scrollTop : 0; const keepY = window.scrollY; // on reste où l'on était après une coche
     box.innerHTML = `<div class="pi-it-bar"><b>Articles de la facture</b><span class="muted">${items.length} article(s) · cochez des articles (ou touchez-les), puis</span>
         <select data-bulkpid>${pOpts('')}</select><button type="button" class="btn sm primary" data-bulk>Attribuer la sélection</button><span class="grow"></span>
         ${fileId && isPdfFile() && !items.some((x) => x.grp) ? '<button type="button" class="link-btn" data-reread title="Relit le PDF pour grouper les articles par bon de livraison / référence">Grouper par référence</button>' : ''}<button type="button" class="link-btn" data-all>${picked.size === items.length ? 'Tout désélectionner' : 'Tout sélectionner'}</button><button type="button" class="link-btn" data-rest>Non attribués → sélection</button></div>
@@ -450,6 +451,7 @@ route('purchase', async (id) => {
       <div class="pi-it-sum">${Object.entries(per).map(([pid, v]) => `<div><span>${esc(pName(pid))}</span><b>${money(v)}</b></div>`).join('')}
         <div class="${none ? 'warn' : 'ok'}"><span>Reste à attribuer</span><b>${money(none)}</b></div>
         ${Math.abs(gap) >= 0.01 ? `<div class="muted"><span>Écart entre les articles et le HT (frais, remises, articles non lus)</span><b>${money(gap)}</b></div>` : ''}</div>`;
+    $('.pi-it-list', box).scrollTop = keepTop; if (window.scrollY !== keepY) window.scrollTo(0, keepY);
     $$('[data-grp]', box).forEach((row) => {
       const ids = grpIdx(+row.dataset.grp);
       row.onclick = (ev) => { if (ev.target.tagName === 'SELECT' || ev.target.tagName === 'OPTION') return; const all = ids.every((i) => picked.has(i)); ids.forEach((i) => (all ? picked.delete(i) : picked.add(i))); drawItems(); };
