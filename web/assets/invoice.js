@@ -51,7 +51,7 @@ route('invoices', async () => {
     search: (i) => [i.number, i.data.title, i.data.ref, contactName(byId(contacts, i.data.clientId)), (byId(projects, i.project_id) || { data: {} }).data.name, fnum(i.st.t.total)].join(' '),
     filters: { def: '', options: [['', 'Toutes'], ['brouillon', 'Brouillons', '#868e96'], ['aenvoyer', 'À envoyer', '#f08c00'], ['envoye', 'Envoyées', '#3b5bdb'], ['partielle', 'Part. payées', '#e8a10c'], ['payee', 'Payées', '#2f9e44'], ['retard', 'En retard', '#e5484d'], ['avoir', 'Notes de crédit', '#adb5bd']], match: (i, f) => invDisp(i).k === f },
     columns: [
-      { l: 'N°', v: (i) => `<b class="nowrap">${esc(i.number || '—')}</b>`, sort: (i) => i.number || '' },
+      { l: 'N°', v: (i) => `<b class="nowrap">${esc(i.number || '—')}</b>${i.data.external ? '<br><small class="muted" title="Facture émise dans l\'ancien logiciel">reprise</small>' : ''}`, sort: (i) => i.number || '' },
       { l: 'Date', v: (i) => fmtDate(i.data.date), sort: (i) => `${i.data.date || ''}${String(i.id).padStart(8, '0')}` },
       { l: 'Type', v: (i) => esc(INV_TYPE[i.data.kind] || 'Facture') },
       { l: 'Client', v: (i) => esc(contactName(byId(contacts, i.data.clientId))), sort: (i) => contactName(byId(contacts, i.data.clientId)) },

@@ -66,8 +66,9 @@ route('export', async () => {
   const inP = (d) => d && d >= from && d <= to;
   const perLabel = P.q === 'x' ? `du ${fmtDate(from)} au ${fmtDate(to)}` : `T${P.q} ${P.y}`;
   const rows = [
-    ...invoices.filter((i) => i.data.status === 'emise' && inP(i.data.date)).map((i) => invRow(i, contacts)),
-    ...expenses.filter((e) => purchState(e) !== 'refusee' && inP(e.data.date)).map((e) => purchRow(e, contacts)),
+    // factures et dépenses reprises d'un autre logiciel : le comptable les a déjà
+    ...invoices.filter((i) => i.data.status === 'emise' && !i.data.external && inP(i.data.date)).map((i) => invRow(i, contacts)),
+    ...expenses.filter((e) => purchState(e) !== 'refusee' && !e.data.external && inP(e.data.date)).map((e) => purchRow(e, contacts)),
   ].sort((a, b) => a.typ.localeCompare(b.typ) || (a.date || '').localeCompare(b.date || '') || String(a.n).localeCompare(String(b.n)));
   const TYP = { vente: ['Facture émise', '#3b5bdb'], avoir: ['Note de crédit', '#7048e8'], achat: ['Facture d\'achat', '#e8590c'] };
   const page = layout({ title: 'Envoyer au comptable', icon: 'mail', back: isSimple() ? '#/dashboard' : null, sub: `Du ${fmtDate(from)} au ${fmtDate(to)}`, actions: `<button class="btn" data-zip2>${I.download} ZIP</button><button class="btn primary" data-send2>${I.mail} Envoyer au comptable</button>` });

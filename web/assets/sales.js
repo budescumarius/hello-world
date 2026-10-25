@@ -364,6 +364,7 @@ async function invoiceFromQuote(q) {
       mk({ kind: 'acompte', lines: qt.vats.map((x) => ({ id: lid(), kind: 'item', desc: `Acompte de ${fnum(num(v.pct))} % sur devis ${q.number}${many ? ` (TVA ${fnum(x.rate)} %)` : ''}`, unit: 'forfait', qty: 1, price: r2(x.base * num(v.pct) / 100), vat: x.rate, type: 'divers' })) });
     } },
     { label: "Facture d'avancement (état des travaux)", run: () => progressInvoice(q, prev, base) },
+    { label: 'Reprendre des factures déjà émises (autre logiciel)…', run: () => historyFromOtherApp(q, prev, base) },
     { label: 'Facture de solde (reste à facturer)', run: () => {
       const pb = prevBase(prev);
       const lines = d.lines.filter((l) => !l.option).map(disco);
@@ -372,6 +373,84 @@ async function invoiceFromQuote(q) {
     } },
   ]);
 }
+// ---------------------------------------------------------------- Reprise d'un chantier commencé dans un autre logiciel
+// Acomptes et états d'avancement déjà facturés : encodés avec leur numéro d'origine (factures « reprises »), pour que
+// le prochain état reparte du bon cumul et que l'acompte déjà déduit soit pris en compte.
+async function historyFromOtherApp(q, prev, base) {
+  const d = q.data; const disc = num(d.discount) / 100; const rate0 = (totals(d).vats[0] || { rate: defVat() }).rate;
+  const src = d.lines.filter((l) => l.kind === 'title' || (l.kind === 'item' && !l.option));
+  const rows = src.map((l) => (l.kind === 'title' ? { lineId: l.id, kind: 'title', level: tlevel(l), desc: l.desc, ...(l.no ? { no: l.no } : {}) }
+    : { lineId: l.id, kind: 'item', desc: l.desc, ...(l.no ? { no: l.no } : {}), unit: l.unit, vat: num(l.vat), type: l.type, qty: num(l.qty), price: r2(num(l.price) * (1 - disc)), prev: 0, cum: 0 }));
+  const nos = numbering(rows); const amt = (r, pct) => r2(r.qty * r.price * pct / 100);
+  const acs = [{ number: '', date: '', ht: '', rate: rate0, paid: true }];
+  const m = modal(`${mhead(`Reprise de la facturation – devis ${q.number}`)}<div class="m-body">
+    <p class="muted">Pour un chantier commencé dans un autre logiciel : encodez ce qui est <b>déjà facturé</b>. Ces factures gardent leur numéro d'origine, ne sont renvoyées ni au client ni au comptable, et la suite (prochain état d'avancement, déduction de l'acompte, solde) en tient compte.${prev.length ? ` <b>Ce devis a déjà ${prev.length} facture(s) dans BâtiPro.</b>` : ''}</p>
+    <div class="section-t">1. Factures d'acompte déjà émises</div><div data-acs></div><button type="button" class="btn sm" data-addac>${I.plus} Ajouter un acompte</button>
+    <div class="section-t">2. États d'avancement déjà facturés</div>
+    <label class="chk"><input type="checkbox" data-hasea checked> Il y a déjà des états d'avancement</label>
+    <div data-ea><div class="grid-form">${fieldHTML({ name: 'eano', label: 'N° du dernier état (ex. 2 pour EA2)', type: 'number' }, 2)}${fieldHTML({ name: 'eanum', label: 'Numéros des factures (ex. 2026-012, 2026-019)' }, '')}
+      ${fieldHTML({ name: 'eadate', label: 'Date du dernier état', type: 'date' }, '')}${fieldHTML({ name: 'eaded', label: 'Acompte déjà déduit sur ces états (HT)', type: 'money' }, '')}</div>
+      <p class="muted sm">Avancement <b>cumulé</b> à la fin du dernier état (ex. EA1 15 % + EA2 10 % → 25 %). Sur un chapitre, le % s'applique à toutes ses lignes.</p>
+      <div class="btns"><label class="pg-chap">Tout le devis <input class="pct" data-allp inputmode="decimal" placeholder="—"><em>%</em></label></div>
+      <div class="pg-list">${rows.map((r, i) => (r.kind === 'title'
+    ? `<div class="pg-sec ${r.level === 2 ? 'lv2' : ''}" ${String(r.desc || '').trim() ? '' : 'hidden'}><span class="pg-no">${esc(String(nos[i]).replace(/(\.0)+$/, ''))}</span><b class="pg-t">${esc(r.desc)}</b><label class="pg-chap"><input class="pct" data-ch="${i}" inputmode="decimal" placeholder="—"><em>%</em></label><b class="pg-amt" data-ct="${i}"></b></div>`
+    : `<div class="pg-row" data-r="${i}"><div class="pg-desc"><span class="pg-no">${esc(String(nos[i]).replace(/(\.0)+$/, ''))}</span><span class="pg-d">${esc(r.desc.split('\n')[0])}</span></div>
+        <div class="pg-in"><span class="pg-cum"><small>Marché</small><b>${money(amt(r, 100))}</b></span><label><span>Cumul facturé</span><input class="pct" data-p="${i}" inputmode="decimal" value="0"><em>%</em></label><span class="pg-per"><small>Montant cumulé</small><b data-per="${i}"></b></span></div></div>`)).join('')}</div>
+      <div class="totals"><div class="tr big"><span>Total HT déjà facturé en états</span><span data-t1></span></div><div class="tr int"><span>Avancement global</span><span data-t2></span></div></div></div>
+    </div><div class="m-foot"><span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-ok>Enregistrer la reprise</button></div>`, { wide: true });
+  const drawAcs = () => {
+    $('[data-acs]', m.el).innerHTML = acs.map((a, i) => `<div class="grid-form hist-ac" data-ac="${i}">${fieldHTML({ name: 'number', label: 'N° de facture' }, a.number)}${fieldHTML({ name: 'date', label: 'Date', type: 'date' }, a.date)}
+      ${fieldHTML({ name: 'ht', label: 'Montant HT', type: 'money' }, a.ht)}${fieldHTML({ name: 'rate', label: 'TVA', type: 'select', options: vatOptions(a.rate) }, a.rate)}${fieldHTML({ name: 'paid', label: 'Payée', type: 'check' }, a.paid)}</div>`).join('');
+    $$('[data-ac]', m.el).forEach((row) => { const a = acs[+row.dataset.ac]; $$('input,select', row).forEach((inp) => { inp.oninput = inp.onchange = () => { a[inp.name] = inp.type === 'checkbox' ? inp.checked : inp.value; }; }); });
+  };
+  drawAcs();
+  $('[data-addac]', m.el).onclick = () => { acs.push({ number: '', date: '', ht: '', rate: rate0, paid: true }); drawAcs(); };
+  const items = rows.filter((r) => r.kind === 'item');
+  const upd = () => {
+    rows.forEach((r, i) => { if (r.kind === 'item') $(`[data-per="${i}"]`, m.el).textContent = money(amt(r, r.cum)); });
+    rows.forEach((r, i) => { if (r.kind === 'title') $(`[data-ct="${i}"]`, m.el).textContent = money(rows.slice(i + 1, blockEnd(rows, i)).filter((x) => x.kind === 'item').reduce((a, x) => a + amt(x, x.cum), 0)); });
+    const market = items.reduce((a, r) => a + amt(r, 100), 0); const cum = items.reduce((a, r) => a + amt(r, r.cum), 0);
+    $('[data-t1]', m.el).textContent = money(cum); $('[data-t2]', m.el).textContent = `${fnum(market ? cum / market * 100 : 0, 1)} %`;
+  };
+  const setP = (i, v) => { rows[i].cum = Math.min(100, Math.max(0, num(v))); $(`[data-p="${i}"]`, m.el).value = r2(rows[i].cum); };
+  $$('[data-p]', m.el).forEach((inp) => { inp.oninput = () => { rows[+inp.dataset.p].cum = Math.min(100, Math.max(0, num(inp.value))); upd(); }; });
+  $$('[data-ch]', m.el).forEach((inp) => { inp.onchange = () => { if (inp.value.trim() === '') return; const i = +inp.dataset.ch; rows.slice(i + 1, blockEnd(rows, i)).forEach((r, k) => { if (r.kind === 'item') setP(i + 1 + k, inp.value); }); upd(); }; });
+  $('[data-allp]', m.el).onchange = (e) => { if (e.target.value.trim() === '') return; rows.forEach((r, i) => { if (r.kind === 'item') setP(i, e.target.value); }); upd(); };
+  $('[data-hasea]', m.el).onchange = (e) => { $('[data-ea]', m.el).hidden = !e.target.checked; };
+  upd();
+  $('[data-ok]', m.el).onclick = async () => {
+    const hasEa = $('[data-hasea]', m.el).checked;
+    const okAcs = acs.filter((a) => num(a.ht));
+    if (okAcs.some((a) => !a.number || !a.date)) return toast('Indiquez le numéro et la date de chaque acompte', 4000);
+    if (hasEa && !items.some((r) => r.cum > 0)) return toast('Encodez l\'avancement cumulé (ou décochez « états d\'avancement »)', 4000);
+    if (hasEa && !$('[name=eadate]', m.el).value) return toast('Indiquez la date du dernier état', 4000);
+    if (!okAcs.length && !hasEa) return toast('Rien à reprendre', 3000);
+    const mk = async (data, number) => {
+      const it = await persist('invoice', { project_id: base.project_id || null, data: { status: 'emise', external: true, ownerId: S.me.id, billSame: true, payments: [], discount: 0, reverse: !!d.reverse, defaultVat: rate0, notes: '', ...base.data, ...data } });
+      it.number = number; await persist('invoice', it, { silent: true }); return it;
+    };
+    for (const a of okAcs) {
+      const ht = r2(num(a.ht)); const ttc = r2(ht * (1 + (d.reverse ? 0 : num(a.rate)) / 100));
+      await mk({ kind: 'acompte', date: a.date, due: a.date, emittedAt: a.date, payDays: 0, title: `Acompte – ${d.title || q.number}`,
+        lines: [{ id: lid(), kind: 'item', desc: `Acompte sur devis ${q.number} (facture ${a.number}, reprise de l'ancien logiciel)`, unit: 'forfait', qty: 1, price: ht, vat: num(a.rate), type: 'divers' }],
+        payments: a.paid ? [{ date: a.date, amount: ttc, method: 'Virement', note: 'Reprise' }] : [] }, a.number);
+    }
+    if (hasEa) {
+      const no = Math.max(1, num($('[name=eano]', m.el).value) || 1); const date = $('[name=eadate]', m.el).value; const ded = r2(num($('[name=eaded]', m.el).value));
+      const lines = []; let pending = [];
+      rows.forEach((r) => {
+        if (r.kind === 'title') { pending = pending.filter((x) => tlevel(x) < r.level); pending.push({ id: lid(), kind: 'title', level: r.level === 2 ? 2 : undefined, desc: r.desc }); return; }
+        if (!r.cum) return; lines.push(...pending); pending = [];
+        lines.push({ id: lid(), kind: 'item', srcId: r.lineId, desc: r.desc, unit: r.unit, qty: Math.round(r.qty * r.cum / 100 * 10000) / 10000, price: r.price, vat: r.vat, type: r.type });
+      });
+      if (ded > 0) lines.push({ id: lid(), kind: 'item', deduction: 'acompte', desc: 'Déduction acompte (états repris)', unit: 'forfait', qty: 1, price: -ded, vat: rate0, type: 'divers' });
+      await mk({ kind: 'situation', situationNo: no, ref: `EA${no}`, date, due: date, emittedAt: date, payDays: 0, title: d.title || q.number, progressRows: rows.map((r) => ({ ...r })), lines,
+        docNote: `États d'avancement 1 à ${no} repris de l'ancien logiciel`, ea: { status: 'approuve' } }, $('[name=eanum]', m.el).value.trim() || `EA1-${no} (reprise)`);
+    }
+    m.close(); toast('Reprise enregistrée : le prochain état d\'avancement partira de ce cumul', 5000); render();
+  };
+}
+
 // ---------------------------------------------------------------- États d'avancement
 // Pourcentage cumulé déjà facturé pour chaque ligne du devis (hors facture `exceptId`)
 function prevProgress(list, lineId, exceptId) {
@@ -404,7 +483,8 @@ async function progressInvoice(q, prev, base, existing) {
     prev: prevProgress(prev, l.id, existing && existing.id),
   }));
   rows.forEach((r) => { if (r.kind === 'item') { const o = old.find((x) => x.lineId === r.lineId); r.cum = o ? num(o.cum) : r.prev; } });
-  const n = existing ? existing.data.situationNo : prev.filter((i) => i.data.kind === 'situation').length + 1;
+  // numéro suivant (un état repris d'un autre logiciel peut porter le n° 2, 3…)
+  const n = existing ? existing.data.situationNo : Math.max(0, ...prev.filter((i) => i.data.kind === 'situation').map((i) => num(i.data.situationNo) || 1)) + 1;
   const ac = acompteState(prev, existing && existing.id);
   const nos = numbering(rows);
   const amt = (r, pct) => r2(r.qty * r.price * pct / 100);

@@ -4,7 +4,7 @@
 const PURCH_ST = { avalider: ['À valider', '#f08c00'], retard: ['En retard', '#e5484d'], partiel: ['Part. payée', '#0c8599'], apayer: ['À payer', '#3b5bdb'], payee: ['Payée', '#2f9e44'], refusee: ['Refusée', '#868e96'] };
 // montant saisi : toujours 2 décimales (« 883,30 »)
 const famt = (x) => (num(x) || 0).toLocaleString('fr-BE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const PURCH_SRC = { peppol: 'Peppol', pdf: 'PDF importé', xml: 'XML importé', photo: 'Photo' };
+const PURCH_SRC = { reprise: 'Reprise ancien logiciel', peppol: 'Peppol', pdf: 'PDF importé', xml: 'XML importé', photo: 'Photo' };
 // TVA par taux (anciens achats : un seul taux)
 function purchVat(d) {
   if (Array.isArray(d.vatLines) && d.vatLines.length) return d.vatLines.map((x) => ({ rate: num(x.rate), amount: num(x.amount) }));

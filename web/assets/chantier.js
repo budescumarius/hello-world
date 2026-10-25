@@ -243,11 +243,30 @@ async function tabPInvoices(p, el, contacts) {
 }
 
 // ---------------------------------------------------------------- Achats & dépenses
+// Chantier commencé avec un autre logiciel : dépenses déjà payées encodées en totaux par type (sans recharger chaque facture).
+// Comptées dans le suivi du chantier, payées, exclues de l'envoi au comptable.
+async function oldExpenses(p) {
+  const v = await ask('Dépenses déjà faites (ancien logiciel)', [
+    { name: 'info', type: 'html', cls: 'full', html: '<p class="muted">Totaux <b>HT</b> déjà dépensés sur ce chantier, par type de coût. Ils comptent dans le budget et la marge du chantier, sont marqués payés et ne partent pas chez le comptable (il a déjà ces factures).</p>' },
+    { name: 'date', label: 'Jusqu\'au (date)', type: 'date', required: true },
+    ...Object.entries(TYPES).filter(([k]) => k !== 'ouvrage').map(([k, l]) => ({ name: 't_' + k, label: `${l} (HT)`, type: 'money' })),
+  ], { date: today() });
+  if (!v) return;
+  let n = 0;
+  for (const [k, l] of Object.entries(TYPES)) {
+    const ht = r2(num(v['t_' + k])); if (!ht) continue;
+    await persist('expense', { project_id: p.id, data: { date: v.date, category: k, source: 'reprise', status: 'validee', external: true, desc: `Reprise ancien logiciel – ${l}`, ref: `Reprise ${fmtDate(v.date)}`,
+      amount: ht, vat: 0, vatAmount: 0, ttc: ht, vatLines: [{ rate: 0, amount: 0 }], paid: true, paidDate: v.date, payments: [{ date: v.date, amount: ht, method: 'Reprise' }], toCheck: false } }, { silent: true });
+    n++;
+  }
+  toast(n ? `${n} total(s) repris dans le suivi du chantier` : 'Aucun montant', 3500); if (n) render();
+}
 async function tabPExpenses(p, el, contacts) {
   const [all, projects] = await Promise.all([db.list('expense'), db.list('project')]);
   const rows = all.filter((e) => expenseFor(e, p.id).length);
-  el.innerHTML = `<div class="toolbar"><span class="grow"></span><button class="btn" data-act="imp">${I.upload} Importer une facture</button><button class="btn primary" data-act="ne">${I.plus} Saisie manuelle</button></div><div id="tbl"></div>`;
+  el.innerHTML = `<div class="toolbar"><span class="grow"></span><button class="btn" data-act="old">Reprendre les dépenses déjà faites…</button><button class="btn" data-act="imp">${I.upload} Importer une facture</button><button class="btn primary" data-act="ne">${I.plus} Saisie manuelle</button></div><div id="tbl"></div>`;
   $('[data-act=imp]', el).onclick = () => importPurchase(p.id);
+  $('[data-act=old]', el).onclick = () => oldExpenses(p);
   expensesTable($('#tbl', el), rows, contacts, projects, false, p.id);
   $('[data-act=ne]', el).onclick = () => editExpense(null, { project_id: p.id });
 }
