@@ -721,16 +721,27 @@ route('diarypdf', async (pid, from, to) => {
 
 // ---------------------------------------------------------------- Documents
 async function tabDocuments(p, el) {
-  const docs = await db.list('document', { project: p.id });
-  const folders = [...new Set(['Plans', 'Administratif', 'Photos', 'Contrats', 'Fiches techniques', ...docs.map((x) => x.data.folder).filter(Boolean)])];
+  const [own, plans] = await Promise.all([db.list('document', { project: p.id }), db.list('plan', { project: p.id })]);
+  // plans de l'onglet « Plans » repris ici (dossier Plans), en lecture : on les gère dans l'onglet Plans
+  const docs = [...own, ...plans.filter((x) => x.data.fileId).map((x) => ({ id: -x.id, plan: x, created_by: x.created_by, data: { name: x.data.name || 'Plan', fileId: x.data.fileId, thumbId: x.data.thumbId, folder: 'Plans', size: 0, mime: '' } }))];
+  const custom = p.data.docFolders || [];
+  const folders = [...new Set(['Plans', 'Administratif', 'Photos', 'Contrats', 'Fiches techniques', ...custom, ...docs.map((x) => x.data.folder).filter(Boolean)])];
   const cur = ui['docf_' + p.id] || '';
   const list = docs.filter((x) => !cur || x.data.folder === cur).sort((a, b) => b.id - a.id);
-  el.innerHTML = `<div class="toolbar"><div class="chips"><button class="chip ${!cur ? 'on' : ''}" data-f="">Tous (${docs.length})</button>${folders.map((f) => `<button class="chip ${cur === f ? 'on' : ''}" data-f="${esc(f)}">${esc(f)} (${docs.filter((x) => x.data.folder === f).length})</button>`).join('')}</div><span class="grow"></span><button class="btn primary" data-act="up">${I.plus} Ajouter des fichiers</button></div>
+  el.innerHTML = `<div class="toolbar"><div class="chips"><button class="chip ${!cur ? 'on' : ''}" data-f="">Tous (${docs.length})</button>${folders.map((f) => `<button class="chip ${cur === f ? 'on' : ''}" data-f="${esc(f)}">${esc(f)} (${docs.filter((x) => x.data.folder === f).length})</button>`).join('')}<button class="chip" data-newf>${I.plus} Catégorie</button>${cur && custom.includes(cur) && !docs.some((x) => x.data.folder === cur) ? '<button class="chip" data-delf>Supprimer cette catégorie</button>' : ''}</div><span class="grow"></span><button class="btn primary" data-act="up">${I.plus} Ajouter des fichiers</button></div>
     <div class="drop" data-drop>Glissez des fichiers ici</div>
-    ${list.length ? `<div class="docs">${list.map((x) => `<div class="doc-card"><a href="${fileUrl(x.data.fileId)}" target="_blank">${/^image\//.test(x.data.mime) ? `<img src="${fileUrl(x.data.fileId)}" alt="" loading="lazy">` : `<span class="doc-ic">${I.file}<b>${esc((x.data.name.split('.').pop() || '').toUpperCase())}</b></span>`}</a>
-      <div class="dc-meta"><b title="${esc(x.data.name)}">${esc(x.data.name)}</b><small class="muted">${esc(x.data.folder || '')} · ${fnum((x.data.size || 0) / 1048576, 1)} Mo · ${esc(userName(x.created_by))}</small></div>
+    ${list.length ? `<div class="docs">${list.map((x) => `<div class="doc-card"><a href="${fileUrl(x.data.fileId)}" target="_blank">${x.plan && x.data.thumbId ? `<img src="${fileUrl(x.data.thumbId)}" alt="" loading="lazy">` : /^image\//.test(x.data.mime) ? `<img src="${fileUrl(x.data.fileId)}" alt="" loading="lazy">` : `<span class="doc-ic">${I.file}<b>${esc((x.data.name.split('.').pop() || '').toUpperCase())}</b></span>`}</a>
+      <div class="dc-meta"><b title="${esc(x.data.name)}">${esc(x.data.name)}</b><small class="muted">${x.plan ? `Plan${x.plan.data.version > 1 ? ` · version ${x.plan.data.version}` : ''} · onglet Plans` : `${esc(x.data.folder || '')} · ${fnum((x.data.size || 0) / 1048576, 1)} Mo`} · ${esc(userName(x.created_by))}</small></div>
       <button class="icon-btn sm" data-doc="${x.id}">${I.more}</button></div>`).join('')}</div>` : empty('Aucun document', 'Ajoutez contrats, permis, fiches techniques, photos…')}`;
   $$('[data-f]', el).forEach((b) => { b.onclick = () => { ui['docf_' + p.id] = b.dataset.f; saveUi(); render(); }; });
+  // catégories personnelles du chantier (gardées même vides)
+  $('[data-newf]', el).onclick = async () => {
+    const v = await ask('Nouvelle catégorie', [{ name: 'name', label: 'Nom de la catégorie', required: true, placeholder: 'ex. Permis, Factures fournisseurs, Sécurité' }]);
+    const n = v && v.name.trim(); if (!n) return;
+    if (!folders.includes(n)) { p.data.docFolders = [...custom, n]; await persist('project', p); }
+    ui['docf_' + p.id] = n; saveUi(); render();
+  };
+  const df = $('[data-delf]', el); if (df) df.onclick = async () => { p.data.docFolders = custom.filter((f) => f !== cur); await persist('project', p); ui['docf_' + p.id] = ''; saveUi(); render(); };
   const doUpload = async (files) => {
     if (!files.length) return;
     const v = await ask('Classer dans', [{ name: 'folder', label: 'Dossier', list: 'folders', required: true }], { folder: cur || 'Administratif' });
@@ -749,6 +760,13 @@ async function tabDocuments(p, el) {
   el.ondrop = (e) => { e.preventDefault(); drop.classList.remove('on'); doUpload([...e.dataTransfer.files]); };
   $$('[data-doc]', el).forEach((b) => {
     const x = docs.find((y) => y.id === +b.dataset.doc);
+    if (x.plan) {
+      b.onclick = () => menuSheet(x.data.name, [
+        { label: 'Ouvrir dans Plans (points, annotations)', primary: true, run: () => go(`#/project/${p.id}/plan/${x.plan.id}`) },
+        { label: 'Télécharger', run: () => { location.href = fileUrl(x.data.fileId, true); } },
+      ]);
+      return;
+    }
     b.onclick = () => menuSheet(x.data.name, [
       { label: 'Télécharger', run: () => { location.href = fileUrl(x.data.fileId, true); } },
       { label: 'Renommer / déplacer', run: () => formModal({ title: 'Document', values: x.data, fields: [{ name: 'name', label: 'Nom', required: true }, { name: 'folder', label: 'Dossier', list: 'folders' }], async onSave(v) { Object.assign(x.data, v); await persist('document', x); render(); } }) },
