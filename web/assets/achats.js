@@ -253,7 +253,18 @@ async function peppolSync({ force = false, quiet = true } = {}) {
   if (!peppolApOn()) return null;
   const last = S.settings.peppol_sync && S.settings.peppol_sync.at;
   if (!force && last && Date.now() - new Date(last.replace(' ', 'T')).getTime() < 10 * 60 * 1000) return null;
-  if (!peppolSyncP) peppolSyncP = api('POST', 'peppol/sync').then((r) => {
+  // relève par tranches courtes : on rappelle le serveur tant qu'il reste des messages
+  const run = async () => {
+    const all = { created: [], errors: [] };
+    for (let i = 0; i < 30; i++) {
+      const r = await api('POST', 'peppol/sync');
+      all.created.push(...(r.created || [])); all.errors.push(...(r.errors || [])); all.busy = r.busy;
+      if (r.created && r.created.length && i === 0 && !quiet) toast(`Relève Peppol en cours… ${r.created.length} facture(s)`, 3000);
+      if (!r.more) break;
+    }
+    return all;
+  };
+  if (!peppolSyncP) peppolSyncP = run().then((r) => {
     S.settings.peppol_sync = { at: new Date().toISOString().slice(0, 19).replace('T', ' '), created: r.created.length };
     if (r.created.length) toast(`${r.created.length} facture(s) reçue(s) via Peppol ajoutée(s) aux achats`, 4000);
     else if (!quiet) toast(r.busy ? 'Relève déjà en cours' : 'Aucune nouvelle facture Peppol', 2500);

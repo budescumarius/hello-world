@@ -172,12 +172,15 @@ function pap_import(string $msgId, string $xml, ?int $uid): array {
 function pap_sync(?int $uid): array {
     pap_cfg();
     if ((int)q('SELECT GET_LOCK(?, 0)', ['batipro_peppol_' . cid()])->fetchColumn() !== 1) return ['created' => [], 'busy' => true];
-    $created = []; $errors = [];
+    $created = []; $errors = []; $more = false; $t0 = microtime(true);
+    @set_time_limit(120);
     try {
-        for ($page = 1; $page <= 5; $page++) {
+        // par tranches d'environ 20 s : l'hébergement coupe les requêtes trop longues (le navigateur rappelle tant qu'il en reste)
+        for ($page = 1; $page <= 5 && !$more; $page++) {
             $list = pap_req('GET', 'message/list?folder=INBOX&confirmed=false&perPage=100&page=' . $page);
             $items = $list['items'] ?? [];
             foreach ($items as $m) {
+                if (microtime(true) - $t0 > 20) { $more = true; break; }
                 $id = (string)($m['id'] ?? '');
                 if ($id === '' || !preg_match('/^[A-Za-z0-9_\-]{1,80}$/', $id)) continue;
                 try {
@@ -192,11 +195,11 @@ function pap_sync(?int $uid): array {
                 } catch (Throwable $e) { $errors[] = "$id : " . $e->getMessage(); }
             }
             $pages = (int)($list['meta']['pages'] ?? 1);
-            if ($page >= $pages || !$items) break;
+            if ($more || $page >= $pages || !$items) break;
         }
     } finally {
         set_setting('peppol_sync', ['at' => now(), 'created' => count($created), 'errors' => array_slice($errors, 0, 5)]);
         q('SELECT RELEASE_LOCK(?)', ['batipro_peppol_' . cid()]);
     }
-    return ['created' => $created, 'errors' => $errors];
+    return ['created' => $created, 'errors' => $errors, 'more' => $more];
 }
