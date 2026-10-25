@@ -14,6 +14,9 @@ set_exception_handler(function (Throwable $e) {
 $method = $_SERVER['REQUEST_METHOD'];
 $path = trim((string)($_GET['r'] ?? ''), '/');
 $seg = $path === '' ? [] : explode('/', $path);
+// Seules ces routes modifient la session (connexion, changement de firme) ; ailleurs la session est relâchée dès
+// l'utilisateur lu, pour qu'une requête longue (relève Peppol, e-mails, sauvegarde) ne bloque pas les autres onglets/requêtes
+if (in_array($seg[0] ?? '', ['auth', 'platform', 'signup'], true)) define('BP_KEEP_SESSION', true);
 
 // Les requêtes qui modifient des données doivent venir de l'application (protection CSRF avec le cookie SameSite)
 // (sauf l'avis de paiement de Mollie : il ne contient qu'un identifiant, relu ensuite chez Mollie)

@@ -120,6 +120,7 @@ function current_user(): ?array {
             // le super-administrateur peut travailler dans une autre firme
             $GLOBALS['BP_CID'] = $u['super'] && !empty($_SESSION['cid']) ? (int)$_SESSION['cid'] : $u['company_id'];
         }
+        if (!defined('BP_KEEP_SESSION') && session_status() === PHP_SESSION_ACTIVE) session_write_close();
     }
     return $u;
 }
