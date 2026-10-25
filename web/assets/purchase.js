@@ -249,7 +249,7 @@ route('purchase', async (id) => {
   const vat = purchVat(d); let ttc = purchTtc(d); let manualVat = vat.length > 1;
   // TVA lue de travers à l'import (ex. le total pris pour la TVA) : recalculée depuis le TTC
   if (vat.length === 1 && ttc && Math.abs(vat[0].amount) >= Math.abs(ttc) * 0.5) vat[0].amount = r2(ttc - ttc / (1 + num(vat[0].rate) / 100));
-  const alloc = Array.isArray(d.alloc) && d.alloc.length ? d.alloc.map((x) => ({ pid: x.pid || '', amount: num(x.amount), category: x.category || d.category }))
+  const alloc = Array.isArray(d.alloc) && d.alloc.length ? d.alloc.map((x) => ({ pid: x.pid || '', amount: num(x.amount), category: x.category || d.category, ...(x.fromItems ? { fromItems: true } : {}) }))
     : e.project_id ? [{ pid: e.project_id, amount: num(d.amount), category: d.category || 'mat' }] : [];
   let fileId = d.fileId; let fileName = d.fileName;
   let guess = !d.supplierId ? d.supplierGuess : null;
@@ -406,12 +406,12 @@ route('purchase', async (id) => {
 
   // --- article par article : chaque ligne de la facture attribuée à un chantier ; les liaisons se calculent toutes seules
   let items = Array.isArray(d.items) ? d.items.map((x) => ({ desc: x.desc || '', amount: num(x.amount), pid: x.pid || '', ...(x.grp ? { grp: x.grp } : {}) })) : [];
-  const picked = new Set();
+  const picked = new Set(); let doneOpen = false;
   const syncAlloc = () => {
-    if (!items.some((x) => x.pid)) return;
+    if (!items.some((x) => x.pid)) { if (alloc.length && alloc.every((a) => a.fromItems)) { alloc.length = 0; d.items = items; drawAlloc(); } return; }
     const cat = Object.fromEntries(alloc.map((a) => [a.pid, a.category]));
     const by = {}; items.forEach((x) => { if (x.pid) by[x.pid] = r2((by[x.pid] || 0) + x.amount); });
-    alloc.length = 0; Object.entries(by).forEach(([pid, amount]) => alloc.push({ pid: +pid, amount, category: cat[pid] || F('category').value }));
+    alloc.length = 0; Object.entries(by).forEach(([pid, amount]) => alloc.push({ pid: +pid, amount, category: cat[pid] || F('category').value, fromItems: true }));
     d.items = items; drawAlloc();
   };
   const pName = (pid) => { const pp = byId(projects, pid); return pp ? `${pp.number} · ${pp.data.name}` : '?'; };
@@ -432,39 +432,49 @@ route('purchase', async (id) => {
       return;
     }
     // groupe : articles consécutifs d'un même bon de livraison / référence (qui a pris, pour quel chantier)
-    const grpIdx = (i0) => { const ids = []; for (let i = i0; i < items.length && items[i].grp === items[i0].grp; i++) ids.push(i); return ids; };
-    const grpHead = (g, i0) => {
-      const ids = grpIdx(i0); const pids = [...new Set(ids.map((i) => items[i].pid))];
-      return `<div class="pi-grp ${ids.every((i) => picked.has(i)) ? 'on' : ''}" data-grp="${i0}"><input type="checkbox" ${ids.every((i) => picked.has(i)) ? 'checked' : ''} aria-label="Sélectionner le groupe"><span class="pi-it-d">${esc(g)} <small>${ids.length} article(s)</small></span>
-        <b class="r">${money(r2(ids.reduce((a, i) => a + items[i].amount, 0)))}</b><select>${pids.length > 1 ? '<option value="">— plusieurs chantiers —</option>' : ''}${pOpts(pids.length > 1 ? '' : pids[0])}</select></div>`;
+    // à attribuer : groupes = articles non attribués consécutifs d'un même bon de livraison / référence (qui a pris, pour quel chantier)
+    const todo = items.map((x, i) => i).filter((i) => !items[i].pid);
+    const gmap = {}; let gk = null;
+    todo.forEach((i, k) => { if (items[i].grp && (k === 0 || items[todo[k - 1]].grp !== items[i].grp)) { gk = i; gmap[gk] = []; } if (items[i].grp) gmap[gk].push(i); });
+    const grpHead = (i0) => {
+      const ids = gmap[i0]; const all = ids.every((i) => picked.has(i));
+      return `<div class="pi-grp ${all ? 'on' : ''}" data-grp="${i0}"><input type="checkbox" ${all ? 'checked' : ''} aria-label="Sélectionner le groupe"><span class="pi-it-d">${esc(items[i0].grp)} <small>${ids.length} article(s)</small></span>
+        <b class="r">${money(r2(ids.reduce((a, i) => a + items[i].amount, 0)))}</b><select>${pOpts('')}</select></div>`;
     };
+    // attribués : liste à part, par chantier (on peut encore changer ou retirer)
+    const byP = {}; items.forEach((x, i) => { if (x.pid) (byP[x.pid] = byP[x.pid] || []).push(i); });
+    const doneN = items.length - todo.length;
     const tot = r2(items.reduce((a, x) => a + x.amount, 0)); const per = {}; let none = 0;
     items.forEach((x) => { if (x.pid) per[x.pid] = r2((per[x.pid] || 0) + x.amount); else none = r2(none + x.amount); });
     const gap = r2(ht() - tot);
     const oldList = $('.pi-it-list', box); const keepTop = oldList ? oldList.scrollTop : 0; const keepY = window.scrollY; // on reste où l'on était après une coche
-    box.innerHTML = `<div class="pi-it-bar"><b>Articles de la facture</b><span class="muted">${items.length} article(s) · cochez des articles (ou touchez-les), puis</span>
+    box.innerHTML = `<div class="pi-it-bar"><b>Articles à attribuer</b><span class="muted">${todo.length} / ${items.length} article(s) · cochez des articles (ou touchez-les), puis</span>
         <select data-bulkpid>${pOpts('')}</select><button type="button" class="btn sm primary" data-bulk>Attribuer la sélection</button><span class="grow"></span>
-        ${fileId && isPdfFile() && !items.some((x) => x.grp) ? '<button type="button" class="link-btn" data-reread title="Relit le PDF pour grouper les articles par bon de livraison / référence">Grouper par référence</button>' : ''}<button type="button" class="link-btn" data-all>${picked.size === items.length ? 'Tout désélectionner' : 'Tout sélectionner'}</button><button type="button" class="link-btn" data-rest>Non attribués → sélection</button></div>
-      <div class="pi-it-list">${items.map((x, i) => `${x.grp && (i === 0 || items[i - 1].grp !== x.grp) ? grpHead(x.grp, i) : ''}<div class="pi-it ${picked.has(i) ? 'on' : ''} ${x.pid ? 'done' : ''}" data-it="${i}">
-        <input type="checkbox" ${picked.has(i) ? 'checked' : ''} aria-label="Sélectionner"><span class="pi-it-d">${esc(x.desc)}</span><b class="r">${money(x.amount)}</b>
-        <select data-pid="${i}">${pOpts(x.pid)}</select></div>`).join('')}</div>
+        ${fileId && isPdfFile() && !items.some((x) => x.grp) ? '<button type="button" class="link-btn" data-reread title="Relit le PDF pour grouper les articles par bon de livraison / référence">Grouper par référence</button>' : ''}${todo.length ? `<button type="button" class="link-btn" data-all>${todo.length && todo.every((i) => picked.has(i)) ? 'Tout désélectionner' : 'Tout sélectionner'}</button>` : ''}</div>
+      ${todo.length ? `<div class="pi-it-list">${todo.map((i) => `${gmap[i] ? grpHead(i) : ''}<div class="pi-it ${picked.has(i) ? 'on' : ''}" data-it="${i}">
+        <input type="checkbox" ${picked.has(i) ? 'checked' : ''} aria-label="Sélectionner"><span class="pi-it-d">${esc(items[i].desc)}</span><b class="r">${money(items[i].amount)}</b>
+        <select data-pid="${i}">${pOpts('')}</select></div>`).join('')}</div>` : '<div class="pi-it-alldone">✓ Tous les articles sont attribués</div>'}
+      ${doneN ? `<details class="pi-done" ${doneOpen ? 'open' : ''}><summary>Articles attribués <small>${doneN} article(s)</small></summary>${Object.entries(byP).map(([pid, ids]) => `<div class="pi-done-p"><b>${esc(pName(pid))}</b><b class="r">${money(r2(ids.reduce((a, i) => a + items[i].amount, 0)))}</b></div>
+        ${ids.map((i) => `<div class="pi-it pi-it-done" data-it="${i}"><span></span><span class="pi-it-d">${esc(items[i].desc)}${items[i].grp ? `<small>${esc(items[i].grp)}</small>` : ''}</span><b class="r">${money(items[i].amount)}</b>
+        <select data-pid="${i}"><option value="">↩ Retirer (à attribuer)</option>${pOpts(items[i].pid).replace(/^<option value="">[^<]*<\/option>/, '')}</select></div>`).join('')}`).join('')}</details>` : ''}
       <div class="pi-it-sum">${Object.entries(per).map(([pid, v]) => `<div><span>${esc(pName(pid))}</span><b>${money(v)}</b></div>`).join('')}
         <div class="${none ? 'warn' : 'ok'}"><span>Reste à attribuer</span><b>${money(none)}</b></div>
         ${Math.abs(gap) >= 0.01 ? `<div class="muted"><span>Écart entre les articles et le HT (frais, remises, articles non lus)</span><b>${money(gap)}</b></div>` : ''}</div>`;
-    $('.pi-it-list', box).scrollTop = keepTop; if (window.scrollY !== keepY) window.scrollTo(0, keepY);
+    if ($('.pi-it-list', box)) $('.pi-it-list', box).scrollTop = keepTop;
+    const det = $('.pi-done', box); if (det) det.ontoggle = () => { doneOpen = det.open; }; if (window.scrollY !== keepY) window.scrollTo(0, keepY);
     $$('[data-grp]', box).forEach((row) => {
-      const ids = grpIdx(+row.dataset.grp);
+      const ids = gmap[+row.dataset.grp];
       row.onclick = (ev) => { if (ev.target.tagName === 'SELECT' || ev.target.tagName === 'OPTION') return; const all = ids.every((i) => picked.has(i)); ids.forEach((i) => (all ? picked.delete(i) : picked.add(i))); drawItems(); };
-      $('select', row).onchange = (ev) => { ids.forEach((i) => { items[i].pid = ev.target.value ? +ev.target.value : ''; }); syncAlloc(); drawItems(); };
+      $('select', row).onchange = (ev) => { if (!ev.target.value) return; ids.forEach((i) => { items[i].pid = +ev.target.value; picked.delete(i); }); syncAlloc(); drawItems(); };
     });
     const rr = $('[data-reread]', box); if (rr) rr.onclick = () => readItems(rr);
     $$('[data-it]', box).forEach((row) => {
       const i = +row.dataset.it;
+      if (items[i].pid) { $('select', row).onchange = (ev) => { items[i].pid = ev.target.value ? +ev.target.value : ''; syncAlloc(); drawItems(); }; return; }
       row.onclick = (ev) => { if (ev.target.tagName === 'SELECT' || ev.target.tagName === 'OPTION') return; if (picked.has(i)) picked.delete(i); else picked.add(i); drawItems(); };
       $('select', row).onchange = (ev) => { items[i].pid = ev.target.value ? +ev.target.value : ''; syncAlloc(); drawItems(); };
     });
-    $('[data-all]', box).onclick = () => { if (picked.size === items.length) picked.clear(); else items.forEach((x, i) => picked.add(i)); drawItems(); };
-    $('[data-rest]', box).onclick = () => { picked.clear(); items.forEach((x, i) => { if (!x.pid) picked.add(i); }); drawItems(); };
+    const ab = $('[data-all]', box); if (ab) ab.onclick = () => { if (todo.every((i) => picked.has(i))) picked.clear(); else todo.forEach((i) => picked.add(i)); drawItems(); };
     $('[data-bulk]', box).onclick = () => {
       const pid = $('[data-bulkpid]', box).value; if (!pid) return toast('Choisissez le chantier', 2500); if (!picked.size) return toast('Cochez au moins un article', 2500);
       picked.forEach((i) => { items[i].pid = +pid; }); picked.clear(); syncAlloc(); drawItems();
@@ -535,7 +545,7 @@ route('purchase', async (id) => {
     if (mode === 'paid' && purchRest(e.data) > 0.009) { const r = purchRest(e.data); (e.data.payments = e.data.payments || []).push({ date: today(), amount: r, method: 'Virement' }); purchLog(e.data, `Paiement de ${money(r)} le ${fmtDate(today())}`); purchSyncPaid(e.data); }
     ['readNote', 'supplierGuess', 'project_id'].forEach((k) => delete e.data[k]);
     if (rows.length === 1 && Math.abs(num(rows[0].amount) - ht()) < 0.01) { e.project_id = +rows[0].pid; e.data.category = rows[0].category || e.data.category; delete e.data.alloc; }
-    else if (rows.length) { e.project_id = null; e.data.alloc = rows.map((a) => ({ pid: +a.pid, amount: r2(num(a.amount)), category: a.category || e.data.category })); }
+    else if (rows.length) { e.project_id = null; e.data.alloc = rows.map((a) => ({ pid: +a.pid, amount: r2(num(a.amount)), category: a.category || e.data.category, ...(a.fromItems ? { fromItems: true } : {}) })); }
     else { e.project_id = null; delete e.data.alloc; }
     await persist('expense', e);
     toast(mode === 'draft' ? 'Enregistrée (à valider)' : mode === 'paid' ? 'Facture soumise et marquée payée' : 'Facture soumise', 2500);

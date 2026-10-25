@@ -1794,6 +1794,11 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .pi-grp small { font-weight: 400; color: var(--muted); margin-left: 6px; } .pi-grp.on { background: #ffe9c2; }
 .pi-grp select { padding: 5px 6px; border-radius: 8px; border: 1px solid var(--border); background: #fff; font-size: 13px; }
 .pi-it select { padding: 5px 6px; border-radius: 8px; border: 1px solid var(--border); background: #fff; font-size: 13px; }
+.pi-it-alldone { padding: 14px; border: 1px dashed var(--border); border-radius: 12px; color: #1f7a3c; font-weight: 600; text-align: center; }
+.pi-done { margin-top: 10px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.pi-done > summary { padding: 10px 12px; cursor: pointer; font-weight: 600; background: #e9f7ee; color: #1f7a3c; } .pi-done > summary small { font-weight: 400; margin-left: 6px; }
+.pi-done-p { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; background: #f6f4ee; border-top: 1px solid var(--border); }
+.pi-it-done { cursor: default; } .pi-it-done .pi-it-d small { display: block; color: var(--muted); font-size: 12px; }
 .pi-it-sum { margin-top: 10px; display: grid; gap: 4px; }
 .pi-it-sum > div { display: flex; justify-content: space-between; gap: 12px; padding: 6px 12px; border-radius: 8px; background: #f6f4ee; }
 .pi-it-sum > div.warn { background: #fff4e6; color: #8a4b08; } .pi-it-sum > div.ok { background: #e9f7ee; color: #1f7a3c; }
