@@ -12,7 +12,7 @@ async function editProject(p, preset = {}) {
   const contacts = await db.list('contact');
   formModal({
     title: p ? `Chantier ${p.number}` : 'Nouveau chantier', wide: true,
-    values: p ? p.data : { status: 'preparation', managerId: S.me.id, start: today(), color: '#3b5bdb', ...preset },
+    values: p ? { ...p.data, declNo: (p.data.decl30bis || {}).no || '', checkinNo: (p.data.checkin || {}).no || '' } : { status: 'preparation', managerId: S.me.id, start: today(), color: '#3b5bdb', ...preset },
     fields: [
       { name: 'name', label: 'Nom du chantier', required: true, cls: 'full' },
       { name: 'clientId', label: 'Client', type: 'contact', contacts, kinds: ['client', 'prospect', 'architecte', 'autre'] },
@@ -24,12 +24,20 @@ async function editProject(p, preset = {}) {
       { name: 'architectId', label: 'Architecte / BE', type: 'contact', contacts, kinds: ['architecte', 'autre'], allowNew: false },
       { name: 'color', label: 'Couleur (planning)', type: 'color' },
       { name: 'budget', label: 'Budget HT (si pas de devis)', type: 'money' }, { name: 'access', label: 'Accès / codes / clés' },
+      // obligations sociales (aussi dans la carte « Obligations sociales » de la vue d'ensemble)
+      { name: 'declNo', label: 'N° de déclaration de travaux (30bis)', placeholder: 'ex. 1234567890' }, { name: 'checkinNo', label: 'N° Checkin@Work (si chantier avec Checkin)', placeholder: 'ex. CHK-…' },
       { name: 'notes', label: 'Notes', type: 'textarea', cls: 'full' },
     ],
     async onSave(v) {
       await resolveContact(v, 'clientId', 'client');
       const it = p || { data: {} };
-      it.data = { ...it.data, ...v };
+      const { declNo, checkinNo, ...rest } = v;
+      it.data = { ...it.data, ...rest };
+      for (const [k, no] of [['decl30bis', declNo], ['checkin', checkinNo]]) {
+        const cur = it.data[k] || null; const n = String(no || '').trim();
+        if (n) it.data[k] = { ...(cur || {}), no: n, date: (cur && cur.date) || today() };
+        else if (cur && cur.no) it.data[k] = { ...cur, no: '' };
+      }
       const r = await persist('project', it);
       if (!p) go(`#/project/${r.id}`); else render();
     },
@@ -161,6 +169,7 @@ route('projectsummary', async (pid, mode) => {
     <div class="d-sec"><h2>Informations</h2><table class="d-lines"><tbody>
       ${kv('N° chantier', esc(p.number || ''))}${kv('Client', esc(c ? contactName(c) : ''))}${kv('Adresse', esc([d.address, [d.zip, d.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')))}
       ${kv('Statut', esc((PST[d.status] || [d.status])[0] || ''))}${kv('Période', [d.start && `du ${fmtDate(d.start)}`, d.end && `au ${fmtDate(d.end)}`].filter(Boolean).join(' '))}
+      ${kv('Déclaration de travaux (30bis)', esc((d.decl30bis || {}).no || ''))}${kv('Checkin@Work', esc((d.checkin || {}).no || ''))}
       ${kv('Conducteur', esc(userName(+d.managerId)))}${kv('Équipe', esc((d.team || []).map((u) => userName(+u)).join(', ')))}${kv('Sous-traitants', esc(subs.join(', ')))}</tbody></table></div>
     <div class="d-sec"><h2>${forClient ? 'Montants' : 'Finances'}</h2><table class="d-lines"><tbody>
       ${kv('Montant des travaux HT (devis acceptés)', money(f.budget))}
