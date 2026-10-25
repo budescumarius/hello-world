@@ -48,7 +48,7 @@ function sendMailDialog({ subject, body, recipients = [], ref = {}, projectId, p
       if (ref.type) fd.append('ref_type', ref.type);
       if (ref.id) fd.append('ref_id', ref.id);
       if (projectId) fd.append('project_id', projectId);
-      if (pdfName && form.pdf.checked) fd.append('att', new File([await makePdf()], pdfName, { type: 'application/pdf' }));
+      if (pdfName && form.pdf.checked) fd.append('att', new File([await makePdf(undefined, { light: true })], pdfName, { type: 'application/pdf' }));
       const r = await api('POST', 'mail', fd);
       // adresse saisie pour un contact sans email : enregistrée sur sa fiche
       for (const x of to) if (x.typed && x.r.contact) { x.r.contact.data.email = x.email; persist('contact', x.r.contact).catch(() => {}); }

@@ -364,7 +364,8 @@ async function makePdf(src, opt = {}) {
       cuts.sort((a, b) => a - b);
     };
     docEl.setAttribute('data-pdf-root', '1');
-    const scale = opt.light ? 1.35 : Math.min(2, window.devicePixelRatio > 1 ? 2 : 1.6);
+    // léger (e-mail, export comptable) : environ deux fois plus petit, toujours bien lisible
+    const scale = opt.scale || (opt.light ? 1.3 : 1.6);
     // html2canvas ne connaît pas les couleurs « color(srgb …) » produites par color-mix() : conversion en rgba
     const toRgb = (v) => v.replace(/color\(srgb ([\d.e-]+) ([\d.e-]+) ([\d.e-]+)(?: \/ ([\d.e-]+))?\)/g, (m0, r, g, bl, a) => `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(bl * 255)}, ${a ?? 1})`);
     const onclone = (cdoc) => {
@@ -401,7 +402,7 @@ async function makePdf(src, opt = {}) {
       const ctx = part.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, part.width, part.height); ctx.drawImage(canvas, 0, -a);
       if (i) pdf.addPage();
       const top = brand ? m + 4 : m;
-      pdf.addImage(part.toDataURL('image/jpeg', opt.light ? 0.78 : 0.9), 'JPEG', m, top, pw, (b - a) * pw / canvas.width);
+      pdf.addImage(part.toDataURL('image/jpeg', opt.q || (opt.light ? 0.7 : 0.8)), 'JPEG', m, top, pw, (b - a) * pw / canvas.width);
       if (brand) {
         // règle de chantier : bande, graduations tous les 2 mm (1 cm plus longues), segment d'accent
         pdf.setFillColor(brand.ink); pdf.rect(0, 0, 210, 3.2, 'F');
@@ -448,7 +449,8 @@ function downloadBlob(blob, name) {
 }
 const csvBytes = (rows) => new TextEncoder().encode('\ufeff' + rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'));
 async function sharePdf(title) {
-  const blob = await makePdf();
+  // partagé par e-mail / WhatsApp : version légère (environ deux fois plus petite)
+  const blob = await makePdf(undefined, { light: true });
   const name = fileTitle(title) + '.pdf';
   const file = new File([blob], name, { type: 'application/pdf' });
   const canShare = navigator.canShare && navigator.canShare({ files: [file] });
