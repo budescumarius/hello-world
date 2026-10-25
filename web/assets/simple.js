@@ -664,7 +664,7 @@ async function docSimple(kind, id) {
     if (a === 'peppol') return peppolApOn() ? peppolInvoice(it) : go('#/s/peppol');
     if (a === 'share') { if (typ === 'quote' && d.status === 'brouillon') { d.status = 'envoye'; d.sentAt = today(); await persist('quote', it, { silent: true }); } return sharePdfOf(typ, it.id, sVar(typ, d)); }
     if (a === 'no') { d.status = 'refuse'; await persist('quote', it, { silent: true }); return render(); }
-    if (a === 'yes') { d.status = 'accepte'; d.acceptedAt = today(); await persist('quote', it, { silent: true }); }
+    if (a === 'yes') { d.status = 'accepte'; d.acceptedAt = today(); await persist('quote', it, { silent: true }); quoteToLibrary(it, { auto: true }).catch(() => {}); }
     if (a === 'yes' || a === 'bill') return billQuote(it);
   }; });
 }

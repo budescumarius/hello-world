@@ -1830,3 +1830,8 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .l-sugg { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 12px; color: var(--muted); }
 .l-sugg .sg-b { border: 1px solid #f0c36d; background: #fff8e6; color: #7a5200; border-radius: 999px; padding: 2px 9px; font: inherit; font-weight: 700; cursor: pointer; }
 .l-sugg .sg-b.lib { border-color: #b7c4f5; background: #eef2ff; color: #2b3f9e; } .l-sugg .ok { color: #2f9e44; }
+
+.sg-list { flex-basis: 100%; display: grid; gap: 3px; margin-bottom: 4px; padding: 6px; border: 1px solid #f0c36d; border-radius: 10px; background: #fffdf6; }
+.sg-list > small { color: var(--muted); }
+.sg-d { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; text-align: left; border: 0; background: transparent; padding: 5px 6px; border-radius: 7px; font: inherit; color: var(--ink, #1c2550); cursor: pointer; }
+.sg-d:hover { background: #fff1cc; } .sg-d span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; } .sg-d em { font-style: normal; font-weight: 700; } .sg-d small { color: var(--muted); }

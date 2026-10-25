@@ -107,7 +107,7 @@ function priceTrend(a) {
 route('library', async () => {
   const [all, contacts] = await Promise.all([db.list('article'), db.list('contact')]);
   const page = layout({ active: 'library', icon: 'book', title: 'Bibliothèque',
-    actions: `<button class="btn" data-act="learn" title="Lit les factures d'achat déjà validées et enregistre leurs prix">Prix depuis mes achats</button><button class="btn" data-act="imp">Importer Excel / CSV</button><button class="btn" data-act="exp">Exporter CSV</button><button class="btn" data-act="bulk">Indexer les prix</button><button class="btn primary" data-act="new">${I.plus} Nouvel article</button>` });
+    actions: `<button class="btn" data-act="learn" title="Prix d'achat des factures fournisseurs validées et prix de vente des devis acceptés">Remplir depuis achats et devis</button><button class="btn" data-act="imp">Importer Excel / CSV</button><button class="btn" data-act="exp">Exporter CSV</button><button class="btn" data-act="bulk">Indexer les prix</button><button class="btn primary" data-act="new">${I.plus} Nouvel article</button>` });
   dataTable(page, {
     rows: all, state: ui.tbl_lib || (ui.tbl_lib = {}),
     search: (a) => [a.data.code, a.data.name, a.data.category].join(' '),
@@ -128,10 +128,12 @@ route('library', async () => {
   $('[data-act=new]').onclick = () => editArticle();
   $('[data-act=learn]').onclick = async (ev) => {
     const exps = (await db.list('expense')).filter((x) => x.data.status === 'validee' && ((x.data.items || []).length || x.data.fileId));
-    if (!exps.length) return toast('Aucune facture d\'achat validée à lire', 3000);
-    if (!confirm(`Lire les ${exps.length} facture(s) d'achat validée(s) et enregistrer leurs prix dans la bibliothèque ?\n\nLes nouvelles factures validées sont ajoutées automatiquement.`)) return;
-    ev.target.disabled = true; let n = 0; let c = 0; let u = 0;
-    for (const x of exps) { ev.target.textContent = `Lecture… ${++n}/${exps.length}`; const r = await learnPrices(x, { quiet: true }).catch(() => ({})); c += r.created || 0; u += r.updated || 0; }
+    const qs = (await db.list('quote')).filter((x) => x.data.status === 'accepte').sort((a, b) => ((a.data.date || '') < (b.data.date || '') ? -1 : 1));
+    if (!exps.length && !qs.length) return toast('Aucune facture d\'achat validée ni devis accepté à lire', 3000);
+    if (!confirm(`Remplir la bibliothèque avec :\n• les prix d'achat de ${exps.length} facture(s) fournisseur validée(s)\n• les prix de vente de ${qs.length} devis accepté(s)\n\nLes prochaines factures validées et devis acceptés sont ajoutés automatiquement.`)) return;
+    ev.target.disabled = true; let n = 0; let c = 0; let u = 0; const tot = exps.length + qs.length;
+    for (const x of exps) { ev.target.textContent = `Lecture… ${++n}/${tot}`; const r = await learnPrices(x, { quiet: true }).catch(() => ({})); c += r.created || 0; u += r.updated || 0; }
+    for (const x of qs) { ev.target.textContent = `Lecture… ${++n}/${tot}`; const r = await quoteToLibrary(x, { auto: true, quiet: true }).catch(() => ({})); c += r.c || 0; u += r.u || 0; }
     toast(c || u ? `Bibliothèque : ${c} nouvel(s) article(s), ${u} prix mis à jour` : 'Aucun nouveau prix : déjà lus, ou factures scannées / sans quantité et prix unitaire par article', 7000); render();
   };
   $('[data-act=exp]').onclick = () => downloadCSV('bibliotheque.csv', [['Code', 'Designation', 'Type', 'Categorie', 'Unite', 'Debourse', 'Marge', 'Prix', 'TVA', 'Description'],
@@ -351,6 +353,7 @@ route('quote', async (id) => {
       if (d.status === 'accepte') d.acceptedAt = today();
       await persist('quote', q);
       if (d.status === 'accepte') {
+        quoteToLibrary(q, { auto: true }).catch(() => {}); // prix de vente gagnés → bibliothèque
         if (d.opportunityId) { try { const o = await db.get('opportunity', +d.opportunityId); o.data.stage = 'gagne'; o.data.wonAt = today(); await persist('opportunity', o); } catch (e) { /* opportunité supprimée */ } }
         if (!q.project_id && confirm('Devis accepté !\n\nCréer le chantier correspondant maintenant ?')) return createProjectFromQuote(q);
       }
@@ -372,30 +375,36 @@ route('quote', async (id) => {
 });
 
 // Postes d'un devis → articles de la bibliothèque (réutilisables dans les prochains devis) ; un poste déjà présent (même nom et unité) est mis à jour
-async function quoteToLibrary(q) {
+// auto : devis accepté → ses postes (prix de vente) alimentent la bibliothèque sans question
+async function quoteToLibrary(q, { auto = false, quiet = false } = {}) {
   const d = q.data; const disc = num(d.discount) / 100;
   const items = d.lines.filter((l) => l.kind === 'item' && !l.option && !l.deduction && String(l.desc || '').trim() && num(l.price) > 0);
-  if (!items.length) return toast('Aucun poste chiffré dans ce devis', 3000);
-  const v = await ask(`Ajouter ${items.length} poste(s) à la bibliothèque`, [
+  if (!items.length) { if (!auto) toast('Aucun poste chiffré dans ce devis', 3000); return { c: 0, u: 0 }; }
+  const v = auto ? { category: d.title || q.number, update: true } : await ask(`Ajouter ${items.length} poste(s) à la bibliothèque`, [
     { name: 'category', label: 'Catégorie', hint: 'Pour les retrouver (ex. Peinture, Rénovation…)' },
     { name: 'update', label: 'Mettre à jour les postes déjà présents (même désignation et unité)', type: 'check' },
   ], { category: d.title || q.number, update: true });
-  if (!v) return;
+  if (!v) return { c: 0, u: 0 };
   const all = await db.list('article'); let c = 0; let u = 0;
-  toast('Enregistrement…', 20000);
+  if (!quiet) toast('Enregistrement…', 20000);
   for (const l of items) {
-    const [name, ...rest] = String(l.desc).split('\n'); const price = r2(num(l.price) * (1 - disc)); const cost = num(l.cost);
+    const [name, ...rest] = String(l.desc).split('\n'); const price = r2(num(l.price) * (1 - disc));
     const kind = TYPES[l.type] ? l.type : 'divers';
     const same = all.find((a) => normKey(a.data.name) === normKey(name) && (a.data.unit || 'u') === (l.unit || 'u'));
+    // un devis plus ancien ne remplace pas le prix d'un devis plus récent
+    if (same && same.data.quoteDate && d.date && same.data.quoteDate > d.date) continue;
+    // déboursé : celui de la ligne, sinon celui déjà connu (prix d'achat appris des factures) – jamais effacé
+    const cost = num(l.cost) > 0 ? num(l.cost) : same ? num(same.data.cost) : 0;
     // déjà présent : mis à jour si demandé, sauf un ouvrage calculé (composants / heures), qui garde sa composition
     if (same && (!v.update || (same.data.kind === 'ouvrage' && ((same.data.components || []).length || num(same.data.moHours))))) continue;
     const it = same || { data: {} };
     // sans déboursé connu : prix de vente fixe ; sinon déboursé + marge
     it.data = { ...it.data, name: name.trim(), desc: rest.join('\n').trim(), unit: l.unit || 'u', kind: same ? same.data.kind : kind, category: it.data.category || v.category, vat: num(l.vat),
-      ...(cost > 0 ? { cost, margin: r2((price / cost - 1) * 100), price, priceMode: 'margin' } : { cost: 0, margin: 0, price, priceMode: 'fixed' }), fromQuote: q.number };
+      ...(cost > 0 ? { cost, margin: r2((price / cost - 1) * 100), price, priceMode: 'margin' } : { cost: 0, margin: 0, price, priceMode: 'fixed' }), fromQuote: q.number, quoteDate: d.date || today() };
     await persist('article', it, { silent: true }); if (same) u++; else { c++; all.push(it); }
   }
-  toast(`Bibliothèque : ${c} poste(s) ajouté(s)${u ? `, ${u} mis à jour` : ''}`, 5000);
+  if (!quiet) toast(`Bibliothèque : ${c} poste(s) ajouté(s)${u ? `, ${u} mis à jour` : ''}`, 5000);
+  return { c, u };
 }
 
 async function createProjectFromQuote(q) {

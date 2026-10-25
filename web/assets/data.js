@@ -141,19 +141,38 @@ function lineFromArticle(a, all) {
 // ---------------------------------------------------------------- Éditeur de lignes (tableau éditable)
 // doc : objet data (devis, facture, commande) ; opts : { showCost, onChange, readOnly, library, contacts }
 // ---------------------------------------------------------------- Mémoire des prix : lignes des devis précédents + bibliothèque
-const P_STOP = new Set(['les', 'des', 'pour', 'avec', 'sans', 'sur', 'dans', 'par', 'une', 'aux', 'compris', 'fourniture', 'pose', 'y', 'et', 'the', 'van', 'het', 'een', 'voor', 'met', 'type', 'suivant', 'selon']);
-const pWords = (s) => new Set(String(s || '').split('\n')[0].slice(0, 160).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9²³]+/).filter((w) => w.length >= 3 && !P_STOP.has(w)));
+const P_STOP = new Set(['les', 'des', 'pour', 'avec', 'sans', 'sur', 'dans', 'par', 'une', 'aux', 'compris', 'fourniture', 'pose', 'y', 'et', 'the', 'van', 'het', 'een', 'voor', 'met', 'type', 'suivant', 'selon', 'mise', 'realisation', 'execution', 'placement', 'travaux', 'ensemble']);
+const pWords = (s) => new Set(String(s || '').split('\n')[0].slice(0, 160).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9²³]+/).filter((w) => w.length >= 3 && !P_STOP.has(w)).map((w) => (w.length > 3 && /[a-z][sx]$/.test(w) ? w.slice(0, -1) : w)));
 const pUnit = (u) => String(u || '').toLowerCase().replace(/^m2$/, 'm²').replace(/^m3$/, 'm³').replace(/^(pce|pcs|piece|pièce|st)$/, 'pc').trim();
 let pMemo = null; let pMemoAt = 0;
 async function priceMemory() {
   if (pMemo && Date.now() - pMemoAt < 60000) return pMemo;
   const [qs, arts] = await Promise.all([db.list('quote'), db.list('article')]);
   const out = [];
-  for (const q of qs) for (const l of q.data.lines || []) if (l.kind === 'item' && !l.option && num(l.price) > 0 && l.desc) out.push({ id: l.id, w: pWords(l.desc), unit: pUnit(l.unit), price: num(l.price), cost: num(l.cost), date: q.data.date || '', no: q.number || 'brouillon', ok: q.data.status === 'accepte', qid: q.id });
-  for (const a of arts) out.push({ lib: a, w: pWords(a.data.name), unit: pUnit(a.data.unit), price: articlePrice(a, arts), cost: articleCost(a, arts).cost, date: a.data.buy ? a.data.buy.d : '', name: a.data.name });
+  for (const q of qs) for (const l of q.data.lines || []) if (l.kind === 'item' && !l.option && num(l.price) > 0 && l.desc) out.push({ id: l.id, w: pWords(l.desc), unit: pUnit(l.unit), price: num(l.price), cost: num(l.cost), date: q.data.date || '', no: q.number || 'brouillon', ok: q.data.status === 'accepte', qid: q.id, line: l });
+  for (const a of arts) out.push({ lib: a, w: pWords(a.data.name), unit: pUnit(a.data.unit), price: articlePrice(a, arts), cost: articleCost(a, arts).cost, date: a.data.buy ? a.data.buy.d : (a.data.quoteDate || ''), name: a.data.name, arts });
   pMemo = out; pMemoAt = Date.now(); return out;
 }
 // lignes semblables (mots communs, même unité) : prix déjà pratiqués
+// désignations déjà utilisées qui ressemblent à ce qui est tapé (« peinture mur » ≈ « Mise en peinture des murs ») : bibliothèque puis devis récents
+async function descHints(l, skipIds, selfQuote) {
+  const raw = String(l.desc || '').split('\n')[0]; if (raw.length < 4 || String(l.desc).includes('\n')) return [];
+  const w = [...pWords(raw)]; if (!w.length) return [];
+  const last = raw.trim().split(/\s+/).pop().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const typingLast = !/\s$/.test(raw) && w[w.length - 1] && last.startsWith(w[w.length - 1].slice(0, 3));
+  const own = normKey(raw); const seen = new Set(); const out = [];
+  const cand = (await priceMemory()).filter((x) => (x.lib || (selfQuote ? x.qid !== selfQuote : !skipIds.has(x.id))));
+  for (const x of cand) {
+    let n = 0;
+    w.forEach((t, i) => { if (x.w.has(t) || (typingLast && i === w.length - 1 && [...x.w].some((y) => y.startsWith(t)))) n++; });
+    const cover = n / w.length; if (cover < (w.length === 1 ? 1 : 0.5)) continue;
+    const text = x.lib ? x.lib.data.name : String(x.line.desc).split('\n')[0];
+    const k = normKey(text); if (k === own) continue;
+    out.push({ ...x, text, k, sc: cover + (2 * n) / (w.length + x.w.size) / 2 });
+  }
+  out.sort((a, b) => b.sc - a.sc || (a.lib ? -1 : 0) - (b.lib ? -1 : 0) || (b.date > a.date ? 1 : -1));
+  return out.filter((x) => (seen.has(x.k) ? false : seen.add(x.k))).slice(0, 6);
+}
 async function priceHints(l, skipIds, selfQuote) {
   const w = pWords(l.desc); if (w.size < 2) return null;
   const u = pUnit(l.unit);
@@ -244,12 +263,25 @@ function linesEditor(el, doc, opts) {
   }
   async function showHints(tr, l) {
     const box = $('[data-sg]', tr); if (!box) return;
-    const h = await priceHints(l, new Set(doc.lines.map((x) => x.id)), opts.selfQuote);
-    if (!h) { box.innerHTML = ''; return; }
+    const skip = new Set(doc.lines.map((x) => x.id));
+    const [h, ds] = await Promise.all([priceHints(l, skip, opts.selfQuote), descHints(l, skip, opts.selfQuote)]);
+    if (!h && !ds.length) { box.innerHTML = ''; return; }
     const u = l.unit ? `/${esc(l.unit)}` : '';
-    box.innerHTML = `<span class="sg-i">💡</span>${h.last ? `<button type="button" class="sg-b" data-sp="${h.last.price}" data-sc="${h.last.cost || ''}" title="Appliquer ce prix">${money(h.last.price)}${u}</button><span>${esc(h.last.no)}${h.last.date ? ` · ${fmtDate(h.last.date)}` : ''}${h.last.ok ? ' <b class="ok">✓ accepté</b>' : ''}</span>` : ''}
+    const dl = ds.length ? `<div class="sg-list"><small>Déjà utilisé – cliquez pour reprendre la désignation${ds.some((x) => x.lib) ? ', l\'unité et le prix' : ' et le prix'} :</small>${ds.map((x, i) => `<button type="button" class="sg-d" data-sd="${i}"><span>${esc(x.text)}</span><em>${esc(x.lib ? x.lib.data.unit || 'u' : x.line.unit || '')} · ${money(x.price)}</em><small>${x.lib ? 'bibliothèque' : `${esc(x.no)}${x.ok ? ' ✓' : ''}`}</small></button>`).join('')}</div>` : '';
+    box.innerHTML = `${dl}${h ? `<span class="sg-i">💡</span>${h.last ? `<button type="button" class="sg-b" data-sp="${h.last.price}" data-sc="${h.last.cost || ''}" title="Appliquer ce prix">${money(h.last.price)}${u}</button><span>${esc(h.last.no)}${h.last.date ? ` · ${fmtDate(h.last.date)}` : ''}${h.last.ok ? ' <b class="ok">✓ accepté</b>' : ''}</span>` : ''}
       ${h.avg != null ? `<button type="button" class="sg-b" data-sp="${h.avg}" title="Appliquer la moyenne">moyenne ${money(h.avg)}</button><span>sur ${h.n} devis${h.okN ? ` (${h.okN} accepté${h.okN > 1 ? 's' : ''})` : ''}</span>` : ''}
-      ${h.lib ? `<button type="button" class="sg-b lib" data-sp="${h.lib.price}" data-sc="${h.lib.cost || ''}" title="${esc(h.lib.name)}">bibliothèque ${money(h.lib.price)}</button>${h.lib.cost ? `<span>déboursé ${money(h.lib.cost)}${h.lib.date ? ` (acheté ${fmtDate(h.lib.date)})` : ''}</span>` : ''}` : ''}`;
+      ${h.lib ? `<button type="button" class="sg-b lib" data-sp="${h.lib.price}" data-sc="${h.lib.cost || ''}" title="${esc(h.lib.name)}">bibliothèque ${money(h.lib.price)}</button>${h.lib.cost ? `<span>déboursé ${money(h.lib.cost)}${h.lib.date ? ` (acheté ${fmtDate(h.lib.date)})` : ''}</span>` : ''}` : ''}` : ''}`;
+    // reprendre une désignation : texte complet, unité, prix, déboursé (un article de la bibliothèque est lié à la ligne)
+    $$('[data-sd]', box).forEach((b) => {
+      b.onmousedown = (ev) => ev.preventDefault();
+      b.onclick = () => {
+        const x = ds[+b.dataset.sd];
+        const src = x.lib ? lineFromArticle(x.lib, x.arts) : x.line;
+        Object.assign(l, { desc: src.desc, unit: src.unit || l.unit, price: num(src.price), cost: src.cost ?? '', type: src.type || l.type, ...(src.articleId ? { articleId: src.articleId } : {}) });
+        if (src.costBy) l.costBy = src.costBy; else delete l.costBy;
+        box.innerHTML = ''; draw(); changed(); toast('Désignation et prix repris', 1500);
+      };
+    });
     $$('[data-sp]', box).forEach((b) => {
       b.onmousedown = (ev) => ev.preventDefault(); // garde le focus dans la désignation
       b.onclick = () => {
