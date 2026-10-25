@@ -219,6 +219,7 @@ function parseUBL(xmlText) {
       country: txt(sup, 'PostalAddress', 'Country', 'IdentificationCode'), email: txt(sup, 'Contact', 'ElectronicMail') },
     base: base * sign, tax: tax * sign, total: num(txt(root, 'LegalMonetaryTotal', 'TaxInclusiveAmount')) * sign, payable: num(txt(root, 'LegalMonetaryTotal', 'PayableAmount')) * sign,
     lines: [...kids(root, 'InvoiceLine'), ...kids(root, 'CreditNoteLine')].map((l) => txt(l, 'Item', 'Name')).filter(Boolean),
+    items: [...kids(root, 'InvoiceLine'), ...kids(root, 'CreditNoteLine')].map((l) => ({ desc: txt(l, 'Item', 'Name'), amount: r2(num(txt(l, 'LineExtensionAmount')) * sign) })).filter((x) => x.desc || x.amount),
     attachments,
     // TVA par taux, coordonnées de paiement
     vatLines: kids(root, 'TaxTotal').flatMap((t) => kids(t, 'TaxSubtotal')).map((st) => ({ rate: num(txt(st, 'TaxCategory', 'Percent')), base: num(txt(st, 'TaxableAmount')) * sign, amount: num(txt(st, 'TaxAmount')) * sign })),

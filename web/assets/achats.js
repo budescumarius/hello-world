@@ -89,7 +89,7 @@ async function presetFromUBL(u, uploaded, projectId) {
     amount: r2(u.base), vat: Math.abs(near - rate) < 0.3 ? near : rate, vatAmount: r2(u.tax), peppol: true, fileId, fileName, ttc: r2(u.total),
     vatLines: (u.vatLines || []).length ? u.vatLines.map((x) => ({ rate: x.rate, amount: r2(x.amount) })) : [{ rate: Math.abs(near - rate) < 0.3 ? near : rate, amount: r2(u.tax) }],
     iban: u.iban || '', bic: u.bic || '', communication: (u.payId || '').replace(/\D/g, '').length === 12 ? u.payId.replace(/\D/g, '') : (u.payId || ''), structured: (u.payId || '').replace(/\D/g, '').length === 12,
-    supplierId: sup ? sup.id : '',
+    supplierId: sup ? sup.id : '', items: u.items || [],
     supplierGuess: sup ? null : { name: u.supplier.name, vat: u.supplier.vat, peppolId: u.supplier.endpoint, address: u.supplier.street, zip: u.supplier.zip, city: u.supplier.city, email: u.supplier.email },
   };
 }
@@ -114,15 +114,33 @@ function pdfLines(tc) {
 
 // Reconnaissance des informations principales d'une facture (FR / NL / EN)
 // texte des premières pages d'un PDF (document pdf.js ou fichier stocké)
-async function pdfDocText(doc) {
+async function pdfDocText(doc, maxPages = 4) {
   let text = '';
-  for (let i = 1; i <= Math.min(doc.numPages, 4); i++) text += pdfLines(await (await doc.getPage(i)).getTextContent()) + '\n';
+  for (let i = 1; i <= Math.min(doc.numPages, maxPages); i++) text += pdfLines(await (await doc.getPage(i)).getTextContent()) + '\n';
   return text;
 }
-async function pdfFileText(fileId) {
+async function pdfFileText(fileId, maxPages = 4) {
   const pdfjs = await loadPdfJs();
   const bytes = new Uint8Array(await (await fetch(fileUrl(fileId), { credentials: 'same-origin' })).arrayBuffer());
-  return pdfDocText(await pdfjs.getDocument({ data: bytes }).promise);
+  return pdfDocText(await pdfjs.getDocument({ data: bytes }).promise, maxPages);
+}
+// Articles d'une facture PDF : lignes qui finissent par un montant (le dernier = total HT de la ligne), hors totaux / TVA
+function invoiceItemsFromText(text) {
+  const MONEY = /^-?\d{1,3}(?:[ .\u00a0]\d{3})*,\d{2}$|^-?\d+[.,]\d{2}$/;
+  const SKIP = /(sous[- ]?total|subtotaal|^total|totaal|\btva\b|\bbtw\b|\bvat\b|montant|à payer|a payer|te betalen|report|à suivre|acompte|iban|bic|escompte|base imposable|base tva|maatstaf|net à|frais de port|page \d)/i;
+  const out = [];
+  for (const l of invoiceTextLines(text)) {
+    const tk = l.split(' ');
+    if (!MONEY.test(tk[tk.length - 1]) || !/[A-Za-zÀ-ÿ]{3}/.test(l) || SKIP.test(l)) continue;
+    const amount = num(tk[tk.length - 1].replace(/[ .\u00a0](?=\d{3}\b)/g, '').replace(',', '.'));
+    // désignation : sans les colonnes de fin (unité, quantité, prix, remise, totaux)
+    let nums = 0;
+    while (tk.length > 1 && (/^-?[\d.,%]+$/.test(tk[tk.length - 1]) || /^[€%]$/.test(tk[tk.length - 1]))) { tk.pop(); nums++; }
+    if (nums >= 2 && tk.length > 1 && /^[A-Za-z²³]{1,4}\.?$/.test(tk[tk.length - 1])) tk.pop(); // unité (PC, BTE, m², kg…)
+    const desc = tk.join(' ').trim();
+    if (desc.length >= 3) out.push({ desc, amount: r2(amount) });
+  }
+  return out;
 }
 const supplierGuessOf = (g) => ({ name: g.name || '', vat: g.vatRaw || '', address: g.address || '', zip: g.zip || '', city: g.city || '', email: g.email || '', phone: g.phone || '', iban: g.iban || '', bic: g.bic || '' });
 

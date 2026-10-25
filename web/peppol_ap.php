@@ -78,8 +78,12 @@ function ubl_parse(string $xml): array {
     }
     $tax = 0.0;
     foreach ($kids($root, 'TaxTotal') as $t) { $v = $num($txt($t, 'TaxAmount')); if ($v) { $tax = $v; break; } }
-    $lines = [];
-    foreach (array_merge($kids($root, 'InvoiceLine'), $kids($root, 'CreditNoteLine')) as $l) { $n = $txt($l, 'Item', 'Name'); if ($n !== '') $lines[] = $n; }
+    $lines = []; $items = [];
+    foreach (array_merge($kids($root, 'InvoiceLine'), $kids($root, 'CreditNoteLine')) as $l) {
+        $n = $txt($l, 'Item', 'Name'); if ($n !== '') $lines[] = $n;
+        // articles avec leur montant HT : attribuables un par un aux chantiers
+        $items[] = ['desc' => trim($n . ($txt($l, 'Item', 'Description') !== '' && $txt($l, 'Item', 'Description') !== $n ? ' – ' . $txt($l, 'Item', 'Description') : '')), 'amount' => round($num($txt($l, 'LineExtensionAmount')) * $sign, 2)];
+    }
     return [
         'kind' => $kind, 'number' => $txt($root, 'ID'), 'date' => $txt($root, 'IssueDate'),
         'due' => $txt($root, 'DueDate') ?: $txt($root, 'PaymentMeans', 'PaymentDueDate'),
@@ -94,7 +98,7 @@ function ubl_parse(string $xml): array {
         'base' => $num($txt($root, 'LegalMonetaryTotal', 'TaxExclusiveAmount')) * $sign,
         'tax' => $tax * $sign,
         'total' => $num($txt($root, 'LegalMonetaryTotal', 'TaxInclusiveAmount')) * $sign,
-        'lines' => $lines, 'attachments' => $atts,
+        'lines' => $lines, 'items' => $items, 'attachments' => $atts,
         'vatLines' => array_map(fn($st) => ['rate' => $num($txt($st, 'TaxCategory', 'Percent')), 'amount' => round($num($txt($st, 'TaxAmount')) * $sign, 2)],
             array_merge(...array_map(fn($t) => $kids($t, 'TaxSubtotal'), $kids($root, 'TaxTotal')) ?: [[]])),
         'iban' => preg_replace('/\s+/', '', $txt($root, 'PaymentMeans', 'PayeeFinancialAccount', 'ID')),
@@ -162,6 +166,7 @@ function pap_import(string $msgId, string $xml, ?int $uid): array {
         'fileId' => $fileId, 'fileName' => $fileName, 'xmlFileId' => $xmlId, 'peppol' => true, 'peppolMsg' => $msgId, 'toCheck' => true,
         'status' => 'avalider', 'source' => 'peppol', 'ttc' => round($u['total'], 2),
         'vatLines' => $u['vatLines'] ?: [['rate' => abs($near - $rate) < 0.3 ? $near : $rate, 'amount' => round($u['tax'], 2)]],
+        'items' => array_values(array_filter($u['items'] ?? [], fn($x) => $x['desc'] !== '' || $x['amount'] != 0)),
         'iban' => $u['iban'], 'bic' => $u['bic'], 'communication' => preg_replace('/\D/', '', $u['payId']) !== '' && strlen(preg_replace('/\D/', '', $u['payId'])) === 12 ? preg_replace('/\D/', '', $u['payId']) : $u['payId'],
         'structured' => strlen(preg_replace('/\D/', '', $u['payId'])) === 12,
     ], $uid);

@@ -1778,3 +1778,17 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .sub-head p { margin: 4px 0; } .saas-tbl input, .saas-tbl select { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 13px; }
 .saas-tbl td { padding: 4px; } .saas-card .card-h h3, .sub-head h3 { display: flex; align-items: center; gap: 6px; } .saas-card .card-h svg { width: 18px; height: 18px; }
 @media (max-width: 600px) { .card-h:has(.su-per) { flex-wrap: wrap; gap: 8px; } .card-h:has(.su-per) h3 { flex: 1 0 100%; } }
+/* Achats : répartition article par article */
+.pi-items { margin-bottom: 14px; }
+.pi-items-empty { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 4px 0 12px; }
+.pi-it-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.pi-it-bar select { max-width: 280px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: #fff; }
+.pi-it-list { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; max-height: 460px; overflow-y: auto; }
+.pi-it { display: grid; grid-template-columns: 24px 1fr 110px minmax(160px, 260px); gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 14px; }
+.pi-it:last-child { border-bottom: 0; }
+.pi-it.on { background: #fff4e0; } .pi-it.done .pi-it-d { color: var(--muted); }
+.pi-it select { padding: 5px 6px; border-radius: 8px; border: 1px solid var(--border); background: #fff; font-size: 13px; }
+.pi-it-sum { margin-top: 10px; display: grid; gap: 4px; }
+.pi-it-sum > div { display: flex; justify-content: space-between; gap: 12px; padding: 6px 12px; border-radius: 8px; background: #f6f4ee; }
+.pi-it-sum > div.warn { background: #fff4e6; color: #8a4b08; } .pi-it-sum > div.ok { background: #e9f7ee; color: #1f7a3c; }
+@media (max-width: 700px) { .pi-it { grid-template-columns: 22px 1fr 90px; } .pi-it select { grid-column: 2 / 4; } }

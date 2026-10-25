@@ -290,7 +290,7 @@ route('purchase', async (id) => {
         <div class="pi-view" data-view></div>
       </div>
     </section>
-    <section class="card"><div class="card-h"><h3>Lier la facture à un chantier</h3></div><div class="pi-alloc" data-alloc></div></section>
+    <section class="card"><div class="card-h"><h3>Lier la facture à un chantier</h3></div><div class="pi-items" data-items></div><div class="pi-alloc" data-alloc></div></section>
     ${isNew ? '' : '<section class="card" data-ret hidden></section><section class="card" data-pays></section>'}
   </div>
   <div class="pi-bar"><span class="grow"></span><button class="btn" data-cancel>Annuler</button><span class="btn-split"><button class="btn primary" data-submit>Soumettre</button><button class="btn primary" data-moresub aria-label="Autres actions">${I.chevron}</button></span></div>`;
@@ -403,6 +403,56 @@ route('purchase', async (id) => {
     $('[data-add]', box).onclick = () => { alloc.push({ pid: '', amount: r2(Math.max(0, ht() - linked())), category: F('category').value }); drawAlloc(); };
     drawAllocSummary();
   };
+
+  // --- article par article : chaque ligne de la facture attribuée à un chantier ; les liaisons se calculent toutes seules
+  let items = Array.isArray(d.items) ? d.items.map((x) => ({ desc: x.desc || '', amount: num(x.amount), pid: x.pid || '' })) : [];
+  const picked = new Set();
+  const syncAlloc = () => {
+    if (!items.some((x) => x.pid)) return;
+    const cat = Object.fromEntries(alloc.map((a) => [a.pid, a.category]));
+    const by = {}; items.forEach((x) => { if (x.pid) by[x.pid] = r2((by[x.pid] || 0) + x.amount); });
+    alloc.length = 0; Object.entries(by).forEach(([pid, amount]) => alloc.push({ pid: +pid, amount, category: cat[pid] || F('category').value }));
+    d.items = items; drawAlloc();
+  };
+  const pName = (pid) => { const pp = byId(projects, pid); return pp ? `${pp.number} · ${pp.data.name}` : '?'; };
+  const drawItems = () => {
+    const box = $('[data-items]', page);
+    if (!items.length) {
+      box.innerHTML = fileId && isPdfFile() ? `<div class="pi-items-empty"><button type="button" class="btn" data-readitems>${I.list || I.file} Répartir article par article</button><small class="muted">Lit les articles de la facture pour les attribuer un par un aux chantiers.</small></div>` : '';
+      const rb = $('[data-readitems]', box); if (rb) rb.onclick = async () => {
+        rb.disabled = true; toast('Lecture des articles…', 8000);
+        let txt = ''; try { txt = await pdfFileText(fileId, 20); } catch (err) { /* PDF illisible */ }
+        items = invoiceItemsFromText(txt).map((x) => ({ ...x, pid: '' }));
+        if (!items.length) { rb.disabled = false; return toast('Aucun article reconnu dans ce PDF (facture scannée ?) : liez les montants ci-dessous.', 5000); }
+        toast(`${items.length} article(s) lu(s)`, 2000); d.items = items; drawItems();
+      };
+      return;
+    }
+    const tot = r2(items.reduce((a, x) => a + x.amount, 0)); const per = {}; let none = 0;
+    items.forEach((x) => { if (x.pid) per[x.pid] = r2((per[x.pid] || 0) + x.amount); else none = r2(none + x.amount); });
+    const gap = r2(ht() - tot);
+    box.innerHTML = `<div class="pi-it-bar"><b>Articles de la facture</b><span class="muted">${items.length} article(s) · cochez des articles (ou touchez-les), puis</span>
+        <select data-bulkpid>${pOpts('')}</select><button type="button" class="btn sm primary" data-bulk>Attribuer la sélection</button><span class="grow"></span>
+        <button type="button" class="link-btn" data-all>${picked.size === items.length ? 'Tout désélectionner' : 'Tout sélectionner'}</button><button type="button" class="link-btn" data-rest>Non attribués → sélection</button></div>
+      <div class="pi-it-list">${items.map((x, i) => `<div class="pi-it ${picked.has(i) ? 'on' : ''} ${x.pid ? 'done' : ''}" data-it="${i}">
+        <input type="checkbox" ${picked.has(i) ? 'checked' : ''} aria-label="Sélectionner"><span class="pi-it-d">${esc(x.desc)}</span><b class="r">${money(x.amount)}</b>
+        <select data-pid="${i}">${pOpts(x.pid)}</select></div>`).join('')}</div>
+      <div class="pi-it-sum">${Object.entries(per).map(([pid, v]) => `<div><span>${esc(pName(pid))}</span><b>${money(v)}</b></div>`).join('')}
+        <div class="${none ? 'warn' : 'ok'}"><span>Reste à attribuer</span><b>${money(none)}</b></div>
+        ${Math.abs(gap) >= 0.01 ? `<div class="muted"><span>Écart entre les articles et le HT (frais, remises, articles non lus)</span><b>${money(gap)}</b></div>` : ''}</div>`;
+    $$('[data-it]', box).forEach((row) => {
+      const i = +row.dataset.it;
+      row.onclick = (ev) => { if (ev.target.tagName === 'SELECT' || ev.target.tagName === 'OPTION') return; if (picked.has(i)) picked.delete(i); else picked.add(i); drawItems(); };
+      $('select', row).onchange = (ev) => { items[i].pid = ev.target.value ? +ev.target.value : ''; syncAlloc(); drawItems(); };
+    });
+    $('[data-all]', box).onclick = () => { if (picked.size === items.length) picked.clear(); else items.forEach((x, i) => picked.add(i)); drawItems(); };
+    $('[data-rest]', box).onclick = () => { picked.clear(); items.forEach((x, i) => { if (!x.pid) picked.add(i); }); drawItems(); };
+    $('[data-bulk]', box).onclick = () => {
+      const pid = $('[data-bulkpid]', box).value; if (!pid) return toast('Choisissez le chantier', 2500); if (!picked.size) return toast('Cochez au moins un article', 2500);
+      picked.forEach((i) => { items[i].pid = +pid; }); picked.clear(); syncAlloc(); drawItems();
+    };
+  };
+  drawItems();
 
   // --- facture affichée à droite
   const view = $('[data-view]', page);
