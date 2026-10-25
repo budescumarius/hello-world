@@ -128,8 +128,19 @@ async function pdfFileText(fileId, maxPages = 4) {
 function invoiceItemsFromText(text) {
   const MONEY = /^-?\d{1,3}(?:[ .\u00a0]\d{3})*,\d{2}$|^-?\d+[.,]\d{2}$/;
   const SKIP = /(sous[- ]?total|subtotaal|^total|totaal|\btva\b|\bbtw\b|\bvat\b|montant|à payer|a payer|te betalen|report|à suivre|acompte|iban|bic|escompte|base imposable|base tva|maatstaf|net à|frais de port|page \d)/i;
+  // blocs de livraison (« N/référence, BL chiffre, V/référence, Employé ») : les articles qui suivent sont groupés sous cette référence
+  const REF = /^(n\/?\s?r[ée]f(?:[ée]rence)?|notre r[ée]f[ée]rence|v\/?\s?r[ée]f(?:[ée]rence)?|votre r[ée]f[ée]rence|r[ée]f[ée]rence client|bl(?: chiffre| n[°o]?)?|bon de livraison|leveringsbon|employ[ée]|vendeur|chantier|werf|uw referentie|onze referentie)(?=[\s.:])\.?\s*:?\s+(\S.*)$/i;
+  let ref = {}; let fresh = true;
+  const grpOf = () => [ref.v && `V/réf. ${ref.v}`, ref.bl && `BL ${ref.bl}`, ref.emp && `par ${ref.emp}`, !ref.v && !ref.bl && ref.n && `N/réf. ${ref.n}`].filter(Boolean).join(' · ');
   const out = [];
   for (const l of invoiceTextLines(text)) {
+    const rm = l.match(REF);
+    if (rm && !/\d,\d{2}$/.test(l)) {
+      if (!fresh) { ref = {}; fresh = true; }
+      const k = rm[1].toLowerCase(); const v = rm[2].trim();
+      if (/^v|votre|uw|client|chantier|werf/.test(k)) ref.v = v; else if (/^bl|bon|levering/.test(k)) ref.bl = v; else if (/employ|vendeur/.test(k)) ref.emp = v; else ref.n = v;
+      continue;
+    }
     const tk = l.split(' ');
     if (!MONEY.test(tk[tk.length - 1]) || !/[A-Za-zÀ-ÿ]{3}/.test(l) || SKIP.test(l)) continue;
     const amount = num(tk[tk.length - 1].replace(/[ .\u00a0](?=\d{3}\b)/g, '').replace(',', '.'));
@@ -138,7 +149,7 @@ function invoiceItemsFromText(text) {
     while (tk.length > 1 && (/^-?[\d.,%]+$/.test(tk[tk.length - 1]) || /^[€%]$/.test(tk[tk.length - 1]))) { tk.pop(); nums++; }
     if (nums >= 2 && tk.length > 1 && /^[A-Za-z²³]{1,4}\.?$/.test(tk[tk.length - 1])) tk.pop(); // unité (PC, BTE, m², kg…)
     const desc = tk.join(' ').trim();
-    if (desc.length >= 3) out.push({ desc, amount: r2(amount) });
+    if (desc.length >= 3) { const grp = grpOf(); out.push({ desc, amount: r2(amount), ...(grp ? { grp } : {}) }); fresh = false; }
   }
   return out;
 }
