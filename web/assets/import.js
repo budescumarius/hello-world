@@ -39,8 +39,9 @@ function xnum(v) {
   if (!s) return NaN;
   if (s.includes(',') && s.includes('.')) s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
   else if (s.includes(',')) s = s.replace(',', '.');
-  const x = parseFloat(s);
-  return isNaN(x) ? NaN : x;
+  // « 27 euro/m² », « offre », « supprimé » : pas un nombre
+  if (!/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(s)) return NaN;
+  return parseFloat(s);
 }
 const has = (v) => v !== '' && v != null && !(typeof v === 'number' && isNaN(v));
 
@@ -117,6 +118,7 @@ const QUOTE_FIELDS = [
   { key: 'unit', label: 'Unité', syn: ['u', 'un', 'unite', 'unit', 'eenheid', 'um'] },
   { key: 'price', label: 'Prix unitaire HT', syn: ['pu', 'pue', 'puht', 'prixunitaire', 'prixunitaireht', 'prix', 'eenheidsprijs', 'pret', 'pretunitar', 'unitprice', 'puhtva'] },
   { key: 'total', label: 'Total HT', syn: ['total', 'totalht', 'montant', 'montantht', 'totaal', 'valoare', 'prixtotal', 'prix', 'bedrag'] },
+  { key: 'chap', label: 'Sous-total des chapitres (contrôle)', syn: ['soustotal', 'totalchapitre', 'subtotal', 'subtotaal'] },
   { key: 'vat', label: 'TVA %', syn: ['tva', 'btw', 'vat', 'tauxtva', 'tvaht'] },
   { key: 'cost', label: 'Déboursé unitaire', syn: ['debourse', 'cout', 'coutunitaire', 'prixachat', 'cost', 'kost'] },
 ];
@@ -135,7 +137,7 @@ function classifyRows(rows) {
     if (numbered && !no && !has(total)) return { kind: 'cont', desc, no };
     const parts = no.split(/[.\s]/).filter((x) => x !== '');
     while (parts.length > 1 && /^0+$/.test(parts[parts.length - 1])) parts.pop();
-    if (/^\d+(\.\d+)*\.?$/.test(no) && parts.length) return { kind: parts.length >= 2 ? 'sub' : 'title', desc, no, total };
+    if (/^\d+(\.\d+)*[a-z]?\.?$/i.test(no) && parts.length) return { kind: parts.length >= 2 ? 'sub' : 'title', desc, no, total, chap: xnum(r.chap) };
     if (desc.length <= 70 && !/[.;:]$/.test(desc)) return { kind: 'title', desc, no, total };
     return { kind: 'text', desc, no };
   });
@@ -153,6 +155,7 @@ async function importLinesExcel(onLines) {
   const m = modal(`${mhead('Vérifier l\'import')}<div class="m-body">
     <p class="muted">Vérifiez la nature de chaque ligne (chapitre, sous-chapitre, ligne chiffrée, texte) avant l'import. « Suite du texte » est ajouté à la description de la ligne au-dessus. Les lignes de totaux sont ignorées automatiquement.</p>
     <div class="grid-form">${fieldHTML({ name: 'vat', label: 'TVA si la colonne est absente ou vide', type: 'select', options: vatOptions(defVat()) }, defVat())}${fieldHTML({ name: 'type', label: 'Type de déboursé par défaut', type: 'select', options: optsOf(TYPES) }, 'divers')}</div>
+    <div data-warn></div>
     <div class="dt-body"><table class="dt imp"><thead><tr><th>Type</th><th>N°</th><th>Désignation</th><th>TM</th><th class="r">Qté</th><th>U</th><th class="r">PU HT</th><th class="r">Total HT</th><th class="r">Calculé</th></tr></thead><tbody>
     ${cls.map((x, i) => `<tr class="k-${x.kind}" data-row="${i}"><td><select data-k="${i}">${KL.map(([k, l]) => `<option value="${k}" ${x.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td><td>${esc(x.no)}</td><td>${esc(x.desc.slice(0, 120))}</td><td>${esc(x.tm || '')}</td>
       <td class="r">${has(x.qty) ? fnum(x.qty, 3) : ''}</td><td>${esc(x.unit || '')}</td><td class="r">${has(x.price) ? money(x.price) : ''}</td><td class="r">${has(x.total) ? money(x.total) : ''}</td><td class="r" data-calc="${i}"></td></tr>`).join('')}
@@ -161,7 +164,12 @@ async function importLinesExcel(onLines) {
   const build = () => {
     const vat = num($('[name=vat]', m.el).value); const type = $('[name=type]', m.el).value;
     const lines = [];
+    const fill = $('[data-fill]', m.el); const addFill = fill && fill.checked;
+    // chapitre dont le sous-total Excel n'est pas couvert par ses lignes (ex. « estimation » saisie directement) : ligne forfaitaire de l'écart
+    const closeChap = () => { const c = curChap; if (!c || !addFill || !(c.gap > 0.05)) return; lines.push({ id: lid(), kind: 'item', desc: `${c.desc} – montant repris du métré (forfait)`, unit: 'forfait', qty: 1, price: r2(c.gap), cost: '', vat: num($('[name=vat]', m.el).value), type: $('[name=type]', m.el).value }); };
+    let curChap = null;
     for (const x of cls) {
+      if (x.kind === 'title') { closeChap(); curChap = chapGaps.find((g) => g.x === x) || null; }
       if (x.kind === 'skip') continue;
       // suite : ajoutée à la ligne ou au texte précédent (après un chapitre : nouveau texte)
       if (x.kind === 'cont') {
@@ -178,7 +186,27 @@ async function importLinesExcel(onLines) {
       let v = has(x.vat) ? x.vat : vat; if (v > 0 && v < 1) v = r2(v * 100);
       lines.push({ id: lid(), _src: cls.indexOf(x), kind: 'item', desc: x.desc, ...(x.tm ? { tm: x.tm } : {}), unit: x.unit || 'u', qty, price: has(price) ? price : 0, cost: has(x.cost) ? x.cost : '', vat: v, type });
     }
+    closeChap();
     return lines;
+  };
+  // écarts par chapitre entre le sous-total Excel et les lignes importées
+  let chapGaps = [];
+  const checkChaps = () => {
+    chapGaps = []; let cur = null;
+    cls.forEach((x) => {
+      if (x.kind === 'title') { cur = has(x.chap) ? { x, desc: x.desc, excel: x.chap, got: 0 } : null; if (cur) chapGaps.push(cur); return; }
+      if (cur && x.kind === 'item') {
+        const q = has(x.qty) ? x.qty : (has(x.total) && has(x.price) ? (x.price ? x.total / x.price : 0) : 1);
+        const pr = has(x.price) ? x.price : (has(x.total) && q ? x.total / q : 0);
+        cur.got += r2(q * pr);
+      }
+    });
+    chapGaps.forEach((g) => { g.gap = r2(g.excel - g.got); });
+    const bad = chapGaps.filter((g) => Math.abs(g.gap) > 0.05);
+    const w = $('[data-warn]', m.el); const was = $('[data-fill]', m.el); const on = was ? was.checked : false;
+    w.innerHTML = bad.length ? `<div class="hint-box warn"><span><b>Sous-totaux de chapitre différents du métré :</b><br>${bad.map((g) => `${esc(g.desc)} : ${money(g.excel)} dans Excel, ${money(g.got)} en lignes (écart ${money(g.gap)})`).join('<br>')}
+      ${bad.some((g) => g.gap > 0) ? `<br><label class="chk"><input type="checkbox" data-fill ${on ? 'checked' : ''}> Ajouter une ligne forfaitaire de l'écart dans ces chapitres</label>` : ''}</span></div>` : '';
+    const f = $('[data-fill]', m.el); if (f) f.onchange = sum;
   };
   // contrôle : chaque ligne recalculée (quantité × prix) comparée au total de la colonne Excel
   const sum = () => {
@@ -193,9 +221,11 @@ async function importLinesExcel(onLines) {
       td.textContent = money(calc); td.className = 'r' + (diff ? ' late' : ''); td.title = diff ? `Différent du total Excel (${money(x.total)})` : '';
     });
     const net = totals({ lines: ls }).net;
-    $('[data-sum]', m.el).innerHTML = `${ls.filter((l) => l.kind === 'title').length} chapitre(s) · ${ls.filter((l) => l.kind === 'item').length} ligne(s) · <b>${money(net)} HT</b>${xl ? ` · Excel : ${money(r2(xl))}${Math.abs(net - xl) > 0.01 ? ` <b class="late">(écart ${money(r2(net - xl))}${bad ? `, ${bad} ligne(s) en rouge` : ''})</b>` : ' ✓'}` : ''}`;
+    if (chapGaps.length) xl = chapGaps.reduce((t, g) => t + g.excel, 0); // total du métré = somme des sous-totaux de chapitre
+    $('[data-sum]', m.el).innerHTML = `${ls.filter((l) => l.kind === 'title').length} chapitre(s) · ${ls.filter((l) => l.kind === 'item').length} ligne(s) · <b>${money(net)} HT</b>${xl ? ` · Excel : ${money(r2(xl))}${Math.abs(net - xl) > Math.max(0.01, ls.filter((l) => l.kind === 'item').length * 0.005) ? ` <b class="late">(écart ${money(r2(net - xl))}${bad ? `, ${bad} ligne(s) en rouge` : ''})</b>` : ` ✓${Math.abs(net - xl) >= 0.01 ? ` (arrondis ${money(r2(net - xl))})` : ''}`}` : ''}`;
   };
-  $$('[data-k]', m.el).forEach((s) => { s.onchange = () => { cls[+s.dataset.k].kind = s.value; s.closest('tr').className = 'k-' + s.value; sum(); }; });
+  $$('[data-k]', m.el).forEach((s) => { s.onchange = () => { cls[+s.dataset.k].kind = s.value; s.closest('tr').className = 'k-' + s.value; checkChaps(); sum(); }; });
+  checkChaps();
   $('[name=vat]', m.el).onchange = sum; sum();
   $('[data-ok]', m.el).onclick = () => { const ls = build().map(({ _src, ...l }) => l); m.close(); onLines(ls, res.fileName); toast(`${ls.filter((l) => l.kind === 'item').length} ligne(s) importée(s)`); };
 }
