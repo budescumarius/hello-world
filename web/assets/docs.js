@@ -276,30 +276,42 @@ function mentionsBlock(kind, d, t) {
   return out.length ? `<section class="mb-legal"><h4>Mentions TVA</h4>${out.map(([k, v]) => `<div class="mb-mention"><b>${k}</b><div class="pre">${esc(v)}</div></div>`).join('')}</section>` : '';
 }
 
+// Facture simplifiée : une ligne de travaux par taux de TVA (+ déductions d'acompte / déjà facturé), sans le détail des postes
+function simpleInvoiceData(d, it) {
+  const work = {}; const keep = [];
+  for (const l of d.lines || []) { if (l.kind !== 'item') continue; if (isDeduction(l)) { keep.push(l); continue; } const k = num(l.vat); work[k] = r2((work[k] || 0) + r2(num(l.qty) * num(l.price))); }
+  const many = Object.keys(work).length > 1;
+  const label = d.kind === 'situation' ? `Avancement des travaux – état d'avancement ${d.ref || `EA${d.situationNo || ''}`}${d.title ? ` – ${d.title}` : ''}`
+    : `${IKIND[d.kind] || 'Facture'}${d.title ? ` – ${d.title}` : ''}${it.number ? '' : ''}`;
+  const lines = Object.entries(work).map(([rate, v]) => ({ id: 'w' + rate, kind: 'item', desc: `${label}${many ? ` (TVA ${fnum(+rate)} %)` : ''}`, unit: 'forfait', qty: 1, price: v, vat: +rate }));
+  return { ...d, lines: [...lines, ...keep], discount: 0, progressRows: d.kind === 'situation' ? d.progressRows : undefined };
+}
+const docVariant = () => new URLSearchParams(location.hash.split('?')[1] || '').get('v') || '';
 async function printDoc(kind, id) {
-  const r = await docHtml(kind, id);
+  const r = await docHtml(kind, id, docVariant());
   const { it, d, c, project, title, html, typ, co } = r;
   return printDocPage(kind, id, it, d, c, project, title, html, typ, co);
 }
 // Rendu du document (devis, facture, commande) : utilisé pour l'impression, l'aperçu et le PDF
-async function docHtml(kind, id) {
+async function docHtml(kind, id, variant = '') {
   const typ = { quote: 'quote', invoice: 'invoice', order: 'order' }[kind];
   const it = await db.get(typ, id);
-  const d = it.data;
+  const simple = kind === 'invoice' && variant === 'simple';
+  const d = simple ? simpleInvoiceData(it.data, it) : it.data;
   const [contacts, project] = await Promise.all([db.list('contact'), it.project_id ? db.get('project', it.project_id).catch(() => null) : null]);
   const c = byId(contacts, kind === 'order' ? d.supplierId : d.clientId);
   const t = tpl(); const co = company();
   const { head, info, title } = docBlocks(kind, it, c, project, t);
   const paid = kind === 'invoice' ? invState(it).paid : 0;
-  const isProg = kind === 'invoice' && d.kind === 'situation' && (d.progressRows || []).length;
+  const isProg = !simple && kind === 'invoice' && d.kind === 'situation' && (d.progressRows || []).length;
   const cgv = cgvBlock(kind, t);
   const legal = legalLine(t);
   const html = `<style>${docCSS(t)}</style><div class="doc mb mb-paper" data-foot="${esc(legal)}" data-ink="${esc(t.ink)}" data-acc="${esc(t.accent)}"><div class="mb-sheet"><div class="mb-ruler"></div>
     ${coMissing(kind, c)}${head}${info}
     ${d.intro ? `<p class="pre mb-intro">${esc(d.intro)}</p>` : ''}
     ${isProg ? progressTable(d, t) : linesTable(d, t, kind)}
-    ${await totalsBlock(kind, it, t, paid)}
-    ${isProg && t.recap ? progressRecap(d, t) : ''}
+    ${await totalsBlock(kind, simple ? { ...it, data: d } : it, t, paid)}
+    ${(isProg && t.recap) || (simple && d.kind === 'situation' && (d.progressRows || []).length) ? progressRecap(d, t) : ''}
     ${d.reverse && c && !(c.data || {}).vat ? '<p class="mb-warn no-print">⚠ Autoliquidation : le numéro de TVA du client doit figurer sur la facture.</p>' : ''}
     ${d.notes ? `<div class="mb-notes pre">${esc(d.notes)}</div>` : ''}
     ${isEAdoc(kind, d) ? `<section class="mb-sign"><div><small>Pour ${esc(co.name || "l'entreprise")}</small><span class="mb-sl"></span><em>Nom et signature</em></div><div><small>Approuvé – le client</small><span class="mb-sl"></span><em>Date, nom et signature, précédés de « Lu et approuvé »</em></div></section>` : ''}
@@ -323,7 +335,11 @@ function printDocPage(kind, id, it, d, c, project, title, html, typ, co) {
     sendMailDialog({
       subject: ea ? `${label} – à approuver${d.ea && d.ea.approveBy ? ` avant le ${fmtDate(d.ea.approveBy)}` : ''}${site}` : `${label} ${it.number || ''}${site}`.trim(), body,
       recipients: [...(c ? [contactRcpt(c, kind === 'order' ? 'Fournisseur' : 'Client', true)] : []), ...S.users.filter((u) => u.active && u.id !== S.me.id).map((u) => userRcpt(u, 'Notre équipe', false))],
-      ref: { type: typ, id: it.id }, projectId: it.project_id, pdfName: `${fileTitle(title)}.pdf`,
+      ref: { type: typ, id: it.id }, projectId: it.project_id, pdfName: `${fileTitle(title)}${docVariant() === 'simple' ? '' : ''}.pdf`,
+      // facture simplifiée : l'état d'avancement détaillé en 2e pièce jointe (et inversement)
+      extra: kind === 'invoice' && (d.lines || []).length > 1 ? [docVariant() === 'simple'
+        ? { label: d.kind === 'situation' ? `Détail de l'état d'avancement ${d.ref || ''}` : 'Facture détaillée', name: `${fileTitle(title)}-detail.pdf`, checked: true, make: async () => makePdf((await docHtml(kind, id, '')).html, { light: true }) }
+        : { label: 'Facture simplifiée (sans détail des postes)', name: `${fileTitle(title)}-simplifiee.pdf`, checked: false, make: async () => makePdf((await docHtml(kind, id, 'simple')).html, { light: true }) }] : [],
       onSent: (to) => {
         d.sent = [...(d.sent || []), { t: new Date().toISOString(), to, by: S.me.id }];
         if (kind === 'quote' && d.status === 'brouillon') { d.status = 'envoye'; d.sentAt = today(); }
@@ -334,6 +350,11 @@ function printDocPage(kind, id, it, d, c, project, title, html, typ, co) {
   };
   if (isField()) return printPage(title, html, '#/t/commandes', null);
   printPage(title, html, (isSimple() && kind !== 'order' ? { quote: `#/s/doc/devis/${id}`, invoice: `#/s/doc/facture/${id}` } : { quote: `#/quote/${id}`, invoice: `#/invoice/${id}`, order: `#/order/${id}` })[kind], mailDoc);
+  // facture : version détaillée (tous les postes) ou simplifiée (une ligne + récapitulatif)
+  if (kind === 'invoice' && (it.data.lines || []).length > 1) {
+    const v = docVariant() === 'simple' ? 'simple' : '';
+    $('.print-shell .top-actions').insertAdjacentHTML('afterbegin', `<div class="seg no-print"><a class="${v ? '' : 'on'}" href="#/print/invoice/${id}">Détaillée</a><a class="${v ? 'on' : ''}" href="#/print/invoice/${id}?v=simple">Simplifiée</a></div>`);
+  }
   if (new URLSearchParams(location.hash.split('?')[1] || '').has('mail')) mailDoc();
 }
 route('print', (kind, id) => printDoc(kind, +id));

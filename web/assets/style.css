@@ -1794,3 +1794,7 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .pi-it-sum > div { display: flex; justify-content: space-between; gap: 12px; padding: 6px 12px; border-radius: 8px; background: #f6f4ee; }
 .pi-it-sum > div.warn { background: #fff4e6; color: #8a4b08; } .pi-it-sum > div.ok { background: #e9f7ee; color: #1f7a3c; }
 @media (max-width: 700px) { .pi-it { grid-template-columns: 22px 1fr 90px; } .pi-it select { grid-column: 2 / 4; } }
+/* Facture : détaillée / simplifiée */
+.top-actions .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-right: 6px; }
+.top-actions .seg a { padding: 0 12px; height: 36px; display: inline-flex; align-items: center; font-weight: 600; font-size: 13px; color: var(--muted); text-decoration: none; background: var(--surface); }
+.top-actions .seg a.on { background: var(--ink, #1c2550); color: #fff; }

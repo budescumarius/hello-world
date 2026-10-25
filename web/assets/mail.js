@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------- Envoi par email depuis l'application (PDF du document en pièce jointe)
 // recipients : [{ name, email, role, group, checked, contact }] — `contact` permet d'enregistrer un email saisi sur la fiche
-function sendMailDialog({ subject, body, recipients = [], ref = {}, projectId, pdfName, onSent }) {
+function sendMailDialog({ subject, body, recipients = [], ref = {}, projectId, pdfName, extra = [], onSent }) {
   const rcpts = [];
   recipients.forEach((r) => { if (!rcpts.some((x) => x.email && r.email && x.email.toLowerCase() === r.email.toLowerCase()) && !rcpts.some((x) => x.contact && r.contact && x.contact.id === r.contact.id)) rcpts.push({ ...r }); });
   const groups = [...new Set(rcpts.map((r) => r.group || 'Destinataires'))];
@@ -14,6 +14,7 @@ function sendMailDialog({ subject, body, recipients = [], ref = {}, projectId, p
     <label class="field full"><span>Objet *</span><input name="subject" type="text" value="${esc(subject)}"></label>
     <label class="field full"><span>Message</span><textarea name="body" rows="9">${esc(body)}</textarea></label>
     ${pdfName ? `<label class="field chk"><input type="checkbox" name="pdf" checked><span>Joindre le PDF (${esc(pdfName)})</span></label>` : ''}
+    ${extra.map((x, i) => `<label class="field chk"><input type="checkbox" data-x="${i}" ${x.checked ? 'checked' : ''}><span>Joindre aussi : ${esc(x.label)}</span></label>`).join('')}
     <button type="submit" hidden></button></form>
     <div class="m-foot"><small class="muted" data-cnt></small><span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-send>${I.mail} Envoyer</button></div>`, { wide: true });
   const form = $('form', m.el);
@@ -48,7 +49,8 @@ function sendMailDialog({ subject, body, recipients = [], ref = {}, projectId, p
       if (ref.type) fd.append('ref_type', ref.type);
       if (ref.id) fd.append('ref_id', ref.id);
       if (projectId) fd.append('project_id', projectId);
-      if (pdfName && form.pdf.checked) fd.append('att', new File([await makePdf(undefined, { light: true })], pdfName, { type: 'application/pdf' }));
+      if (pdfName && form.pdf.checked) fd.append('att[]', new File([await makePdf(undefined, { light: true })], pdfName, { type: 'application/pdf' }));
+      for (const [i, x] of extra.entries()) if ($(`[data-x="${i}"]`, form).checked) fd.append('att[]', new File([await x.make()], x.name, { type: 'application/pdf' }));
       const r = await api('POST', 'mail', fd);
       // adresse saisie pour un contact sans email : enregistrée sur sa fiche
       for (const x of to) if (x.typed && x.r.contact) { x.r.contact.data.email = x.email; persist('contact', x.r.contact).catch(() => {}); }
