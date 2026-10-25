@@ -169,7 +169,7 @@ function pap_import(string $msgId, string $xml, ?int $uid): array {
 }
 
 // Relève la boîte de réception du point d'accès ; renvoie les achats créés
-function pap_sync(?int $uid): array {
+function pap_sync(?int $uid, bool $all = false): array {
     pap_cfg();
     if ((int)q('SELECT GET_LOCK(?, 0)', ['batipro_peppol_' . cid()])->fetchColumn() !== 1) return ['created' => [], 'busy' => true];
     $created = []; $errors = []; $more = false; $t0 = microtime(true);
@@ -177,7 +177,7 @@ function pap_sync(?int $uid): array {
     try {
         // par tranches d'environ 20 s : l'hébergement coupe les requêtes trop longues (le navigateur rappelle tant qu'il en reste)
         for ($page = 1; $page <= 5 && !$more; $page++) {
-            $list = pap_req('GET', 'message/list?folder=INBOX&confirmed=false&perPage=100&page=' . $page);
+            $list = pap_req('GET', 'message/list?folder=INBOX' . ($all ? '' : '&confirmed=false') . '&perPage=100&page=' . $page);
             $items = $list['items'] ?? [];
             foreach ($items as $m) {
                 if (microtime(true) - $t0 > 20) { $more = true; break; }
@@ -191,7 +191,7 @@ function pap_sync(?int $uid): array {
                         if ($xml === false || $xml === '') throw new RuntimeException('message vide');
                         $created[] = pap_import($id, $xml, $uid);
                     }
-                    pap_req('PATCH', 'message/' . rawurlencode($id) . '/confirm');
+                    if (empty($m['confirmed'])) pap_req('PATCH', 'message/' . rawurlencode($id) . '/confirm');
                 } catch (Throwable $e) { $errors[] = "$id : " . $e->getMessage(); }
             }
             $pages = (int)($list['meta']['pages'] ?? 1);

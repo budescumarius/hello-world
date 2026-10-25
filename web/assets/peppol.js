@@ -238,7 +238,7 @@ function peppolSettings(page) {
     <div data-lookres></div><form>${fieldsGrid(fields, { enterprise: s.enterprise, peppolId: s.peppolId, street: s.street, zip: s.zip, city: s.city })}<div class="btns"><button class="btn primary" type="submit">Enregistrer</button></div></form></div>
     <div class="card"><div class="card-h"><h3>Réception et envoi automatiques</h3>${peppolApOn() ? badge('Connecté', '#2f9e44') : badge('Non connecté', '#868e96')}</div>
       <p class="muted">Avec un point d'accès <b>Peppyrus</b> (gratuit pour les entreprises belges), les factures de vos fournisseurs arrivent toutes seules dans <b>Achats & dépenses</b> (avec leur PDF), et vos factures partent directement sur Peppol depuis l'application.</p>
-      <form data-ap>${fieldsGrid(AP_FIELDS(), { env: (S.settings.peppolap || {}).env || 'prod', key: '' })}<div class="btns"><button class="btn primary" type="submit">Enregistrer</button><button class="btn" type="button" data-aptest ${peppolApOn() ? '' : 'disabled'}>Tester la connexion</button><button class="btn" type="button" data-apsync ${peppolApOn() ? '' : 'disabled'}>Relever maintenant</button></div></form>
+      <form data-ap>${fieldsGrid(AP_FIELDS(), { env: (S.settings.peppolap || {}).env || 'prod', key: '' })}<div class="btns"><button class="btn primary" type="submit">Enregistrer</button><button class="btn" type="button" data-aptest ${peppolApOn() ? '' : 'disabled'}>Tester la connexion</button><button class="btn" type="button" data-apsync ${peppolApOn() ? '' : 'disabled'}>Relever maintenant</button></div></form><div data-apdiag></div>
       ${S.settings.peppol_sync && S.settings.peppol_sync.at ? `<p class="muted sm">Dernière relève : ${fmtDT(S.settings.peppol_sync.at)}${S.settings.peppol_sync.errors && S.settings.peppol_sync.errors.length ? ` – <span class="late">${esc(S.settings.peppol_sync.errors[0])}</span>` : ''}</p>` : ''}
       <ol class="steps">
         <li>Créez un compte gratuit sur <a href="https://www.peppyrus.be" target="_blank" rel="noopener">peppyrus.be</a> et enregistrez votre entreprise (identifiant <b>0208:</b> + numéro d'entreprise).</li>
@@ -275,7 +275,18 @@ function peppolSettings(page) {
   };
   $('[data-aptest]', page).onclick = async (e) => {
     const b = e.currentTarget; b.disabled = true;
-    try { const r = await api('POST', 'peppol/test'); toast(`Connexion réussie – ${r.waiting} document(s) en attente`, 4000); } catch (err) { toast(err.message, 8000); } finally { b.disabled = false; }
+    const box = $('[data-apdiag]', page);
+    try {
+      const r = await api('POST', 'peppol/test'); const ls = r.lastSync || {};
+      toast(`Connexion réussie – ${r.waiting} document(s) en attente`, 4000);
+      box.innerHTML = `<div class="hint-box"><span><b>Diagnostic Peppyrus</b> (${r.env === 'test' ? '<b class="late">environnement TEST</b> : les vraies factures arrivent en Production' : 'Production'})<br>
+        Votre identifiant : <b>${esc(r.peppolId || '—')}</b> · Messages dans la boîte Peppyrus : <b>${r.total}</b>, dont <b>${r.waiting}</b> pas encore relevé(s)<br>
+        Dernière relève : ${ls.at ? fmtDT(ls.at) : 'jamais'}${ls.at ? ` · ${num(ls.created)} facture(s) ajoutée(s)` : ''}${(ls.errors || []).length ? `<br><span class="late">Erreur : ${esc(ls.errors[0])}</span>` : ''}
+        ${r.recent.length ? `<br><br><b>Derniers messages reçus :</b><br>${r.recent.map((m) => `${esc(m.date ? fmtDT(String(m.date).replace('T', ' ').slice(0, 19)) : '')} · de ${esc(m.sender || '?')} → ${esc(m.recipient || '?')} · ${m.imported ? '✓ dans les achats' : m.confirmed ? '<span class="late">confirmé chez Peppyrus mais absent des achats</span>' : 'en attente'}`).join('<br>')}`
+          + (r.recent.some((m) => m.confirmed && !m.imported) ? '<br><button class="btn sm" data-apall>Importer les messages manquants</button>' : '')
+          : '<br><br><b>Aucun message reçu chez Peppyrus.</b> Vos fournisseurs n\'envoient pas encore à cet identifiant : cliquez « Vérifier mon enregistrement » ci-dessus.'}</span></div>`;
+      const ia = $('[data-apall]', box); if (ia) ia.onclick = async () => { ia.disabled = true; const x = await peppolSync({ force: true, quiet: false, all: true }); ia.disabled = false; if (x) $('[data-aptest]', page).click(); };
+    } catch (err) { toast(err.message, 8000); box.innerHTML = `<div class="hint-box warn"><span><b>Connexion impossible :</b> ${esc(err.message)}</span></div>`; } finally { b.disabled = false; }
   };
   $('[data-apsync]', page).onclick = async (e) => { const b = e.currentTarget; b.disabled = true; await peppolSync({ force: true, quiet: false }); b.disabled = false; };
 }

@@ -504,14 +504,25 @@ switch ($seg[0] ?? '') {
         $me = require_staff();
         $act = $seg[1] ?? '';
         if ($act === 'sync' && $method === 'POST') {
-            try { $r = pap_sync($me['id']); } catch (Throwable $e) { fail(502, $e->getMessage()); }
+            try { $r = pap_sync($me['id'], !empty(body()['all'])); } catch (Throwable $e) { fail(502, $e->getMessage()); }
             foreach ($r['created'] as $c) log_activity($me['id'], 'create', 'expense', $c['id'], null, 'Reçu via Peppol : ' . $c['label']);
             out($r);
         }
         if ($act === 'test' && $method === 'POST') {
             require_admin();
-            try { $l = pap_req('GET', 'message/list?folder=INBOX&confirmed=false&perPage=1'); } catch (Throwable $e) { fail(502, $e->getMessage()); }
-            out(['ok' => true, 'waiting' => (int)($l['meta']['total'] ?? count($l['items'] ?? []))]);
+            try {
+                $l = pap_req('GET', 'message/list?folder=INBOX&confirmed=false&perPage=1');
+                // diagnostic : derniers messages reçus chez Peppyrus (confirmés ou non) et s'ils sont déjà dans les achats
+                $all = pap_req('GET', 'message/list?folder=INBOX&perPage=10');
+            } catch (Throwable $e) { fail(502, $e->getMessage()); }
+            $recent = [];
+            foreach ((array)($all['items'] ?? []) as $m) {
+                $mid = (string)($m['id'] ?? '');
+                $recent[] = ['id' => $mid, 'date' => (string)($m['created'] ?? $m['createdAt'] ?? $m['date'] ?? ''), 'sender' => (string)($m['sender'] ?? ''), 'recipient' => (string)($m['recipient'] ?? $m['receiver'] ?? ''),
+                    'confirmed' => (bool)($m['confirmed'] ?? false), 'imported' => $mid !== '' && (bool)q("SELECT id FROM items WHERE company_id = ? AND type = 'expense' AND data LIKE ?", [cid(), '%"peppolMsg":"' . $mid . '"%'])->fetch()];
+            }
+            out(['ok' => true, 'waiting' => (int)($l['meta']['total'] ?? count($l['items'] ?? [])), 'total' => (int)($all['meta']['total'] ?? count($all['items'] ?? [])), 'recent' => $recent,
+                'env' => (setting('peppolap', []) ?: [])['env'] ?? 'prod', 'peppolId' => (string)((setting('company', []) ?: [])['peppolId'] ?? ''), 'lastSync' => setting('peppol_sync', null)]);
         }
         if ($act === 'send' && $method === 'POST') {
             $b = body();

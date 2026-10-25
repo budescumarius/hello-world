@@ -249,7 +249,7 @@ function parseInvoiceText(text) {
 // ---------------------------------------------------------------- Réception Peppol automatique (point d'accès Peppyrus)
 const peppolApOn = () => !!(S.settings.peppolap && S.settings.peppolap.hasKey);
 let peppolSyncP = null;
-async function peppolSync({ force = false, quiet = true } = {}) {
+async function peppolSync({ force = false, quiet = true, all = false } = {}) {
   if (!peppolApOn()) return null;
   const last = S.settings.peppol_sync && S.settings.peppol_sync.at;
   if (!force && last && Date.now() - new Date(last.replace(' ', 'T')).getTime() < 10 * 60 * 1000) return null;
@@ -257,7 +257,7 @@ async function peppolSync({ force = false, quiet = true } = {}) {
   const run = async () => {
     const all = { created: [], errors: [] };
     for (let i = 0; i < 30; i++) {
-      const r = await api('POST', 'peppol/sync');
+      const r = await api('POST', 'peppol/sync', all ? { all: true } : {});
       all.created.push(...(r.created || [])); all.errors.push(...(r.errors || [])); all.busy = r.busy;
       if (r.created && r.created.length && i === 0 && !quiet) toast(`Relève Peppol en cours… ${r.created.length} facture(s)`, 3000);
       if (!r.more) break;
