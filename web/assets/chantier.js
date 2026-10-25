@@ -105,9 +105,13 @@ route('project', async (id, tab = 'overview', sub) => {
   const c = byId(contacts, p.data.clientId);
   const page = layout({ active: 'projects', icon: 'crane', title: p.data.name, back: '#/projects',
     sub: `${esc(p.number)} · ${st(PST, p.data.status)}${c ? ` · <a href="#/contact/${c.id}">${esc(contactName(c))}</a>` : ''}${p.data.city ? ' · ' + esc(p.data.city) : ''}`,
-    actions: `<button class="btn" data-act="edit">${I.edit} Modifier</button><button class="btn primary" data-act="padd">${I.plus} Ajouter…</button>`,
+    actions: `<button class="btn" data-act="sum">${I.print} Résumé</button><button class="btn" data-act="edit">${I.edit} Modifier</button><button class="btn primary" data-act="padd">${I.plus} Ajouter…</button>`,
     tabs: tabs.map(([k, l, g], i) => `${g && g !== (tabs[i - 1] || [])[2] ? `<span class="tab-g">${g}</span>` : ''}<a href="#/project/${p.id}/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
   $('[data-act=edit]').onclick = () => editProject(p);
+  $('[data-act=sum]').onclick = () => menuSheet('Résumé du chantier (PDF)', [
+    { label: 'Complet (avec finances, coûts et marge)', icon: 'coins', primary: true, run: () => go(`#/projectsummary/${p.id}`) },
+    { label: 'Pour le client (sans coûts ni marge)', icon: 'people', run: () => go(`#/projectsummary/${p.id}/client`) },
+  ]);
   if (isSimple()) $('[data-act=padd]').onclick = () => menuSheet('Ajouter au chantier', [
     { label: 'Achat : photo ou PDF de la facture', icon: 'camera', primary: true, run: () => importPurchase(p.id) },
     { label: 'Facture', icon: 'coins', run: () => newInvoice({ project_id: p.id, data: { clientId: p.data.clientId, title: p.data.name } }) },
@@ -131,6 +135,51 @@ route('project', async (id, tab = 'overview', sub) => {
   await T[tab](p, page, contacts);
 });
 
+// Résumé imprimable d'un chantier : infos, finances, facturation, avancement, heures, points ouverts, derniers rapports.
+// Version « client » : sans coûts, déboursés ni marge.
+route('projectsummary', async (pid, mode) => {
+  const forClient = mode === 'client';
+  const p = await db.get('project', +pid);
+  const [contacts, all] = await Promise.all([db.list('contact'), db.many(['quote', 'invoice', 'order', 'timesheet', 'point', 'phase', 'report'], p.id)]);
+  all.expense = await db.list('expense');
+  const f = projectFinance(p, all); const d = p.data; const c = byId(contacts, d.clientId);
+  const pc = (a, b) => (b ? `${fnum((a / b) * 100, 1)} %` : '—');
+  // avancement facturé : dernier cumul des états d'avancement
+  const sits = all.invoice.filter((i) => i.data.kind === 'situation' && i.data.status === 'emise').sort((a, b) => num(b.data.situationNo) - num(a.data.situationNo));
+  const rows = sits.length ? (sits[0].data.progressRows || []).filter((r) => r.kind === 'item') : [];
+  const market = rows.reduce((a, r) => a + num(r.qty) * num(r.price), 0); const done = rows.reduce((a, r) => a + num(r.qty) * num(r.price) * num(r.cum) / 100, 0);
+  const phases = all.phase.sort((a, b) => (a.data.start || '').localeCompare(b.data.start || ''));
+  const openPts = all.point.filter((x) => ['open', 'progress'].includes(x.data.status)); const late = openPts.filter((x) => x.data.due && x.data.due < today());
+  const months = {}; const people = {};
+  all.timesheet.forEach((t) => { const m = (t.data.date || '').slice(0, 7); months[m] = (months[m] || 0) + num(t.data.hours); const w = t.data.who || '—'; people[w] = (people[w] || 0) + num(t.data.hours); });
+  const totH = Object.values(months).reduce((a, v) => a + v, 0);
+  const invs = all.invoice.filter((i) => i.data.status === 'emise').sort((a, b) => (a.data.date || '').localeCompare(b.data.date || ''));
+  const subs = (d.subs || []).map((id) => contactName(byId(contacts, id))).filter(Boolean);
+  const reps = all.report.sort((a, b) => (b.data.date || '').localeCompare(a.data.date || '')).slice(0, 5);
+  const kv = (l, v) => (v ? `<tr><td class="muted">${l}</td><td>${v}</td></tr>` : '');
+  const html = `<div class="doc">${fieldHead(p, forClient ? 'Rapport de chantier' : 'Résumé du chantier')}
+    <div class="d-sec"><h2>Informations</h2><table class="d-lines"><tbody>
+      ${kv('N° chantier', esc(p.number || ''))}${kv('Client', esc(c ? contactName(c) : ''))}${kv('Adresse', esc([d.address, [d.zip, d.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')))}
+      ${kv('Statut', esc((PST[d.status] || [d.status])[0] || ''))}${kv('Période', [d.start && `du ${fmtDate(d.start)}`, d.end && `au ${fmtDate(d.end)}`].filter(Boolean).join(' '))}
+      ${kv('Conducteur', esc(userName(+d.managerId)))}${kv('Équipe', esc((d.team || []).map((u) => userName(+u)).join(', ')))}${kv('Sous-traitants', esc(subs.join(', ')))}</tbody></table></div>
+    <div class="d-sec"><h2>${forClient ? 'Montants' : 'Finances'}</h2><table class="d-lines"><tbody>
+      ${kv('Montant des travaux HT (devis acceptés)', money(f.budget))}
+      ${forClient ? '' : `${kv('Déboursé prévu', `${money(f.est)}${f.budget ? ` · marge prévue ${pc(f.budget - f.est, f.budget)}` : ''}`)}${kv('Coût réel à ce jour', `${money(f.real)}${f.est ? ` · ${pc(f.real, f.est)} du prévu` : ''}`)}${kv('Engagé (commandes ouvertes)', money(f.engaged))}`}
+      ${kv('Facturé HT', `${money(f.invoiced)}${f.budget ? ` · ${pc(f.invoiced, f.budget)} du montant` : ''}`)}${kv('Encaissé TVAC', money(f.cashed))}${kv('Reste à encaisser TVAC', money(f.due))}
+      ${forClient ? '' : kv('<b>Marge estimée</b>', `<b>${money(f.margin)}</b>${f.budget ? ` (${pc(f.margin, f.budget)})` : ''}`)}</tbody></table>
+      ${forClient ? '' : `<table class="d-lines"><thead><tr><th>Type de coût</th><th class="r">Prévu</th><th class="r">Réel</th><th class="r">Écart</th></tr></thead><tbody>${Object.entries(TYPES).filter(([k]) => f.estBy[k] || f.realBy[k]).map(([k, l]) => `<tr><td>${l}</td><td class="r">${money(f.estBy[k] || 0)}</td><td class="r">${money(f.realBy[k] || 0)}</td><td class="r">${money((f.estBy[k] || 0) - (f.realBy[k] || 0))}</td></tr>`).join('')}</tbody></table>`}</div>
+    ${invs.length ? `<div class="d-sec"><h2>Facturation</h2><table class="d-lines"><thead><tr><th>N°</th><th>Date</th><th>Type</th><th class="r">HT</th><th class="r">TVAC</th><th class="r">Payé</th></tr></thead><tbody>
+      ${invs.map((i) => { const t = totals(i.data); return `<tr><td>${esc(i.number || '')}</td><td>${fmtDate(i.data.date)}</td><td>${esc(IKIND[i.data.kind] || 'Facture')}${i.data.ref ? ` ${esc(i.data.ref)}` : ''}</td><td class="r">${money(t.base)}</td><td class="r">${money(t.total)}</td><td class="r">${money(invState(i).paid)}</td></tr>`; }).join('')}</tbody></table></div>` : ''}
+    <div class="d-sec"><h2>Avancement</h2><table class="d-lines"><tbody>
+      ${market ? kv(`Travaux réalisés (dernier état ${esc(sits[0].data.ref || '')})`, `<b>${pc(done, market)}</b> · ${money(done)} sur ${money(market)}`) : kv('États d\'avancement', 'aucun pour l\'instant')}
+      ${phases.map((x) => kv(esc(x.data.name), `${fnum(num(x.data.progress), 0)} % · ${fmtDate(x.data.start)} → ${fmtDate(x.data.end)}`)).join('')}</tbody></table></div>
+    ${!forClient && totH ? `<div class="d-sec"><h2>Heures prestées : ${fnum(totH, 1)} h</h2><table class="d-lines"><thead><tr><th>Mois</th><th class="r">Heures</th></tr></thead><tbody>${Object.keys(months).sort().map((m) => `<tr><td>${esc(monthLabel(m))}</td><td class="r">${fnum(months[m], 1)} h</td></tr>`).join('')}</tbody></table>
+      <p class="muted sm">${Object.entries(people).sort((a, b) => b[1] - a[1]).map(([w, h]) => `${esc(w)} ${fnum(h, 1)} h`).join(' · ')}</p></div>` : ''}
+    <div class="d-sec"><h2>Points ouverts : ${openPts.length}${late.length ? ` (dont ${late.length} en retard)` : ''}</h2>${openPts.length ? `<table class="d-lines"><thead><tr><th>N°</th><th>Point</th><th>Échéance</th></tr></thead><tbody>${openPts.slice(0, 15).map((x) => `<tr><td>${esc(x.number || '')}</td><td>${esc(x.data.title || '')}</td><td>${x.data.due ? fmtDate(x.data.due) : ''}</td></tr>`).join('')}</tbody></table>${openPts.length > 15 ? `<p class="muted sm">… et ${openPts.length - 15} autre(s)</p>` : ''}` : '<p class="muted">Aucun point ouvert.</p>'}</div>
+    ${reps.length ? `<div class="d-sec"><h2>Derniers rapports</h2><table class="d-lines"><tbody>${reps.map((r) => `<tr><td>${fmtDate(r.data.date)}</td><td><b>${esc(r.data.title || 'Rapport')}</b>${r.data.text ? `<br><span class="muted">${esc(String(r.data.text).slice(0, 160))}</span>` : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
+  </div>`;
+  printPage(forClient ? `Rapport de chantier – ${d.name}` : `Résumé – ${d.name}`, html, `#/project/${p.id}/overview`);
+});
 async function tabOverview(p, el, contacts) {
   const all = await db.many(['quote', 'invoice', 'order', 'timesheet', 'point', 'phase', 'task'], p.id);
   all.expense = await db.list('expense'); // achats ventilés sur plusieurs chantiers inclus
