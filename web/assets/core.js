@@ -57,7 +57,7 @@ async function api(method, path, body) {
   if (body instanceof FormData) opt.body = body;
   else if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
   let res;
-  try { res = await fetch('api.php?r=' + path, opt); } catch (e) { throw new Error('Pas de connexion au serveur'); }
+  try { res = await fetch('api.php?r=' + path, opt); } catch (e) { throw new Error('Pas de connexion au serveur (vérifiez internet) – modifications non enregistrées'); }
   let data = null;
   try { data = await res.json(); } catch (e) { /* réponse vide */ }
   if (res.status === 401 && S.ready) { S.ready = false; showLogin(); }
@@ -85,12 +85,28 @@ const db = {
 };
 // Sauvegarde d'un élément en place : met à jour id / version / numéro mais garde le même objet `data`,
 // que les éditeurs ouverts continuent de modifier.
-async function persist(type, it, opt) {
-  const r = await db.save(type, it, opt);
-  const { data, ...meta } = r;
-  Object.assign(it, meta);
-  if (!it.data) it.data = data;
-  return it;
+// Les sauvegardes d'un même élément passent l'une après l'autre (sinon la 2e part avec une version périmée et le serveur
+// la prend pour la modification d'un autre utilisateur) ; une coupure réseau est réessayée deux fois.
+const savingQ = new WeakMap();
+function persist(type, it, opt) {
+  const run = async () => {
+    for (let a = 0; ; a++) {
+      try {
+        const r = await db.save(type, it, opt);
+        const { data, ...meta } = r;
+        Object.assign(it, meta);
+        if (!it.data) it.data = data;
+        return it;
+      } catch (e) {
+        if (e.status || a >= 2) throw e;
+        await new Promise((res) => setTimeout(res, 1500 * (a + 1)));
+      }
+    }
+  };
+  const p = (savingQ.get(it) || Promise.resolve()).catch(() => {}).then(run);
+  savingQ.set(it, p);
+  p.finally(() => { if (savingQ.get(it) === p) savingQ.delete(it); }).catch(() => {});
+  return p;
 }
 
 async function upload(file, projectId) {
