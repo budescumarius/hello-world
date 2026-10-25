@@ -291,11 +291,12 @@ async function docWizard(kind, id, step) {
   // fini : aperçu + envoi
   const t = totals(d);
   page.innerHTML = `<div class="s-done-h"><small>${kind === 'devis' ? 'Devis' : d.kind === 'avoir' ? `Note de crédit (annule la facture ${esc(d.refInvoice || '')})` : 'Facture'} pour</small><b>${esc(sName(client))}</b><span>${sMoney(t.total)} <small>avec TVA</small></span></div>
-    <div class="s-actions" data-acts></div>
+    ${sVarSeg(typ, d)}<div class="s-actions" data-acts></div>
     <details class="s-preview" open><summary>Voir ${kind === 'devis' ? 'le devis' : 'la facture'}</summary><div class="s-doc" data-doc><p class="muted">Chargement…</p></div></details>
     <button class="s-big" data-edit>${I.edit} Modifier</button>`;
   $('[data-edit]', page).onclick = () => goStep('travail');
-  docHtml(typ, it.id).then((r) => { const el = $('[data-doc]', page); if (el) el.innerHTML = r.html; }).catch((e) => { $('[data-doc]', page).innerHTML = `<p class="late">${esc(e.message)}</p>`; });
+  const preview = () => docHtml(typ, it.id, sVar(typ, d)).then((r) => { const el = $('[data-doc]', page); if (el) el.innerHTML = r.html; }).catch((e) => { $('[data-doc]', page).innerHTML = `<p class="late">${esc(e.message)}</p>`; });
+  preview(); sVarBind(page, preview);
   const acts = $('[data-acts]', page);
   const peppolOk = typ === 'invoice' && buyerInfo(client).peppolId && buyerInfo(client).isCompany;
   if (typ === 'invoice') {
@@ -308,9 +309,9 @@ async function docWizard(kind, id, step) {
       const a = b.dataset.a;
       if (a === 'later') { toast('Facture gardée (pas encore validée)', 2500); return go('#/dashboard'); }
       if (!await emitSimple(it, client)) return;
-      if (a === 'mail') return go(`#/print/invoice/${it.id}?mail=1`);
+      if (a === 'mail') return go(`#/print/invoice/${it.id}?${sVar(typ, d) ? 'v=simple&' : ''}mail=1`);
       if (a === 'peppol') { if (!peppolApOn()) { toast('Activez d\'abord Peppol (2 minutes)', 4000); return go('#/s/peppol'); } go(`#/s/doc/facture/${it.id}`); return setTimeout(() => peppolInvoice(it), 700); }
-      go(`#/s/doc/facture/${it.id}`); setTimeout(() => sharePdfOf('invoice', it.id), 600);
+      const v = sVar(typ, d); go(`#/s/doc/facture/${it.id}`); setTimeout(() => sharePdfOf('invoice', it.id, v), 600);
     }; });
   } else {
     acts.innerHTML = `${sBtn('data-a="mail"', 'mail', 'Envoyer par e-mail', client.data.email ? esc(client.data.email) : 'vous choisirez l\'adresse', 'primary')}
@@ -353,8 +354,14 @@ async function emitSimple(it, client) {
   return true;
 }
 // Partager le PDF depuis n'importe quel écran (WhatsApp, SMS, enregistrer…)
-async function sharePdfOf(typ, id) {
-  const r = await docHtml(typ, id);
+// facture : version détaillée (tous les postes) ou simplifiée (une ligne « travaux » par taux de TVA) – choix gardé pendant la session
+const sVar = (typ, d) => (typ === 'invoice' && (d.lines || []).filter((l) => l.kind === 'item').length > 1 && S.sInvVar === 'simple' ? 'simple' : '');
+const sVarSeg = (typ, d) => (typ === 'invoice' && (d.lines || []).filter((l) => l.kind === 'item').length > 1 ? `<div class="s-var"><span>Facture à envoyer :</span><div class="seg"><button type="button" class="${sVar(typ, d) ? '' : 'on'}" data-var="">Détaillée<small>tous les postes</small></button><button type="button" class="${sVar(typ, d) ? 'on' : ''}" data-var="simple">Simplifiée<small>une ligne, sans détail</small></button></div></div>` : '');
+function sVarBind(page, preview) {
+  $$('[data-var]', page).forEach((b) => { b.onclick = () => { S.sInvVar = b.dataset.var; $$('[data-var]', page).forEach((x) => x.classList.toggle('on', x === b)); const el = $('[data-doc]', page); if (el && (el.closest('details') || {}).open !== false) { el.innerHTML = '<p class="muted">Chargement…</p>'; preview(); } else if (el) el.innerHTML = ''; }; });
+}
+async function sharePdfOf(typ, id, variant = '') {
+  const r = await docHtml(typ, id, variant);
   const holder = document.createElement('div'); holder.className = 'print-page s-offscreen'; holder.innerHTML = r.html;
   document.body.appendChild(holder);
   const old = $$('.print-page').filter((x) => x !== holder); old.forEach((x) => x.classList.remove('print-page'));
@@ -613,7 +620,7 @@ async function docSimple(kind, id) {
     ${d.creditedBy ? `<a class="s-info" href="#/s/doc/facture/${d.creditedBy}">Annulée par une note de crédit ${I.chevron}</a>` : ''}
     ${(d.creditNotes || []).map((n) => `<a class="s-info" href="#/s/doc/facture/${n}">Note de crédit partielle ${I.chevron}</a>`).join('')}
     ${d.kind === 'avoir' && d.refInvoiceId ? `<a class="s-info" href="#/s/doc/facture/${d.refInvoiceId}">Annule la facture ${esc(d.refInvoice || '')} ${I.chevron}</a>` : ''}
-    <div class="s-actions" data-acts></div>
+    ${draft ? '' : sVarSeg(typ, d)}<div class="s-actions" data-acts></div>
     ${typ === 'invoice' && (d.payments || []).length ? `<div class="s-pays"><b>Paiements reçus</b>${d.payments.map((p, i) => `<div class="s-pay"><span>${fmtDate(p.date)} · ${esc(p.method || '')}${p.note ? ` · ${esc(p.note)}` : ''}</span><b>${sMoney(p.amount)}</b><button type="button" data-pdel="${i}" aria-label="Supprimer ce paiement">${I.trash}</button></div>`).join('')}</div>` : ''}
     <details class="s-preview"><summary>Voir ${kind === 'devis' ? 'le devis' : 'la facture'}</summary><div class="s-doc" data-doc></div></details>
     ${!draft ? `<div class="s-list s-danger-zone">${typ === 'invoice' ? sBtn('data-a="fix"', 'edit', `Modifier ou supprimer cette ${d.kind === 'avoir' ? 'note de crédit' : 'facture'}`, 'elle est validée : on vous explique les règles') : sBtn('data-a="qedit"', 'edit', 'Modifier ce devis', '') + sBtn('data-a="qdel"', 'trash', 'Supprimer ce devis', '', 'danger')}</div>` : ''}
@@ -639,7 +646,9 @@ async function docSimple(kind, id) {
     d.payments.splice(i, 1); await persist(typ, it, { silent: true }); render();
     undoToast('Paiement supprimé', async () => { d.payments.splice(i, 0, p); await persist(typ, it, { silent: true }); render(); });
   }; });
-  $('details', page).addEventListener('toggle', (e) => { if (e.target.open && !$('[data-doc] .doc', page)) docHtml(typ, it.id).then((r) => { $('[data-doc]', page).innerHTML = r.html; }); });
+  const preview = () => docHtml(typ, it.id, sVar(typ, d)).then((r) => { $('[data-doc]', page).innerHTML = r.html; });
+  $('details', page).addEventListener('toggle', (e) => { if (e.target.open && !$('[data-doc] .doc', page)) preview(); });
+  sVarBind(page, preview);
   $$('[data-a]', page).forEach((b) => { b.onclick = async () => {
     const a = b.dataset.a;
     if (a === 'edit') return go(`#/s/${kind}/${it.id}/travail`);
@@ -650,10 +659,10 @@ async function docSimple(kind, id) {
     if (a === 'qdel') { const inv = (await db.list('invoice')).filter((x) => +x.data.quoteId === it.id); if (!confirm(inv.length ? `Ce devis a ${inv.length} facture(s). Supprimer quand même le devis ? (les factures restent)` : 'Supprimer ce devis ?')) return; return sDeleteDraft('quote', it, null, () => go('#/s/liste/devis')); }
     if (a === 'del') return sDeleteDraft(typ, it, null, () => go(`#/s/liste/${kind === 'devis' ? 'devis' : 'factures'}`));
     if (a === 'pay') return go(`#/s/paye/${it.id}`);
-    if (a === 'mail') return go(`#/print/${typ}/${it.id}?mail=1`);
-    if (a === 'pdf') return go(`#/print/${typ}/${it.id}`);
+    if (a === 'mail') return go(`#/print/${typ}/${it.id}?${sVar(typ, d) ? 'v=simple&' : ''}mail=1`);
+    if (a === 'pdf') return go(`#/print/${typ}/${it.id}${sVar(typ, d) ? '?v=simple' : ''}`);
     if (a === 'peppol') return peppolApOn() ? peppolInvoice(it) : go('#/s/peppol');
-    if (a === 'share') { if (typ === 'quote' && d.status === 'brouillon') { d.status = 'envoye'; d.sentAt = today(); await persist('quote', it, { silent: true }); } return sharePdfOf(typ, it.id); }
+    if (a === 'share') { if (typ === 'quote' && d.status === 'brouillon') { d.status = 'envoye'; d.sentAt = today(); await persist('quote', it, { silent: true }); } return sharePdfOf(typ, it.id, sVar(typ, d)); }
     if (a === 'no') { d.status = 'refuse'; await persist('quote', it, { silent: true }); return render(); }
     if (a === 'yes') { d.status = 'accepte'; d.acceptedAt = today(); await persist('quote', it, { silent: true }); }
     if (a === 'yes' || a === 'bill') return billQuote(it);

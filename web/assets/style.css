@@ -1807,3 +1807,10 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .top-actions .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-right: 6px; }
 .top-actions .seg a { padding: 0 12px; height: 36px; display: inline-flex; align-items: center; font-weight: 600; font-size: 13px; color: var(--muted); text-decoration: none; background: var(--surface); }
 .top-actions .seg a.on { background: var(--ink, #1c2550); color: #fff; }
+
+/* simplifié : choix facture détaillée / simplifiée avant l'envoi */
+.s-var { display: grid; gap: 6px; margin: 10px 0 4px; } .s-var > span { font-weight: 600; font-size: 14px; }
+.s-var .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.s-var .seg button { display: grid; gap: 2px; padding: 10px 12px; border-radius: 12px; border: 2px solid var(--border); background: #fff; font: inherit; font-weight: 600; cursor: pointer; text-align: left; }
+.s-var .seg button small { font-weight: 400; color: var(--muted); font-size: 12px; }
+.s-var .seg button.on { border-color: var(--primary, #3b5bdb); background: #eef2ff; }
