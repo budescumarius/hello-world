@@ -210,11 +210,22 @@ async function totalsBlock(kind, it, t, paid) {
   let rows = row('Total HT', gross, tt.discount || deds.length ? '' : 'mb-sum');
   if (tt.discount) rows += row(`Remise ${fnum(num(d.discount))} %`, -tt.discount);
   for (const [k, v] of Object.entries(dedGroups)) rows += row(esc(k), v);
+  let leftRow = '';
+  // état d'avancement : acompte encore à déduire après cet état (acomptes du devis − déductions jusqu'à cet état inclus)
+  if (kind === 'invoice' && d.kind === 'situation' && d.quoteId) {
+    const sib = (await db.list('invoice')).filter((i) => +i.data.quoteId === +d.quoteId);
+    const isAc = (l) => l.kind === 'item' && (l.deduction === 'acompte' || (isDeduction(l) && /acompte/i.test(l.desc || '')));
+    const adv = r2(sib.filter((i) => i.data.kind === 'acompte').reduce((a, i) => a + totals(i.data).base, 0));
+    const no = num(d.situationNo) || 1;
+    const done = r2(sib.filter((i) => i.data.kind === 'situation' && i.id !== it.id && (num(i.data.situationNo) || 1) < no).reduce((a, i) => a - (i.data.lines || []).filter(isAc).reduce((x, l) => x + r2(num(l.qty) * num(l.price)), 0), 0)
+      - deds.filter(isAc).reduce((x, l) => x + r2(num(l.qty) * num(l.price)), 0));
+    if (adv > 0.005) leftRow = row(`Acompte restant à déduire <small>(acompte ${dmoney(adv, t)} · déduit à ce jour ${dmoney(done, t)})</small>`, Math.max(0, r2(adv - done)), 'mb-left');
+  }
   if (tt.discount || deds.length) rows += row('Total HT net', tt.base, 'mb-sum');
   rows += d.reverse ? row('TVA', 'Autoliquidation') : tt.vats.map((v) => row(`TVA ${fnum(v.rate)} % <small>sur ${dmoney(v.base, t)}</small>`, v.vat)).join('');
   const due = r2(tt.total - (paid || 0));
   const card = `<div class="mb-totals">${rows}<div class="mb-grand"><span>${isCn ? 'Total crédité' : isEAdoc(kind, d) ? 'Total de cet état TVAC' : 'Total TVAC'}</span><b>${dmoney(tt.total, t)}</b></div>
-    ${kind === 'invoice' && !isCn && !isEAdoc(kind, d) && paid ? `${row('Déjà payé', -paid)}<div class="mb-due"><span>Reste à payer</span><b>${dmoney(due, t)}</b></div>` : ''}</div>`;
+    ${kind === 'invoice' && !isCn && !isEAdoc(kind, d) && paid ? `${row('Déjà payé', -paid)}<div class="mb-due"><span>Reste à payer</span><b>${dmoney(due, t)}</b></div>` : ''}${leftRow}</div>`;
   const side = [];
   const ea = isEAdoc(kind, d);
   if (ea) side.push(`<div class="mb-accept"><h4>Approbation</h4>Merci de vérifier cet état d'avancement et de nous le retourner approuvé${d.ea && d.ea.approveBy ? ` avant le <b>${esc(dateFr(d.ea.approveBy))}</b>` : ''}. Sans remarque écrite dans ce délai, il sera considéré comme accepté et facturé.</div>`);

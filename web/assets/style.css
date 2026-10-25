@@ -1172,6 +1172,7 @@ a.s-note { text-decoration: none; color: var(--text); } a.s-note > b { color: va
 .mb-tr + .mb-tr { border-top: 1px solid #f0f1f6; }
 .mb-tr span { color: var(--mute); } .mb-tr b { font-weight: 700; white-space: nowrap; }
 .mb-tr.mb-sum { background: var(--tint); } .mb-tr.mb-sum span { color: var(--ink); font-weight: 700; }
+.mb-tr.mb-left { font-size: .88em; font-style: italic; } .mb-tr.mb-left b { font-weight: 600; color: var(--mute); }
 .mb-grand { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 12px 14px; background: var(--ink); color: #fff; }
 .mb-grand span { font-weight: 700; letter-spacing: .04em; } .mb-grand b { font-size: 1.45em; font-weight: 800; white-space: nowrap; }
 .mb-due { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 10px 14px; background: var(--acc); color: #1d1600; }
