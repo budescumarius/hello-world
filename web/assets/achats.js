@@ -145,11 +145,22 @@ function invoiceItemsFromText(text) {
     if (!MONEY.test(tk[tk.length - 1]) || !/[A-Za-zÀ-ÿ]{3}/.test(l) || SKIP.test(l)) continue;
     const amount = num(tk[tk.length - 1].replace(/[ .\u00a0](?=\d{3}\b)/g, '').replace(',', '.'));
     // désignation : sans les colonnes de fin (unité, quantité, prix, remise, totaux)
-    let nums = 0;
-    while (tk.length > 1 && (/^-?[\d.,%]+$/.test(tk[tk.length - 1]) || /^[€%]$/.test(tk[tk.length - 1]))) { tk.pop(); nums++; }
-    if (nums >= 2 && tk.length > 1 && /^[A-Za-z²³]{1,4}\.?$/.test(tk[tk.length - 1])) tk.pop(); // unité (PC, BTE, m², kg…)
+    let nums = 0; const ns = [];
+    while (tk.length > 1 && (/^-?[\d.,%]+$/.test(tk[tk.length - 1]) || /^[€%]$/.test(tk[tk.length - 1]))) { const t = tk.pop(); nums++; if (/\d/.test(t) && !/%$/.test(t)) ns.unshift(t); }
+    let unit = '';
+    if (nums >= 2 && tk.length > 1 && /^[A-Za-z²³]{1,4}\.?$/.test(tk[tk.length - 1])) unit = tk.pop().replace(/\.$/, ''); // unité (PC, BTE, m², kg…)
     const desc = tk.join(' ').trim();
-    if (desc.length >= 3) { const grp = grpOf(); out.push({ desc, amount: r2(amount), ...(grp ? { grp } : {}) }); fresh = false; }
+    if (desc.length >= 3) {
+      const grp = grpOf();
+      // quantité × prix unitaire net = montant de la ligne (« PC 2 36,98 30 25,89 51,78 » → 2 × 25,89 : remise déjà déduite)
+      const vals = ns.slice(0, -1).map((t) => num(t.replace(/[ .\u00a0](?=\d{3}\b)/g, '').replace(',', '.')));
+      let qty = 0; let price = 0;
+      for (let i = 0; i < vals.length && !qty; i++) for (let j = vals.length - 1; j > i; j--) { if (vals[i] > 0 && vals[j] > 0 && Math.abs(vals[i] * vals[j] - Math.abs(amount)) <= 0.011 + vals[i] * 0.006) { qty = vals[i]; price = vals[j]; break; } }
+      // référence fournisseur en tête (« 131809 TTH TUBE… ») : chiffres ou code avec chiffres
+      const rm = desc.match(/^(\d{2,}[A-Z0-9./-]*|[A-Z]{1,4}\d[A-Z0-9./-]{2,})\s+(.{3,})$/);
+      out.push({ desc, amount: r2(amount), ...(grp ? { grp } : {}), ...(qty ? { qty, price } : {}), ...(unit ? { unit } : {}), ...(rm ? { ref: rm[1], name: rm[2] } : {}) });
+      fresh = false;
+    }
   }
   return out;
 }

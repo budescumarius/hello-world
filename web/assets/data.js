@@ -104,17 +104,20 @@ function invState(inv) {
   return { t, paid, rest, s };
 }
 const lid = () => Math.random().toString(36).slice(2, 10);
-// Prix d'un article de bibliothèque ; un ouvrage additionne ses composants
+// Coût horaire de la main d'œuvre (déboursé €/h, Paramètres → Entreprise) : utilisé par les ouvrages
+const moRate = () => num((S.settings.company || {}).moRate);
+// Prix d'un article de bibliothèque ; un ouvrage additionne ses composants (avec % de pertes) et ses heures de main d'œuvre
 function articleCost(a, all, depth = 0) {
   const d = a.data;
-  // article simple, ou ouvrage sans composant : le déboursé encodé tel quel
-  if (d.kind !== 'ouvrage' || !(d.components || []).length || depth > 4) return { cost: num(d.cost), costBy: { [d.kind === 'ouvrage' ? 'divers' : d.kind || 'divers']: num(d.cost) } };
+  // article simple, ou ouvrage sans composant ni heures : le déboursé encodé tel quel
+  if (d.kind !== 'ouvrage' || !((d.components || []).length || num(d.moHours)) || depth > 4) return { cost: num(d.cost), costBy: { [d.kind === 'ouvrage' ? 'divers' : d.kind || 'divers']: num(d.cost) } };
   const costBy = {}; let cost = 0;
+  if (num(d.moHours)) { const mo = num(d.moHours) * moRate(); cost += mo; costBy.mo = mo; }
   for (const c of d.components || []) {
     const sub = all.find((x) => x.id === +c.articleId);
     if (!sub) continue;
     const r = articleCost(sub, all, depth + 1);
-    const q = num(c.qty);
+    const q = num(c.qty) * (1 + num(c.loss) / 100);
     cost += r.cost * q;
     for (const [k, v] of Object.entries(r.costBy)) costBy[k] = (costBy[k] || 0) + v * q;
   }
@@ -137,6 +140,32 @@ function lineFromArticle(a, all) {
 
 // ---------------------------------------------------------------- Éditeur de lignes (tableau éditable)
 // doc : objet data (devis, facture, commande) ; opts : { showCost, onChange, readOnly, library, contacts }
+// ---------------------------------------------------------------- Mémoire des prix : lignes des devis précédents + bibliothèque
+const P_STOP = new Set(['les', 'des', 'pour', 'avec', 'sans', 'sur', 'dans', 'par', 'une', 'aux', 'compris', 'fourniture', 'pose', 'y', 'et', 'the', 'van', 'het', 'een', 'voor', 'met', 'type', 'suivant', 'selon']);
+const pWords = (s) => new Set(String(s || '').split('\n')[0].slice(0, 160).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9²³]+/).filter((w) => w.length >= 3 && !P_STOP.has(w)));
+const pUnit = (u) => String(u || '').toLowerCase().replace(/^m2$/, 'm²').replace(/^m3$/, 'm³').replace(/^(pce|pcs|piece|pièce|st)$/, 'pc').trim();
+let pMemo = null; let pMemoAt = 0;
+async function priceMemory() {
+  if (pMemo && Date.now() - pMemoAt < 60000) return pMemo;
+  const [qs, arts] = await Promise.all([db.list('quote'), db.list('article')]);
+  const out = [];
+  for (const q of qs) for (const l of q.data.lines || []) if (l.kind === 'item' && !l.option && num(l.price) > 0 && l.desc) out.push({ id: l.id, w: pWords(l.desc), unit: pUnit(l.unit), price: num(l.price), cost: num(l.cost), date: q.data.date || '', no: q.number || 'brouillon', ok: q.data.status === 'accepte', qid: q.id });
+  for (const a of arts) out.push({ lib: a, w: pWords(a.data.name), unit: pUnit(a.data.unit), price: articlePrice(a, arts), cost: articleCost(a, arts).cost, date: a.data.buy ? a.data.buy.d : '', name: a.data.name });
+  pMemo = out; pMemoAt = Date.now(); return out;
+}
+// lignes semblables (mots communs, même unité) : prix déjà pratiqués
+async function priceHints(l, skipIds, selfQuote) {
+  const w = pWords(l.desc); if (w.size < 2) return null;
+  const u = pUnit(l.unit);
+  const sc = (x) => { let n = 0; for (const t of w) if (x.w.has(t)) n++; return (2 * n) / (w.size + x.w.size); };
+  const hits = (await priceMemory()).filter((x) => (selfQuote ? x.qid !== selfQuote : !skipIds.has(x.id)) && (!u || u === 'u' || !x.unit || x.unit === u || x.lib)).map((x) => ({ ...x, s: sc(x) })).filter((x) => x.s >= 0.6);
+  const qs = hits.filter((x) => !x.lib).sort((a, b) => b.s - a.s || (b.date > a.date ? 1 : -1));
+  const best = qs.length ? qs.filter((x) => x.s >= qs[0].s - 0.15).sort((a, b) => (b.date > a.date ? 1 : -1)) : [];
+  const lib = hits.filter((x) => x.lib).sort((a, b) => b.s - a.s)[0] || null;
+  if (!best.length && !lib) return null;
+  return { last: best[0] || null, avg: best.length > 1 ? r2(best.reduce((t, x) => t + x.price, 0) / best.length) : null, n: best.length, okN: best.filter((x) => x.ok).length, lib };
+}
+
 function linesEditor(el, doc, opts) {
   doc.lines = doc.lines || [];
   const showCost = opts.showCost && ui.showCost !== false;
@@ -155,7 +184,7 @@ function linesEditor(el, doc, opts) {
         if (l.kind === 'text') return `<tr class="l-text" data-i="${i}"><td></td><td colspan="${span + 1}"><textarea class="in" data-k="desc" rows="1" placeholder="Texte libre / commentaire" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea></td><td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
         const m = num(l.cost) > 0 ? r2((num(l.price) / num(l.cost) - 1) * 100) : '';
         return `<tr class="l-item ${l.option ? 'opt' : ''}" data-i="${i}"><td class="c-no">${noCell(l, i)}${l.type ? `<i class="tdot" style="--c:${TYPE_COLORS[l.type] || '#999'}" title="${esc(TYPES[l.type] || 'Ouvrage')}"></i>` : ''}</td>
-          <td class="c-d"><textarea class="in" data-k="desc" rows="1" placeholder="Désignation" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea>${l.option ? '<small class="muted">En option – non compris dans le total</small>' : ''}</td>
+          <td class="c-d"><textarea class="in" data-k="desc" rows="1" placeholder="Désignation" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea>${l.option ? '<small class="muted">En option – non compris dans le total</small>' : ''}<div class="l-sugg" data-sg></div></td>
           ${showTm ? `<td class="c-tm" data-l="TM"><input class="in" data-k="tm" value="${esc(l.tm || '')}" maxlength="6" ${opts.readOnly ? 'readonly' : ''}></td>` : ''}
           <td class="c-u" data-l="Unité"><input class="in" data-k="unit" value="${esc(l.unit)}" list="units" ${opts.readOnly ? 'readonly' : ''}></td>
           <td class="c-n" data-l="Qté"><input class="in r" data-k="qty" inputmode="decimal" value="${esc(l.qty)}" ${opts.readOnly ? 'readonly' : ''}></td>
@@ -200,6 +229,11 @@ function linesEditor(el, doc, opts) {
           changed();
         });
         if (inp.dataset.k !== 'desc') inp.addEventListener('blur', () => { if (!['unit', 'tm', 'no'].includes(inp.dataset.k)) drawSoon(); });
+        // désignation d'une ligne : prix déjà pratiqués pour des lignes semblables
+        if (inp.dataset.k === 'desc' && l.kind === 'item' && !opts.readOnly) {
+          let t; const go2 = () => { clearTimeout(t); t = setTimeout(() => showHints(tr, l), 450); };
+          inp.addEventListener('input', go2); inp.addEventListener('focus', go2);
+        }
       });
     });
     $$('[data-menu]', el).forEach((b) => { b.onclick = () => lineMenu(+b.dataset.menu); });
@@ -207,6 +241,26 @@ function linesEditor(el, doc, opts) {
     const an = $('[data-autono]', el); if (an) an.onclick = () => { if (!confirm('Remplacer les numéros du métré par une numérotation automatique (1.1.1, 1.1.2…) ?')) return; doc.lines.forEach((l) => { delete l.no; }); draw(); changed(); };
     const av = $('[data-allvat]', el); if (av) av.onclick = () => setVat(0, doc.lines.length, 'toutes les lignes');
     const sc = $('[data-showcost]', el); if (sc) sc.onchange = () => { ui.showCost = sc.checked; saveUi(); linesEditor(el, doc, opts); };
+  }
+  async function showHints(tr, l) {
+    const box = $('[data-sg]', tr); if (!box) return;
+    const h = await priceHints(l, new Set(doc.lines.map((x) => x.id)), opts.selfQuote);
+    if (!h) { box.innerHTML = ''; return; }
+    const u = l.unit ? `/${esc(l.unit)}` : '';
+    box.innerHTML = `<span class="sg-i">💡</span>${h.last ? `<button type="button" class="sg-b" data-sp="${h.last.price}" data-sc="${h.last.cost || ''}" title="Appliquer ce prix">${money(h.last.price)}${u}</button><span>${esc(h.last.no)}${h.last.date ? ` · ${fmtDate(h.last.date)}` : ''}${h.last.ok ? ' <b class="ok">✓ accepté</b>' : ''}</span>` : ''}
+      ${h.avg != null ? `<button type="button" class="sg-b" data-sp="${h.avg}" title="Appliquer la moyenne">moyenne ${money(h.avg)}</button><span>sur ${h.n} devis${h.okN ? ` (${h.okN} accepté${h.okN > 1 ? 's' : ''})` : ''}</span>` : ''}
+      ${h.lib ? `<button type="button" class="sg-b lib" data-sp="${h.lib.price}" data-sc="${h.lib.cost || ''}" title="${esc(h.lib.name)}">bibliothèque ${money(h.lib.price)}</button>${h.lib.cost ? `<span>déboursé ${money(h.lib.cost)}${h.lib.date ? ` (acheté ${fmtDate(h.lib.date)})` : ''}</span>` : ''}` : ''}`;
+    $$('[data-sp]', box).forEach((b) => {
+      b.onmousedown = (ev) => ev.preventDefault(); // garde le focus dans la désignation
+      b.onclick = () => {
+        l.price = num(b.dataset.sp); if (b.dataset.sc !== '') l.cost = num(b.dataset.sc);
+        const pi = $('[data-k=price]', tr); if (pi) pi.value = l.price; const ci = $('[data-k=cost]', tr); if (ci && b.dataset.sc !== '') ci.value = l.cost;
+        const mi = $('[data-k=margin]', tr); if (mi) mi.value = num(l.cost) > 0 ? r2((num(l.price) / num(l.cost) - 1) * 100) : '';
+        const tot = $('.tot', tr); if (tot) tot.textContent = money(num(l.qty) * num(l.price));
+        const secs = sectionTotals(doc.lines); $$('[data-sec]', el).forEach((x) => { x.textContent = money(secs[x.dataset.sec]); });
+        box.innerHTML = ''; changed(); toast(`Prix appliqué : ${money(l.price)}`, 1500);
+      };
+    });
   }
   let drawT;
   const drawSoon = () => { clearTimeout(drawT); drawT = setTimeout(() => { if (!el.contains(document.activeElement) || document.activeElement.tagName === 'BUTTON') { draw(); changed(); } }, 150); };

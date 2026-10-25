@@ -405,7 +405,7 @@ route('purchase', async (id) => {
   };
 
   // --- article par article : chaque ligne de la facture attribuée à un chantier ; les liaisons se calculent toutes seules
-  let items = Array.isArray(d.items) ? d.items.map((x) => ({ desc: x.desc || '', amount: num(x.amount), pid: x.pid || '', ...(x.grp ? { grp: x.grp } : {}) })) : [];
+  let items = Array.isArray(d.items) ? d.items.map((x) => ({ ...x, desc: x.desc || '', amount: num(x.amount), pid: x.pid || '' })) : [];
   const picked = new Set(); let doneOpen = false;
   const syncAlloc = () => {
     if (!items.some((x) => x.pid)) { if (alloc.length && alloc.every((a) => a.fromItems)) { alloc.length = 0; d.items = items; drawAlloc(); } return; }
@@ -550,6 +550,8 @@ route('purchase', async (id) => {
     await persist('expense', e);
     toast(mode === 'draft' ? 'Enregistrée (à valider)' : mode === 'paid' ? 'Facture soumise et marquée payée' : 'Facture soumise', 2500);
     go('#/expenses');
+    // facture validée : ses prix d'achat alimentent la bibliothèque (en arrière-plan)
+    if (mode !== 'draft') learnPrices(e).catch(() => {});
   };
   $('[data-submit]', page).onclick = () => save('submit');
   $('[data-cancel]', page).onclick = () => (history.length > 1 ? history.back() : go('#/expenses'));
@@ -626,4 +628,48 @@ function purchViewer(box, getFile, onAction) {
   };
   draw();
   return { draw };
+}
+
+// ---------------------------------------------------------------- Bibliothèque de prix tenue à jour par les factures d'achat
+// Chaque article acheté (quantité × prix unitaire net, remise déduite) crée ou met à jour un article « Matériaux » :
+// dernier prix payé, fournisseur, référence, historique ; les ouvrages qui l'utilisent sont recalculés d'office.
+const BUY_UNITS = { pc: 'pc', pce: 'pc', pcs: 'pc', st: 'pc', stk: 'pc', u: 'u', un: 'u', bte: 'bte', box: 'bte', paq: 'paq', pak: 'paq', m: 'm', ml: 'ml', m2: 'm²', 'm²': 'm²', m3: 'm³', 'm³': 'm³', kg: 'kg', t: 't', l: 'l', lt: 'l', h: 'h', rl: 'rl', sac: 'sac', zak: 'sac' };
+async function learnPrices(e, { quiet = false } = {}) {
+  const d = e.data;
+  let items = (d.items || []).filter((x) => num(x.qty) > 0 && num(x.price) > 0);
+  // articles pas encore lus : lecture du PDF de la facture
+  if (!(d.items || []).length && d.fileId && /\.pdf$/i.test(d.fileName || '')) {
+    try { items = invoiceItemsFromText(await pdfFileText(d.fileId, 20)).filter((x) => num(x.qty) > 0 && num(x.price) > 0); } catch (err) { items = []; }
+  }
+  if (!items.length) return { n: 0 };
+  const all = await db.list('article'); const contacts = await db.list('contact');
+  const sup = byId(contacts, d.supplierId); const supName = sup ? sup.data.company || sup.data.name || '' : '';
+  const date = d.date || today(); const changed = new Set(); let created = 0; let updated = 0; let up = 0;
+  for (const x of items) {
+    const name = String(x.name || x.desc || '').split('\n')[0].trim(); if (name.length < 3) continue;
+    const ref = String(x.ref || '').trim(); const price = r2(num(x.price) * 1e4) / 1e4;
+    const unit = BUY_UNITS[String(x.unit || '').toLowerCase()] || (x.unit ? String(x.unit).toLowerCase() : 'u');
+    let a = all.find((y) => y.data.kind !== 'ouvrage' && ref && y.data.supplierRef === ref && +y.data.supplierId === +d.supplierId)
+      || all.find((y) => y.data.kind !== 'ouvrage' && normKey(y.data.name) === normKey(name) && (!y.data.supplierId || +y.data.supplierId === +d.supplierId));
+    const h = { d: date, p: price, s: d.supplierId || null, e: e.id };
+    if (!a) {
+      a = { data: { name, code: ref, kind: 'mat', category: supName, unit, cost: price, margin: 25, vat: defVat(), supplierId: d.supplierId || null, supplierRef: ref, buy: h, priceHist: [h], auto: true } };
+      all.push(a); changed.add(a); created++; continue;
+    }
+    const hist = a.data.priceHist || (a.data.priceHist = []);
+    if (hist.some((y) => y.e === e.id && Math.abs(y.p - price) < 0.0001)) continue; // facture déjà apprise
+    hist.push(h); hist.sort((p, q) => (p.d < q.d ? -1 : 1)); if (hist.length > 24) hist.splice(0, hist.length - 24);
+    // prix le plus récent (une ancienne facture encodée après coup ne remplace pas un prix plus récent)
+    if (!a.data.buy || a.data.buy.d <= date) {
+      const old = num(a.data.cost);
+      if (old > 0 && price > old * 1.05) up++;
+      a.data.prevCost = old || null; a.data.cost = price; a.data.buy = h;
+      if (!a.data.supplierId && d.supplierId) a.data.supplierId = d.supplierId;
+      if (!a.data.supplierRef && ref) a.data.supplierRef = ref;
+    }
+    changed.add(a); updated++;
+  }
+  for (const a of changed) await persist('article', a, { silent: true });
+  if (!quiet && (created || updated)) toast(`Bibliothèque de prix : ${created ? `${created} nouvel(s) article(s)` : ''}${created && updated ? ', ' : ''}${updated ? `${updated} prix mis à jour` : ''}${up ? ` (⚠ ${up} en hausse de plus de 5 %)` : ''}`, 6000);
+  return { n: created + updated, created, updated, up };
 }

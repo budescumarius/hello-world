@@ -20,22 +20,27 @@ async function editArticle(a, preset = {}) {
       { name: 'supplierId', label: 'Fournisseur / sous-traitant', type: 'contact', contacts, kinds: ['fournisseur', 'soustraitant'], allowNew: false },
       { name: 'ficheId', label: 'Fiche technique', type: 'select', options: [['', '—'], ...fiches.map((f) => [f.id, f.data.title])] },
     ], d)}
-    <div class="ouv" ${d.kind === 'ouvrage' ? '' : 'hidden'}><div class="section-t">Composition de l'ouvrage (pour 1 ${esc(d.unit || 'u')})</div><div class="comp"></div>
-      <button type="button" class="btn sm" data-addc>${I.plus} Ajouter un composant</button></div>
+    <div class="ouv" ${d.kind === 'ouvrage' ? '' : 'hidden'}><div class="section-t">Composition de l'ouvrage (pour 1 <span data-ou>${esc(d.unit || 'u')}</span>)</div>
+      <div class="comp-head muted sm"><span>Composant</span><span>Qté</span><span>Pertes %</span><span></span><span class="r">Coût</span><span></span></div><div class="comp"></div>
+      <button type="button" class="btn sm" data-addc>${I.plus} Ajouter un matériau / composant</button>
+      <div class="ouv-mo"><label>Main d'œuvre <input data-mo inputmode="decimal" value="${esc(d.moHours || '')}" placeholder="0"> h par ${esc(d.unit || 'u')}</label>
+        <span>× <a href="#" data-rate>${moRate() ? `${money(moRate())}/h` : 'définir le coût horaire'}</a></span><b data-mocost></b></div></div>
     ${fieldsGrid([
       { name: 'cost', label: 'Déboursé unitaire HT', type: 'money', hint: 'Coût d\'achat ou de revient' },
       { name: 'margin', label: 'Marge %', type: 'percent' },
       { name: 'price', label: 'Prix de vente HT', type: 'money' },
       { name: 'vat', label: 'TVA', type: 'select', options: vatOptions(d.vat) },
     ], d)}
+    ${(d.priceHist || []).length ? `<div class="section-t">Prix d'achat payés (factures)</div><div class="ph-list">${[...d.priceHist].reverse().map((h) => { const sp = byId(contacts, h.s); return `<div><span>${fmtDate(h.d)}${sp ? ` · ${esc(sp.data.company || sp.data.name || '')}` : ''}</span>${h.e ? `<a href="#/purchase/${h.e}" data-close>facture</a>` : '<span></span>'}<b>${money(h.p)}</b></div>`; }).join('')}</div>` : ''}
     <datalist id="cats">${cats.map((x) => `<option value="${esc(x)}">`).join('')}</datalist><datalist id="units">${UNITS.map((u) => `<option value="${u}">`).join('')}</datalist>
   </form><div class="m-foot">${a ? `<button class="btn danger ghost" data-del>${I.trash} Supprimer</button>` : ''}<span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-save>Enregistrer</button></div>`, { wide: true });
   const f = $('form', m.el); const E = f.elements;
   const others = all.filter((x) => !a || x.id !== a.id);
   const recalc = (from) => {
     // ouvrage avec composants : déboursé calculé ; sans composant, on le tape soi-même
-    const auto = E.kind.value === 'ouvrage' && (d.components || []).length > 0;
-    if (auto) E.cost.value = articleCost({ data: { kind: 'ouvrage', components: d.components } }, others).cost;
+    const auto = E.kind.value === 'ouvrage' && ((d.components || []).length > 0 || num(d.moHours) > 0);
+    if (auto) E.cost.value = r2(articleCost({ data: { kind: 'ouvrage', components: d.components, moHours: d.moHours } }, others).cost);
+    $('[data-mocost]', m.el).textContent = num(d.moHours) ? money(num(d.moHours) * moRate()) : '';
     E.cost.readOnly = auto;
     const hint = E.cost.closest('.field').querySelector('small');
     if (hint) hint.textContent = auto ? 'Calculé depuis la composition de l\'ouvrage' : 'Coût d\'achat ou de revient';
@@ -43,19 +48,41 @@ async function editArticle(a, preset = {}) {
     if (from === 'price') E.margin.value = cost > 0 ? r2((num(E.price.value) / cost - 1) * 100) : '';
     else if (cost > 0) E.price.value = r2(cost * (1 + num(E.margin.value) / 100));
   };
+  // composants : recherche dans la bibliothèque (liste proposée pendant la frappe)
+  const artLabel = (x) => `${x.data.code ? x.data.code + ' · ' : ''}${x.data.name} (${x.data.unit || 'u'} · ${money(articleCost(x, others).cost)})`;
+  const pickable = others.filter((x) => x.data.kind !== 'ouvrage');
+  m.el.insertAdjacentHTML('beforeend', `<datalist id="artlist">${pickable.map((x) => `<option value="${esc(artLabel(x))}">`).join('')}</datalist>`);
   const drawComp = () => {
     $('.comp', m.el).innerHTML = d.components.map((c, i) => {
       const s = others.find((x) => x.id === +c.articleId);
-      return `<div class="comp-row"><select data-ca="${i}"><option value="">— choisir —</option>${others.filter((x) => x.data.kind !== 'ouvrage').map((x) => `<option value="${x.id}" ${x.id === +c.articleId ? 'selected' : ''}>${esc((x.data.code ? x.data.code + ' · ' : '') + x.data.name)}</option>`).join('')}</select>
-        <input data-cq="${i}" inputmode="decimal" value="${esc(c.qty)}" title="Quantité"><span class="muted">${esc(s ? s.data.unit : '')}</span><b>${s ? money(articleCost(s, others).cost * num(c.qty)) : ''}</b><button type="button" class="icon-btn sm" data-cd="${i}">✕</button></div>`;
-    }).join('') || '<div class="muted sm">Ajoutez la main d\'œuvre, les matériaux… qui composent l\'ouvrage.</div>';
-    $$('[data-ca]', m.el).forEach((s) => { s.onchange = () => { d.components[+s.dataset.ca].articleId = +s.value; drawComp(); recalc(); }; });
-    $$('[data-cq]', m.el).forEach((s) => { s.oninput = () => { d.components[+s.dataset.cq].qty = num(s.value); recalc(); }; s.onblur = drawComp; });
+      return `<div class="comp-row"><input data-ca="${i}" list="artlist" value="${esc(s ? artLabel(s) : '')}" placeholder="Tapez pour chercher (nom, code)…" class="comp-q">
+        <input data-cq="${i}" inputmode="decimal" value="${esc(c.qty)}" title="Quantité"><input data-cl="${i}" inputmode="decimal" value="${esc(c.loss || '')}" placeholder="0" title="Pertes / chutes en %"><span class="muted">${esc(s ? s.data.unit : '')}</span><b class="r">${s ? money(articleCost(s, others).cost * num(c.qty) * (1 + num(c.loss) / 100)) : ''}</b><button type="button" class="icon-btn sm" data-cd="${i}">✕</button></div>`;
+    }).join('') || '<div class="muted sm">Ajoutez les matériaux (avec leurs pertes) et les heures de main d\'œuvre pour 1 unité : le déboursé se calcule tout seul.</div>';
+    $$('[data-ca]', m.el).forEach((s) => { s.onchange = () => {
+      const c = d.components[+s.dataset.ca]; const x = pickable.find((y) => artLabel(y) === s.value.trim());
+      if (!x) { if (s.value.trim()) toast('Choisissez un article de la liste', 2500); return; }
+      if (+c.articleId === x.id) return;
+      c.articleId = x.id; setTimeout(() => { drawComp(); recalc(); }); // redessin après l'événement (le champ peut perdre le focus pendant ce temps)
+    }; });
+    // quantité / pertes : coût de la ligne mis à jour sur place (pas de redessin : le curseur reste dans le champ)
+    const rowCost = (i, inp) => { const c = d.components[i]; const sa = others.find((x) => x.id === +c.articleId); const bc = inp.closest('.comp-row').querySelector('b.r'); if (bc) bc.textContent = sa ? money(articleCost(sa, others).cost * num(c.qty) * (1 + num(c.loss) / 100)) : ''; };
+    $$('[data-cq]', m.el).forEach((s) => { s.oninput = () => { d.components[+s.dataset.cq].qty = num(s.value); rowCost(+s.dataset.cq, s); recalc(); }; });
+    $$('[data-cl]', m.el).forEach((s) => { s.oninput = () => { d.components[+s.dataset.cl].loss = num(s.value); rowCost(+s.dataset.cl, s); recalc(); }; });
     $$('[data-cd]', m.el).forEach((s) => { s.onclick = () => { d.components.splice(+s.dataset.cd, 1); drawComp(); recalc(); }; });
   };
   E.kind.onchange = () => { $('.ouv', m.el).hidden = E.kind.value !== 'ouvrage'; recalc(); };
   E.cost.oninput = () => recalc('cost'); E.margin.oninput = () => recalc('margin'); E.price.oninput = () => recalc('price');
   $('[data-addc]', m.el).onclick = () => { d.components.push({ articleId: '', qty: 1 }); drawComp(); };
+  $('[data-mo]', m.el).oninput = (ev) => { d.moHours = num(ev.target.value); recalc(); };
+  E.unit.addEventListener('input', () => { $('[data-ou]', m.el).textContent = E.unit.value || 'u'; });
+  $('[data-rate]', m.el).onclick = async (ev) => {
+    ev.preventDefault();
+    const v = await ask('Coût horaire de la main d\'œuvre', [{ name: 'rate', label: 'Déboursé par heure (salaire chargé, €/h)', type: 'money', required: true }], { rate: moRate() || '' });
+    if (!v) return;
+    const co = { ...(S.settings.company || {}), moRate: num(v.rate) }; delete co.logo;
+    await api('PUT', 'settings', { company: co }); S.settings.company = co;
+    ev.target.textContent = `${money(moRate())}/h`; recalc(); toast('Coût horaire enregistré pour tous les ouvrages', 2500);
+  };
   drawComp(); if (d.kind === 'ouvrage') recalc();
   if (E.cost.value && !E.price.value) recalc('cost');
   $('[data-save]', m.el).onclick = async () => {
@@ -63,27 +90,35 @@ async function editArticle(a, preset = {}) {
     const v = readFields(f, fields);
     if (!v.name) return toast('Indiquez la désignation');
     const it = a || { data: {} };
-    it.data = { ...it.data, ...v, components: v.kind === 'ouvrage' ? d.components.filter((c) => c.articleId) : [], priceMode: 'margin' };
+    it.data = { ...it.data, ...v, components: v.kind === 'ouvrage' ? d.components.filter((c) => c.articleId) : [], moHours: v.kind === 'ouvrage' ? num(d.moHours) : 0, priceMode: 'margin' };
     await persist('article', it); m.close(); toast('Article enregistré');
     if (location.hash.startsWith('#/library')) render();
   };
   if (a) $('[data-del]', m.el).onclick = async () => { if (confirm('Supprimer cet article ?')) { await db.del('article', a.id); m.close(); render(); } };
 }
 
+// évolution du dernier prix d'achat par rapport au précédent
+function priceTrend(a) {
+  const o = num(a.data.prevCost); const n = num(a.data.cost);
+  if (!(o > 0) || !a.data.buy || Math.abs(n / o - 1) < 0.005) return '';
+  const p = (n / o - 1) * 100;
+  return ` <small class="trend ${p > 0 ? 'up' : 'down'}" title="Avant : ${money(o)}">${p > 0 ? '▲ +' : '▼ '}${fnum(p, 1)} %</small>`;
+}
 route('library', async () => {
-  const all = await db.list('article');
+  const [all, contacts] = await Promise.all([db.list('article'), db.list('contact')]);
   const page = layout({ active: 'library', icon: 'book', title: 'Bibliothèque',
-    actions: `<button class="btn" data-act="imp">Importer Excel / CSV</button><button class="btn" data-act="exp">Exporter CSV</button><button class="btn" data-act="bulk">Indexer les prix</button><button class="btn primary" data-act="new">${I.plus} Nouvel article</button>` });
+    actions: `<button class="btn" data-act="learn" title="Lit les factures d'achat déjà validées et enregistre leurs prix">Prix depuis mes achats</button><button class="btn" data-act="imp">Importer Excel / CSV</button><button class="btn" data-act="exp">Exporter CSV</button><button class="btn" data-act="bulk">Indexer les prix</button><button class="btn primary" data-act="new">${I.plus} Nouvel article</button>` });
   dataTable(page, {
     rows: all, state: ui.tbl_lib || (ui.tbl_lib = {}),
     search: (a) => [a.data.code, a.data.name, a.data.category].join(' '),
-    filters: { def: '', options: [['', 'Tout'], ...Object.entries(LIB_KINDS).map(([k, l]) => [k, l, TYPE_COLORS[k]])], match: (a, f) => a.data.kind === f },
+    filters: { def: '', options: [['', 'Tout'], ...Object.entries(LIB_KINDS).map(([k, l]) => [k, l, TYPE_COLORS[k]]), ['up', 'Prix en hausse', '#e5484d']], match: (a, f) => (f === 'up' ? num(a.data.prevCost) > 0 && num(a.data.cost) > num(a.data.prevCost) * 1.005 : a.data.kind === f) },
     columns: [
       { l: 'Code', v: (a) => esc(a.data.code || '') },
       { l: 'Désignation', v: (a) => `<i class="tdot" style="--c:${TYPE_COLORS[a.data.kind] || '#999'}"></i><b>${esc(a.data.name)}</b>${a.data.kind === 'ouvrage' ? ` <small class="muted">(${(a.data.components || []).length} composants)</small>` : ''}`, sort: (a) => a.data.name.toLowerCase() },
       { l: 'Catégorie', v: (a) => esc(a.data.category || '') },
       { l: 'Unité', v: (a) => esc(a.data.unit || '') },
-      { l: 'Déboursé', cls: 'r', v: (a) => money(articleCost(a, all).cost), sort: (a) => articleCost(a, all).cost },
+      { l: 'Déboursé', cls: 'r', v: (a) => `${money(articleCost(a, all).cost)}${priceTrend(a)}`, sort: (a) => articleCost(a, all).cost },
+      { l: 'Dernier achat', v: (a) => (a.data.buy ? `<small>${fmtDate(a.data.buy.d)}${a.data.buy.s && byId(contacts, a.data.buy.s) ? ` · ${esc(byId(contacts, a.data.buy.s).data.company || byId(contacts, a.data.buy.s).data.name || '')}` : ''}</small>` : ''), sort: (a) => (a.data.buy ? a.data.buy.d : '') },
       { l: 'Marge', cls: 'r', v: (a) => `${fnum(num(a.data.margin), 1)} %` },
       { l: 'Prix HT', cls: 'r', v: (a) => `<b>${money(articlePrice(a, all))}</b>`, sort: (a) => articlePrice(a, all) },
     ],
@@ -91,6 +126,14 @@ route('library', async () => {
     empty: 'Bibliothèque vide – créez vos articles et ouvrages ou importez un fichier CSV',
   });
   $('[data-act=new]').onclick = () => editArticle();
+  $('[data-act=learn]').onclick = async (ev) => {
+    const exps = (await db.list('expense')).filter((x) => x.data.status === 'validee' && ((x.data.items || []).length || x.data.fileId));
+    if (!exps.length) return toast('Aucune facture d\'achat validée à lire', 3000);
+    if (!confirm(`Lire les ${exps.length} facture(s) d'achat validée(s) et enregistrer leurs prix dans la bibliothèque ?\n\nLes nouvelles factures validées sont ajoutées automatiquement.`)) return;
+    ev.target.disabled = true; let n = 0; let c = 0; let u = 0;
+    for (const x of exps) { ev.target.textContent = `Lecture… ${++n}/${exps.length}`; const r = await learnPrices(x, { quiet: true }).catch(() => ({})); c += r.created || 0; u += r.updated || 0; }
+    toast(`Bibliothèque : ${c} nouvel(s) article(s), ${u} prix mis à jour`, 6000); render();
+  };
   $('[data-act=exp]').onclick = () => downloadCSV('bibliotheque.csv', [['Code', 'Designation', 'Type', 'Categorie', 'Unite', 'Debourse', 'Marge', 'Prix', 'TVA', 'Description'],
     ...all.map((a) => [a.data.code, a.data.name, a.data.kind, a.data.category, a.data.unit, fnum(articleCost(a, all).cost, 4), fnum(num(a.data.margin)), fnum(articlePrice(a, all)), fnum(num(a.data.vat)), a.data.desc])]);
   $('[data-act=imp]').onclick = () => importLibrary(all);
@@ -297,7 +340,7 @@ route('quote', async (id) => {
     <div id="lines"></div>
     <div class="cols-2"><div>${d.status === 'accepte' && pr && !isSimple() ? `<div class="hint-box">Déclaration de travaux (30bis) et Checkin@Work : sur la page du chantier. <a href="#/project/${pr.id}">Ouvrir le chantier ${esc(pr.number)}</a></div>` : ''}${inv.length ? `<div class="card"><div class="card-h"><h3>Factures liées</h3></div><div class="rows">${inv.map((i) => { const s = invState(i); return `<a class="row" href="#/invoice/${i.id}"><span class="grow"><b>${esc(i.number || 'Brouillon')}</b> · ${esc(IKIND[i.data.kind])}</span>${st(IST, s.s)}<b>${money(s.t.base)}</b></a>`; }).join('')}</div></div>` : ''}</div><div id="tot"></div></div>`;
   const drawTot = () => { $('#tot').innerHTML = totalsBox(totals(d), d, true); };
-  linesEditor($('#lines'), d, { showCost: true, onChange: () => { drawTot(); $('[data-saved]').textContent = 'Modification…'; save(); } });
+  linesEditor($('#lines'), d, { showCost: true, selfQuote: q.id, onChange: () => { drawTot(); $('[data-saved]').textContent = 'Modification…'; save(); } });
   drawTot();
   $('[data-act=head]').onclick = (e) => { if (!e.target.closest('a')) quoteHead(q, contacts, projects, render); };
   $$('[data-st]').forEach((b) => {
@@ -321,11 +364,39 @@ route('quote', async (id) => {
     ...(!q.project_id ? [{ label: 'Créer le chantier', icon: 'crane', run: async () => { await save.flush(); createProjectFromQuote(q); } }] : []),
     { label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/quote/${q.id}?mail=1`) },
     { label: 'Dupliquer (nouvelle version)', icon: 'copy', run: async () => { await save.flush(); const n = await persist('quote', { project_id: q.project_id, data: { ...JSON.parse(JSON.stringify(d)), status: 'brouillon', date: today(), valid: addDays(today(), num(company().quoteValidity) || 30), acceptedAt: null, sentAt: null, title: d.title } }); go(`#/quote/${n.id}`); } },
+    { label: 'Ajouter les postes à ma bibliothèque', icon: 'book', run: async () => { await save.flush(); quoteToLibrary(q); } },
     { sep: true },
     { label: 'Supprimer le devis', danger: true, icon: 'trash', run: async () => { if (confirm(`Supprimer le devis ${q.number} ?`)) { await db.del('quote', q.id); go('#/quotes'); } } },
   ]);
   cleanupView = () => save.flush();
 });
+
+// Postes d'un devis → articles de la bibliothèque (réutilisables dans les prochains devis) ; un poste déjà présent (même nom et unité) est mis à jour
+async function quoteToLibrary(q) {
+  const d = q.data; const disc = num(d.discount) / 100;
+  const items = d.lines.filter((l) => l.kind === 'item' && !l.option && !l.deduction && String(l.desc || '').trim() && num(l.price) > 0);
+  if (!items.length) return toast('Aucun poste chiffré dans ce devis', 3000);
+  const v = await ask(`Ajouter ${items.length} poste(s) à la bibliothèque`, [
+    { name: 'category', label: 'Catégorie', hint: 'Pour les retrouver (ex. Peinture, Rénovation…)' },
+    { name: 'update', label: 'Mettre à jour les postes déjà présents (même désignation et unité)', type: 'check' },
+  ], { category: d.title || q.number, update: true });
+  if (!v) return;
+  const all = await db.list('article'); let c = 0; let u = 0;
+  toast('Enregistrement…', 20000);
+  for (const l of items) {
+    const [name, ...rest] = String(l.desc).split('\n'); const price = r2(num(l.price) * (1 - disc)); const cost = num(l.cost);
+    const kind = TYPES[l.type] ? l.type : 'divers';
+    const same = all.find((a) => normKey(a.data.name) === normKey(name) && (a.data.unit || 'u') === (l.unit || 'u'));
+    // déjà présent : mis à jour si demandé, sauf un ouvrage calculé (composants / heures), qui garde sa composition
+    if (same && (!v.update || (same.data.kind === 'ouvrage' && ((same.data.components || []).length || num(same.data.moHours))))) continue;
+    const it = same || { data: {} };
+    // sans déboursé connu : prix de vente fixe ; sinon déboursé + marge
+    it.data = { ...it.data, name: name.trim(), desc: rest.join('\n').trim(), unit: l.unit || 'u', kind: same ? same.data.kind : kind, category: it.data.category || v.category, vat: num(l.vat),
+      ...(cost > 0 ? { cost, margin: r2((price / cost - 1) * 100), price, priceMode: 'margin' } : { cost: 0, margin: 0, price, priceMode: 'fixed' }), fromQuote: q.number };
+    await persist('article', it, { silent: true }); if (same) u++; else { c++; all.push(it); }
+  }
+  toast(`Bibliothèque : ${c} poste(s) ajouté(s)${u ? `, ${u} mis à jour` : ''}`, 5000);
+}
 
 async function createProjectFromQuote(q) {
   const t = totals(q.data);

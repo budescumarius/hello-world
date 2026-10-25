@@ -82,7 +82,16 @@ function ubl_parse(string $xml): array {
     foreach (array_merge($kids($root, 'InvoiceLine'), $kids($root, 'CreditNoteLine')) as $l) {
         $n = $txt($l, 'Item', 'Name'); if ($n !== '') $lines[] = $n;
         // articles avec leur montant HT : attribuables un par un aux chantiers
-        $items[] = ['desc' => trim($n . ($txt($l, 'Item', 'Description') !== '' && $txt($l, 'Item', 'Description') !== $n ? ' – ' . $txt($l, 'Item', 'Description') : '')), 'amount' => round($num($txt($l, 'LineExtensionAmount')) * $sign, 2)];
+        $it = ['desc' => trim($n . ($txt($l, 'Item', 'Description') !== '' && $txt($l, 'Item', 'Description') !== $n ? ' – ' . $txt($l, 'Item', 'Description') : '')), 'amount' => round($num($txt($l, 'LineExtensionAmount')) * $sign, 2)];
+        // quantité, prix unitaire net, unité et référence du fournisseur : alimentent la bibliothèque de prix
+        $qn = $kids($l, 'InvoicedQuantity') ?: $kids($l, 'CreditedQuantity');
+        $q = $num($txt($l, 'InvoicedQuantity') ?: $txt($l, 'CreditedQuantity')); $pr = $num($txt($l, 'Price', 'PriceAmount')); $bq = $num($txt($l, 'Price', 'BaseQuantity')) ?: 1;
+        if ($q > 0 && $pr > 0) { $it['qty'] = $q; $it['price'] = round($pr / $bq, 4); }
+        $uc = $qn ? strtoupper($qn[0]->getAttribute('unitCode')) : '';
+        $um = ['C62' => 'pc', 'H87' => 'pc', 'EA' => 'pc', 'XPP' => 'pc', 'MTR' => 'm', 'MTK' => 'm²', 'MTQ' => 'm³', 'KGM' => 'kg', 'TNE' => 't', 'LTR' => 'l', 'HUR' => 'h', 'DAY' => 'j', 'SET' => 'ens', 'XBX' => 'bte', 'PK' => 'paq'];
+        if (isset($um[$uc])) $it['unit'] = $um[$uc];
+        $ref = $txt($l, 'Item', 'SellersItemIdentification', 'ID'); if ($ref !== '') { $it['ref'] = $ref; $it['name'] = $n; }
+        $items[] = $it;
     }
     return [
         'kind' => $kind, 'number' => $txt($root, 'ID'), 'date' => $txt($root, 'IssueDate'),

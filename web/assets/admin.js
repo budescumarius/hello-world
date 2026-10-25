@@ -276,6 +276,7 @@ route('settings', async (tab = 'company') => {
     { name: 'street', label: 'Rue et numéro', cls: 'full' }, { name: 'zip', label: 'Code postal' }, { name: 'city', label: 'Localité' },
     { name: 'phone', label: 'Téléphone' }, { name: 'email', label: 'Email' }, { name: 'website', label: 'Site web' },
     { name: 'iban', label: 'IBAN' }, { name: 'bic', label: 'BIC' },
+    { name: 'moRate', label: 'Coût horaire de la main d\'œuvre (€/h)', type: 'money', hint: 'Déboursé par heure (salaire chargé) : calcule la main d\'œuvre des ouvrages de la bibliothèque' },
     { name: 'accountantEmail', label: 'E-mail du comptable', type: 'email', hint: 'Pour lui envoyer les factures depuis Argent → Export comptable' },
     { name: 'country', label: 'Pays', type: 'select', options: [['BE', 'Belgique'], ['FR', 'France'], ['LU', 'Luxembourg'], ['CH', 'Suisse'], ['RO', 'Roumanie']] },
     { name: 'currency', label: 'Devise', type: 'select', options: [['EUR', 'EUR €'], ['CHF', 'CHF'], ['RON', 'RON lei']] },

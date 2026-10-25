@@ -259,8 +259,13 @@ table.lines { width: 100%; border-collapse: collapse; min-width: 760px; }
 .pick-row small { display: block; }
 .pick-row .qty { width: 64px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 7px; text-align: right; }
 .ouv { border: 1px dashed var(--border); border-radius: 10px; padding: 10px 12px; margin: 8px 0 14px; }
-.comp-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
-.comp-row select { flex: 1; min-width: 0; padding: 7px; border: 1px solid var(--border); border-radius: 8px; }
+.comp-row, .comp-head { display: grid; grid-template-columns: minmax(0, 1fr) 70px 70px 34px 90px 30px; gap: 8px; align-items: center; margin-bottom: 6px; }
+.comp-head { margin-bottom: 2px; } .comp-row b.r { text-align: right; }
+.ouv-mo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--tint, #f4f6fb); }
+.ouv-mo input { width: 70px; padding: 7px; border: 1px solid var(--border); border-radius: 8px; text-align: right; margin: 0 4px; }
+.ouv-mo b { margin-left: auto; }
+@media (max-width: 600px) { .comp-row, .comp-head { grid-template-columns: minmax(0, 1fr) 56px 56px 30px; } .comp-row > span.muted, .comp-row b.r, .comp-head span:nth-child(4), .comp-head span:nth-child(5) { display: none; } }
+.comp-row .comp-q { width: auto; text-align: left; } .comp-row select { flex: 1; min-width: 0; padding: 7px; border: 1px solid var(--border); border-radius: 8px; }
 .comp-row input { width: 70px; padding: 7px; border: 1px solid var(--border); border-radius: 8px; text-align: right; }
 
 /* ---------- Kanban */
@@ -1814,3 +1819,14 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .s-var .seg button { display: grid; gap: 2px; padding: 10px 12px; border-radius: 12px; border: 2px solid var(--border); background: #fff; font: inherit; font-weight: 600; cursor: pointer; text-align: left; }
 .s-var .seg button small { font-weight: 400; color: var(--muted); font-size: 12px; }
 .s-var .seg button.on { border-color: var(--primary, #3b5bdb); background: #eef2ff; }
+
+/* bibliothèque de prix : tendance et historique des prix d'achat */
+.trend { font-weight: 700; margin-left: 4px; } .trend.up { color: #e5484d; } .trend.down { color: #2f9e44; }
+.ph-list { display: grid; gap: 2px; max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; padding: 4px 0; margin-bottom: 10px; }
+.ph-list > div { display: grid; grid-template-columns: 1fr auto 90px; gap: 10px; padding: 4px 12px; font-size: 13px; } .ph-list b { text-align: right; }
+
+/* lignes de devis : prix déjà pratiqués (devis précédents, bibliothèque) */
+.l-sugg:empty { display: none; }
+.l-sugg { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 12px; color: var(--muted); }
+.l-sugg .sg-b { border: 1px solid #f0c36d; background: #fff8e6; color: #7a5200; border-radius: 999px; padding: 2px 9px; font: inherit; font-weight: 700; cursor: pointer; }
+.l-sugg .sg-b.lib { border-color: #b7c4f5; background: #eef2ff; color: #2b3f9e; } .l-sugg .ok { color: #2f9e44; }
