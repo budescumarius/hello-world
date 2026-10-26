@@ -594,6 +594,70 @@ function invoiceSide(box, form, getFile, readText) {
 }
 
 // Visionneuse de la facture : PDF (toutes les pages) ou photo, avec zoom, remplacement, retrait et téléchargement
+// Facture électronique Peppol (UBL) reçue sans PDF : rendue comme une facture lisible
+function ublHtml(xml) {
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('XML illisible');
+  const kids = (el, n) => (el ? [...el.children].filter((c) => c.localName === n) : []);
+  const one = (el, ...path) => { let c = el; for (const n of path) { c = kids(c, n)[0]; if (!c) return null; } return c; };
+  const tx = (el, ...path) => { const c = one(el, ...path); return c ? c.textContent.trim() : ''; };
+  const root = doc.documentElement; const credit = root.localName === 'CreditNote';
+  const cur = tx(root, 'DocumentCurrencyCode') || 'EUR';
+  const m = (v) => (v === '' || v == null ? '' : `${num(v).toLocaleString('fr-BE', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${cur === 'EUR' ? '€' : esc(cur)}`);
+  const UC = { C62: 'pc', H87: 'pc', EA: 'pc', XPP: 'pc', MTR: 'm', MTK: 'm²', MTQ: 'm³', KGM: 'kg', TNE: 't', LTR: 'l', HUR: 'h', DAY: 'j', SET: 'ens', XBX: 'bte', PK: 'paq', LS: 'forfait' };
+  const hasDisc = [...kids(root, 'InvoiceLine'), ...kids(root, 'CreditNoteLine')].some((l) => kids(l, 'AllowanceCharge').length);
+  const party = (p) => {
+    const pp = one(p, 'Party'); if (!pp) return '';
+    const name = tx(pp, 'PartyLegalEntity', 'RegistrationName') || tx(pp, 'PartyName', 'Name');
+    const ad = one(pp, 'PostalAddress');
+    const vat = tx(pp, 'PartyTaxScheme', 'CompanyID') || tx(pp, 'PartyLegalEntity', 'CompanyID');
+    return `<b style="font-size:15px">${esc(name)}</b><br>${esc([tx(ad, 'StreetName'), tx(ad, 'AdditionalStreetName')].filter(Boolean).join(', '))}<br>${esc([tx(ad, 'PostalZone'), tx(ad, 'CityName')].filter(Boolean).join(' '))}${tx(ad, 'Country', 'IdentificationCode') ? ` (${esc(tx(ad, 'Country', 'IdentificationCode'))})` : ''}
+      ${vat ? `<br>TVA ${esc(vat)}` : ''}${tx(pp, 'Contact', 'ElectronicMail') ? `<br>${esc(tx(pp, 'Contact', 'ElectronicMail'))}` : ''}${tx(pp, 'Contact', 'Telephone') ? `<br>${esc(tx(pp, 'Contact', 'Telephone'))}` : ''}`;
+  };
+  const lines = [...kids(root, 'InvoiceLine'), ...kids(root, 'CreditNoteLine')].map((l) => {
+    const q = one(l, 'InvoicedQuantity') || one(l, 'CreditedQuantity');
+    const it = one(l, 'Item'); const desc = tx(it, 'Description');
+    const disc = kids(l, 'AllowanceCharge').filter((a) => tx(a, 'ChargeIndicator') === 'false').reduce((t, a) => t + num(tx(a, 'Amount')), 0);
+    return `<tr><td style="color:#667">${esc(tx(it, 'SellersItemIdentification', 'ID'))}</td><td><b>${esc(tx(it, 'Name'))}</b>${desc && desc !== tx(it, 'Name') ? `<br><small>${esc(desc)}</small>` : ''}${tx(l, 'Note') ? `<br><small>${esc(tx(l, 'Note'))}</small>` : ''}</td>
+      <td style="text-align:right;white-space:nowrap">${q ? `${fnum(num(q.textContent), 3)} ${esc(UC[q.getAttribute('unitCode')] || q.getAttribute('unitCode') || '')}` : ''}</td><td style="text-align:right;white-space:nowrap">${m(tx(l, 'Price', 'PriceAmount'))}</td>
+      ${hasDisc ? `<td style="text-align:right">${disc ? `-${m(disc)}` : ''}</td>` : ''}<td style="text-align:right">${tx(it, 'ClassifiedTaxCategory', 'Percent') ? `${fnum(num(tx(it, 'ClassifiedTaxCategory', 'Percent')))} %` : ''}</td><td style="text-align:right;white-space:nowrap"><b>${m(tx(l, 'LineExtensionAmount'))}</b></td></tr>`;
+  }).join('');
+  const docAc = kids(root, 'AllowanceCharge').map((a) => `<tr><td>${tx(a, 'ChargeIndicator') === 'true' ? 'Frais' : 'Remise'} ${esc(tx(a, 'AllowanceChargeReason'))}</td><td style="text-align:right">${tx(a, 'ChargeIndicator') === 'true' ? '' : '-'}${m(tx(a, 'Amount'))}</td></tr>`).join('');
+  const tot = one(root, 'LegalMonetaryTotal');
+  const vats = kids(one(root, 'TaxTotal'), 'TaxSubtotal').map((t) => `<tr><td>TVA ${fnum(num(tx(t, 'TaxCategory', 'Percent')))} % sur ${m(tx(t, 'TaxableAmount'))}</td><td style="text-align:right">${m(tx(t, 'TaxAmount'))}</td></tr>`).join('');
+  const pm = kids(root, 'PaymentMeans')[0];
+  const notes = kids(root, 'Note').map((n) => esc(n.textContent.trim())).filter(Boolean).join('<br>');
+  const th = 'style="text-align:left;padding:6px;border-bottom:2px solid #1c2550;font-size:11px;text-transform:uppercase;color:#1c2550"';
+  return `<div class="ubl-doc" style="background:#fff;color:#1c2550;font:13px/1.45 Helvetica,Arial,sans-serif;padding:20px 18px"><style>.ubl-doc td{padding:6px;border-bottom:1px solid #eef0f5;vertical-align:top}</style>
+    <div style="display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap"><div>${party(one(root, 'AccountingSupplierParty'))}</div>
+      <div style="text-align:right"><div style="font-size:22px;font-weight:800">${credit ? 'Note de crédit' : 'Facture'}</div><div style="font-size:15px"><b>${esc(tx(root, 'ID'))}</b></div>
+      <div>Date : ${esc(dateFr(tx(root, 'IssueDate')) || tx(root, 'IssueDate'))}</div>${tx(root, 'DueDate') || tx(pm, 'PaymentDueDate') ? `<div>Échéance : ${esc(dateFr(tx(root, 'DueDate') || tx(pm, 'PaymentDueDate')))}</div>` : ''}
+      ${tx(root, 'OrderReference', 'ID') ? `<div>Commande : ${esc(tx(root, 'OrderReference', 'ID'))}</div>` : ''}${tx(root, 'BuyerReference') ? `<div>Votre réf. : ${esc(tx(root, 'BuyerReference'))}</div>` : ''}</div></div>
+    <div style="margin:18px 0 14px;padding:10px 14px;border-radius:10px;background:#f4f6fb"><small style="text-transform:uppercase;color:#667">Client</small><br>${party(one(root, 'AccountingCustomerParty'))}</div>
+    ${notes ? `<p style="color:#445">${notes}</p>` : ''}
+    <table style="width:100%;border-collapse:collapse"><thead><tr><th ${th}>Réf.</th><th ${th}>Désignation</th><th ${th}>Qté</th><th ${th}>Prix u.</th>${hasDisc ? `<th ${th}>Remise</th>` : ''}<th ${th}>TVA</th><th ${th}>Total HT</th></tr></thead>
+      <tbody>${lines}</tbody></table>
+    <table style="margin:14px 0 0 auto;min-width:300px;border-collapse:collapse">${docAc}
+      <tr><td>Total HT</td><td style="text-align:right"><b>${m(tx(tot, 'TaxExclusiveAmount') || tx(tot, 'LineExtensionAmount'))}</b></td></tr>${vats}
+      <tr><td style="padding-top:6px;font-size:16px"><b>Total TVAC</b></td><td style="text-align:right;padding-top:6px;font-size:16px"><b>${m(tx(tot, 'TaxInclusiveAmount'))}</b></td></tr>
+      ${num(tx(tot, 'PrepaidAmount')) ? `<tr><td>Déjà payé</td><td style="text-align:right">-${m(tx(tot, 'PrepaidAmount'))}</td></tr>` : ''}
+      <tr><td style="background:#e8a33d;padding:6px 8px"><b>À payer</b></td><td style="text-align:right;background:#e8a33d;padding:6px 8px"><b>${m(tx(tot, 'PayableAmount'))}</b></td></tr></table>
+    ${pm ? `<div style="margin-top:16px;padding:10px 14px;border:1px solid #dde;border-radius:10px"><b>Paiement</b>${tx(pm, 'PayeeFinancialAccount', 'ID') ? `<br>IBAN : <b>${esc(tx(pm, 'PayeeFinancialAccount', 'ID'))}</b>` : ''}${tx(pm, 'PayeeFinancialAccount', 'FinancialInstitutionBranch', 'ID') ? ` · BIC ${esc(tx(pm, 'PayeeFinancialAccount', 'FinancialInstitutionBranch', 'ID'))}` : ''}${tx(pm, 'PaymentID') ? `<br>Communication : <b>${esc(tx(pm, 'PaymentID'))}</b>` : ''}${tx(root, 'PaymentTerms', 'Note') ? `<br>${esc(tx(root, 'PaymentTerms', 'Note'))}` : ''}</div>` : ''}
+    <p style="margin-top:14px;font-size:11px;color:#889">Facture électronique reçue par Peppol – affichage généré par BâtiPro à partir du fichier UBL.</p></div>`;
+}
+// articles d'une facture UBL : référence, désignation, quantité, prix unitaire net, unité
+function ublItems(xml) {
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  const kids = (el, n) => (el ? [...el.children].filter((c) => c.localName === n) : []);
+  const tx = (el, ...path) => { let c = el; for (const n of path) { c = kids(c, n)[0]; if (!c) return ''; } return c.textContent.trim(); };
+  const UC = { C62: 'pc', H87: 'pc', EA: 'pc', XPP: 'pc', MTR: 'm', MTK: 'm²', MTQ: 'm³', KGM: 'kg', TNE: 't', LTR: 'l', HUR: 'h', SET: 'ens', XBX: 'bte', PK: 'paq' };
+  const r = doc.documentElement;
+  return [...kids(r, 'InvoiceLine'), ...kids(r, 'CreditNoteLine')].map((l) => {
+    const q = kids(l, 'InvoicedQuantity')[0] || kids(l, 'CreditedQuantity')[0];
+    const bq = num(tx(l, 'Price', 'BaseQuantity')) || 1;
+    return { name: tx(l, 'Item', 'Name'), desc: tx(l, 'Item', 'Name'), ref: tx(l, 'Item', 'SellersItemIdentification', 'ID'), qty: q ? num(q.textContent) : 0, price: r2(num(tx(l, 'Price', 'PriceAmount')) / bq * 1e4) / 1e4, unit: q ? UC[q.getAttribute('unitCode')] || '' : '', amount: num(tx(l, 'LineExtensionAmount')) };
+  }).filter((x) => x.name && x.qty > 0 && x.price > 0 && r.localName !== 'CreditNote');
+}
 function purchViewer(box, getFile, onAction) {
   let zoom = 1; let seq = 0;
   const draw = async () => {
@@ -602,13 +666,26 @@ function purchViewer(box, getFile, onAction) {
       box.innerHTML = `<div class="pi-drop"><div class="pi-empty-ic">${I.file}</div><b>Aucune facture jointe</b><p class="muted">Ajoutez le PDF ou une photo de la facture.</p><button type="button" class="btn primary" data-up>${I.plus} Ajouter la facture</button></div>`;
       $('[data-up]', box).onclick = () => onAction('upload'); return;
     }
-    const isPdf = /\.pdf$/i.test(fileName || ''); const isImg = /\.(jpe?g|png|gif|webp|heic)$/i.test(fileName || '');
+    const isPdf = /\.pdf$/i.test(fileName || ''); const isImg = /\.(jpe?g|png|gif|webp|heic)$/i.test(fileName || ''); const isXml = /\.xml$/i.test(fileName || '');
     box.innerHTML = `<div class="pi-vbar"><button type="button" class="icon-btn" data-z="-" aria-label="Zoom arrière">−</button><span class="pi-zoom">${Math.round(zoom * 100)} %</span><button type="button" class="icon-btn" data-z="+" aria-label="Zoom avant">+</button>
       <span class="pi-fname" title="${esc(fileName || '')}">${esc(fileName || 'facture')}</span>
       <button type="button" class="icon-btn" data-up title="Remplacer">${I.upload}</button><button type="button" class="icon-btn" data-rm title="Retirer">${I.trash}</button><a class="icon-btn" href="${fileUrl(fileId, true)}" title="Télécharger">${I.download}</a></div>
-      <div class="pi-doc" data-doc>${isImg ? `<img src="${fileUrl(fileId)}" alt="" style="width:${zoom * 100}%">` : isPdf ? '<p class="muted pi-load">Chargement de la facture…</p>' : `<p class="muted pi-load">Aperçu indisponible pour ce fichier. <a href="${fileUrl(fileId)}" target="_blank">Ouvrir</a></p>`}</div>`;
+      <div class="pi-doc" data-doc>${isImg ? `<img src="${fileUrl(fileId)}" alt="" style="width:${zoom * 100}%">` : isPdf || isXml ? '<p class="muted pi-load">Chargement de la facture…</p>' : `<p class="muted pi-load">Aperçu indisponible pour ce fichier. <a href="${fileUrl(fileId)}" target="_blank">Ouvrir</a></p>`}</div>`;
     $$('[data-z]', box).forEach((b) => { b.onclick = () => { zoom = Math.min(3, Math.max(0.5, r2(zoom + (b.dataset.z === '+' ? 0.25 : -0.25)))); draw(); }; });
     $('[data-up]', box).onclick = () => onAction('upload'); $('[data-rm]', box).onclick = () => onAction('remove');
+    if (isXml) {
+      try {
+        const html = ublHtml(await (await fetch(fileUrl(fileId), { credentials: 'same-origin' })).text()); if (my !== seq) return;
+        const h = $('[data-doc]', box);
+        h.innerHTML = `<div class="ubl-wrap" style="zoom:${zoom}">${html}</div><div class="ubl-acts"><button type="button" class="btn sm" data-ublpdf>${I.download || I.file} Enregistrer en PDF</button></div>`;
+        $('[data-ublpdf]', h).onclick = async (ev) => {
+          ev.target.disabled = true; toast('Création du PDF…', 20000);
+          try { const blob = await makePdf(html); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = String(fileName).replace(/\.xml$/i, '.pdf'); a.click(); toast('PDF prêt', 1500); } catch (err) { toast('PDF impossible : ' + err.message, 4000); }
+          ev.target.disabled = false;
+        };
+      } catch (err) { const h = $('[data-doc]', box); if (h) h.innerHTML = `<p class="muted pi-load">Aperçu impossible (${esc(err.message)}). <a href="${fileUrl(fileId)}" target="_blank">Ouvrir le fichier</a></p>`; }
+      return;
+    }
     if (!isPdf) return;
     try {
       const pdfjs = await loadPdfJs();
@@ -642,6 +719,11 @@ async function learnPrices(e, { quiet = false, skipDone = false } = {}) {
   // articles pas encore lus, ou lus avant la v96 (sans quantité ni prix unitaire) : lecture du PDF de la facture
   if (!items.length && d.fileId && /\.pdf$/i.test(d.fileName || '')) {
     try { items = invoiceItemsFromText(await pdfFileText(d.fileId, 20)).filter((x) => num(x.qty) > 0 && num(x.price) > 0); } catch (err) { items = []; }
+  }
+  // facture Peppol (UBL) importée avant la v96 : quantités et prix relus dans le XML
+  const xmlId = d.xmlFileId || (/\.xml$/i.test(d.fileName || '') ? d.fileId : null);
+  if (!items.length && xmlId) {
+    try { items = ublItems(await (await fetch(fileUrl(xmlId), { credentials: 'same-origin' })).text()); } catch (err) { items = []; }
   }
   // marquée comme lue (même sans prix trouvé : PDF scanné) pour ne plus la relire
   const done = async () => { try { const fresh = await db.get('expense', e.id); fresh.data.libDone = today(); await persist('expense', fresh, { silent: true }); d.libDone = fresh.data.libDone; } catch (err) { /* hors ligne : relue la prochaine fois */ } };
