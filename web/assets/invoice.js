@@ -19,7 +19,8 @@ function invDisp(i) {
   if (s.s === 'partielle') return { k: 'partielle', l: 'Part. payé', c: '#e8a10c', sub: fmtDate(lastPay) };
   if (s.s === 'retard') return { k: 'retard', l: 'En retard', c: '#e5484d', sub: `éch. ${fmtDate(d.due)}` };
   const sent = (d.sent || []).length || (d.peppol && d.peppol.sentAt);
-  return sent ? { k: 'envoye', l: 'Envoyé', c: '#3b5bdb', sub: `éch. ${fmtDate(d.due)}` } : { k: 'aenvoyer', l: 'À envoyer', c: '#f08c00' };
+  const man = (d.sent || []).find((x) => x.manual);
+  return sent ? { k: 'envoye', l: 'Envoyé', c: '#3b5bdb', sub: man ? `${man.to.toLowerCase()} · éch. ${fmtDate(d.due)}` : `éch. ${fmtDate(d.due)}` } : { k: 'aenvoyer', l: 'À envoyer', c: '#f08c00' };
 }
 const invDispHtml = (i) => { const x = invDisp(i); return `<span class="pst">${badge(x.l, x.c)}${x.sub ? `<small class="muted">${esc(x.sub)}</small>` : ''}</span>`; };
 // Facturation électronique (Peppol)
@@ -29,6 +30,25 @@ function invEInv(i, contacts) {
   if (d.peppol && d.peppol.sentAt) return `<span class="pst">${badge('Envoyé', '#3b5bdb')}<small class="muted">Peppol ${fmtDate(d.peppol.sentAt)}</small></span>`;
   const c = byId(contacts, d.clientId);
   return c && buyerInfo(c).peppolId && buyerInfo(c).isCompany ? badge('À envoyer', '#f08c00') : '<small class="muted">Hors Peppol</small>';
+}
+
+// Facture envoyée hors de l'application (en main propre, par la poste, WhatsApp…) : marquée « Envoyée » à la main
+const SEND_WAYS = ['Remise en main propre', 'Par la poste', 'Par e-mail (autre messagerie)', 'WhatsApp / SMS', 'Autre'];
+async function invMarkSent(list, after) {
+  const ok = list.filter((i) => i.data.status === 'emise' && !isEA(i) && !(i.data.sent || []).length);
+  if (!ok.length) return toast('Rien à marquer : seules les factures validées pas encore envoyées peuvent l\'être', 4000);
+  const v = await ask(ok.length > 1 ? `Marquer ${ok.length} factures comme envoyées` : `Facture ${ok[0].number} envoyée`, [
+    { name: 'how', label: 'Envoyée comment ?', type: 'select', options: SEND_WAYS.map((x) => [x, x]) },
+    { name: 'date', label: 'Date d\'envoi', type: 'date' },
+  ], { how: SEND_WAYS[0], date: today() });
+  if (!v) return;
+  for (const it of ok) { it.data.sent = [...(it.data.sent || []), { t: `${v.date || today()}T12:00:00`, to: v.how, manual: true, by: S.me.id }]; await persist('invoice', it, { silent: true }); }
+  toast(ok.length > 1 ? `${ok.length} factures marquées envoyées` : 'Facture marquée envoyée', 2500);
+  if (after) after(); else render();
+}
+async function invUnmarkSent(it) {
+  if (!confirm('Retirer l\'envoi enregistré à la main ? La facture repassera « À envoyer ».')) return;
+  it.data.sent = (it.data.sent || []).filter((x) => !x.manual); await persist('invoice', it, { silent: true }); render();
 }
 
 // Note de crédit qui annule une facture (mêmes lignes en négatif)
@@ -91,7 +111,9 @@ function invMenu(it) {
     { label: 'PDF / Imprimer', icon: 'print', run: () => go(`#/print/invoice/${it.id}`) },
     ...(locked ? [{ label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/invoice/${it.id}?mail=1`) },
       { label: 'Peppol – facture électronique', icon: 'file', run: () => peppolInvoice(it) },
-      ...(d.kind !== 'avoir' && invState(it).rest > 0.005 ? [{ label: 'Ajouter un paiement', icon: 'coins', run: () => invPayment(it, null) }] : [])] : []),
+      ...(d.kind !== 'avoir' && invState(it).rest > 0.005 ? [{ label: 'Ajouter un paiement', icon: 'coins', run: () => invPayment(it, null) }] : []),
+      ...(!isEA(it) && !(d.sent || []).length && !(d.peppol && d.peppol.sentAt) ? [{ label: 'Marquer comme envoyée (envoi manuel)…', icon: 'check', run: () => invMarkSent([it]) }] : []),
+      ...((d.sent || []).some((x) => x.manual) ? [{ label: 'Annuler « envoyée manuellement »', icon: 'x', run: () => invUnmarkSent(it) }] : [])] : []),
     { label: 'Commentaires', icon: 'chat', run: () => invComments(it) },
     ...(locked ? [{ sep: true }, { label: 'Modifier / supprimer la facture validée…', icon: 'edit', run: () => invChangeValidated(it) }] : []),
     ...(!locked ? [{ sep: true }, { label: 'Supprimer le brouillon', icon: 'trash', danger: true, run: async () => { if (confirm('Supprimer ce brouillon ?')) { await db.del('invoice', it.id); render(); } } }] : []),
@@ -276,6 +298,7 @@ route('invoice', async (id, tab = 'informations') => {
     await persist('invoice', it); toast(`Facture ${it.number} soumise`);
     if (after === 'mail') return go(`#/print/invoice/${it.id}?mail=1`);
     if (after === 'peppol') { go(`#/invoice/${it.id}/visualisation`); return setTimeout(() => peppolInvoice(it), 600); }
+    if (after === 'manual') return invMarkSent([it], () => go(`#/invoice/${it.id}/visualisation`));
     go(`#/invoice/${it.id}/visualisation`);
   };
   const sub = $('[data-submit]', page); if (sub) sub.onclick = () => emit();
@@ -284,6 +307,8 @@ route('invoice', async (id, tab = 'informations') => {
     { label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/invoice/${it.id}?mail=1`) },
     { label: 'Peppol – facture électronique', icon: 'file', primary: true, run: () => peppolInvoice(it) },
     ...(d.kind !== 'avoir' && invState(it).rest > 0.005 ? [{ label: 'Ajouter un paiement', icon: 'coins', run: () => invPayment(it, null) }] : []),
+    ...(!isEA(it) && !(d.sent || []).length && !(d.peppol && d.peppol.sentAt) ? [{ label: 'Marquer comme envoyée (envoi manuel)…', icon: 'check', run: () => invMarkSent([it]) }] : []),
+    ...((d.sent || []).some((x) => x.manual) ? [{ label: 'Annuler « envoyée manuellement »', icon: 'x', run: () => invUnmarkSent(it) }] : []),
     ...(d.kind !== 'avoir' ? [{ label: 'Créer une note de crédit', icon: 'copy', run: () => invCredit(it) }] : []),
     { sep: true },
     { label: 'Modifier la facture validée…', icon: 'edit', run: () => invChangeValidated(it) },
@@ -293,6 +318,7 @@ route('invoice', async (id, tab = 'informations') => {
   ] : [
     { label: 'Soumettre et envoyer par email', icon: 'mail', run: () => emit('mail') },
     ...(peppolApOn() ? [{ label: 'Soumettre et envoyer via Peppol', icon: 'file', run: () => emit('peppol') }] : []),
+    { label: 'Soumettre – envoyée autrement (main propre, poste…)', icon: 'check', run: () => emit('manual') },
     { label: 'Enregistrer le brouillon', icon: 'file', run: async () => { await save.flush(); toast('Brouillon enregistré'); } },
     ...(d.quoteId ? [{ label: 'Ouvrir le devis', icon: 'calc', run: () => go(`#/quote/${d.quoteId}`) }] : []),
     { sep: true },

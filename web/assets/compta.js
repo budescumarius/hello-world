@@ -37,6 +37,7 @@ function multiActions(kind, picked) {
     { label: 'Imprimer', icon: 'print', primary: true, run: () => printMany(kind, picked) },
     { label: 'Télécharger en PDF (zip)', icon: 'download', run: () => docsZip(kind, picked) },
     ...(kind === 'invoice' ? [{ label: 'Envoyer au comptable', icon: 'mail', run: async () => { const contacts = await db.list('contact'); const ok = picked.filter((i) => i.data.status === 'emise'); if (!ok.length) return toast('Choisissez des factures validées (pas des brouillons)', 4000); sendToAccountant(ok.map((i) => invRow(i, contacts)), `${ok.length} facture(s)`); } }] : []),
+    ...(kind === 'invoice' ? [{ label: 'Marquer comme envoyées (envoi manuel)…', icon: 'check', run: () => invMarkSent(picked) }] : []),
     { sep: true },
     { label: `Supprimer (${picked.length})`, icon: 'trash', danger: true, run: () => deleteMany(kind, picked) },
   ];
