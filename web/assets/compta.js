@@ -1,5 +1,5 @@
 'use strict';
-/* Plusieurs documents à la fois : impression, PDF (zip), suppression depuis les listes ;
+/* Plusieurs documents à la fois : impression, PDF (un seul fichier, séparés ou zip), suppression depuis les listes ;
    export comptable : factures émises, notes de crédit et factures d'achat d'une période en un seul ZIP (PDF + journaux CSV). */
 
 const MULTI_KIND = { quote: 'Devis', invoice: 'Factures', order: 'Bons de commande' };
@@ -10,8 +10,9 @@ async function printMany(kind, picked) {
   const parts = [];
   for (const it of picked) parts.push(`<div class="pm-doc">${(await docHtml(kind, it.id)).html}</div>`);
   printPage(`${picked.length} ${MULTI_KIND[kind].toLowerCase()}`, parts.join(''), location.hash, null);
-  const b = $('[data-act=pdf]'); if (b) { b.innerHTML = `${I.download} PDF (zip)`; b.onclick = () => docsZip(kind, picked); }
-  toast('Prêt : Imprimer, ou PDF (zip)', 2500);
+  const b = $('[data-act=pdf]'); if (b) { b.innerHTML = `${I.file} PDF`; b.onclick = () => docsOnePdf(kind, picked); }
+  const dl = $('[data-act=dl]'); if (dl) dl.onclick = () => docsOnePdf(kind, picked);
+  toast('Prêt : Imprimer ou télécharger en PDF', 2500);
 }
 // Un PDF par document, tous dans un ZIP
 async function docsPdfFiles(kind, picked, folder = '', light = false) {
@@ -24,6 +25,25 @@ async function docsPdfFiles(kind, picked, folder = '', light = false) {
   }
   return files;
 }
+// Tous les documents cochés dans un seul PDF (chacun commence sur une nouvelle page, avec sa propre numérotation)
+async function docsOnePdf(kind, picked) {
+  try {
+    if (picked.length === 1) { const r = await docHtml(kind, picked[0].id); downloadBlob(await makePdf(r.html), `${r.fname}.pdf`); return toast('PDF téléchargé ✓', 2500); }
+    await loadScript('assets/vendor/jspdf-2.5.1.umd.min.js');
+    let pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    for (const [i, it] of picked.entries()) { toast(`PDF ${i + 1} / ${picked.length}…`, 60000); pdf = await makePdf((await docHtml(kind, it.id)).html, { into: pdf }); }
+    downloadBlob(pdf.output('blob'), `${fileTitle(MULTI_KIND[kind])}_${picked.length}-documents_${today()}.pdf`);
+    toast(`${picked.length} documents dans un seul PDF ✓`, 3000);
+  } catch (e) { console.error(e); toast('PDF impossible : ' + e.message, 5000); }
+}
+// Un fichier PDF par document (téléchargés l'un après l'autre)
+async function docsSeparatePdfs(kind, picked) {
+  try {
+    const files = await docsPdfFiles(kind, picked);
+    for (const f of files) { downloadBlob(new Blob([f.data], { type: 'application/pdf' }), f.name); await new Promise((r) => setTimeout(r, 400)); }
+    toast(`${files.length} PDF téléchargé(s) ✓ (autorisez les téléchargements multiples si le navigateur le demande)`, 5000);
+  } catch (e) { console.error(e); toast('PDF impossible : ' + e.message, 5000); }
+}
 async function docsZip(kind, picked) {
   try {
     const files = await docsPdfFiles(kind, picked);
@@ -35,7 +55,9 @@ async function docsZip(kind, picked) {
 function multiActions(kind, picked) {
   return [
     { label: 'Imprimer', icon: 'print', primary: true, run: () => printMany(kind, picked) },
-    { label: 'Télécharger en PDF (zip)', icon: 'download', run: () => docsZip(kind, picked) },
+    { label: picked.length > 1 ? 'Télécharger en PDF (un seul fichier)' : 'Télécharger en PDF', icon: 'download', run: () => docsOnePdf(kind, picked) },
+    ...(picked.length > 1 ? [{ label: 'Télécharger un PDF par document', icon: 'file', run: () => docsSeparatePdfs(kind, picked) },
+      { label: 'Télécharger en ZIP', icon: 'download', run: () => docsZip(kind, picked) }] : []),
     ...(kind === 'invoice' ? [{ label: 'Envoyer au comptable', icon: 'mail', run: async () => { const contacts = await db.list('contact'); const ok = picked.filter((i) => i.data.status === 'emise'); if (!ok.length) return toast('Choisissez des factures validées (pas des brouillons)', 4000); sendToAccountant(ok.map((i) => invRow(i, contacts)), `${ok.length} facture(s)`); } }] : []),
     ...(kind === 'invoice' ? [{ label: 'Marquer comme envoyées (envoi manuel)…', icon: 'check', run: () => invMarkSent(picked) }] : []),
     { sep: true },

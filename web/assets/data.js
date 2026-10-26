@@ -480,7 +480,9 @@ async function makePdf(src, opt = {}) {
     };
     const canvas = await window.html2canvas(docEl, { scale, backgroundColor: '#ffffff', useCORS: true, logging: false, windowWidth: W + 40, onclone });
     const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    // opt.into : document jsPDF existant (plusieurs documents dans un seul PDF) – on y ajoute les pages
+    const pdf = opt.into || new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    const first = opt.into ? !opt.into.bpUsed : true; if (opt.into) opt.into.bpUsed = true;
     const m = 8; const pw = 210 - 2 * m; const ph = 297 - 2 * m - (brand ? 12 : 6);
     if (!cuts.length) measure(docEl);
     const k = canvas.width / docEl.offsetWidth; // px canvas par px CSS
@@ -496,7 +498,7 @@ async function makePdf(src, opt = {}) {
     breaks.forEach(([a, b], i) => {
       const part = document.createElement('canvas'); part.width = canvas.width; part.height = Math.ceil(b - a);
       const ctx = part.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, part.width, part.height); ctx.drawImage(canvas, 0, -a);
-      if (i) pdf.addPage();
+      if (i || !first) pdf.addPage();
       const top = brand ? m + 4 : m;
       pdf.addImage(part.toDataURL('image/jpeg', opt.q || (opt.light ? 0.7 : 0.8)), 'JPEG', m, top, pw, (b - a) * pw / canvas.width);
       if (brand) {
@@ -512,7 +514,7 @@ async function makePdf(src, opt = {}) {
         pdf.setTextColor(brand.ink); pdf.text(`${i + 1} / ${breaks.length}`, 210 - m - 4, 297 - 6.5, { align: 'right' });
       } else { pdf.setFontSize(8); pdf.setTextColor(120); pdf.text(`Page ${i + 1}/${breaks.length}`, 210 - m, 297 - 5, { align: 'right' }); }
     });
-    return pdf.output('blob');
+    return opt.into ? pdf : pdf.output('blob');
   } finally { holder.remove(); const t = $('#toast'); if (t) t.classList.remove('show'); }
 }
 // ---------------------------------------------------------------- ZIP (sans compression) : plusieurs PDF en un seul téléchargement
