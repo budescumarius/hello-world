@@ -398,10 +398,19 @@ function totalsBox(t, doc, internal) {
 function printPage(title, html, back, mail) {
   const standalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
   app.innerHTML = `<div class="print-shell"><header class="top no-print"><a class="icon-btn" href="${back}" aria-label="Retour">${I.back}</a><div class="top-title"><h1>${esc(title)}</h1></div>
-    <div class="top-actions">${mail ? `<button class="btn primary" data-act="mail">${I.mail} Envoyer</button>` : ''}<button class="btn ${mail ? '' : 'primary'}" data-act="pdf">${I.file} PDF / Partager</button>${standalone ? '' : `<button class="btn" data-act="print">${I.print} Imprimer</button>`}</div></header><div class="print-page">${html}</div></div>`;
+    <div class="top-actions">${mail ? `<button class="btn primary" data-act="mail">${I.mail} Envoyer</button>` : ''}<button class="btn" data-act="dl">${I.download} Télécharger</button><button class="btn ${mail ? '' : 'primary'}" data-act="pdf">${I.file} PDF / Partager</button>${standalone ? '' : `<button class="btn" data-act="print">${I.print} Imprimer</button>`}</div></header><div class="print-page">${html}</div></div>`;
   if (mail) $('[data-act=mail]').onclick = () => mail();
   const pr = $('[data-act=print]');
   if (pr) pr.onclick = () => { const old = document.title; document.title = fileTitle(title); window.print(); setTimeout(() => { document.title = old; }, 800); };
+  // téléchargement direct du PDF (qualité normale)
+  $('[data-act=dl]').onclick = async (e) => {
+    const btn = e.currentTarget; btn.disabled = true;
+    try {
+      const blob = await makePdf(); const a = document.createElement('a'); const url = URL.createObjectURL(blob);
+      a.href = url; a.download = fileTitle(title) + '.pdf'; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000); toast('PDF téléchargé', 2000);
+    } catch (err) { console.error(err); toast('PDF impossible : ' + err.message, 5000); } finally { btn.disabled = false; }
+  };
   $('[data-act=pdf]').onclick = async (e) => {
     const btn = e.currentTarget; btn.disabled = true;
     try { await sharePdf(title); } catch (err) { console.error(err); toast('PDF impossible : ' + err.message, 5000); } finally { btn.disabled = false; }
@@ -539,7 +548,9 @@ async function sharePdf(title) {
   const blob = await makePdf(undefined, { light: true });
   const name = fileTitle(title) + '.pdf';
   const file = new File([blob], name, { type: 'application/pdf' });
-  const canShare = navigator.canShare && navigator.canShare({ files: [file] });
+  // ordinateur : le partage système (Chrome / Mac) n'ouvre souvent rien → fenêtre Ouvrir / Télécharger
+  const desktop = window.matchMedia('(pointer: fine)').matches && !('ontouchstart' in window);
+  const canShare = !desktop && navigator.canShare && navigator.canShare({ files: [file] });
   if (canShare) {
     try { await navigator.share({ files: [file], title }); return; } catch (e) { if (e.name === 'AbortError') return; }
   }
