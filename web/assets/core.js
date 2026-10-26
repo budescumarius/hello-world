@@ -627,6 +627,15 @@ async function render() {
   if (seq === renderSeq) window.scrollTo(0, 0);
 }
 window.addEventListener('hashchange', render);
+// « Remonter » : bouton flottant dès qu'on a fait défiler une longue page
+(() => {
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'to-top no-print'; b.setAttribute('aria-label', 'Remonter en haut de la page'); b.title = 'Remonter en haut';
+  b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+  b.onclick = () => window.scrollTo({ top: 0, behavior: 'smooth' });
+  const upd = () => b.classList.toggle('on', window.scrollY > 700);
+  window.addEventListener('scroll', upd, { passive: true }); window.addEventListener('hashchange', () => setTimeout(upd, 50));
+  document.addEventListener('DOMContentLoaded', () => document.body.appendChild(b)); if (document.body) document.body.appendChild(b);
+})();
 // recherche dans les listes à cocher (sous-traitants, équipe…)
 document.addEventListener('input', (e) => {
   if (!e.target.matches || !e.target.matches('.multi-q')) return;

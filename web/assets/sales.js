@@ -388,10 +388,23 @@ async function quoteToLibrary(q, { auto = false, quiet = false } = {}) {
   if (!v) return { c: 0, u: 0 };
   const all = await db.list('article'); let c = 0; let u = 0;
   if (!quiet) toast('Enregistrement…', 20000);
+  // sous-ligne d'un poste (« niveau 1 », « Niv.0 : », « Bois ») : nommée d'après le poste principal qui la précède
+  let parent = '';
+  const parentOf = new Map();
+  for (const l of d.lines) {
+    if (l.kind === 'title') { parent = ''; continue; }
+    if (l.kind !== 'item') continue;
+    const first = String(l.desc || '').split('\n')[0].trim();
+    const short = first.length < 16 || /:\s*$/.test(first) || /^(niv(eau)?\.?\s*[-+\d]|[-–•])/i.test(first);
+    if (short && parent) parentOf.set(l, `${parent} – ${first.replace(/\s*:\s*$/, '')}`);
+    else if (!short) parent = first.replace(/\s*[–-]\s*niv(eau)?\.?\s*[-+]?\d.*$/i, ''); // « … – niveau 0 » : la base sert aux sous-lignes « niveau 1 »
+  }
   for (const l of items) {
-    const [name, ...rest] = String(l.desc).split('\n'); const price = r2(num(l.price) * (1 - disc));
+    const [name0, ...rest] = String(l.desc).split('\n'); const name = parentOf.get(l) || name0; const price = r2(num(l.price) * (1 - disc));
     const kind = TYPES[l.type] ? l.type : 'divers';
-    const same = all.find((a) => normKey(a.data.name) === normKey(name) && (a.data.unit || 'u') === (l.unit || 'u'));
+    const same = all.find((a) => normKey(a.data.name) === normKey(name) && (a.data.unit || 'u') === (l.unit || 'u'))
+      // ancien nom trop court (« Niv.0 : ») enregistré depuis ce devis avant la v100 : renommé au lieu d'un doublon
+      || (name !== name0 ? all.find((a) => a.data.fromQuote === q.number && normKey(a.data.name) === normKey(name0) && (a.data.unit || 'u') === (l.unit || 'u')) : null);
     // un devis plus ancien ne remplace pas le prix d'un devis plus récent
     if (same && same.data.quoteDate && d.date && same.data.quoteDate > d.date) continue;
     // déboursé : celui de la ligne, sinon celui déjà connu (prix d'achat appris des factures) – jamais effacé
