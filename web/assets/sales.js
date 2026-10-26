@@ -128,13 +128,14 @@ route('library', async () => {
   $('[data-act=new]').onclick = () => editArticle();
   $('[data-act=learn]').onclick = async (ev) => {
     const exps = (await db.list('expense')).filter((x) => x.data.status === 'validee' && ((x.data.items || []).length || x.data.fileId));
+    const todo = exps.filter((x) => !x.data.libDone).length;
     const qs = (await db.list('quote')).filter((x) => x.data.status === 'accepte').sort((a, b) => ((a.data.date || '') < (b.data.date || '') ? -1 : 1));
     if (!exps.length && !qs.length) return toast('Aucune facture d\'achat validée ni devis accepté à lire', 3000);
-    if (!confirm(`Remplir la bibliothèque avec :\n• les prix d'achat de ${exps.length} facture(s) fournisseur validée(s)\n• les prix de vente de ${qs.length} devis accepté(s)\n\nLes prochaines factures validées et devis acceptés sont ajoutés automatiquement.`)) return;
-    ev.target.disabled = true; let n = 0; let c = 0; let u = 0; const tot = exps.length + qs.length;
-    for (const x of exps) { ev.target.textContent = `Lecture… ${++n}/${tot}`; const r = await learnPrices(x, { quiet: true }).catch(() => ({})); c += r.created || 0; u += r.updated || 0; }
+    if (!confirm(`Remplir la bibliothèque avec :\n• les prix d'achat de ${todo} facture(s) fournisseur pas encore lue(s)${exps.length - todo ? ` (${exps.length - todo} déjà lue(s), ignorée(s))` : ''}\n• les prix de vente de ${qs.length} devis accepté(s)\n\nLes prochaines factures validées et devis acceptés sont ajoutés automatiquement.`)) return;
+    ev.target.disabled = true; let n = 0; let c = 0; let u = 0; let sk = 0; const tot = exps.length + qs.length;
+    for (const x of exps) { ev.target.textContent = `Lecture… ${++n}/${tot}`; const r = await learnPrices(x, { quiet: true, skipDone: true }).catch(() => ({})); c += r.created || 0; u += r.updated || 0; if (r.skipped) sk++; }
     for (const x of qs) { ev.target.textContent = `Lecture… ${++n}/${tot}`; const r = await quoteToLibrary(x, { auto: true, quiet: true }).catch(() => ({})); c += r.c || 0; u += r.u || 0; }
-    toast(c || u ? `Bibliothèque : ${c} nouvel(s) article(s), ${u} prix mis à jour` : 'Aucun nouveau prix : déjà lus, ou factures scannées / sans quantité et prix unitaire par article', 7000); render();
+    toast(`${c || u ? `Bibliothèque : ${c} nouvel(s) article(s), ${u} prix mis à jour` : 'Aucun nouveau prix'}${sk ? ` · ${sk} facture(s) déjà lue(s), ignorée(s)` : ''}`, 7000); render();
   };
   $('[data-act=exp]').onclick = () => downloadCSV('bibliotheque.csv', [['Code', 'Designation', 'Type', 'Categorie', 'Unite', 'Debourse', 'Marge', 'Prix', 'TVA', 'Description'],
     ...all.map((a) => [a.data.code, a.data.name, a.data.kind, a.data.category, a.data.unit, fnum(articleCost(a, all).cost, 4), fnum(num(a.data.margin)), fnum(articlePrice(a, all)), fnum(num(a.data.vat)), a.data.desc])]);
@@ -397,10 +398,11 @@ async function quoteToLibrary(q, { auto = false, quiet = false } = {}) {
     const cost = num(l.cost) > 0 ? num(l.cost) : same ? num(same.data.cost) : 0;
     // déjà présent : mis à jour si demandé, sauf un ouvrage calculé (composants / heures), qui garde sa composition
     if (same && (!v.update || (same.data.kind === 'ouvrage' && ((same.data.components || []).length || num(same.data.moHours))))) continue;
-    const it = same || { data: {} };
+    const it = same || { data: {} }; const before = JSON.stringify(it.data);
     // sans déboursé connu : prix de vente fixe ; sinon déboursé + marge
     it.data = { ...it.data, name: name.trim(), desc: rest.join('\n').trim(), unit: l.unit || 'u', kind: same ? same.data.kind : kind, category: it.data.category || v.category, vat: num(l.vat),
       ...(cost > 0 ? { cost, margin: r2((price / cost - 1) * 100), price, priceMode: 'margin' } : { cost: 0, margin: 0, price, priceMode: 'fixed' }), fromQuote: q.number, quoteDate: d.date || today() };
+    if (same && JSON.stringify(it.data) === before) continue; // rien de changé : pas d'enregistrement (relecture rapide)
     await persist('article', it, { silent: true }); if (same) u++; else { c++; all.push(it); }
   }
   if (!quiet) toast(`Bibliothèque : ${c} poste(s) ajouté(s)${u ? `, ${u} mis à jour` : ''}`, 5000);

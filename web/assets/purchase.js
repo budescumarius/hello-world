@@ -634,14 +634,18 @@ function purchViewer(box, getFile, onAction) {
 // Chaque article acheté (quantité × prix unitaire net, remise déduite) crée ou met à jour un article « Matériaux » :
 // dernier prix payé, fournisseur, référence, historique ; les ouvrages qui l'utilisent sont recalculés d'office.
 const BUY_UNITS = { pc: 'pc', pce: 'pc', pcs: 'pc', st: 'pc', stk: 'pc', u: 'u', un: 'u', bte: 'bte', box: 'bte', paq: 'paq', pak: 'paq', m: 'm', ml: 'ml', m2: 'm²', 'm²': 'm²', m3: 'm³', 'm³': 'm³', kg: 'kg', t: 't', l: 'l', lt: 'l', h: 'h', rl: 'rl', sac: 'sac', zak: 'sac' };
-async function learnPrices(e, { quiet = false } = {}) {
+// skipDone : facture déjà lue (« Remplir depuis achats et devis ») → ignorée, sans relire le PDF
+async function learnPrices(e, { quiet = false, skipDone = false } = {}) {
   const d = e.data;
+  if (skipDone && d.libDone) return { n: 0, skipped: true };
   let items = (d.items || []).filter((x) => num(x.qty) > 0 && num(x.price) > 0);
   // articles pas encore lus, ou lus avant la v96 (sans quantité ni prix unitaire) : lecture du PDF de la facture
   if (!items.length && d.fileId && /\.pdf$/i.test(d.fileName || '')) {
     try { items = invoiceItemsFromText(await pdfFileText(d.fileId, 20)).filter((x) => num(x.qty) > 0 && num(x.price) > 0); } catch (err) { items = []; }
   }
-  if (!items.length) return { n: 0 };
+  // marquée comme lue (même sans prix trouvé : PDF scanné) pour ne plus la relire
+  const done = async () => { try { const fresh = await db.get('expense', e.id); fresh.data.libDone = today(); await persist('expense', fresh, { silent: true }); d.libDone = fresh.data.libDone; } catch (err) { /* hors ligne : relue la prochaine fois */ } };
+  if (!items.length) { await done(); return { n: 0 }; }
   const all = await db.list('article'); const contacts = await db.list('contact');
   const sup = byId(contacts, d.supplierId); const supName = sup ? sup.data.company || sup.data.name || '' : '';
   const date = d.date || today(); const changed = new Set(); let created = 0; let updated = 0; let up = 0;
@@ -670,6 +674,7 @@ async function learnPrices(e, { quiet = false } = {}) {
     changed.add(a); updated++;
   }
   for (const a of changed) await persist('article', a, { silent: true });
+  await done();
   if (!quiet && (created || updated)) toast(`Bibliothèque de prix : ${created ? `${created} nouvel(s) article(s)` : ''}${created && updated ? ', ' : ''}${updated ? `${updated} prix mis à jour` : ''}${up ? ` (⚠ ${up} en hausse de plus de 5 %)` : ''}`, 6000);
   return { n: created + updated, created, updated, up };
 }
