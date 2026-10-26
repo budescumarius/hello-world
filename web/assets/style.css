@@ -1863,6 +1863,18 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .team-t th a { color: inherit; text-decoration: none; }
 
 /* planning : couleur d'une personne (pastille cliquable) */
-.g-pick { display: flex; align-items: center; gap: 8px; } .g-pick a { color: inherit; text-decoration: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-pick { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; } .g-pick a { color: inherit; text-decoration: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .g-col { position: relative; width: 16px; height: 16px; flex: none; border-radius: 50%; overflow: hidden; box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--border); cursor: pointer; }
 .g-col input { position: absolute; inset: -6px; width: 28px; height: 28px; border: 0; padding: 0; cursor: pointer; }
+
+/* téléphone : planning plus compact (colonne des noms étroite, grille de la semaine resserrée) */
+@media (max-width: 700px) {
+  .gantt { --nw: 124px; }
+  .g-name { padding: 4px 8px; } .g-name b { font-size: 12.5px; } .g-name small { font-size: 10.5px; }
+  .g-group .g-name b, .g-pick a b { font-size: 12.5px; }
+  .team-t { min-width: 760px; } .team-t tbody th { width: 112px; } .team-t th, .team-t td { padding: 4px; }
+  .team-t tbody th b { font-size: 13px; } .team-t td { height: 56px; }
+  .asg { font-size: 11.5px; padding: 3px 5px; } .asg.der small { font-size: 10px; }
+}
+
+.login-rem { display: flex; align-items: center; gap: 8px; margin: 2px 0 14px; font-size: 14px; } .login-rem small { font-size: 12px; }

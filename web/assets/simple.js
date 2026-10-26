@@ -869,7 +869,7 @@ async function peppolSimple() {
 
 // ---------------------------------------------------------------- Aiguillage #/s/…
 route('s', async (screen, a, b) => {
-  if (screen === 'facture' || screen === 'devis') return docWizard(screen, a, b);
+  if (screen === 'facture' || screen === 'devis') return a ? docWizard(screen, a, b) : go(`#/s/${screen}/new`);
   if (screen === 'achat') return buyWizard(a, b || (a ? 'montant' : ''));
   if (screen === 'paye') return paidWizard(a);
   if (screen === 'avoir') return creditWizard(a);

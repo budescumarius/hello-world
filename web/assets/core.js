@@ -655,6 +655,7 @@ function showLogin(msg = '') {
     ${msg ? `<div class="alert">${esc(msg)}</div>` : ''}
     <label class="field"><span>Email</span><input name="email" type="email" autocomplete="username" required></label>
     <label class="field"><span>Mot de passe</span><input name="password" type="password" autocomplete="current-password" required></label>
+    <label class="chk login-rem"><input type="checkbox" name="remember" ${(() => { try { return localStorage.getItem('bp-remember') === '1' ? 'checked' : ''; } catch (e) { return ''; } })()}> Rester connecté sur cet appareil <small class="muted">(30 jours)</small></label>
     <button class="btn primary block" type="submit">Se connecter</button>
     <p class="muted" data-noacc>Pas de compte ? Demandez à l'administrateur de votre entreprise de vous en créer un.</p>
     <p class="login-legal"><a href="legal.php?doc=cgu" target="_blank" rel="noopener">Conditions</a> · <a href="legal.php?doc=confidentialite" target="_blank" rel="noopener">Confidentialité</a> · <a href="legal.php?doc=mentions" target="_blank" rel="noopener">Mentions légales</a></p>
@@ -666,7 +667,8 @@ function showLogin(msg = '') {
     e.preventDefault();
     const btn = $('button', f); btn.disabled = true;
     try {
-      const r = await api('POST', 'auth/login', { email: f.email.value, password: f.password.value });
+      try { localStorage.setItem('bp-remember', f.remember.checked ? '1' : '0'); } catch (e2) { /* stockage indisponible */ }
+      const r = await api('POST', 'auth/login', { email: f.email.value, password: f.password.value, remember: f.remember.checked });
       if (r && r.need2fa) return showLogin2fa();
       await boot();
     } catch (err) { showLogin(err.message); }

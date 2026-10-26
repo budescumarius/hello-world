@@ -55,12 +55,13 @@ switch ($seg[0] ?? '') {
             session_regenerate_id(true);
             // validation en deux étapes : le mot de passe ne suffit pas, il faut encore le code du téléphone
             if (!empty($u['totp'])) {
-                $_SESSION = ['pending' => (int)$u['id'], 'pending_at' => time()];
+                $_SESSION = ['pending' => (int)$u['id'], 'pending_at' => time(), 'pending_remember' => !empty($b['remember'])];
                 out(['need2fa' => true]);
             }
             $_SESSION['uid'] = (int)$u['id'];
             $_SESSION['pv'] = pass_version((string)$u['pass']); $_SESSION['seen'] = time();
             unset($_SESSION['cid']);
+            if (!empty($b['remember'])) { remember_issue((int)$u['id'], (string)$u['pass']); $_SESSION['remember'] = 1; } else remember_forget();
             if (password_needs_rehash($u['pass'], PASSWORD_DEFAULT)) q('UPDATE users SET pass = ? WHERE id = ?', [password_hash((string)$b['password'], PASSWORD_DEFAULT), $u['id']]);
             q('UPDATE users SET last_login = ? WHERE id = ?', [now(), $u['id']]);
             q('DELETE FROM logins WHERE ip IN (?, ?)', [$ip, $acc]);
@@ -78,8 +79,10 @@ switch ($seg[0] ?? '') {
             $step = $u && $u['totp'] ? totp_verify((string)$u['totp'], (string)(body()['code'] ?? ''), (int)$u['totp_step']) : 0;
             if (!$step) { q('INSERT INTO logins (ip, at) VALUES (?, ?), (?, ?)', [$ip, now(), $acc, now()]); usleep(600000); fail(400, 'Code incorrect.'); }
             q('UPDATE users SET totp_step = ?, last_login = ? WHERE id = ?', [$step, now(), $uid]);
+            $rem = !empty($_SESSION['pending_remember']);
             session_regenerate_id(true);
             $_SESSION = ['uid' => $uid, 'pv' => pass_version((string)$u['pass']), 'seen' => time()];
+            if ($rem) { remember_issue($uid, (string)$u['pass']); $_SESSION['remember'] = 1; }
             q('DELETE FROM logins WHERE ip IN (?, ?)', [$ip, $acc]);
             out(['ok' => true]);
         }
@@ -111,6 +114,7 @@ switch ($seg[0] ?? '') {
         }
         if ($act === 'logout' && $method === 'POST') {
             start_session();
+            remember_forget();
             $_SESSION = [];
             session_destroy();
             out(['ok' => true]);

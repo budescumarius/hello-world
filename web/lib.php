@@ -100,12 +100,54 @@ function start_session(): void {
     session_set_cookie_params(['lifetime' => 0, 'path' => '/', 'secure' => $secure, 'httponly' => true, 'samesite' => 'Lax']);
     session_start();
 }
+// « Rester connecté » : jeton longue durée (30 jours) dans un cookie séparé, gardé haché en base (sélecteur + secret).
+// Il recrée la session quand le serveur l'a effacée ou que le navigateur / l'app du téléphone a été fermé.
+// Invalide si le mot de passe change ; supprimé à la déconnexion.
+const REMEMBER_DAYS = 30;
+function remember_table(): void {
+    static $done = false; if ($done) return; $done = true;
+    db()->exec('CREATE TABLE IF NOT EXISTS remember_tokens (id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, selector CHAR(24) NOT NULL, hash CHAR(64) NOT NULL, pv CHAR(16) NOT NULL, expires DATETIME NOT NULL, created_at DATETIME NOT NULL, UNIQUE KEY sel (selector), KEY u (user_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+}
+function remember_cookie(string $value, int $expires): void {
+    $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+    if (!headers_sent()) setcookie('BPREM', $value, ['expires' => $expires, 'path' => '/', 'secure' => $secure, 'httponly' => true, 'samesite' => 'Lax']);
+}
+function remember_issue(int $uid, string $passHash): void {
+    remember_table();
+    q('DELETE FROM remember_tokens WHERE expires < ?', [now()]);
+    $sel = bin2hex(random_bytes(12)); $val = bin2hex(random_bytes(32)); $exp = time() + REMEMBER_DAYS * 86400;
+    q('INSERT INTO remember_tokens (user_id, selector, hash, pv, expires, created_at) VALUES (?,?,?,?,?,?)', [$uid, $sel, hash('sha256', $val), pass_version($passHash), date('Y-m-d H:i:s', $exp), now()]);
+    remember_cookie("$sel:$val", $exp);
+}
+function remember_forget(): void {
+    $c = (string)($_COOKIE['BPREM'] ?? '');
+    if ($c !== '' && strpos($c, ':') !== false) { try { remember_table(); q('DELETE FROM remember_tokens WHERE selector = ?', [explode(':', $c, 2)[0]]); } catch (Throwable $e) { /* table absente */ } }
+    remember_cookie('', time() - 3600);
+}
+// session perdue mais cookie « rester connecté » valable : la session est recréée (et le jeton renouvelé)
+function remember_restore(): void {
+    $c = (string)($_COOKIE['BPREM'] ?? '');
+    if (!preg_match('/^([a-f0-9]{24}):([a-f0-9]{64})$/', $c, $m)) return;
+    try { remember_table(); } catch (Throwable $e) { return; }
+    $t = q('SELECT * FROM remember_tokens WHERE selector = ?', [$m[1]])->fetch();
+    if (!$t) return;
+    if ($t['expires'] < now() || !hash_equals($t['hash'], hash('sha256', $m[2]))) { q('DELETE FROM remember_tokens WHERE id = ?', [$t['id']]); remember_cookie('', time() - 3600); return; }
+    $u = q('SELECT id, pass, active FROM users WHERE id = ?', [$t['user_id']])->fetch();
+    if (!$u || !$u['active'] || $t['pv'] !== pass_version((string)$u['pass'])) { q('DELETE FROM remember_tokens WHERE id = ?', [$t['id']]); remember_cookie('', time() - 3600); return; }
+    session_regenerate_id(true);
+    $_SESSION = ['uid' => (int)$u['id'], 'pv' => pass_version((string)$u['pass']), 'seen' => time(), 'remember' => 1];
+    // même jeton, validité prolongée (30 jours glissants) : plusieurs requêtes simultanées ne s'annulent pas
+    $exp = time() + REMEMBER_DAYS * 86400;
+    q('UPDATE remember_tokens SET expires = ? WHERE id = ?', [date('Y-m-d H:i:s', $exp), $t['id']]);
+    remember_cookie($c, $exp);
+}
 // empreinte du mot de passe gardée en session : un changement de mot de passe déconnecte les autres appareils
 function pass_version(string $hash): string { return substr(hash('sha256', $hash), 0, 16);
 }
 
 function current_user(): ?array {
     start_session();
+    if (empty($_SESSION['uid']) && empty($_SESSION['pending'])) remember_restore();
     if (empty($_SESSION['uid'])) return null;
     static $u = false;
     if ($u === false) {
