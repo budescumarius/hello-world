@@ -25,6 +25,31 @@ const crewHours = (k, x, m) => m.timesheet.filter((t) => (k === 'e' ? +t.data.em
 const crewOrders = (k, x, m) => (k === 'c' ? m.order.filter((o) => +o.data.supplierId === x.id && o.data.status !== 'brouillon') : []);
 const crewDue = (orders) => orders.filter((o) => !['facturee', 'annulee'].includes(o.data.status)).reduce((s, o) => s + totals(o.data).base, 0);
 const crewPoints = (k, x, m) => { const uid = +x.data.userId || 0; return m.point.filter((p) => (k === 'c' && +p.data.companyId === x.id) || (uid && +p.data.assigneeId === uid)); };
+// Diagramme d'une personne : pour chaque chantier, sa période, puis ses jours au planning (regroupés en périodes) et ses phases
+function crewGanttRows(k, x, m, why) {
+  const from = dstr(dnum(today()) - 90); const rows = [];
+  const pids = Object.keys(why).map(Number).filter((pid) => byId(m.project, pid));
+  // période du chantier : dates de la fiche, sinon celles de ses phases (comme le planning des chantiers)
+  const span = (p) => { const phs = m.phase.filter((f) => +f.project_id === p.id && f.data.start && f.data.end); const s0 = p.data.start || phs.map((f) => f.data.start).sort()[0]; const e0 = p.data.end || phs.map((f) => f.data.end).sort().pop(); return s0 ? { id: p.id, data: { name: p.data.name, start: s0, end: e0 && e0 >= s0 ? e0 : (s0 > today() ? s0 : today()), open: !e0, progress: p.data.status === 'termine' ? 100 : 0 } } : null; };
+  const items = pids.map((pid) => {
+    const p = byId(m.project, pid); const its = [];
+    if (k === 'e') {
+      // jours au planning → périodes (un week-end ou un jour férié ne coupe pas la période)
+      const ds = [...new Set(m.assign.filter((a) => +a.data.employeeId === x.id && +a.project_id === pid && a.data.date >= from).map((a) => a.data.date))].sort();
+      let cur = null;
+      ds.forEach((d) => { if (cur && dnum(d) - dnum(cur.end) <= 3) { cur.end = d; cur.n++; } else { cur = { start: d, end: d, n: 1 }; its.push(cur); } });
+    }
+    const asg = its.map((r, i) => ({ item: { id: -(pid * 1000 + i), data: { name: `Planning · ${r.n} jour${r.n > 1 ? 's' : ''}`, start: r.start, end: r.end, progress: r.end < today() ? 100 : 0 } }, color: p.data.color, sub: 'affecté' }));
+    const ph = m.phase.filter((f) => +f.project_id === pid && f.data.start && f.data.end && ((k === 'e' && (f.data.staff || []).map(Number).includes(x.id)) || (k === 'c' && +f.data.companyId === x.id)))
+      .sort((a, b) => a.data.start.localeCompare(b.data.start)).map((f) => ({ item: f, color: p.data.color, sub: 'phase' }));
+    const all = [...asg, ...ph].sort((a, b) => a.item.data.start.localeCompare(b.item.data.start));
+    const sp = span(p) || (all.length ? { id: p.id, data: { name: p.data.name, start: all[0].item.data.start, end: all.map((r) => r.item.data.end).sort().pop(), progress: 0 } } : null);
+    return { p, sp, all, key: (sp && sp.data.start) || (all[0] && all[0].item.data.start) || '9999' };
+  }).filter((r) => crewActive(r.p) || r.all.some((y) => y.item.data.end >= from))
+    .sort((a, b) => (crewActive(b.p) - crewActive(a.p)) || a.key.localeCompare(b.key));
+  items.forEach(({ p, sp, all }) => { rows.push({ proj: p, item: sp }); all.forEach((r) => rows.push(r)); });
+  return rows;
+}
 // où il travaille aujourd'hui (planning pour un ouvrier, phases en cours pour un sous-traitant)
 function crewToday(k, x, m) {
   const d = today();
@@ -104,6 +129,8 @@ async function crewPerson(k, id) {
       ${kpi('Heures ce mois', `${fnum(sumH(hours.filter((t) => (t.data.date || '').startsWith(month))), 1)} h`, { sub: `${fnum(sumH(hours), 1)} h au total` })}
       ${k === 'c' ? kpi('Bons de commande émis', money(issued.reduce((s, o) => s + totals(o.data).base, 0)), { sub: `${issued.length} bon(s) · HT` }) + kpi('Pas encore facturé', money(crewDue(orders)), { cls: crewDue(orders) ? 'warn' : '' })
     : kpi('Points à traiter', String(openPts.length))}</div>
+    ${(() => { const gr = crewGanttRows(k, x, m, why); return gr.length ? `<div class="card crew-gantt"><div class="card-h"><h3>Ses chantiers dans le temps</h3><span class="grow"></span>${zoomChips()}</div>${ganttHTML(gr, 'Chantier / affectation')}
+      <p class="muted sm">Barre du chantier : du début à la fin prévue · en dessous : ses jours au planning des équipes (regroupés en périodes) et ses phases.</p></div>` : ''; })()}
     <div class="cols-2">
       <div class="card"><div class="card-h"><h3>Chantiers attribués</h3></div><div class="rows">${sites.map((p) => { const h = sumH(hours.filter((t) => +t.project_id === p.id)); const bc = orders.filter((o) => +o.project_id === p.id && o.data.status !== 'annulee').reduce((s, o) => s + totals(o.data).base, 0);
         return `<a class="row" href="#/project/${p.id}"><span class="grow"><b>${esc(p.data.name)}</b><small class="muted">${esc([...why[p.id]].join(' · '))}</small></span>${st(PST, p.data.status)}<span class="crew-num">${h ? `${fnum(h, 1)} h` : ''}${h && bc ? '<br>' : ''}${bc ? money(bc) : ''}</span></a>`; }).join('')
@@ -123,6 +150,8 @@ async function crewPerson(k, id) {
     ${pts.length ? `<div class="card"><div class="card-h"><h3>Points sur plan attribués</h3></div><div class="rows">${[...openPts, ...pts.filter((p) => !isOpenPt(p))].map((p) => `<a class="row" href="#/project/${p.project_id}/points"><span class="grow"><b>n° ${esc(p.number || '')} – ${esc(p.data.title || '')}</b><small class="muted">${esc(pname(p.project_id))}${p.data.due ? ` · pour le ${fmtDate(p.data.due)}` : ''}</small></span>${st(PTS, p.data.status)}</a>`).join('')}</div></div>` : ''}
     ${user ? `<div class="card"><div class="card-h"><h3>Rapports</h3></div><div class="rep-list">${reportRows(reports, m.project) || '<p class="muted">Aucun rapport échangé.</p>'}</div></div>` : ''}`;
   $$('[data-mo]', page).forEach((b) => { b.onclick = () => { ui[`crewm_${k}${id}`] = b.dataset.mo; saveUi(); render(); }; });
+  // phase : ouverte pour modification ; période du planning : planning des équipes
+  bindGantt(page, (tid) => { if (tid < 0) return go('#/planning/team'); const ph = m.phase.find((f) => f.id === tid); if (ph) editPhase(byId(m.project, ph.project_id), ph); });
   $$('[data-href]', page).forEach((tr) => { tr.style.cursor = 'pointer'; tr.onclick = () => go(tr.dataset.href); });
   const rep = $('[data-act=rep]'); if (rep && user) rep.onclick = () => sendReport(null, [user.id]);
 }

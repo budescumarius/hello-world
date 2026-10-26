@@ -162,21 +162,40 @@ route('planning', async (sub = 'projects') => {
 async function teamPlanning() {
   const wk = ui.week && /^\d{4}-\d\d-\d\d$/.test(ui.week) ? ui.week : (() => { const t = dnum(today()); return dstr(t - ((new Date(t * DAY).getUTCDay() + 6) % 7)); })();
   const days = Array.from({ length: 7 }, (_, i) => addDays(wk, i));
-  const [staff, assigns, projects, inters, absences] = await Promise.all([db.list('employee'), db.list('assign'), db.list('project'), db.list('intervention'), db.list('absence')]);
-  const people = staff.filter((s) => s.data.active !== false).sort((a, b) => a.data.name.localeCompare(b.data.name));
+  const [staff, assigns, projects, inters, absences, phases, contacts] = await Promise.all([db.list('employee'), db.list('assign'), db.list('project'), db.list('intervention'), db.list('absence'), db.list('phase'), db.list('contact')]);
+  // autres attributions de la semaine (affichées en plus des affectations du planning) : phases, équipe du chantier, sous-traitants du chantier
+  const live = projects.filter((p) => !['termine', 'annule'].includes(p.data.status));
+  const pspan = (p) => { const ph = phases.filter((f) => f.project_id === p.id && f.data.start && f.data.end); const a0 = p.data.start || ph.map((f) => f.data.start).sort()[0]; const b0 = p.data.end || ph.map((f) => f.data.end).sort().pop(); return a0 && b0 ? [a0, b0] : null; };
+  const derived = (k, x, d, i) => {
+    if (i > 4) return [];
+    const out = []; const seen = new Set();
+    phases.forEach((f) => { if (f.data.start <= d && f.data.end >= d && ((k === 'e' && (f.data.staff || []).map(Number).includes(x.id)) || (k === 'c' && +f.data.companyId === x.id))) { const p = byId(projects, f.project_id); if (p && live.includes(p)) { seen.add(p.id); out.push({ p, why: f.data.name, href: `#/project/${p.id}/planning` }); } } });
+    const uid = k === 'e' ? +x.data.userId || 0 : 0;
+    live.forEach((p) => {
+      if (seen.has(p.id)) return; const sp = pspan(p); if (!sp || sp[0] > d || sp[1] < d) return;
+      if ((uid && (p.data.team || []).map(Number).includes(uid)) || (k === 'c' && (p.data.subs || []).map(Number).includes(x.id))) out.push({ p, why: k === 'c' ? 'sous-traitant du chantier' : 'équipe du chantier', href: `#/project/${p.id}` });
+    });
+    return out;
+  };
+  const people = [
+    ...staff.filter((s) => s.data.active !== false).map((x) => ({ k: 'e', x, name: x.data.name || '—', role: x.data.role || '' })),
+    ...contacts.filter((c) => c.data.kind === 'soustraitant').map((x) => ({ k: 'c', x, name: contactName(x), role: `Sous-traitant${x.data.trade ? ` · ${x.data.trade}` : ''}` })),
+  ].filter((pp) => pp.k === 'e' || days.some((d, i) => derived('c', pp.x, d, i).length))
+    .sort((a, b) => (a.k === b.k ? a.name.localeCompare(b.name) : a.k === 'e' ? -1 : 1));
   const week = assigns.filter((x) => x.data.date >= days[0] && x.data.date <= days[6]);
   const page = layout({ active: 'planning', icon: 'calendar', title: 'Planning des équipes',
     actions: `<button class="btn" data-w="-7">‹ Semaine préc.</button><button class="btn" data-w="0">Cette semaine</button><button class="btn" data-w="7">Semaine suiv. ›</button><button class="btn" data-act="copy">Copier la semaine précédente</button>` });
   const DN = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
   page.innerHTML = people.length ? `<div class="team"><table class="team-t"><thead><tr><th>Ouvrier</th>${days.map((d, i) => `<th class="${d === today() ? 'today' : ''} ${i > 4 ? 'we' : ''}">${DN[i]} ${fmtDate(d).slice(0, 5)}</th>`).join('')}</tr></thead><tbody>
-    ${people.map((s) => `<tr><th><b>${esc(s.data.name)}</b><small class="muted">${esc(s.data.role || '')}</small></th>${days.map((d, i) => {
-      const abs = absences.find((a) => +a.data.employeeId === s.id && a.data.from <= d && a.data.to >= d);
-      const cell = week.filter((x) => +x.data.employeeId === s.id && x.data.date === d);
-      const it = inters.filter((x) => x.data.date === d && (x.data.staff || []).map(Number).includes(s.id));
-      return `<td class="${i > 4 ? 'we' : ''}" data-cell="${s.id}|${d}">${abs ? `<div class="abs">${esc(ABS_KINDS[abs.data.kind] || 'Absent')}</div>` : ''}
+    ${people.map(({ k, x: s, name, role }) => `<tr><th><a href="#/crew/${k}/${s.id}"><b>${esc(name)}</b></a><small class="muted">${esc(role)}</small></th>${days.map((d, i) => {
+      const abs = k === 'e' ? absences.find((a) => +a.data.employeeId === s.id && a.data.from <= d && a.data.to >= d) : null;
+      const cell = k === 'e' ? week.filter((x) => +x.data.employeeId === s.id && x.data.date === d) : [];
+      const it = k === 'e' ? inters.filter((x) => x.data.date === d && (x.data.staff || []).map(Number).includes(s.id)) : [];
+      const der = derived(k, s, d, i).filter((y) => !cell.some((c) => +c.project_id === y.p.id));
+      return `<td class="${i > 4 ? 'we' : ''}" ${k === 'e' ? `data-cell="${s.id}|${d}"` : ''}>${der.map((y) => `<a class="asg der" href="${y.href}" style="--c:${esc(y.p.data.color || '#3b5bdb')}" title="${esc(y.why)}">${esc(y.p.data.name)}<small>${esc(y.why)}</small></a>`).join('')}${abs ? `<div class="abs">${esc(ABS_KINDS[abs.data.kind] || 'Absent')}</div>` : ''}
         ${cell.map((x) => { const p = byId(projects, x.project_id); return `<div class="asg" draggable="true" data-asg="${x.id}" style="--c:${esc((p && p.data.color) || '#3b5bdb')}">${esc(p ? p.data.name : x.data.note || '—')}${x.data.half && x.data.half !== 'day' ? ` <small>${x.data.half === 'am' ? 'matin' : 'après-midi'}</small>` : ''}</div>`; }).join('')}
         ${it.map((x) => `<a class="asg int" href="#/intervention/${x.id}">${I.tool} ${esc(x.data.title || x.number)}</a>`).join('')}</td>`;
-    }).join('')}</tr>`).join('')}</tbody></table></div><p class="muted">Cliquez sur une case pour affecter un ouvrier à un chantier · glissez une affectation pour la déplacer.</p>`
+    }).join('')}</tr>`).join('')}</tbody></table></div><p class="muted">Cliquez sur une case pour affecter un ouvrier à un chantier · glissez une affectation pour la déplacer · en pointillé : attribué par une phase ou par l'équipe / les sous-traitants du chantier (jours ouvrables).</p>`
     : empty('Aucun ouvrier', 'Ajoutez votre personnel dans RH → Personnel pour planifier les équipes.', '<a class="btn primary" href="#/hr/staff">Ajouter du personnel</a>');
   $$('[data-w]').forEach((b) => { b.onclick = () => { ui.week = +b.dataset.w ? addDays(wk, +b.dataset.w) : ''; saveUi(); render(); }; });
   const active = projects.filter((p) => !['termine', 'annule'].includes(p.data.status));
@@ -202,7 +221,7 @@ async function teamPlanning() {
       { label: 'Ouvrir le chantier', run: () => go(`#/project/${x.project_id}`) },
       // sur téléphone le glisser-déposer n'existe pas : déplacement par formulaire
       { label: 'Déplacer / modifier…', run: () => formModal({ title: 'Déplacer l\'affectation', values: { employeeId: x.data.employeeId, date: x.data.date, half: x.data.half || 'day', project_id: x.project_id, note: x.data.note },
-        fields: [{ name: 'employeeId', label: 'Ouvrier', type: 'select', options: people.map((s) => [s.id, s.data.name]) }, { name: 'date', label: 'Date', type: 'date' }, { name: 'project_id', label: 'Chantier', type: 'select', options: active.map((pp) => [pp.id, pp.data.name]) }, { name: 'half', label: 'Période', type: 'select', options: [['day', 'Journée'], ['am', 'Matin'], ['pm', 'Après-midi']] }, { name: 'note', label: 'Remarque', cls: 'full' }],
+        fields: [{ name: 'employeeId', label: 'Ouvrier', type: 'select', options: people.filter((pp) => pp.k === 'e').map((pp) => [pp.x.id, pp.name]) }, { name: 'date', label: 'Date', type: 'date' }, { name: 'project_id', label: 'Chantier', type: 'select', options: active.map((pp) => [pp.id, pp.data.name]) }, { name: 'half', label: 'Période', type: 'select', options: [['day', 'Journée'], ['am', 'Matin'], ['pm', 'Après-midi']] }, { name: 'note', label: 'Remarque', cls: 'full' }],
         async onSave(v) { x.project_id = +v.project_id; Object.assign(x.data, { employeeId: +v.employeeId, date: v.date, half: v.half, note: v.note }); await persist('assign', x, { silent: true }); render(); } }) },
       { label: 'Supprimer l\'affectation', danger: true, run: async () => { await db.del('assign', x.id); render(); } }]); };
   });

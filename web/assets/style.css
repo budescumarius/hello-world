@@ -1855,3 +1855,9 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .g-row.g-proj { background: #fbfaf6; } .g-row.g-proj .g-name small { color: var(--muted); }
 .g-bar.g-pbar { font-weight: 700; } .g-bar.g-pbar.open { background-image: repeating-linear-gradient(45deg, transparent 0 6px, rgba(255,255,255,.35) 6px 12px); border-right: 2px dashed rgba(0,0,0,.25); }
 .g-nodate { position: absolute; top: 50%; transform: translateY(-50%); border: 1px dashed var(--border); background: #fff; border-radius: 8px; padding: 3px 10px; font: inherit; font-size: 12px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+
+.crew-gantt .card-h .chips { margin: 0; } .crew-gantt .chips .chip:not([data-z]) { display: none; }
+
+.asg.der { background: transparent; border: 1px dashed color-mix(in srgb, var(--c) 70%, #fff); border-left: 3px solid var(--c); color: inherit; text-decoration: none; font-weight: 600; }
+.asg.der small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
+.team-t th a { color: inherit; text-decoration: none; }
