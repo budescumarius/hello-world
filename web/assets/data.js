@@ -395,25 +395,26 @@ function totalsBox(t, doc, internal) {
 
 // ---------------------------------------------------------------- Page d'impression (documents : voir docs.js)
 // mail : fonction qui ouvre la fenêtre d'envoi par email (bouton « Envoyer » affiché si présent)
-function printPage(title, html, back, mail) {
+function printPage(title, html, back, mail, fname) {
+  const fn = fname || fileTitle(title);
   const standalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
   app.innerHTML = `<div class="print-shell"><header class="top no-print"><a class="icon-btn" href="${back}" aria-label="Retour">${I.back}</a><div class="top-title"><h1>${esc(title)}</h1></div>
     <div class="top-actions">${mail ? `<button class="btn primary" data-act="mail">${I.mail} Envoyer</button>` : ''}<button class="btn" data-act="dl">${I.download} Télécharger</button><button class="btn ${mail ? '' : 'primary'}" data-act="pdf">${I.file} PDF / Partager</button>${standalone ? '' : `<button class="btn" data-act="print">${I.print} Imprimer</button>`}</div></header><div class="print-page">${html}</div></div>`;
   if (mail) $('[data-act=mail]').onclick = () => mail();
   const pr = $('[data-act=print]');
-  if (pr) pr.onclick = () => { const old = document.title; document.title = fileTitle(title); window.print(); setTimeout(() => { document.title = old; }, 800); };
+  if (pr) pr.onclick = () => { const old = document.title; document.title = fn; window.print(); setTimeout(() => { document.title = old; }, 800); };
   // téléchargement direct du PDF (qualité normale)
   $('[data-act=dl]').onclick = async (e) => {
     const btn = e.currentTarget; btn.disabled = true;
     try {
       const blob = await makePdf(); const a = document.createElement('a'); const url = URL.createObjectURL(blob);
-      a.href = url; a.download = fileTitle(title) + '.pdf'; document.body.appendChild(a); a.click(); a.remove();
+      a.href = url; a.download = fn + '.pdf'; document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60000); toast('PDF téléchargé', 2000);
     } catch (err) { console.error(err); toast('PDF impossible : ' + err.message, 5000); } finally { btn.disabled = false; }
   };
   $('[data-act=pdf]').onclick = async (e) => {
     const btn = e.currentTarget; btn.disabled = true;
-    try { await sharePdf(title); } catch (err) { console.error(err); toast('PDF impossible : ' + err.message, 5000); } finally { btn.disabled = false; }
+    try { await sharePdf(title, fn); } catch (err) { console.error(err); toast('PDF impossible : ' + err.message, 5000); } finally { btn.disabled = false; }
   };
 }
 const fileTitle = (t) => String(t).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'document';
@@ -543,10 +544,10 @@ function downloadBlob(blob, name) {
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
 }
 const csvBytes = (rows) => new TextEncoder().encode('\ufeff' + rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'));
-async function sharePdf(title) {
+async function sharePdf(title, fname) {
   // partagé par e-mail / WhatsApp : version légère (environ deux fois plus petite)
   const blob = await makePdf(undefined, { light: true });
-  const name = fileTitle(title) + '.pdf';
+  const name = (fname || fileTitle(title)) + '.pdf';
   const file = new File([blob], name, { type: 'application/pdf' });
   // ordinateur : le partage système (Chrome / Mac) n'ouvre souvent rien → fenêtre Ouvrir / Télécharger
   const desktop = window.matchMedia('(pointer: fine)').matches && !('ontouchstart' in window);

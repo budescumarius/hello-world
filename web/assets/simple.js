@@ -365,7 +365,7 @@ async function sharePdfOf(typ, id, variant = '') {
   const holder = document.createElement('div'); holder.className = 'print-page s-offscreen'; holder.innerHTML = r.html;
   document.body.appendChild(holder);
   const old = $$('.print-page').filter((x) => x !== holder); old.forEach((x) => x.classList.remove('print-page'));
-  try { await sharePdf(r.title); } catch (e) { toast('PDF impossible : ' + e.message, 4000); } finally { holder.remove(); old.forEach((x) => x.classList.add('print-page')); }
+  try { await sharePdf(r.title, r.fname); } catch (e) { toast('PDF impossible : ' + e.message, 4000); } finally { holder.remove(); old.forEach((x) => x.classList.add('print-page')); }
 }
 function undoToast(msg, undo) {
   toast(msg, 5000);

@@ -20,7 +20,7 @@ async function docsPdfFiles(kind, picked, folder = '', light = false) {
     toast(`PDF ${i + 1} / ${picked.length}…`, 60000);
     const r = await docHtml(kind, it.id);
     const blob = await makePdf(r.html, { light });
-    files.push({ name: `${folder}${fileTitle(r.title || it.number || String(it.id))}.pdf`, data: new Uint8Array(await blob.arrayBuffer()) });
+    files.push({ name: `${folder}${r.fname || fileTitle(r.title || it.number || String(it.id))}.pdf`, data: new Uint8Array(await blob.arrayBuffer()) });
   }
   return files;
 }

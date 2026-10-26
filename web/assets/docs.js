@@ -301,7 +301,7 @@ const docVariant = () => new URLSearchParams(location.hash.split('?')[1] || '').
 async function printDoc(kind, id) {
   const r = await docHtml(kind, id, docVariant());
   const { it, d, c, project, title, html, typ, co } = r;
-  return printDocPage(kind, id, it, d, c, project, title, html, typ, co);
+  return printDocPage(kind, id, it, d, c, project, title, html, typ, co, r.fname);
 }
 // Rendu du document (devis, facture, commande) : utilisé pour l'impression, l'aperçu et le PDF
 async function docHtml(kind, id, variant = '') {
@@ -331,9 +331,16 @@ async function docHtml(kind, id, variant = '') {
     <footer class="mb-foot"><span>${esc(legal)}</span><span class="mb-pg">1 / ${cgv ? 2 : 1}</span></footer></div>
     ${cgv}
   </div>`;
-  return { it, d, c, project, title, html, typ, co };
+  return { it, d, c, project, title, html, typ, co, fname: docFileName(kind, it, variant) };
 }
-function printDocPage(kind, id, it, d, c, project, title, html, typ, co) {
+// nom des fichiers PDF : « Facture_2026-122 », « Devis_2026-075 » (préfixe FAC- / DEV- retiré du numéro)
+function docFileName(kind, it, variant = '') {
+  const d = it.data || {};
+  const label = kind === 'quote' ? 'Devis' : kind === 'order' ? 'Commande' : d.kind === 'avoir' ? 'Note-de-credit' : 'Facture';
+  const no = String(it.number || '').replace(/^[A-Za-z]{1,6}[-_ ]?(?=\d)/, '').trim() || 'brouillon';
+  return `${label}_${fileTitle(no)}${variant === 'simple' ? '_simplifiee' : ''}`;
+}
+function printDocPage(kind, id, it, d, c, project, title, html, typ, co, fname) {
   const mailDoc = () => {
     const tot = money(totals(d).total);
     const site = project ? ` – ${project.data.name}` : '';
@@ -346,11 +353,11 @@ function printDocPage(kind, id, it, d, c, project, title, html, typ, co) {
     sendMailDialog({
       subject: ea ? `${label} – à approuver${d.ea && d.ea.approveBy ? ` avant le ${fmtDate(d.ea.approveBy)}` : ''}${site}` : `${label} ${it.number || ''}${site}`.trim(), body,
       recipients: [...(c ? [contactRcpt(c, kind === 'order' ? 'Fournisseur' : 'Client', true)] : []), ...S.users.filter((u) => u.active && u.id !== S.me.id).map((u) => userRcpt(u, 'Notre équipe', false))],
-      ref: { type: typ, id: it.id }, projectId: it.project_id, pdfName: `${fileTitle(title)}${docVariant() === 'simple' ? '' : ''}.pdf`,
+      ref: { type: typ, id: it.id }, projectId: it.project_id, pdfName: `${fname || fileTitle(title)}.pdf`,
       // facture simplifiée : l'état d'avancement détaillé en 2e pièce jointe (et inversement)
       extra: kind === 'invoice' && (d.lines || []).length > 1 ? [docVariant() === 'simple'
-        ? { label: d.kind === 'situation' ? `Détail de l'état d'avancement ${d.ref || ''}` : 'Facture détaillée', name: `${fileTitle(title)}-detail.pdf`, checked: true, make: async () => makePdf((await docHtml(kind, id, '')).html, { light: true }) }
-        : { label: 'Facture simplifiée (sans détail des postes)', name: `${fileTitle(title)}-simplifiee.pdf`, checked: false, make: async () => makePdf((await docHtml(kind, id, 'simple')).html, { light: true }) }] : [],
+        ? { label: d.kind === 'situation' ? `Détail de l'état d'avancement ${d.ref || ''}` : 'Facture détaillée', name: `${docFileName(kind, it)}_detail.pdf`, checked: true, make: async () => makePdf((await docHtml(kind, id, '')).html, { light: true }) }
+        : { label: 'Facture simplifiée (sans détail des postes)', name: `${docFileName(kind, it, 'simple')}.pdf`, checked: false, make: async () => makePdf((await docHtml(kind, id, 'simple')).html, { light: true }) }] : [],
       onSent: (to) => {
         d.sent = [...(d.sent || []), { t: new Date().toISOString(), to, by: S.me.id }];
         if (kind === 'quote' && d.status === 'brouillon') { d.status = 'envoye'; d.sentAt = today(); }
@@ -360,7 +367,7 @@ function printDocPage(kind, id, it, d, c, project, title, html, typ, co) {
     });
   };
   if (isField()) return printPage(title, html, '#/t/commandes', null);
-  printPage(title, html, (isSimple() && kind !== 'order' ? { quote: `#/s/doc/devis/${id}`, invoice: `#/s/doc/facture/${id}` } : { quote: `#/quote/${id}`, invoice: `#/invoice/${id}`, order: `#/order/${id}` })[kind], mailDoc);
+  printPage(title, html, (isSimple() && kind !== 'order' ? { quote: `#/s/doc/devis/${id}`, invoice: `#/s/doc/facture/${id}` } : { quote: `#/quote/${id}`, invoice: `#/invoice/${id}`, order: `#/order/${id}` })[kind], mailDoc, fname);
   // facture : version détaillée (tous les postes) ou simplifiée (une ligne + récapitulatif)
   if (kind === 'invoice' && (it.data.lines || []).length > 1) {
     const v = docVariant() === 'simple' ? 'simple' : '';
