@@ -285,6 +285,8 @@ route('purchase', async (id) => {
           ${fieldsGrid([{ name: 'iban', label: 'IBAN' }, { name: 'bic', label: 'BIC / Swift' }], d)}
           <div class="field full pi-comm"><span class="pi-comm-h">Communication <label class="toggle"><input type="checkbox" name="structured" ${d.structured ? 'checked' : ''}><i></i> Structurée</label></span>
             <input name="communication" value="${esc(d.structured ? commFmt(d.communication || '') : (d.communication || ''))}" placeholder="+++123/4567/89012+++"><small class="muted" data-commok></small></div>
+          ${purchRest(d) > 0.009 || !(d.payments || []).length ? `<div class="pi-prepaid"><label class="toggle"><input type="checkbox" name="prepaid" ${d.prepaid ? 'checked' : ''}><i></i> <b>Déjà payée</b></label><small class="muted" data-pphint>la facture est réglée (acquittée, payée par carte, domiciliation…)</small>
+            <div class="pi-pp-f" ${d.prepaid ? '' : 'hidden'}>${fieldsGrid([{ name: 'ppdate', label: 'Payée le', type: 'date' }, { name: 'ppmethod', label: 'Mode', type: 'select', options: PAY_METHODS.map((x) => [x, x]) }], { ppdate: (d.prepaid || {}).date || d.date || today(), ppmethod: (d.prepaid || {}).method || 'Virement' })}</div></div>` : ''}
           ${fieldsGrid([{ name: 'desc', label: 'Libellé (facultatif)', cls: 'full', placeholder: 'ex. Matériaux toiture' }], d)}
         </form>
         <div class="pi-view" data-view></div>
@@ -358,6 +360,21 @@ route('purchase', async (id) => {
     contacts.push(c); guess = null; drawGuess();
   }
   drawGuess(); refreshGuess();
+  // « Déjà payée » : date et mode ; cochée d'office si la facture se dit acquittée / payée
+  const ppBox = F('prepaid');
+  if (ppBox) {
+    ppBox.onchange = () => { $('.pi-pp-f', page).hidden = !ppBox.checked; };
+    const paidHint = async () => {
+      if (ppBox.checked || (d.payments || []).length || !(e.data.status === 'avalider' || isNew)) return;
+      const txt = isPdfFile() ? await readPdf() : '';
+      if (/\bacquitt[ée]e?s?\b|\b(d[ée]j[aà] )?pay[ée]e? (le|par|en|via|comptant)\b|\bbetaald\b|\bvoldaan\b|\bpaid\b/i.test(txt)) {
+        ppBox.checked = true; $('.pi-pp-f', page).hidden = false;
+        const pm = /carte|card|bancontact|maestro|visa/i.test(txt) ? 'Carte' : /esp[èe]ces|cash|contant/i.test(txt) ? 'Espèces' : /domicili/i.test(txt) ? 'Domiciliation' : 'Virement';
+        F('ppmethod').value = pm; $('[data-pphint]', page).innerHTML = '<b>La facture indique qu\'elle est acquittée / payée</b> – décochez si ce n\'est pas le cas';
+      }
+    };
+    paidHint();
+  }
   // relecture complète du PDF (factures importées avant une amélioration de la lecture)
   const reread = async () => {
     if (!fileId || !isPdfFile()) return toast('Pas de PDF joint');
@@ -542,13 +559,17 @@ route('purchase', async (id) => {
       status: mode === 'draft' ? 'avalider' : 'validee', toCheck: mode === 'draft',
     });
     if (mode !== 'draft' && !wasOpen) purchLog(e.data, 'Facture validée');
+    // « Déjà payée » cochée : paiement enregistré à la validation (gardé tant que la facture reste à valider)
+    const pp = F('prepaid') && F('prepaid').checked ? { date: F('ppdate').value || v.date || today(), method: F('ppmethod').value || 'Virement' } : null;
+    if (pp && mode !== 'draft' && purchRest(e.data) > 0.009) { const r = purchRest(e.data); (e.data.payments = e.data.payments || []).push({ date: pp.date, amount: r, method: pp.method }); purchLog(e.data, `Paiement de ${money(r)} le ${fmtDate(pp.date)} (${pp.method})`); purchSyncPaid(e.data); delete e.data.prepaid; }
+    else if (pp && mode === 'draft') e.data.prepaid = pp; else delete e.data.prepaid;
     if (mode === 'paid' && purchRest(e.data) > 0.009) { const r = purchRest(e.data); (e.data.payments = e.data.payments || []).push({ date: today(), amount: r, method: 'Virement' }); purchLog(e.data, `Paiement de ${money(r)} le ${fmtDate(today())}`); purchSyncPaid(e.data); }
     ['readNote', 'supplierGuess', 'project_id'].forEach((k) => delete e.data[k]);
     if (rows.length === 1 && Math.abs(num(rows[0].amount) - ht()) < 0.01) { e.project_id = +rows[0].pid; e.data.category = rows[0].category || e.data.category; delete e.data.alloc; }
     else if (rows.length) { e.project_id = null; e.data.alloc = rows.map((a) => ({ pid: +a.pid, amount: r2(num(a.amount)), category: a.category || e.data.category, ...(a.fromItems ? { fromItems: true } : {}) })); }
     else { e.project_id = null; delete e.data.alloc; }
     await persist('expense', e);
-    toast(mode === 'draft' ? 'Enregistrée (à valider)' : mode === 'paid' ? 'Facture soumise et marquée payée' : 'Facture soumise', 2500);
+    toast(mode === 'draft' ? 'Enregistrée (à valider)' : mode === 'paid' || pp ? 'Facture soumise et marquée payée' : 'Facture soumise', 2500);
     go('#/expenses');
     // facture validée : ses prix d'achat alimentent la bibliothèque (en arrière-plan)
     if (mode !== 'draft') learnPrices(e).catch(() => {});

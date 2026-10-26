@@ -1845,3 +1845,8 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 /* facture Peppol (UBL) affichée sans PDF */
 .ubl-wrap { overflow-x: auto; }
 .ubl-acts { padding: 10px; text-align: center; }
+
+/* facture d'achat : « Déjà payée » */
+.pi-prepaid { grid-column: 1 / -1; margin: 6px 0 10px; padding: 10px 12px; border-radius: 12px; background: #eef8f1; border: 1px solid #cfe9d8; }
+.pi-prepaid > label { display: inline-flex; align-items: center; gap: 8px; } .pi-prepaid small { display: block; margin-top: 4px; }
+.pi-pp-f { margin-top: 8px; }
