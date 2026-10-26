@@ -39,7 +39,7 @@ function crewGanttRows(k, x, m, why) {
       let cur = null;
       ds.forEach((d) => { if (cur && dnum(d) - dnum(cur.end) <= 3) { cur.end = d; cur.n++; } else { cur = { start: d, end: d, n: 1 }; its.push(cur); } });
     }
-    const asg = its.map((r, i) => ({ item: { id: -(pid * 1000 + i), data: { name: `Planning · ${r.n} jour${r.n > 1 ? 's' : ''}`, start: r.start, end: r.end, progress: r.end < today() ? 100 : 0 } }, color: p.data.color, sub: 'affecté' }));
+    const asg = its.map((r, i) => ({ item: { id: -(pid * 1000 + i), data: { name: `Planning · ${r.n} jour${r.n > 1 ? 's' : ''}`, start: r.start, end: r.end, progress: r.end < today() ? 100 : 0, noPct: true } }, color: p.data.color, sub: 'affecté' }));
     const ph = m.phase.filter((f) => +f.project_id === pid && f.data.start && f.data.end && ((k === 'e' && (f.data.staff || []).map(Number).includes(x.id)) || (k === 'c' && +f.data.companyId === x.id)))
       .sort((a, b) => a.data.start.localeCompare(b.data.start)).map((f) => ({ item: f, color: p.data.color, sub: 'phase' }));
     const all = [...asg, ...ph].sort((a, b) => a.item.data.start.localeCompare(b.item.data.start));

@@ -77,7 +77,7 @@ function ganttHTML(rows, head = 'Phase') {
       if (!r.item) return `<div class="g-row g-group"><a class="g-name" href="${r.href || '#'}"><b><i class="dot" style="--c:${esc(r.color || '#3b5bdb')}"></i> ${esc(r.label)}</b></a><div class="g-track" style="width:${W}px"></div></div>`;
       const t = r.item.data; const x = (dnum(t.start) - a) * dw; const w = (dnum(t.end) - dnum(t.start) + 1) * dw; const pg = Math.min(100, Math.max(0, num(t.progress)));
       return `<div class="g-row"><button class="g-name" data-task="${r.item.id}"><b>${esc(t.name)}</b><small>${fmtDate(t.start).slice(0, 5)} – ${fmtDate(t.end).slice(0, 5)}${r.sub ? ' · ' + esc(r.sub) : ''}</small></button>
-        <div class="g-track" style="width:${W}px"><button class="g-bar" data-task="${r.item.id}" style="left:${x}px;width:${w}px;--c:${phaseColor(r.item, r.color)}"><span class="g-fill" style="width:${pg}%"></span><span class="g-lbl">${pg} %${w > 120 ? ' · ' + esc(t.name) : ''}</span></button></div></div>`;
+        <div class="g-track" style="width:${W}px"><button class="g-bar" data-task="${r.item.id}" style="left:${x}px;width:${w}px;--c:${phaseColor(r.item, r.color)}"><span class="g-fill" style="width:${pg}%"></span><span class="g-lbl">${t.noPct ? (w > 60 ? esc(t.name) : '') : `${pg} %`}${!t.noPct && w > 120 ? ' · ' + esc(t.name) : ''}</span></button></div></div>`;
     }).join('')}</div></div>`;
 }
 function bindGantt(el, onTask) {
@@ -159,7 +159,28 @@ route('planning', async (sub = 'projects') => {
 });
 
 // Planning des équipes : ouvriers × jours de la semaine
+// Vue « Diagramme » : chaque personne, ses chantiers et ses périodes (planning, phases, équipe du chantier) – zoom jours / semaines / mois
+const teamViewChips = (v) => `<div class="chips team-views">${[['grid', 'Semaine (grille)'], ['gantt', 'Diagramme']].map(([k, l]) => `<button class="chip ${v === k ? 'on' : ''}" data-tv="${k}">${l}</button>`).join('')}</div>`;
+async function teamGantt() {
+  const m = await crewData();
+  const page = layout({ active: 'planning', icon: 'calendar', title: 'Planning des équipes' });
+  const people = [
+    ...m.employee.filter((e) => e.data.active !== false).map((x) => ({ k: 'e', x, name: x.data.name || '—' })),
+    ...m.contact.filter((c) => c.data.kind === 'soustraitant').map((x) => ({ k: 'c', x, name: contactName(x) })),
+  ].map((pp) => ({ ...pp, rows: crewGanttRows(pp.k, pp.x, m, crewSites(pp.k, pp.x, m)) }))
+    .filter((pp) => pp.k === 'e' || pp.rows.length)
+    .sort((a, b) => (a.k === b.k ? a.name.localeCompare(b.name) : a.k === 'e' ? -1 : 1));
+  const rows = [];
+  people.forEach((pp) => { rows.push({ label: `${pp.name}${pp.k === 'c' ? ' (sous-traitant)' : ''}`, href: `#/crew/${pp.k}/${pp.x.id}`, color: CREW_KIND[pp.k][1] }); pp.rows.forEach((r) => rows.push(r)); });
+  if (!ui.gzoom) ui.gzoom = 'month';
+  const g = ganttHTML(rows, 'Personne / chantier');
+  page.innerHTML = `<div class="toolbar">${teamViewChips('gantt')}</div>${g ? `${zoomChips()}${g}<p class="muted sm">Pour chaque personne : ses chantiers (du début à la fin prévue), ses jours au planning des équipes regroupés en périodes, et ses phases. Cliquez sur un nom pour sa fiche.</p>`
+    : empty('Rien de planifié', 'Affectez les ouvriers dans la vue « Semaine (grille) », aux phases d\'un chantier ou à l\'équipe d\'un chantier.')}`;
+  $$('[data-tv]', page).forEach((b) => { b.onclick = () => { ui.tview = b.dataset.tv; saveUi(); render(); }; });
+  bindGantt(page, (tid) => { if (tid < 0) { ui.tview = 'grid'; saveUi(); return render(); } const ph = m.phase.find((f) => f.id === tid); if (ph) editPhase(byId(m.project, ph.project_id), ph); });
+}
 async function teamPlanning() {
+  if (ui.tview === 'gantt') return teamGantt();
   const wk = ui.week && /^\d{4}-\d\d-\d\d$/.test(ui.week) ? ui.week : (() => { const t = dnum(today()); return dstr(t - ((new Date(t * DAY).getUTCDay() + 6) % 7)); })();
   const days = Array.from({ length: 7 }, (_, i) => addDays(wk, i));
   const [staff, assigns, projects, inters, absences, phases, contacts] = await Promise.all([db.list('employee'), db.list('assign'), db.list('project'), db.list('intervention'), db.list('absence'), db.list('phase'), db.list('contact')]);
@@ -186,7 +207,7 @@ async function teamPlanning() {
   const page = layout({ active: 'planning', icon: 'calendar', title: 'Planning des équipes',
     actions: `<button class="btn" data-w="-7">‹ Semaine préc.</button><button class="btn" data-w="0">Cette semaine</button><button class="btn" data-w="7">Semaine suiv. ›</button><button class="btn" data-act="copy">Copier la semaine précédente</button>` });
   const DN = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-  page.innerHTML = people.length ? `<div class="team"><table class="team-t"><thead><tr><th>Ouvrier</th>${days.map((d, i) => `<th class="${d === today() ? 'today' : ''} ${i > 4 ? 'we' : ''}">${DN[i]} ${fmtDate(d).slice(0, 5)}</th>`).join('')}</tr></thead><tbody>
+  page.innerHTML = people.length ? `<div class="toolbar">${teamViewChips('grid')}</div><div class="team"><table class="team-t"><thead><tr><th>Ouvrier</th>${days.map((d, i) => `<th class="${d === today() ? 'today' : ''} ${i > 4 ? 'we' : ''}">${DN[i]} ${fmtDate(d).slice(0, 5)}</th>`).join('')}</tr></thead><tbody>
     ${people.map(({ k, x: s, name, role }) => `<tr><th><a href="#/crew/${k}/${s.id}"><b>${esc(name)}</b></a><small class="muted">${esc(role)}</small></th>${days.map((d, i) => {
       const abs = k === 'e' ? absences.find((a) => +a.data.employeeId === s.id && a.data.from <= d && a.data.to >= d) : null;
       const cell = k === 'e' ? week.filter((x) => +x.data.employeeId === s.id && x.data.date === d) : [];
@@ -196,8 +217,9 @@ async function teamPlanning() {
         ${cell.map((x) => { const p = byId(projects, x.project_id); return `<div class="asg" draggable="true" data-asg="${x.id}" style="--c:${esc((p && p.data.color) || '#3b5bdb')}">${esc(p ? p.data.name : x.data.note || '—')}${x.data.half && x.data.half !== 'day' ? ` <small>${x.data.half === 'am' ? 'matin' : 'après-midi'}</small>` : ''}</div>`; }).join('')}
         ${it.map((x) => `<a class="asg int" href="#/intervention/${x.id}">${I.tool} ${esc(x.data.title || x.number)}</a>`).join('')}</td>`;
     }).join('')}</tr>`).join('')}</tbody></table></div><p class="muted">Cliquez sur une case pour affecter un ouvrier à un chantier · glissez une affectation pour la déplacer · en pointillé : attribué par une phase ou par l'équipe / les sous-traitants du chantier (jours ouvrables).</p>`
-    : empty('Aucun ouvrier', 'Ajoutez votre personnel dans RH → Personnel pour planifier les équipes.', '<a class="btn primary" href="#/hr/staff">Ajouter du personnel</a>');
+    : `<div class="toolbar">${teamViewChips('grid')}</div>${empty('Aucun ouvrier', 'Ajoutez votre personnel dans RH → Personnel pour planifier les équipes.', '<a class="btn primary" href="#/hr/staff">Ajouter du personnel</a>')}`;
   $$('[data-w]').forEach((b) => { b.onclick = () => { ui.week = +b.dataset.w ? addDays(wk, +b.dataset.w) : ''; saveUi(); render(); }; });
+  $$('[data-tv]', page).forEach((b) => { b.onclick = () => { ui.tview = b.dataset.tv; saveUi(); render(); }; });
   const active = projects.filter((p) => !['termine', 'annule'].includes(p.data.status));
   const addAt = (sid, d) => formModal({
     title: `${(byId(staff, sid) || { data: {} }).data.name} – ${fmtDate(d)}`, values: { half: 'day', until: d },
