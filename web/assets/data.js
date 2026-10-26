@@ -426,6 +426,20 @@ function loadScript(src) {
 // Génère un vrai PDF A4 dans le navigateur (fonctionne aussi sur iPhone, où l'impression est bloquée dans l'app installée)
 // src : HTML d'un document à convertir (par défaut, la page d'impression affichée)
 // opt.light : PDF plus léger (exports groupés, envoi au comptable)
+// html2canvas ne lit pas color(srgb …) (produit par color-mix) : converti en rgba dans la copie capturée
+const h2cToRgb = (v) => v.replace(/color\(srgb ([\d.e-]+) ([\d.e-]+) ([\d.e-]+)(?: \/ ([\d.e-]+))?\)/g, (m0, r, g, bl, a) => `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(bl * 255)}, ${a ?? 1})`);
+function h2cFixColors(cdoc) {
+  const win = cdoc.defaultView;
+  cdoc.querySelectorAll('*').forEach((el) => {
+    const cs = win.getComputedStyle(el);
+    for (const prop of ['color', 'background-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'outline-color', 'text-decoration-color']) {
+      const v = cs.getPropertyValue(prop);
+      if (v && v.includes('color(')) el.style.setProperty(prop, h2cToRgb(v));
+    }
+    const bg = cs.getPropertyValue('background-image');
+    if (bg && bg.includes('color(')) el.style.setProperty('background-image', h2cToRgb(bg));
+  });
+}
 async function makePdf(src, opt = {}) {
   if (src == null) toast('Création du PDF…', 60000);
   await Promise.all([loadScript('assets/vendor/html2canvas-1.4.1.min.js'), loadScript('assets/vendor/jspdf-2.5.1.umd.min.js')]);

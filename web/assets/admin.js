@@ -16,6 +16,7 @@ route('hr', async (sub = 'staff') => {
       { name: 'phone', label: 'Téléphone', type: 'tel' }, { name: 'email', label: 'Email', type: 'email' },
       { name: 'start', label: 'Date d\'entrée', type: 'date' }, { name: 'userId', label: 'Compte utilisateur lié', type: 'user' },
       { name: 'skills', label: 'Compétences / certificats (VCA, permis…)', cls: 'full' },
+      { name: 'color', label: 'Couleur (planning)', type: 'color' },
       { name: 'active', label: 'Actif', type: 'check' }, { name: 'notes', label: 'Notes', type: 'textarea', cls: 'full' },
     ],
     async onSave(v) { const it = s || { data: {} }; it.data = { ...it.data, ...v }; await persist('employee', it); render(); },

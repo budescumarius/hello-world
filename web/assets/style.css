@@ -1861,3 +1861,8 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .asg.der { background: transparent; border: 1px dashed color-mix(in srgb, var(--c) 70%, #fff); border-left: 3px solid var(--c); color: inherit; text-decoration: none; font-weight: 600; }
 .asg.der small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
 .team-t th a { color: inherit; text-decoration: none; }
+
+/* planning : couleur d'une personne (pastille cliquable) */
+.g-pick { display: flex; align-items: center; gap: 8px; } .g-pick a { color: inherit; text-decoration: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-col { position: relative; width: 16px; height: 16px; flex: none; border-radius: 50%; overflow: hidden; box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--border); cursor: pointer; }
+.g-col input { position: absolute; inset: -6px; width: 28px; height: 28px; border: 0; padding: 0; cursor: pointer; }

@@ -14,7 +14,7 @@ const num = (v) => { const x = parseFloat(String(v ?? '').replace(/\s/g, '').rep
 const r2 = (x) => Math.round((x + Number.EPSILON) * 100) / 100;
 const today = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
 const DAY = 864e5;
-const dnum = (s) => { const [y, m, d] = s.split('-').map(Number); return Math.round(Date.UTC(y, m - 1, d) / DAY); };
+const dnum = (s) => { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return Math.round(Date.UTC(y, m - 1, d) / DAY); };
 const dstr = (n) => new Date(n * DAY).toISOString().slice(0, 10);
 const addDays = (s, k) => dstr(dnum(s) + k);
 const fmtDate = (d) => { if (!d) return ''; const [y, m, dd] = String(d).slice(0, 10).split('-'); return `${dd}/${m}/${y}`; };

@@ -45,6 +45,39 @@ route('tasks', async () => {
 const ZOOMS = { day: ['Jours', 32], week: ['Semaines', 13], month: ['Mois', 5] };
 const MONTHS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
 const phaseColor = (t, fallback) => (num(t.data.progress) >= 100 ? '#2f9e44' : t.data.end < today() ? '#e5484d' : fallback || '#3b5bdb');
+// Export PDF d'un planning (diagramme ou grille) : A4 paysage, toute la largeur, sur plusieurs pages si besoin
+async function planningPdf(el, title) {
+  if (!el) return toast('Rien à exporter', 2500);
+  toast('Création du PDF…', 60000);
+  await Promise.all([loadScript('assets/vendor/html2canvas-1.4.1.min.js'), loadScript('assets/vendor/jspdf-2.5.1.umd.min.js')]);
+  const inner = el.querySelector('.g-inner, table') || el;
+  const W = Math.max(inner.scrollWidth, el.scrollWidth);
+  const holder = document.createElement('div');
+  holder.style.cssText = `position:fixed;left:-30000px;top:0;width:${W + 40}px;background:#fff;padding:16px;`;
+  holder.innerHTML = `<div style="font:700 18px Manrope,Arial,sans-serif;color:#1c2550;margin:0 0 4px">${esc(title)}</div><div style="font:12px Arial,sans-serif;color:#667;margin:0 0 10px">${esc(company().name || '')} · imprimé le ${fmtDate(today())}</div>`;
+  const clone = el.cloneNode(true); clone.style.overflow = 'visible'; clone.style.width = `${W}px`; clone.style.maxWidth = 'none';
+  clone.querySelectorAll('.g-col').forEach((x) => { const v = (x.querySelector('input') || {}).value || '#3b5bdb'; x.outerHTML = `<i class="dot" style="--c:${v}"></i>`; }); // pastille de couleur (sélecteur) → simple point
+  clone.querySelectorAll('.no-print').forEach((x) => x.remove());
+  clone.querySelectorAll('.g-name').forEach((x) => { x.style.position = 'static'; }); // colonne figée : à plat pour la capture
+  holder.appendChild(clone); document.body.appendChild(holder);
+  try {
+    const canvas = await window.html2canvas(holder, { scale: 2, backgroundColor: '#ffffff', logging: false, windowWidth: W + 80, onclone: h2cFixColors });
+    const { jsPDF } = window.jspdf; const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4', compress: true });
+    const m = 8; const pw = 297 - 2 * m; const ph = 210 - 2 * m - 6; const pxPerMm = canvas.width / pw; const pageH = ph * pxPerMm;
+    let y = 0; let n = 0; const pages = Math.max(1, Math.ceil(canvas.height / pageH));
+    while (y < canvas.height - 1) {
+      const h = Math.min(pageH, canvas.height - y); const part = document.createElement('canvas'); part.width = canvas.width; part.height = Math.ceil(h);
+      const ctx = part.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, part.width, part.height); ctx.drawImage(canvas, 0, -y);
+      if (n) pdf.addPage();
+      pdf.addImage(part.toDataURL('image/jpeg', 0.85), 'JPEG', m, m, pw, h / pxPerMm);
+      pdf.setFontSize(8); pdf.setTextColor(120); pdf.text(`${n + 1} / ${pages}`, 297 - m, 210 - 5, { align: 'right' });
+      y += h; n++;
+    }
+    downloadBlob(pdf.output('blob'), `${fileTitle(title)}.pdf`); toast('PDF téléchargé', 2000);
+  } catch (e) { console.error(e); toast('PDF impossible : ' + e.message, 5000); } finally { holder.remove(); }
+}
+// date courte du planning ; l'année est affichée si ce n'est pas l'année en cours (une date mal encodée se voit tout de suite)
+const gd = (d) => (String(d).slice(0, 4) === today().slice(0, 4) ? fmtDate(d).slice(0, 5) : fmtDate(d));
 function ganttHTML(rows, head = 'Phase') {
   const tasks = rows.filter((r) => r.item && r.item.data.start && r.item.data.end).map((r) => r.item.data);
   if (!tasks.length && !rows.some((r) => r.proj)) return '';
@@ -68,13 +101,14 @@ function ganttHTML(rows, head = 'Phase') {
       // chantier (barre du début à la fin prévue) ; sans dates : bouton pour les définir
       if (r.proj) {
         const p = r.proj; const t = r.item ? r.item.data : null;
-        const name = `<a class="g-name" href="#/project/${p.id}"><b><i class="dot" style="--c:${esc(p.data.color || '#3b5bdb')}"></i> ${esc(p.data.name)}</b><small>${t ? `${fmtDate(t.start).slice(0, 5)} – ${t.open ? 'fin ?' : fmtDate(t.end).slice(0, 5)}` : 'dates à définir'} · ${esc((PST[p.data.status] || [''])[0])}</small></a>`;
+        const name = `<a class="g-name" href="#/project/${p.id}"><b><i class="dot" style="--c:${esc(p.data.color || '#3b5bdb')}"></i> ${esc(p.data.name)}</b><small>${t ? `${gd(t.start)} – ${t.open ? 'fin ?' : gd(t.end)}` : 'dates à définir'} · ${esc((PST[p.data.status] || [''])[0])}</small></a>`;
         if (!t) return `<div class="g-row g-proj">${name}<div class="g-track" style="width:${W}px"><button class="g-nodate" data-pdates="${p.id}" style="left:${(t0 - a) * dw + 4}px">${I.calendar || ''} Définir les dates</button></div></div>`;
         const x = (dnum(t.start) - a) * dw; const w = (dnum(t.end) - dnum(t.start) + 1) * dw; const pg = Math.min(100, Math.max(0, num(t.progress)));
-        const col = pg >= 100 ? '#2f9e44' : !t.open && t.end < today() ? '#e5484d' : p.data.color || '#3b5bdb';
+        const col = pg >= 100 ? '#2f9e44' : !t.open && t.end < today() ? '#e5484d' : r.barColor || p.data.color || '#3b5bdb';
         return `<div class="g-row g-proj">${name}<div class="g-track" style="width:${W}px"><button class="g-bar g-pbar ${t.open ? 'open' : ''}" data-proj="${p.id}" title="${esc(p.data.name)} : ${fmtDate(t.start)} → ${t.open ? 'fin non définie' : fmtDate(t.end)}" style="left:${x}px;width:${w}px;--c:${col}"><span class="g-fill" style="width:${pg}%"></span><span class="g-lbl">${w > 90 ? esc(p.data.name) : ''}${w > 200 ? ` · ${dnum(t.end) - dnum(t.start) + 1} j` : ''}</span></button></div></div>`;
       }
-      if (!r.item) return `<div class="g-row g-group"><a class="g-name" href="${r.href || '#'}"><b><i class="dot" style="--c:${esc(r.color || '#3b5bdb')}"></i> ${esc(r.label)}</b></a><div class="g-track" style="width:${W}px"></div></div>`;
+      if (!r.item) return `<div class="g-row g-group">${r.pick ? `<div class="g-name g-pick"><label class="g-col no-print" title="Couleur de ${esc(r.label)}"><input type="color" data-pcol="${esc(r.pick)}" value="${esc(r.color || '#3b5bdb')}"></label><a href="${r.href || '#'}"><b>${esc(r.label)}</b></a></div>`
+        : `<a class="g-name" href="${r.href || '#'}"><b><i class="dot" style="--c:${esc(r.color || '#3b5bdb')}"></i> ${esc(r.label)}</b></a>`}<div class="g-track" style="width:${W}px"></div></div>`;
       const t = r.item.data; const x = (dnum(t.start) - a) * dw; const w = (dnum(t.end) - dnum(t.start) + 1) * dw; const pg = Math.min(100, Math.max(0, num(t.progress)));
       return `<div class="g-row"><button class="g-name" data-task="${r.item.id}"><b>${esc(t.name)}</b><small>${fmtDate(t.start).slice(0, 5)} – ${fmtDate(t.end).slice(0, 5)}${r.sub ? ' · ' + esc(r.sub) : ''}</small></button>
         <div class="g-track" style="width:${W}px"><button class="g-bar" data-task="${r.item.id}" style="left:${x}px;width:${w}px;--c:${phaseColor(r.item, r.color)}"><span class="g-fill" style="width:${pg}%"></span><span class="g-lbl">${t.noPct ? (w > 60 ? esc(t.name) : '') : `${pg} %`}${!t.noPct && w > 120 ? ' · ' + esc(t.name) : ''}</span></button></div></div>`;
@@ -129,7 +163,8 @@ async function tabPPlanning(p, el) {
 route('planning', async (sub = 'projects') => {
   if (sub === 'team') return teamPlanning();
   const [phases, projects] = await Promise.all([db.list('phase'), db.list('project')]);
-  const page = layout({ active: 'planning', icon: 'calendar', title: 'Planning des chantiers' });
+  const page = layout({ active: 'planning', icon: 'calendar', title: 'Planning des chantiers', actions: `<button class="btn" data-act="pdf">${I.download} PDF</button>` });
+  $('[data-act=pdf]').onclick = () => planningPdf($('.gantt', page), 'Planning des chantiers');
   const view = ui.gview === 'phases' ? 'phases' : 'sites'; const all = !!ui.gall;
   // période d'un chantier : dates du chantier, sinon celles de ses phases ; avancement : moyenne des phases (ou statut)
   const span = (p, ph) => {
@@ -162,21 +197,28 @@ route('planning', async (sub = 'projects') => {
 // Vue « Diagramme » : chaque personne, ses chantiers et ses périodes (planning, phases, équipe du chantier) – zoom jours / semaines / mois
 const teamViewChips = (v) => `<div class="chips team-views">${[['grid', 'Semaine (grille)'], ['gantt', 'Diagramme']].map(([k, l]) => `<button class="chip ${v === k ? 'on' : ''}" data-tv="${k}">${l}</button>`).join('')}</div>`;
 async function teamGantt() {
-  const m = await crewData();
-  const page = layout({ active: 'planning', icon: 'calendar', title: 'Planning des équipes' });
+  const m = await crewData(); const detail = !!ui.tdetail;
+  const page = layout({ active: 'planning', icon: 'calendar', title: 'Planning des équipes', actions: `<button class="btn" data-act="pdf">${I.download} PDF</button>` });
   const people = [
     ...m.employee.filter((e) => e.data.active !== false).map((x) => ({ k: 'e', x, name: x.data.name || '—' })),
     ...m.contact.filter((c) => c.data.kind === 'soustraitant').map((x) => ({ k: 'c', x, name: contactName(x) })),
-  ].map((pp) => ({ ...pp, rows: crewGanttRows(pp.k, pp.x, m, crewSites(pp.k, pp.x, m)) }))
+  ].map((pp) => ({ ...pp, rows: crewGanttRows(pp.k, pp.x, m, crewSites(pp.k, pp.x, m)).filter((r) => detail || r.proj).map((r) => (r.proj ? { ...r, barColor: pp.x.data.color } : r)) }))
     .filter((pp) => pp.k === 'e' || pp.rows.length)
     .sort((a, b) => (a.k === b.k ? a.name.localeCompare(b.name) : a.k === 'e' ? -1 : 1));
   const rows = [];
-  people.forEach((pp) => { rows.push({ label: `${pp.name}${pp.k === 'c' ? ' (sous-traitant)' : ''}`, href: `#/crew/${pp.k}/${pp.x.id}`, color: CREW_KIND[pp.k][1] }); pp.rows.forEach((r) => rows.push(r)); });
+  people.forEach((pp) => { rows.push({ label: `${pp.name}${pp.k === 'c' ? ' (sous-traitant)' : ''}`, href: `#/crew/${pp.k}/${pp.x.id}`, color: pp.x.data.color || CREW_KIND[pp.k][1], pick: `${pp.k}:${pp.x.id}` }); pp.rows.forEach((r) => rows.push(r)); });
   if (!ui.gzoom) ui.gzoom = 'month';
   const g = ganttHTML(rows, 'Personne / chantier');
-  page.innerHTML = `<div class="toolbar">${teamViewChips('gantt')}</div>${g ? `${zoomChips()}${g}<p class="muted sm">Pour chaque personne : ses chantiers (du début à la fin prévue), ses jours au planning des équipes regroupés en périodes, et ses phases. Cliquez sur un nom pour sa fiche.</p>`
+  page.innerHTML = `<div class="toolbar">${teamViewChips('gantt')}<button class="chip ${detail ? 'on' : ''}" data-tdetail>${detail ? '✓ ' : ''}Détails (jours de planning, phases)</button></div>${g ? `${zoomChips()}${g}<p class="muted sm">Pour chaque personne : ses chantiers, du début à la fin prévue${detail ? ', ses jours au planning regroupés en périodes et ses phases' : ''}. La pastille de couleur devant le nom choisit la couleur de la personne.</p>`
     : empty('Rien de planifié', 'Affectez les ouvriers dans la vue « Semaine (grille) », aux phases d\'un chantier ou à l\'équipe d\'un chantier.')}`;
   $$('[data-tv]', page).forEach((b) => { b.onclick = () => { ui.tview = b.dataset.tv; saveUi(); render(); }; });
+  const td = $('[data-tdetail]', page); if (td) td.onclick = () => { ui.tdetail = !detail; saveUi(); render(); };
+  // couleur d'une personne (ouvrier ou sous-traitant) : enregistrée sur sa fiche
+  $$('[data-pcol]', page).forEach((inp) => { inp.onchange = async () => {
+    const [k, id] = inp.dataset.pcol.split(':'); const typ = k === 'e' ? 'employee' : 'contact';
+    const it = await db.get(typ, +id); it.data.color = inp.value; await persist(typ, it, { silent: true }); render();
+  }; });
+  $('[data-act=pdf]').onclick = () => planningPdf($('.gantt', page), 'Planning des équipes');
   bindGantt(page, (tid) => { if (tid < 0) { ui.tview = 'grid'; saveUi(); return render(); } const ph = m.phase.find((f) => f.id === tid); if (ph) editPhase(byId(m.project, ph.project_id), ph); });
 }
 async function teamPlanning() {
@@ -205,10 +247,10 @@ async function teamPlanning() {
     .sort((a, b) => (a.k === b.k ? a.name.localeCompare(b.name) : a.k === 'e' ? -1 : 1));
   const week = assigns.filter((x) => x.data.date >= days[0] && x.data.date <= days[6]);
   const page = layout({ active: 'planning', icon: 'calendar', title: 'Planning des équipes',
-    actions: `<button class="btn" data-w="-7">‹ Semaine préc.</button><button class="btn" data-w="0">Cette semaine</button><button class="btn" data-w="7">Semaine suiv. ›</button><button class="btn" data-act="copy">Copier la semaine précédente</button>` });
+    actions: `<button class="btn" data-act="pdf">${I.download} PDF</button><button class="btn" data-w="-7">‹ Semaine préc.</button><button class="btn" data-w="0">Cette semaine</button><button class="btn" data-w="7">Semaine suiv. ›</button><button class="btn" data-act="copy">Copier la semaine précédente</button>` });
   const DN = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
   page.innerHTML = people.length ? `<div class="toolbar">${teamViewChips('grid')}</div><div class="team"><table class="team-t"><thead><tr><th>Ouvrier</th>${days.map((d, i) => `<th class="${d === today() ? 'today' : ''} ${i > 4 ? 'we' : ''}">${DN[i]} ${fmtDate(d).slice(0, 5)}</th>`).join('')}</tr></thead><tbody>
-    ${people.map(({ k, x: s, name, role }) => `<tr><th><a href="#/crew/${k}/${s.id}"><b>${esc(name)}</b></a><small class="muted">${esc(role)}</small></th>${days.map((d, i) => {
+    ${people.map(({ k, x: s, name, role }) => `<tr><th><a href="#/crew/${k}/${s.id}"><b>${s.data.color ? `<i class="dot" style="--c:${esc(s.data.color)}"></i> ` : ''}${esc(name)}</b></a><small class="muted">${esc(role)}</small></th>${days.map((d, i) => {
       const abs = k === 'e' ? absences.find((a) => +a.data.employeeId === s.id && a.data.from <= d && a.data.to >= d) : null;
       const cell = k === 'e' ? week.filter((x) => +x.data.employeeId === s.id && x.data.date === d) : [];
       const it = k === 'e' ? inters.filter((x) => x.data.date === d && (x.data.staff || []).map(Number).includes(s.id)) : [];
@@ -220,6 +262,7 @@ async function teamPlanning() {
     : `<div class="toolbar">${teamViewChips('grid')}</div>${empty('Aucun ouvrier', 'Ajoutez votre personnel dans RH → Personnel pour planifier les équipes.', '<a class="btn primary" href="#/hr/staff">Ajouter du personnel</a>')}`;
   $$('[data-w]').forEach((b) => { b.onclick = () => { ui.week = +b.dataset.w ? addDays(wk, +b.dataset.w) : ''; saveUi(); render(); }; });
   $$('[data-tv]', page).forEach((b) => { b.onclick = () => { ui.tview = b.dataset.tv; saveUi(); render(); }; });
+  $('[data-act=pdf]').onclick = () => planningPdf($('.team', page), `Planning des équipes – semaine du ${fmtDate(days[0])} au ${fmtDate(days[6])}`);
   const active = projects.filter((p) => !['termine', 'annule'].includes(p.data.status));
   const addAt = (sid, d) => formModal({
     title: `${(byId(staff, sid) || { data: {} }).data.name} – ${fmtDate(d)}`, values: { half: 'day', until: d },
