@@ -45,9 +45,9 @@ route('tasks', async () => {
 const ZOOMS = { day: ['Jours', 32], week: ['Semaines', 13], month: ['Mois', 5] };
 const MONTHS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
 const phaseColor = (t, fallback) => (num(t.data.progress) >= 100 ? '#2f9e44' : t.data.end < today() ? '#e5484d' : fallback || '#3b5bdb');
-function ganttHTML(rows) {
-  const tasks = rows.filter((r) => r.item).map((r) => r.item.data);
-  if (!tasks.length) return '';
+function ganttHTML(rows, head = 'Phase') {
+  const tasks = rows.filter((r) => r.item && r.item.data.start && r.item.data.end).map((r) => r.item.data);
+  if (!tasks.length && !rows.some((r) => r.proj)) return '';
   const zoom = ZOOMS[ui.gzoom] ? ui.gzoom : 'week'; const dw = ZOOMS[zoom][1];
   const t0 = dnum(today());
   let a = Math.min(t0, ...tasks.map((t) => dnum(t.start))) - 3; a -= (new Date(a * DAY).getUTCDay() + 6) % 7;
@@ -63,8 +63,17 @@ function ganttHTML(rows) {
   }
   return `<div class="gantt" data-today="${(t0 - a) * dw}"><div class="g-inner" style="width:calc(var(--nw) + ${W}px)">
     <div class="g-over" style="width:${W}px">${we}<div class="g-today" style="left:${(t0 - a) * dw + dw / 2}px"></div></div>
-    <div class="g-row g-head"><div class="g-name"><small>Phase</small></div><div class="g-track" style="width:${W}px">${months}${ticks}</div></div>
+    <div class="g-row g-head"><div class="g-name"><small>${esc(head)}</small></div><div class="g-track" style="width:${W}px">${months}${ticks}</div></div>
     ${rows.map((r) => {
+      // chantier (barre du début à la fin prévue) ; sans dates : bouton pour les définir
+      if (r.proj) {
+        const p = r.proj; const t = r.item ? r.item.data : null;
+        const name = `<a class="g-name" href="#/project/${p.id}"><b><i class="dot" style="--c:${esc(p.data.color || '#3b5bdb')}"></i> ${esc(p.data.name)}</b><small>${t ? `${fmtDate(t.start).slice(0, 5)} – ${t.open ? 'fin ?' : fmtDate(t.end).slice(0, 5)}` : 'dates à définir'} · ${esc((PST[p.data.status] || [''])[0])}</small></a>`;
+        if (!t) return `<div class="g-row g-proj">${name}<div class="g-track" style="width:${W}px"><button class="g-nodate" data-pdates="${p.id}" style="left:${(t0 - a) * dw + 4}px">${I.calendar || ''} Définir les dates</button></div></div>`;
+        const x = (dnum(t.start) - a) * dw; const w = (dnum(t.end) - dnum(t.start) + 1) * dw; const pg = Math.min(100, Math.max(0, num(t.progress)));
+        const col = pg >= 100 ? '#2f9e44' : !t.open && t.end < today() ? '#e5484d' : p.data.color || '#3b5bdb';
+        return `<div class="g-row g-proj">${name}<div class="g-track" style="width:${W}px"><button class="g-bar g-pbar ${t.open ? 'open' : ''}" data-proj="${p.id}" title="${esc(p.data.name)} : ${fmtDate(t.start)} → ${t.open ? 'fin non définie' : fmtDate(t.end)}" style="left:${x}px;width:${w}px;--c:${col}"><span class="g-fill" style="width:${pg}%"></span><span class="g-lbl">${w > 90 ? esc(p.data.name) : ''}${w > 200 ? ` · ${dnum(t.end) - dnum(t.start) + 1} j` : ''}</span></button></div></div>`;
+      }
       if (!r.item) return `<div class="g-row g-group"><a class="g-name" href="${r.href || '#'}"><b><i class="dot" style="--c:${esc(r.color || '#3b5bdb')}"></i> ${esc(r.label)}</b></a><div class="g-track" style="width:${W}px"></div></div>`;
       const t = r.item.data; const x = (dnum(t.start) - a) * dw; const w = (dnum(t.end) - dnum(t.start) + 1) * dw; const pg = Math.min(100, Math.max(0, num(t.progress)));
       return `<div class="g-row"><button class="g-name" data-task="${r.item.id}"><b>${esc(t.name)}</b><small>${fmtDate(t.start).slice(0, 5)} – ${fmtDate(t.end).slice(0, 5)}${r.sub ? ' · ' + esc(r.sub) : ''}</small></button>
@@ -73,6 +82,8 @@ function ganttHTML(rows) {
 }
 function bindGantt(el, onTask) {
   $$('[data-z]', el).forEach((b) => { b.onclick = () => { ui.gzoom = b.dataset.z; saveUi(); render(); }; });
+  $$('[data-proj]', el).forEach((b) => { b.onclick = () => go(`#/project/${b.dataset.proj}/planning`); });
+  $$('[data-pdates]', el).forEach((b) => { b.onclick = async () => { const p = await db.get('project', +b.dataset.pdates); editProject(p); }; });
   $$('[data-task]', el).forEach((b) => { b.onclick = () => onTask(+b.dataset.task); });
   const g = $('.gantt', el); if (g) g.scrollLeft = Math.max(0, +g.dataset.today - 80);
 }
@@ -119,14 +130,31 @@ route('planning', async (sub = 'projects') => {
   if (sub === 'team') return teamPlanning();
   const [phases, projects] = await Promise.all([db.list('phase'), db.list('project')]);
   const page = layout({ active: 'planning', icon: 'calendar', title: 'Planning des chantiers' });
+  const view = ui.gview === 'phases' ? 'phases' : 'sites'; const all = !!ui.gall;
+  // période d'un chantier : dates du chantier, sinon celles de ses phases ; avancement : moyenne des phases (ou statut)
+  const span = (p, ph) => {
+    const start = p.data.start || (ph[0] && ph[0].data.start); if (!start) return null;
+    const pend = ph.length ? ph.map((x) => x.data.end).sort().pop() : '';
+    const end = p.data.end || pend; const open = !end;
+    const progress = ph.length ? Math.round(ph.reduce((t, x) => t + num(x.data.progress), 0) / ph.length) : p.data.status === 'termine' ? 100 : p.data.status === 'reception' ? 90 : 0;
+    return { id: p.id, data: { name: p.data.name, start, end: open ? (start > today() ? start : today()) : (end < start ? start : end), open, progress } };
+  };
+  const list = projects.filter((x) => all || !['termine', 'annule'].includes(x.data.status))
+    .map((p) => ({ p, ph: phases.filter((x) => x.project_id === p.id).sort((a, b) => a.data.start.localeCompare(b.data.start)) }))
+    .map((x) => ({ ...x, sp: span(x.p, x.ph) }))
+    .sort((a, b) => ((a.sp && a.sp.data.start) || '9999').localeCompare((b.sp && b.sp.data.start) || '9999'));
   const rows = [];
-  for (const p of projects.filter((x) => !['termine', 'annule'].includes(x.data.status)).sort((a, b) => (a.data.start || '').localeCompare(b.data.start || ''))) {
-    const ph = phases.filter((x) => x.project_id === p.id).sort((a, b) => a.data.start.localeCompare(b.data.start));
-    if (!ph.length) continue;
-    rows.push({ label: p.data.name, href: `#/project/${p.id}/planning`, color: p.data.color });
-    ph.forEach((x) => rows.push({ item: x, color: p.data.color }));
+  for (const { p, ph, sp } of list) {
+    rows.push({ proj: p, item: sp });
+    if (view === 'phases') ph.forEach((x) => rows.push({ item: x, color: p.data.color }));
   }
-  page.innerHTML = rows.length ? `${zoomChips()}${ganttHTML(rows)}` : empty('Aucune phase planifiée', 'Ouvrez un chantier → onglet Planning pour ajouter ses phases.');
+  const chips = `<div class="chips">${[['sites', 'Chantiers'], ['phases', 'Chantiers + phases']].map(([k, l]) => `<button class="chip ${view === k ? 'on' : ''}" data-gv="${k}">${l}</button>`).join('')}
+    <button class="chip ${all ? 'on' : ''}" data-gall>${all ? '✓ ' : ''}Afficher aussi les terminés</button></div>`;
+  page.innerHTML = rows.length ? `${chips}${zoomChips()}${ganttHTML(rows, view === 'phases' ? 'Chantier / phase' : 'Chantier')}
+    <p class="muted sm">La barre va du début à la fin prévue du chantier (fiche du chantier) ; sans dates, elles sont reprises des phases. Cliquez sur une barre pour ouvrir le planning du chantier.</p>`
+    : empty('Aucun chantier', 'Créez un chantier avec ses dates de début et de fin prévue.');
+  $$('[data-gv]', page).forEach((b) => { b.onclick = () => { ui.gview = b.dataset.gv; saveUi(); render(); }; });
+  const ga = $('[data-gall]', page); if (ga) ga.onclick = () => { ui.gall = !all; saveUi(); render(); };
   bindGantt(page, (id) => { const ph = phases.find((x) => x.id === id); editPhase(byId(projects, ph.project_id), ph); });
 });
 
