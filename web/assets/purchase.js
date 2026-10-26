@@ -618,6 +618,11 @@ function ublHtml(xml) {
     const q = one(l, 'InvoicedQuantity') || one(l, 'CreditedQuantity');
     const it = one(l, 'Item'); const desc = tx(it, 'Description');
     const disc = kids(l, 'AllowanceCharge').filter((a) => tx(a, 'ChargeIndicator') === 'false').reduce((t, a) => t + num(tx(a, 'Amount')), 0);
+    // ligne de texte (n° de commande, référence, livraison…) : sans quantité ni montant
+    if (!num(tx(l, 'LineExtensionAmount')) && !(q && num(q.textContent))) {
+      const t = [tx(it, 'Name'), desc, tx(l, 'Note')].filter((x) => x && x !== '_' && x !== '-').join(' – ');
+      return t ? `<tr><td></td><td colspan="${hasDisc ? 6 : 5}" style="color:#556;font-style:italic">${esc(t)}</td></tr>` : '';
+    }
     return `<tr><td style="color:#667">${esc(tx(it, 'SellersItemIdentification', 'ID'))}</td><td><b>${esc(tx(it, 'Name'))}</b>${desc && desc !== tx(it, 'Name') ? `<br><small>${esc(desc)}</small>` : ''}${tx(l, 'Note') ? `<br><small>${esc(tx(l, 'Note'))}</small>` : ''}</td>
       <td style="text-align:right;white-space:nowrap">${q ? `${fnum(num(q.textContent), 3)} ${esc(UC[q.getAttribute('unitCode')] || q.getAttribute('unitCode') || '')}` : ''}</td><td style="text-align:right;white-space:nowrap">${m(tx(l, 'Price', 'PriceAmount'))}</td>
       ${hasDisc ? `<td style="text-align:right">${disc ? `-${m(disc)}` : ''}</td>` : ''}<td style="text-align:right">${tx(it, 'ClassifiedTaxCategory', 'Percent') ? `${fnum(num(tx(it, 'ClassifiedTaxCategory', 'Percent')))} %` : ''}</td><td style="text-align:right;white-space:nowrap"><b>${m(tx(l, 'LineExtensionAmount'))}</b></td></tr>`;
@@ -628,7 +633,7 @@ function ublHtml(xml) {
   const pm = kids(root, 'PaymentMeans')[0];
   const notes = kids(root, 'Note').map((n) => esc(n.textContent.trim())).filter(Boolean).join('<br>');
   const th = 'style="text-align:left;padding:6px;border-bottom:2px solid #1c2550;font-size:11px;text-transform:uppercase;color:#1c2550"';
-  return `<div class="ubl-doc" style="background:#fff;color:#1c2550;font:13px/1.45 Helvetica,Arial,sans-serif;padding:20px 18px"><style>.ubl-doc td{padding:6px;border-bottom:1px solid #eef0f5;vertical-align:top}</style>
+  return `<div class="ubl-doc" style="background:#fff;color:#1c2550;font:13px/1.45 Helvetica,Arial,sans-serif;padding:24px 26px;width:760px;box-sizing:border-box"><style>.ubl-doc td{padding:6px;border-bottom:1px solid #eef0f5;vertical-align:top}</style>
     <div style="display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap"><div>${party(one(root, 'AccountingSupplierParty'))}</div>
       <div style="text-align:right"><div style="font-size:22px;font-weight:800">${credit ? 'Note de crédit' : 'Facture'}</div><div style="font-size:15px"><b>${esc(tx(root, 'ID'))}</b></div>
       <div>Date : ${esc(dateFr(tx(root, 'IssueDate')) || tx(root, 'IssueDate'))}</div>${tx(root, 'DueDate') || tx(pm, 'PaymentDueDate') ? `<div>Échéance : ${esc(dateFr(tx(root, 'DueDate') || tx(pm, 'PaymentDueDate')))}</div>` : ''}
@@ -677,7 +682,9 @@ function purchViewer(box, getFile, onAction) {
       try {
         const html = ublHtml(await (await fetch(fileUrl(fileId), { credentials: 'same-origin' })).text()); if (my !== seq) return;
         const h = $('[data-doc]', box);
-        h.innerHTML = `<div class="ubl-wrap" style="zoom:${zoom}">${html}</div><div class="ubl-acts"><button type="button" class="btn sm" data-ublpdf>${I.download || I.file} Enregistrer en PDF</button></div>`;
+        // largeur A4 réduite à la largeur de l'écran (comme une page PDF), puis zoom de l'utilisateur
+        const fit = Math.min(1.4, Math.max(0.3, (h.clientWidth - 8) / 760)) * zoom;
+        h.innerHTML = `<div class="ubl-wrap" style="zoom:${fit}">${html}</div><div class="ubl-acts"><button type="button" class="btn sm" data-ublpdf>${I.download || I.file} Enregistrer en PDF</button></div>`;
         $('[data-ublpdf]', h).onclick = async (ev) => {
           ev.target.disabled = true; toast('Création du PDF…', 20000);
           try { const blob = await makePdf(html); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = String(fileName).replace(/\.xml$/i, '.pdf'); a.click(); toast('PDF prêt', 1500); } catch (err) { toast('PDF impossible : ' + err.message, 4000); }
