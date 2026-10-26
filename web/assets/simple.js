@@ -772,7 +772,7 @@ async function creditWizard(id) {
   };
 }
 
-// Devis accepté → facture (tout, ou un acompte en %)
+// Devis accepté → facture (tout, ou un acompte en % ou en montant)
 function billQuote(q) {
   const d = q.data; const t = totals(d);
   const mk = async (lines, kind) => {
@@ -786,6 +786,11 @@ function billQuote(q) {
     { label: 'Un autre pourcentage…', icon: 'percent', run: async () => {
       const v = await ask('Acompte', [{ name: 'pct', label: 'Pourcentage du devis', type: 'percent', required: true }], { pct: 50 }); if (!v) return;
       mk(t.vats.map((x) => ({ id: lid(), kind: 'item', desc: `Acompte de ${fnum(num(v.pct))} % sur le devis ${q.number}`, unit: 'forfait', qty: 1, price: r2(x.base * num(v.pct) / 100), vat: x.rate, type: 'divers' })), 'acompte');
+    } },
+    { label: 'Un montant fixe (sans TVA)…', icon: 'coins', run: async () => {
+      const v = await ask('Acompte', [{ name: 'amount', label: `Montant sans TVA (devis : ${money(t.base)} sans TVA)`, type: 'money', required: true }]); if (!v || !(num(v.amount) > 0)) return;
+      if (num(v.amount) > t.base + 0.005 && !confirm(`L'acompte (${money(num(v.amount))}) dépasse le devis (${money(t.base)}). Continuer ?`)) return;
+      mk(acompteLines(q, { amount: num(v.amount) }), 'acompte');
     } },
   ]);
 }

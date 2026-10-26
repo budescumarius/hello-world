@@ -443,6 +443,17 @@ async function newInvoice(preset) {
   const it = await persist('invoice', { project_id: preset.project_id || null, data: { kind: 'facture', status: 'brouillon', date: today(), due: addDays(today(), num(co.paymentDays) || 30), payDays: num(co.paymentDays) || 30, defaultVat: defVat(), ownerId: S.me.id, billSame: true, lines: [], payments: [], discount: 0, reverse: false, notes: co.invoiceNotes || '', ...preset.data } });
   go(`#/invoice/${it.id}`);
 }
+// lignes d'une facture d'acompte : en % du devis, ou montant HTVA fixe (réparti au prorata des taux de TVA du devis)
+function acompteLines(q, { pct, amount }) {
+  const qt = totals(q.data); const many = qt.vats.length > 1; const tot = qt.base || 1;
+  const p = amount != null ? amount / tot * 100 : num(pct);
+  const lines = qt.vats.map((x) => ({ id: lid(), kind: 'item', desc: `${amount != null ? `Acompte de ${money(amount)} HTVA` : `Acompte de ${fnum(p)} %`} sur devis ${q.number}${amount != null ? ` (${fnum(p, 1)} % du devis)` : ''}${many ? ` (TVA ${fnum(x.rate)} %)` : ''}`,
+    unit: 'forfait', qty: 1, price: r2(x.base * p / 100), vat: x.rate, type: 'divers' }));
+  // montant fixe : les arrondis de la répartition reportés sur la dernière ligne (total exact)
+  if (amount != null && lines.length) { const diff = r2(amount - lines.reduce((t, l) => t + l.price, 0)); lines[lines.length - 1].price = r2(lines[lines.length - 1].price + diff); }
+  if (!qt.vats.length) lines.push({ id: lid(), kind: 'item', desc: `Acompte sur devis ${q.number}`, unit: 'forfait', qty: 1, price: r2(amount || 0), vat: defVat(), type: 'divers' });
+  return lines;
+}
 async function invoiceFromQuote(q) {
   const prev = (await db.list('invoice')).filter((i) => +i.data.quoteId === q.id);
   const d = q.data; const disc = num(d.discount) / 100; const qt = totals(d);
@@ -457,6 +468,12 @@ async function invoiceFromQuote(q) {
       const v = await ask("Facture d'acompte", [{ name: 'pct', label: 'Pourcentage du devis', type: 'percent', required: true }], { pct: 30 });
       if (!v) return;
       mk({ kind: 'acompte', lines: qt.vats.map((x) => ({ id: lid(), kind: 'item', desc: `Acompte de ${fnum(num(v.pct))} % sur devis ${q.number}${many ? ` (TVA ${fnum(x.rate)} %)` : ''}`, unit: 'forfait', qty: 1, price: r2(x.base * num(v.pct) / 100), vat: x.rate, type: 'divers' })) });
+    } },
+    { label: "Facture d'acompte (montant HTVA)", run: async () => {
+      const v = await ask("Facture d'acompte", [{ name: 'amount', label: `Montant de l'acompte HTVA (devis : ${money(qt.base)} HT)`, type: 'money', required: true }]);
+      if (!v || !(num(v.amount) > 0)) return;
+      if (num(v.amount) > qt.base + 0.005 && !confirm(`L'acompte (${money(num(v.amount))}) dépasse le montant du devis (${money(qt.base)} HT). Continuer ?`)) return;
+      mk({ kind: 'acompte', lines: acompteLines(q, { amount: num(v.amount) }) });
     } },
     { label: "Facture d'avancement (état des travaux)", run: () => progressInvoice(q, prev, base) },
     { label: 'Reprendre des factures déjà émises (autre logiciel)…', run: () => historyFromOtherApp(q, prev, base) },
