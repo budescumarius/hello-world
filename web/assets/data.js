@@ -444,10 +444,12 @@ async function makePdf(src, opt = {}) {
   if (src == null) toast('Création du PDF…', 60000);
   await Promise.all([loadScript('assets/vendor/html2canvas-1.4.1.min.js'), loadScript('assets/vendor/jspdf-2.5.1.umd.min.js')]);
   const page = $('.print-page');
-  const W = 794; // largeur A4 à 96 dpi
   const holder = document.createElement('div');
-  holder.style.cssText = `position:fixed;left:-20000px;top:0;width:${W}px;background:#fff;`;
   holder.innerHTML = src ?? page.innerHTML;
+  // A4 portrait (794 px à 96 dpi) ou paysage (1123 px) selon le document
+  const land = !!holder.querySelector('.doc[data-land="1"]');
+  const W = land ? 1123 : 794; const PW = land ? 297 : 210; const PH = land ? 210 : 297;
+  holder.style.cssText = `position:fixed;left:-20000px;top:0;width:${W}px;background:#fff;`;
   holder.querySelectorAll('.no-print').forEach((x) => x.remove());
   // modèle Madibu : la règle de chantier et le pied de page légal sont redessinés sur chaque page du PDF
   holder.querySelectorAll('.mb-foot, .mb-ruler').forEach((x) => x.remove());
@@ -495,9 +497,9 @@ async function makePdf(src, opt = {}) {
     const canvas = await window.html2canvas(docEl, { scale, backgroundColor: '#ffffff', useCORS: true, logging: false, windowWidth: W + 40, onclone });
     const { jsPDF } = window.jspdf;
     // opt.into : document jsPDF existant (plusieurs documents dans un seul PDF) – on y ajoute les pages
-    const pdf = opt.into || new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    const pdf = opt.into || new jsPDF({ unit: 'mm', format: 'a4', orientation: land ? 'landscape' : 'portrait', compress: true });
     const first = opt.into ? !opt.into.bpUsed : true; if (opt.into) opt.into.bpUsed = true;
-    const m = 8; const pw = 210 - 2 * m; const ph = 297 - 2 * m - (brand ? 12 : 6);
+    const m = 8; const pw = PW - 2 * m; const ph = PH - 2 * m - (brand ? 12 : 6);
     if (!cuts.length) measure(docEl);
     const k = canvas.width / docEl.offsetWidth; // px canvas par px CSS
     const pageH = ph * (canvas.width / pw);
@@ -512,21 +514,21 @@ async function makePdf(src, opt = {}) {
     breaks.forEach(([a, b], i) => {
       const part = document.createElement('canvas'); part.width = canvas.width; part.height = Math.ceil(b - a);
       const ctx = part.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, part.width, part.height); ctx.drawImage(canvas, 0, -a);
-      if (i || !first) pdf.addPage();
+      if (i || !first) pdf.addPage('a4', land ? 'landscape' : 'portrait');
       const top = brand ? m + 4 : m;
       pdf.addImage(part.toDataURL('image/jpeg', opt.q || (opt.light ? 0.7 : 0.8)), 'JPEG', m, top, pw, (b - a) * pw / canvas.width);
       if (brand) {
         // règle de chantier : bande, graduations tous les 2 mm (1 cm plus longues), segment d'accent
-        pdf.setFillColor(brand.ink); pdf.rect(0, 0, 210, 3.2, 'F');
-        pdf.setFillColor(brand.acc); pdf.rect(210 - 12 - 30, 0, 30, 3.2, 'F');
+        pdf.setFillColor(brand.ink); pdf.rect(0, 0, PW, 3.2, 'F');
+        pdf.setFillColor(brand.acc); pdf.rect(PW - 12 - 30, 0, 30, 3.2, 'F');
         pdf.setDrawColor(255, 255, 255); pdf.setLineWidth(0.15);
-        for (let x = 2; x < 210; x += 2) pdf.line(x, 0, x, x % 10 === 0 ? 2.1 : 1.1);
-        pdf.setDrawColor(228, 230, 238); pdf.setLineWidth(0.25); pdf.line(m + 4, 297 - 10.5, 210 - m - 4, 297 - 10.5);
+        for (let x = 2; x < PW; x += 2) pdf.line(x, 0, x, x % 10 === 0 ? 2.1 : 1.1);
+        pdf.setDrawColor(228, 230, 238); pdf.setLineWidth(0.25); pdf.line(m + 4, PH - 10.5, PW - m - 4, PH - 10.5);
         pdf.setFontSize(7); pdf.setTextColor(107, 112, 128);
         const foot = pdf.splitTextToSize(brand.foot, pw - 30)[0] || '';
-        pdf.text(foot, m + 4, 297 - 6.5);
-        pdf.setTextColor(brand.ink); pdf.text(`${i + 1} / ${breaks.length}`, 210 - m - 4, 297 - 6.5, { align: 'right' });
-      } else { pdf.setFontSize(8); pdf.setTextColor(120); pdf.text(`Page ${i + 1}/${breaks.length}`, 210 - m, 297 - 5, { align: 'right' }); }
+        pdf.text(foot, m + 4, PH - 6.5);
+        pdf.setTextColor(brand.ink); pdf.text(`${i + 1} / ${breaks.length}`, PW - m - 4, PH - 6.5, { align: 'right' });
+      } else { pdf.setFontSize(8); pdf.setTextColor(120); pdf.text(`Page ${i + 1}/${breaks.length}`, PW - m, PH - 5, { align: 'right' }); }
     });
     return opt.into ? pdf : pdf.output('blob');
   } finally { holder.remove(); const t = $('#toast'); if (t) t.classList.remove('show'); }
@@ -641,8 +643,9 @@ function fitDocs() {
     const host = d.parentElement; if (!host) return;
     const cs = getComputedStyle(host);
     const w = host.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-    const z = Math.min(1, w / 794);
-    d.style.width = '794px'; d.style.maxWidth = 'none';
+    const dw = d.classList.contains('mb-land') ? 1123 : 794;
+    const z = Math.min(1, w / dw);
+    d.style.width = `${dw}px`; d.style.maxWidth = 'none';
     d.style.zoom = z < 0.999 ? String(Math.floor(z * 1000) / 1000) : '';
   });
 }

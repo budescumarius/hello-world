@@ -1882,3 +1882,6 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .badge-av { display: inline-block; padding: 1px 7px; border-radius: 999px; background: #fff1d6; color: #8a5a00; font-weight: 700; font-size: 11px; margin-right: 4px; }
 
 .mb-prog .mb-pq { display: block; font-size: .78em; color: #8a8fa3; font-weight: 400; }
+
+/* feuille en paysage (A4 couché) */
+.doc.mb.mb-paper.mb-land { max-width: 1123px; } .mb-land .mb-sheet { min-height: 794px; }

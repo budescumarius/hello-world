@@ -320,7 +320,9 @@ async function docHtml(kind, id, variant = '') {
   const isProg = !simple && kind === 'invoice' && d.kind === 'situation' && (d.progressRows || []).length;
   const cgv = cgvBlock(kind, t);
   const legal = legalLine(t);
-  const html = `<style>${docCSS(t)}</style><div class="doc mb mb-paper" data-foot="${esc(legal)}" data-ink="${esc(t.ink)}" data-acc="${esc(t.accent)}"><div class="mb-sheet"><div class="mb-ruler"></div>
+  // orientation choisie pour ce document (paysage : plus de place pour les désignations, utile aux états d'avancement)
+  const land = it.data.orient === 'landscape';
+  const html = `<style>${docCSS(t)}${land ? '@page { size: A4 landscape; }' : ''}</style><div class="doc mb mb-paper ${land ? 'mb-land' : ''}" data-land="${land ? 1 : ''}" data-foot="${esc(legal)}" data-ink="${esc(t.ink)}" data-acc="${esc(t.accent)}"><div class="mb-sheet"><div class="mb-ruler"></div>
     ${coMissing(kind, c)}${head}${info}
     ${d.intro ? `<p class="pre mb-intro">${esc(d.intro)}</p>` : ''}
     ${isProg ? progressTable(d, t) : linesTable(d, t, kind)}
@@ -375,6 +377,19 @@ function printDocPage(kind, id, it, d, c, project, title, html, typ, co, fname) 
   if (kind === 'invoice' && (it.data.lines || []).length > 1) {
     const v = docVariant() === 'simple' ? 'simple' : '';
     $('.print-shell .top-actions').insertAdjacentHTML('afterbegin', `<div class="seg no-print"><a class="${v ? '' : 'on'}" href="#/print/invoice/${id}">Détaillée</a><a class="${v ? 'on' : ''}" href="#/print/invoice/${id}?v=simple">Simplifiée</a></div>`);
+  }
+  // orientation de la feuille : portrait / paysage (enregistrée sur le document ; un nouvel état d'avancement reprend le dernier choix)
+  if (!isField()) {
+    const land = it.data.orient === 'landscape';
+    $('.print-shell .top-actions').insertAdjacentHTML('afterbegin', `<div class="seg no-print" title="Orientation de la feuille"><a href="#" class="${land ? '' : 'on'}" data-or="">▯ Portrait</a><a href="#" class="${land ? 'on' : ''}" data-or="landscape">▭ Paysage</a></div>`);
+    $$('[data-or]').forEach((a) => { a.onclick = async (e) => {
+      e.preventDefault(); const v = a.dataset.or;
+      if ((it.data.orient || '') === v) return;
+      const fresh = await db.get(typ, it.id); if (v) fresh.data.orient = v; else delete fresh.data.orient;
+      await persist(typ, fresh, { silent: true });
+      if (fresh.data.kind === 'situation') { ui.eaOrient = v; saveUi(); }
+      render();
+    }; });
   }
   if (new URLSearchParams(location.hash.split('?')[1] || '').has('mail')) mailDoc();
 }

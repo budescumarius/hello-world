@@ -751,7 +751,7 @@ async function progressInvoice(q, prev, base, existing) {
     const dedNow = dedLines.reduce((a, l) => a - l.price, 0);
     const restPct = ac.advTotal ? Math.max(0, Math.round(((ac.advTotal - ac.doneTotal - dedNow) / ac.advTotal) * 100)) : 0;
     const extra = {
-      kind: 'situation', situationNo: n, ref: `EA${n}`, progressRows: rows.map((r) => ({ ...r })), lines,
+      kind: 'situation', situationNo: n, ref: `EA${n}`, progressRows: rows.map((r) => ({ ...r })), lines, ...(!existing && ui.eaOrient ? { orient: ui.eaOrient } : {}),
       deductMode: ac.advTotal ? $('[name=dmode]', m.el).value : null, deductAmount: ac.advTotal ? num($('[name=damount]', m.el).value) : null, deductPct: ac.advTotal ? num($('[name=dpct]', m.el).value) : null,
       docNote: ac.advTotal ? `Acompte - reste à déduire ${restPct}%` : (existing ? existing.data.docNote : ''),
       // un état modifié après l'envoi doit être renvoyé au client pour approbation
