@@ -283,7 +283,7 @@ route('quotes', async () => {
     filters: { def: '', options: [['', 'Tous'], ...Object.entries(QST).map(([k, [l, c]]) => [k, l, c])], match: (q, f) => q.data.status === f },
     columns: [
       { l: 'N°', v: (q) => `<b>${esc(q.number)}</b>`, sort: (q) => q.number },
-      { l: 'Objet', v: (q) => esc(q.data.title || '') },
+      { l: 'Objet', v: (q) => `${q.data.avenantOf ? `<small class="badge-av">Avenant ${esc(q.data.avenantNo)} · ${esc(q.data.parentNumber || '')}</small> ` : ''}${esc(q.data.title || '')}` },
       { l: 'Client', v: (q) => esc(contactName(byId(contacts, q.data.clientId))) },
       { l: 'Chantier', v: (q) => esc((byId(projects, q.project_id) || { data: {} }).data.name || '') },
       { l: 'Date', v: (q) => fmtDate(q.data.date), sort: (q) => q.data.date },
@@ -323,13 +323,14 @@ async function quoteHead(q, contacts, projects, onSaved) {
 
 route('quote', async (id) => {
   const q = await db.get('quote', +id);
-  const [contacts, projects, invoices] = await Promise.all([db.list('contact'), db.list('project'), db.list('invoice')]);
+  const [contacts, projects, invoices, quotes] = await Promise.all([db.list('contact'), db.list('project'), db.list('invoice'), db.list('quote')]);
   const d = q.data;
+  const parent = d.avenantOf ? quotes.find((x) => x.id === +d.avenantOf) : null; const avs = d.avenantOf ? [] : avenantsOf(q, quotes);
   const c = byId(contacts, d.clientId);
   const pr = byId(projects, q.project_id);
   const save = debounce(async () => { try { await persist('quote', q, { silent: true }); $('[data-saved]').textContent = 'Enregistré'; } catch (e) { toast('Erreur : ' + e.message); } }, 800);
-  const page = layout({ active: 'quotes', icon: 'calc', title: `Devis ${q.number}`, back: pr ? `#/project/${pr.id}/quotes` : '#/quotes',
-    sub: `${st(QST, d.status)} <span class="muted" data-saved></span>`,
+  const page = layout({ active: 'quotes', icon: 'calc', title: d.avenantOf ? `Avenant n° ${d.avenantNo} · ${q.number}` : `Devis ${q.number}`, back: parent ? `#/quote/${parent.id}` : pr ? `#/project/${pr.id}/quotes` : '#/quotes',
+    sub: `${st(QST, d.status)}${parent ? ` <a class="muted" href="#/quote/${parent.id}">au devis ${esc(parent.number)}</a>` : ''} <span class="muted" data-saved></span>`,
     actions: `<a class="btn" href="#/print/quote/${q.id}">${I.print} PDF</a><button class="btn" data-act="more">${I.more} Actions</button>` });
   const inv = invoices.filter((i) => +i.data.quoteId === q.id);
   page.innerHTML = `<div class="card doc-head" data-act="head">
@@ -340,12 +341,18 @@ route('quote', async (id) => {
       <div><small class="muted">Responsable</small><b>${esc(userName(+d.ownerId))}</b></div>
       <button class="btn sm">${I.edit} Modifier</button></div>
     <div class="status-bar">${Object.entries(QST).map(([k, [l, col]]) => `<button class="${d.status === k ? 'on' : ''}" data-st="${k}" style="--c:${col}">${l}</button>`).join('')}</div>
+    ${parent ? `<div class="hint-box">Avenant n° ${esc(d.avenantNo)} au devis <a href="#/quote/${parent.id}">${esc(parent.number)}</a> : postes en plus (ou en moins avec une quantité ou un prix négatif). Une fois <b>accepté</b>, il s'ajoute au marché : les états d'avancement et la facture de solde du devis principal l'incluent.${d.status === 'accepte' ? ` <button class="btn sm primary" data-goea>Faire l'état d'avancement du devis ${esc(parent.number)}</button>` : ''}</div>` : ''}
     <div id="lines"></div>
+    ${avs.length ? (() => { const acc = avs.filter((x) => x.data.status === 'accepte'); const tq = totals(d).base; const ta = acc.reduce((t, x) => t + totals(x.data).base, 0);
+      return `<div class="card"><div class="card-h"><h3>Avenants</h3><span class="grow"></span><button class="btn sm" data-newav>${I.plus} Nouvel avenant</button></div><div class="rows">${avs.map((x) => `<a class="row" href="#/quote/${x.id}"><span class="grow"><b>Avenant n° ${esc(x.data.avenantNo)}</b> · ${esc(x.data.title || '')}<small class="muted"> ${esc(x.number)}</small></span>${st(QST, x.data.status)}<b>${money(totals(x.data).base)}</b></a>`).join('')}</div>
+        <div class="totals"><div class="tr"><span>Devis initial HT</span><b>${money(tq)}</b></div><div class="tr"><span>Avenants acceptés HT (${acc.length})</span><b>${money(ta)}</b></div><div class="tr big"><span>Marché total HT</span><span>${money(tq + ta)}</span></div></div></div>`; })() : ''}
     <div class="cols-2"><div>${d.status === 'accepte' && pr && !isSimple() ? `<div class="hint-box">Déclaration de travaux (30bis) et Checkin@Work : sur la page du chantier. <a href="#/project/${pr.id}">Ouvrir le chantier ${esc(pr.number)}</a></div>` : ''}${inv.length ? `<div class="card"><div class="card-h"><h3>Factures liées</h3></div><div class="rows">${inv.map((i) => { const s = invState(i); return `<a class="row" href="#/invoice/${i.id}"><span class="grow"><b>${esc(i.number || 'Brouillon')}</b> · ${esc(IKIND[i.data.kind])}</span>${st(IST, s.s)}<b>${money(s.t.base)}</b></a>`; }).join('')}</div></div>` : ''}</div><div id="tot"></div></div>`;
   const drawTot = () => { $('#tot').innerHTML = totalsBox(totals(d), d, true); };
   linesEditor($('#lines'), d, { showCost: true, selfQuote: q.id, onChange: () => { drawTot(); $('[data-saved]').textContent = 'Modification…'; save(); } });
   drawTot();
   $('[data-act=head]').onclick = (e) => { if (!e.target.closest('a')) quoteHead(q, contacts, projects, render); };
+  const nav = $('[data-newav]'); if (nav) nav.onclick = async () => { await save.flush(); createAvenant(q); };
+  const gea = $('[data-goea]'); if (gea) gea.onclick = async () => { await save.flush(); const prev = invoices.filter((i) => +i.data.quoteId === parent.id); progressInvoice(parent, prev, { project_id: parent.project_id, data: { quoteId: parent.id, clientId: parent.data.clientId, reverse: !!parent.data.reverse, title: parent.data.title } }); };
   $$('[data-st]').forEach((b) => {
     b.onclick = async () => {
       await save.flush();
@@ -368,6 +375,7 @@ route('quote', async (id) => {
     ...(!q.project_id ? [{ label: 'Créer le chantier', icon: 'crane', run: async () => { await save.flush(); createProjectFromQuote(q); } }] : []),
     { label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/quote/${q.id}?mail=1`) },
     { label: 'Dupliquer (nouvelle version)', icon: 'copy', run: async () => { await save.flush(); const n = await persist('quote', { project_id: q.project_id, data: { ...JSON.parse(JSON.stringify(d)), status: 'brouillon', date: today(), valid: addDays(today(), num(company().quoteValidity) || 30), acceptedAt: null, sentAt: null, title: d.title } }); go(`#/quote/${n.id}`); } },
+    ...(!isSimple() && (d.status === 'accepte' || d.avenantOf) ? [{ label: d.avenantOf ? 'Créer un autre avenant au même devis' : 'Créer un avenant (travaux en plus / en moins)', icon: 'plus', run: async () => { await save.flush(); createAvenant(q); } }] : []),
     { label: 'Ajouter les postes à ma bibliothèque', icon: 'book', run: async () => { await save.flush(); quoteToLibrary(q); } },
     { sep: true },
     { label: 'Supprimer le devis', danger: true, icon: 'trash', run: async () => { if (confirm(`Supprimer le devis ${q.number} ?`)) { await db.del('quote', q.id); go('#/quotes'); } } },
@@ -455,6 +463,14 @@ function acompteLines(q, { pct, amount }) {
   return lines;
 }
 async function invoiceFromQuote(q) {
+  // avenant : facturé seul, ou inclus dans les états d'avancement / le solde du devis principal
+  if (q.data.avenantOf && !q._direct) {
+    const main = await db.get('quote', +q.data.avenantOf).catch(() => null);
+    if (main) return menuSheet(`Avenant n° ${q.data.avenantNo} (${money(totals(q.data).base)} HT)`, [
+      { label: `Dans les états d'avancement / le solde du devis ${main.number} (conseillé)`, primary: true, run: () => { if (q.data.status !== 'accepte') return toast('Marquez d\'abord l\'avenant comme accepté', 4000); invoiceFromQuote(main); } },
+      { label: 'Facturer cet avenant à part', run: () => invoiceFromQuote({ ...q, _direct: true }) },
+    ]);
+  }
   const prev = (await db.list('invoice')).filter((i) => +i.data.quoteId === q.id);
   const d = q.data; const disc = num(d.discount) / 100; const qt = totals(d);
   const base = { project_id: q.project_id, data: { quoteId: q.id, clientId: d.clientId, reverse: !!d.reverse, title: d.title } };
@@ -477,9 +493,10 @@ async function invoiceFromQuote(q) {
     } },
     { label: "Facture d'avancement (état des travaux)", run: () => progressInvoice(q, prev, base) },
     { label: 'Reprendre des factures déjà émises (autre logiciel)…', run: () => historyFromOtherApp(q, prev, base) },
-    { label: 'Facture de solde (reste à facturer)', run: () => {
+    { label: 'Facture de solde (reste à facturer)', run: async () => {
       const pb = prevBase(prev);
-      const lines = d.lines.filter((l) => !l.option).map(disco);
+      // devis + avenants acceptés (sauf ceux déjà facturés à part), chacun avec sa remise
+      const lines = (await marketLines(q, { separatelyBilled: false })).map(({ _disc, avenant, ...l }) => (l.kind === 'item' ? { ...l, id: lid(), price: r2(num(l.price) * (1 - num(_disc))) } : { ...l, id: lid() }));
       for (const [rate, b] of Object.entries(pb)) if (Math.abs(b) > 0.005) lines.push({ id: lid(), kind: 'item', deduction: 'previous', desc: `Déjà facturé (${prev.map((i) => i.number || 'brouillon').join(', ')})${many ? ` – TVA ${fnum(+rate)} %` : ''}`, unit: 'forfait', qty: 1, price: -b, vat: +rate, type: 'divers' });
       mk({ kind: 'finale', lines });
     } },
@@ -574,6 +591,34 @@ function prevProgress(list, lineId, exceptId) {
   }
   return m;
 }
+// ---------------------------------------------------------------- Avenants (travaux en plus ou en moins après l'acceptation du devis)
+// Un avenant est un devis lié (avenantOf = devis principal), numéroté 1, 2, 3… ; une fois accepté, ses postes s'ajoutent
+// au marché : états d'avancement, facture de solde et récapitulatif du devis principal en tiennent compte.
+const avenantsOf = (q, quotes) => quotes.filter((x) => +x.data.avenantOf === q.id).sort((a, b) => num(a.data.avenantNo) - num(b.data.avenantNo));
+async function marketLines(q, { separatelyBilled = true } = {}) {
+  const d = q.data; const out = [];
+  d.lines.forEach((l) => { if (l.kind === 'title' || (l.kind === 'item' && !l.option)) out.push({ ...l, _disc: num(d.discount) / 100 }); });
+  if (d.avenantOf) return out;
+  const [quotes, invoices] = await Promise.all([db.list('quote'), separatelyBilled ? [] : db.list('invoice')]);
+  for (const av of avenantsOf(q, quotes).filter((x) => x.data.status === 'accepte')) {
+    if (!separatelyBilled && invoices.some((i) => +i.data.quoteId === av.id)) continue; // avenant déjà facturé à part
+    out.push({ id: `av${av.id}`, kind: 'title', desc: `Avenant n° ${av.data.avenantNo} – ${av.data.title || av.number}`, avenant: av.id });
+    av.data.lines.forEach((l) => { if (l.kind === 'title') out.push({ ...l, level: 2, avenant: av.id }); else if (l.kind === 'item' && !l.option) out.push({ ...l, _disc: num(av.data.discount) / 100, avenant: av.id }); });
+  }
+  return out;
+}
+async function createAvenant(q) {
+  const quotes = await db.list('quote');
+  const main = q.data.avenantOf ? quotes.find((x) => x.id === +q.data.avenantOf) || q : q;
+  const no = Math.max(0, ...avenantsOf(main, quotes).map((x) => num(x.data.avenantNo))) + 1;
+  const v = await ask(`Avenant n° ${no} au devis ${main.number}`, [
+    { name: 'title', label: 'Objet de l\'avenant', required: true, placeholder: 'ex. Travaux supplémentaires salle de bain' },
+  ], { title: '' });
+  if (!v) return;
+  const d = main.data;
+  newQuote({ projectId: main.project_id, clientId: d.clientId, title: v.title, siteAddress: d.siteAddress, reverse: !!d.reverse, discount: 0, avenantOf: main.id, avenantNo: no, parentNumber: main.number,
+    intro: `Avenant n° ${no} au devis ${main.number}${d.title ? ` « ${d.title} »` : ''}. Travaux en plus (ou en moins : quantité ou prix négatif) par rapport au devis accepté.` });
+}
 // Acomptes du devis et montants déjà déduits par taux (hors facture `exceptId`)
 function acompteState(list, exceptId) {
   const adv = {}; const done = {};
@@ -587,22 +632,31 @@ function acompteState(list, exceptId) {
 
 // existing : facture d'avancement en brouillon à modifier
 async function progressInvoice(q, prev, base, existing) {
-  const d = q.data; const disc = num(d.discount) / 100;
-  const src = d.lines.filter((l) => l.kind === 'title' || (l.kind === 'item' && !l.option));
+  const d = q.data;
+  // marché = devis + avenants acceptés (chaque avenant : un chapitre « Avenant n° … », sa remise propre)
+  const src = await marketLines(q);
   const old = existing ? existing.data.progressRows || [] : [];
-  const rows = src.map((l) => (l.kind === 'title' ? { lineId: l.id, kind: 'title', level: tlevel(l), desc: l.desc, ...(l.no ? { no: l.no } : {}) } : {
-    lineId: l.id, kind: 'item', desc: l.desc, ...(l.no ? { no: l.no } : {}), unit: l.unit, vat: num(l.vat), type: l.type, qty: num(l.qty), price: r2(num(l.price) * (1 - disc)),
-    prev: prevProgress(prev, l.id, existing && existing.id),
+  // dernier mode de saisie de chaque ligne (en % ou en quantité) : repris d'un état à l'autre
+  const lastMode = (lineId) => { const sits = prev.filter((i) => i.data.kind === 'situation' && (!existing || i.id !== existing.id)).sort((a, b) => num(b.data.situationNo) - num(a.data.situationNo)); for (const i of sits) { const r = (i.data.progressRows || []).find((x) => x.lineId === lineId); if (r && r.mode) return r.mode; } return 'pct'; };
+  const rows = src.map((l) => (l.kind === 'title' ? { lineId: l.id, kind: 'title', level: tlevel(l), desc: l.desc, ...(l.no ? { no: l.no } : {}), ...(l.avenant ? { avenant: l.avenant } : {}) } : {
+    lineId: l.id, kind: 'item', desc: l.desc, ...(l.no ? { no: l.no } : {}), unit: l.unit, vat: num(l.vat), type: l.type, qty: num(l.qty), price: r2(num(l.price) * (1 - num(l._disc))),
+    prev: prevProgress(prev, l.id, existing && existing.id), ...(l.avenant ? { avenant: l.avenant } : {}),
   }));
-  rows.forEach((r) => { if (r.kind === 'item') { const o = old.find((x) => x.lineId === r.lineId); r.cum = o ? num(o.cum) : r.prev; } });
+  rows.forEach((r) => { if (r.kind === 'item') { const o = old.find((x) => x.lineId === r.lineId); r.cum = o ? num(o.cum) : r.prev; r.mode = o && o.mode ? o.mode : lastMode(r.lineId); } });
   // numéro suivant (un état repris d'un autre logiciel peut porter le n° 2, 3…)
   const n = existing ? existing.data.situationNo : Math.max(0, ...prev.filter((i) => i.data.kind === 'situation').map((i) => num(i.data.situationNo) || 1)) + 1;
   const ac = acompteState(prev, existing && existing.id);
   const nos = numbering(rows);
+  // avenants : inclus (acceptés) ou en attente d'acceptation
+  const avAll = d.avenantOf ? [] : avenantsOf(q, await db.list('quote'));
+  const avWait = avAll.filter((x) => x.data.status !== 'accepte' && !['refuse', 'annule'].includes(x.data.status));
+  const avIn = avAll.filter((x) => x.data.status === 'accepte');
+  const avInfo = avAll.length ? `<p class="muted sm">${avIn.length ? `Avenants inclus : ${avIn.map((x) => `n° ${esc(x.data.avenantNo)} (${money(totals(x.data).base)})`).join(', ')}.` : ''}${avWait.length ? ` <span class="late">Pas encore accepté${avWait.length > 1 ? 's' : ''}, donc pas inclus : ${avWait.map((x) => `<a href="#/quote/${x.id}" data-close>avenant n° ${esc(x.data.avenantNo)}</a>`).join(', ')}.</span>` : ''}</p>` : '';
   const amt = (r, pct) => r2(r.qty * r.price * pct / 100);
   const m = modal(`${mhead(`État d'avancement n° ${n} (EA${n}) – devis ${q.number}`)}<div class="m-body">
     <p class="muted">Encodez ce que vous avez <b>avancé depuis l'état précédent</b> (en % ou en quantité) : le cumul total et ce qui reste se calculent tout seuls. Ex. : EA1 15 % → cumul 15 %, reste 85 % ; EA2 + 10 % → cumul 25 %, reste 75 %. Sur un chapitre, le % s'applique à toutes ses lignes.</p>
-    <div class="btns"><button class="btn sm" data-all="100">Tout terminer (cumul 100 %)</button><button class="btn sm" data-all="prev">Tout à 0 % pour cet état</button></div>
+    <div class="btns"><button class="btn sm" data-all="100">Tout terminer (cumul 100 %)</button><button class="btn sm" data-all="prev">Tout à 0 % pour cet état</button>${d.avenantOf ? '' : `<span class="grow"></span><button class="btn sm" data-addav>${I.plus} Ajouter un avenant</button>`}</div>
+    ${avInfo}
     <div class="pg-list">
     ${rows.map((r, i) => (r.kind === 'title'
     ? `<div class="pg-sec ${r.level === 2 ? 'lv2' : ''}" ${String(r.desc || '').trim() ? '' : 'hidden'}><span class="pg-no">${esc(String(nos[i]).replace(/(\.0)+$/, ''))}</span><b class="pg-t">${esc(r.desc)}</b><label class="pg-chap" title="Avancement de cet état, appliqué à tout le chapitre"><input class="pct" data-ch="${i}" inputmode="decimal" placeholder="—"><em>%</em></label><b class="pg-amt" data-ct="${i}"></b></div>`
@@ -614,7 +668,7 @@ async function progressInvoice(q, prev, base, existing) {
       </div>`)).join('')}
     </div>
     ${ac.advTotal ? `<div class="card flat"><b>Acomptes facturés : ${money(ac.advTotal)} HT</b> · déjà déduits ${money(ac.doneTotal)} · reste ${money(ac.advTotal - ac.doneTotal)}
-      <div class="grid-form" style="margin-top:8px">${fieldHTML({ name: 'dmode', label: 'Déduction de l\'acompte', type: 'select', options: [['prorata', 'Au prorata de l\'avancement (recommandé)'], ['manual', 'Montant libre HT'], ['none', 'Pas de déduction sur cet état']] }, existing ? existing.data.deductMode || 'prorata' : 'prorata')}${fieldHTML({ name: 'damount', label: 'Montant HT à déduire', type: 'money' }, existing ? existing.data.deductAmount || '' : '')}</div></div>` : ''}
+      <div class="grid-form" style="margin-top:8px">${fieldHTML({ name: 'dmode', label: 'Déduction de l\'acompte', type: 'select', options: [['prorata', 'Au prorata de l\'avancement (recommandé)'], ['pct', 'Pourcentage de cet état (je choisis le %)'], ['manual', 'Montant libre HT'], ['none', 'Pas de déduction sur cet état']] }, existing ? existing.data.deductMode || 'prorata' : 'prorata')}${fieldHTML({ name: 'damount', label: 'Montant HT à déduire', type: 'money' }, existing ? existing.data.deductAmount || '' : '')}${fieldHTML({ name: 'dpct', label: '% de cet état à déduire', type: 'percent' }, existing && existing.data.deductPct != null ? existing.data.deductPct : 30)}</div></div>` : ''}
     <div class="totals"><div class="tr"><span>Sous-total n°1 (travaux de cet état)</span><b data-t1></b></div>${ac.advTotal ? '<div class="tr"><span>Déduction acompte</span><b data-t2></b></div>' : ''}<div class="tr big"><span>Sous-total n°2 (HT facturé)</span><span data-t3></span></div><div class="tr int"><span>Avancement global cumulé</span><span data-t4></span></div></div></div>
     <div class="m-foot"><span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-ok>${existing ? 'Mettre à jour la facture' : 'Créer la facture'}</button></div>`, { wide: true });
   const items = rows.filter((r) => r.kind === 'item');
@@ -623,12 +677,19 @@ async function progressInvoice(q, prev, base, existing) {
     if (!ac.advTotal) return {};
     const mode = $('[name=dmode]', m.el).value;
     $('[name=damount]', m.el).closest('.field').hidden = mode !== 'manual';
+    $('[name=dpct]', m.el).closest('.field').hidden = mode !== 'pct';
     const remain = {}; for (const [rate, v] of Object.entries(ac.adv)) remain[rate] = r2(v - (ac.done[rate] || 0));
     const out = {};
     if (mode === 'none') return out;
     const period = {}; const market = {};
     for (const r of items) { period[r.vat] = (period[r.vat] || 0) + amt(r, r.cum - r.prev); market[r.vat] = (market[r.vat] || 0) + amt(r, 100); }
     const allDone = items.every((r) => r.cum >= 100);
+    // % choisi du montant de cet état (par taux de TVA), sans dépasser l'acompte restant
+    if (mode === 'pct') {
+      const pc = Math.max(0, num($('[name=dpct]', m.el).value)) / 100;
+      for (const [rate, v] of Object.entries(remain)) if (v > 0) out[rate] = r2(Math.min(v, Math.max(0, (period[rate] || 0) * pc)));
+      return out;
+    }
     if (mode === 'manual') {
       const want = num($('[name=damount]', m.el).value); const totRemain = Object.values(remain).reduce((a, v) => a + Math.max(0, v), 0);
       for (const [rate, v] of Object.entries(remain)) if (v > 0 && totRemain) out[rate] = r2(Math.min(v, want * v / totRemain));
@@ -659,18 +720,20 @@ async function progressInvoice(q, prev, base, existing) {
   };
   // saisie de l'avancement de cet état (différence) ; le cumul = états précédents + cet état, jamais au-delà de 100 %
   const setRow = (i, cum) => { const r = rows[i]; r.cum = clamp(cum); $(`[data-p="${i}"]`, m.el).value = r2(r.cum - r.prev); $(`[data-q="${i}"]`, m.el).value = r2(r.qty * (r.cum - r.prev) / 100); };
-  $$('[data-p]', m.el).forEach((inp) => { inp.oninput = () => { const r = rows[+inp.dataset.p]; r.cum = clamp(r.prev + num(inp.value)); $(`[data-q="${inp.dataset.p}"]`, m.el).value = r2(r.qty * (r.cum - r.prev) / 100); upd(); }; inp.onblur = () => setRow(+inp.dataset.p, rows[+inp.dataset.p].cum); });
-  $$('[data-q]', m.el).forEach((inp) => { inp.oninput = () => { const r = rows[+inp.dataset.q]; r.cum = r.qty ? clamp(r.prev + num(inp.value) / r.qty * 100) : r.prev; $(`[data-p="${inp.dataset.q}"]`, m.el).value = r2(r.cum - r.prev); upd(); }; inp.onblur = () => setRow(+inp.dataset.q, rows[+inp.dataset.q].cum); });
+  $$('[data-p]', m.el).forEach((inp) => { inp.oninput = () => { const r = rows[+inp.dataset.p]; r.mode = 'pct'; r.cum = clamp(r.prev + num(inp.value)); $(`[data-q="${inp.dataset.p}"]`, m.el).value = r2(r.qty * (r.cum - r.prev) / 100); upd(); }; inp.onblur = () => setRow(+inp.dataset.p, rows[+inp.dataset.p].cum); });
+  $$('[data-q]', m.el).forEach((inp) => { inp.oninput = () => { const r = rows[+inp.dataset.q]; r.mode = 'qty'; r.cum = r.qty ? clamp(r.prev + num(inp.value) / r.qty * 100) : r.prev; $(`[data-p="${inp.dataset.q}"]`, m.el).value = r2(r.cum - r.prev); upd(); }; inp.onblur = () => setRow(+inp.dataset.q, rows[+inp.dataset.q].cum); });
   $$('[data-ch]', m.el).forEach((inp) => {
     inp.onchange = () => {
       if (inp.value.trim() === '') return;
       const i = +inp.dataset.ch; const v = clamp(num(inp.value));
-      rows.slice(i + 1, blockEnd(rows, i)).forEach((r, k) => { if (r.kind === 'item') setRow(i + 1 + k, r.prev + v); });
+      rows.slice(i + 1, blockEnd(rows, i)).forEach((r, k) => { if (r.kind === 'item') { r.mode = 'pct'; setRow(i + 1 + k, r.prev + v); } });
       upd();
     };
   });
+  // nouvel avenant depuis l'état : on le crée (postes, puis « Accepté ») et on revient faire l'état, qui l'inclura
+  const addAv = $('[data-addav]', m.el); if (addAv) addAv.onclick = () => { m.close(); toast('Remplissez l\'avenant puis marquez-le « Accepté » : le prochain état d\'avancement l\'inclura', 6000); createAvenant(q); };
   $$('[data-all]', m.el).forEach((b) => { b.onclick = () => { rows.forEach((r, i) => { if (r.kind === 'item') setRow(i, b.dataset.all === 'prev' ? r.prev : 100); }); upd(); }; });
-  ['dmode', 'damount'].forEach((k) => { const e = $(`[name=${k}]`, m.el); if (e) e.addEventListener(k === 'dmode' ? 'change' : 'input', upd); });
+  ['dmode', 'damount', 'dpct'].forEach((k) => { const e = $(`[name=${k}]`, m.el); if (e) e.addEventListener(k === 'dmode' ? 'change' : 'input', upd); });
   upd();
   $('[data-ok]', m.el).onclick = async () => {
     const lines = []; let pending = [];
@@ -689,7 +752,7 @@ async function progressInvoice(q, prev, base, existing) {
     const restPct = ac.advTotal ? Math.max(0, Math.round(((ac.advTotal - ac.doneTotal - dedNow) / ac.advTotal) * 100)) : 0;
     const extra = {
       kind: 'situation', situationNo: n, ref: `EA${n}`, progressRows: rows.map((r) => ({ ...r })), lines,
-      deductMode: ac.advTotal ? $('[name=dmode]', m.el).value : null, deductAmount: ac.advTotal ? num($('[name=damount]', m.el).value) : null,
+      deductMode: ac.advTotal ? $('[name=dmode]', m.el).value : null, deductAmount: ac.advTotal ? num($('[name=damount]', m.el).value) : null, deductPct: ac.advTotal ? num($('[name=dpct]', m.el).value) : null,
       docNote: ac.advTotal ? `Acompte - reste à déduire ${restPct}%` : (existing ? existing.data.docNote : ''),
       // un état modifié après l'envoi doit être renvoyé au client pour approbation
       ea: existing && existing.data.ea ? { ...existing.data.ea, ...(['envoye', 'approuve'].includes(existing.data.ea.status) ? { status: 'brouillon', modifiedAt: today() } : {}) } : { status: 'brouillon' },

@@ -1878,3 +1878,7 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 }
 
 .login-rem { display: flex; align-items: center; gap: 8px; margin: 2px 0 14px; font-size: 14px; } .login-rem small { font-size: 12px; }
+
+.badge-av { display: inline-block; padding: 1px 7px; border-radius: 999px; background: #fff1d6; color: #8a5a00; font-weight: 700; font-size: 11px; margin-right: 4px; }
+
+.mb-prog .mb-pq { display: block; font-size: .78em; color: #8a8fa3; font-weight: 400; }

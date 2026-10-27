@@ -77,6 +77,7 @@ function clientLabel(c) {
 const isEAdoc = (kind, d) => kind === 'invoice' && d.kind === 'situation' && d.status !== 'emise';
 function docLabel(kind, d, t) {
   if (isEAdoc(kind, d)) return 'État d\'avancement';
+  if (kind === 'quote' && d.avenantOf) return `Avenant n° ${d.avenantNo || ''}${d.parentNumber ? ` au devis ${d.parentNumber}` : ''}`;
   const raw = kind === 'quote' ? t.quoteTitle : kind === 'order' ? t.orderTitle : d.kind === 'avoir' ? t.creditTitle
     : d.kind && d.kind !== 'facture' && IKIND[d.kind] ? IKIND[d.kind] : t.invoiceTitle;
   return fill(raw, { numero: '' }).replace(/\s*n[°º]?\s*$/i, '').trim() || 'Document';
@@ -157,6 +158,8 @@ function linesTable(d, t, kind) {
 function progressTable(d, t) {
   const rows = d.progressRows || [];
   const nos = numbering(rows.map((r) => ({ kind: r.kind, level: r.level, no: r.no })));
+  // valeur d'avancement telle qu'elle a été encodée : en quantité (« 3,00 pc », % en petit) ou en pourcentage
+  const pv = (r, p) => (r.mode === 'qty' ? `${dnum2(num(r.qty) * num(p) / 100)}<span class="mb-u">${esc(r.unit || '')}</span><small class="mb-pq">${pctS(p)}</small>` : pctS(p));
   const period = (r) => { const l = (d.lines || []).find((x) => x.srcId === r.lineId && !isDeduction(x)); return l ? r2(num(l.qty) * num(l.price)) : 0; };
   const code = (i) => (t.showCodes && nos[i] ? `<span class="mb-code">${esc(String(nos[i]).replace(/(\.0)+$/, ''))}</span>` : '');
   return `<table class="mb-lines mb-prog"><thead><tr><th>Description</th><th class="r">Prévu</th><th class="r">Précédent</th><th class="r">Cet état</th><th class="r">Cumul total</th><th class="r">Reste</th><th class="r">Prix unit. HT</th><th class="r">Période HT</th></tr></thead><tbody>
@@ -168,7 +171,7 @@ function progressTable(d, t) {
       }
       const pc = Math.max(0, Math.min(100, num(r.cum)));
       return `<tr><td><div class="mb-dl">${code(i)}<span class="pre">${esc(r.desc)}</span></div></td><td class="r">${dnum2(r.qty)}<span class="mb-u">${esc(r.unit || '')}</span></td>
-        <td class="r">${pctS(r.prev)}</td><td class="r"><b>+ ${pctS(num(r.cum) - num(r.prev))}</b></td><td class="r"><b>${pctS(r.cum)}</b><div class="mb-bar"><i style="width:${pc}%"></i></div></td><td class="r">${pctS(100 - num(r.cum))}</td><td class="r">${dmoney(r.price, t)}</td><td class="r">${dmoney(period(r), t)}</td></tr>`;
+        <td class="r">${pv(r, r.prev)}</td><td class="r"><b>+ ${pv(r, num(r.cum) - num(r.prev))}</b></td><td class="r"><b>${pv(r, r.cum)}</b><div class="mb-bar"><i style="width:${pc}%"></i></div></td><td class="r">${pv(r, 100 - num(r.cum))}</td><td class="r">${dmoney(r.price, t)}</td><td class="r">${dmoney(period(r), t)}</td></tr>`;
     }).join('')}</tbody></table>`;
 }
 function progressRecap(d, t) {
@@ -336,7 +339,7 @@ async function docHtml(kind, id, variant = '') {
 // nom des fichiers PDF : « Facture_2026-122 », « Devis_2026-075 » (préfixe FAC- / DEV- retiré du numéro)
 function docFileName(kind, it, variant = '') {
   const d = it.data || {};
-  const label = kind === 'quote' ? 'Devis' : kind === 'order' ? 'Commande' : d.kind === 'avoir' ? 'Note-de-credit' : 'Facture';
+  const label = kind === 'quote' ? (d.avenantOf ? `Avenant-${d.avenantNo || ''}` : 'Devis') : kind === 'order' ? 'Commande' : d.kind === 'avoir' ? 'Note-de-credit' : 'Facture';
   const no = String(it.number || '').replace(/^[A-Za-z]{1,6}[-_ ]?(?=\d)/, '').trim() || 'brouillon';
   return `${label}_${fileTitle(no)}${variant === 'simple' ? '_simplifiee' : ''}`;
 }
