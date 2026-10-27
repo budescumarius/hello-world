@@ -1885,3 +1885,7 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 
 /* feuille en paysage (A4 couché) */
 .doc.mb.mb-paper.mb-land { max-width: 1123px; } .mb-land .mb-sheet { min-height: 794px; }
+
+/* état d'avancement : postes avancés dans cet état mis en évidence */
+.doc.mb .mb-prog tr.mb-cur td { background: #fdf3e1; } /* teinte fixe : lue aussi par la création du PDF */
+.doc.mb .mb-prog tr.mb-cur td:first-child { border-left: 3px solid var(--acc, #e8a33d); }

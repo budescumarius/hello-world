@@ -162,15 +162,20 @@ function progressTable(d, t) {
   const pv = (r, p) => (r.mode === 'qty' ? `${dnum2(num(r.qty) * num(p) / 100)}<span class="mb-u">${esc(r.unit || '')}</span><small class="mb-pq">${pctS(p)}</small>` : pctS(p));
   const period = (r) => { const l = (d.lines || []).find((x) => x.srcId === r.lineId && !isDeduction(x)); return l ? r2(num(l.qty) * num(l.price)) : 0; };
   const code = (i) => (t.showCodes && nos[i] ? `<span class="mb-code">${esc(String(nos[i]).replace(/(\.0)+$/, ''))}</span>` : '');
-  return `<table class="mb-lines mb-prog"><thead><tr><th>Description</th><th class="r">Prévu</th><th class="r">Précédent</th><th class="r">Cet état</th><th class="r">Cumul total</th><th class="r">Reste</th><th class="r">Prix unit. HT</th><th class="r">Période HT</th></tr></thead><tbody>
-    <tr class="mb-txt"><td colspan="8">Avancement ${esc(d.ref || `EA${d.situationNo || ''}`)}${d.title ? ` · ${esc(d.title)}` : ''}</td></tr>
+  // postes avancés dans cet état : surlignés ; option « seulement cet état » (les chapitres qui les contiennent restent, numéros d'origine gardés)
+  const moved = (r) => r.kind === 'item' && Math.abs(num(r.cum) - num(r.prev)) > 1e-6;
+  const plain = rows.map((x) => ({ kind: x.kind, level: x.level }));
+  const show = rows.map((r, i) => (d.eaOnlyCurrent ? (r.kind === 'item' ? moved(r) : rows.slice(i + 1, blockEnd(plain, i)).some(moved)) : true));
+  return `<table class="mb-lines mb-prog ${d.eaOnlyCurrent ? 'mb-only' : ''}"><thead><tr><th>Description</th><th class="r">Prévu</th><th class="r">Précédent</th><th class="r">Cet état</th><th class="r">Cumul total</th><th class="r">Reste</th><th class="r">Prix unit. HT</th><th class="r">Période HT</th></tr></thead><tbody>
+    <tr class="mb-txt"><td colspan="8">Avancement ${esc(d.ref || `EA${d.situationNo || ''}`)}${d.title ? ` · ${esc(d.title)}` : ''}${d.eaOnlyCurrent ? ' – postes avancés dans cet état uniquement' : ''}</td></tr>
     ${rows.map((r, i) => {
+      if (!show[i]) return '';
       if (r.kind === 'title') {
         const sub = rows.slice(i + 1, blockEnd(rows.map((x) => ({ kind: x.kind, level: x.level })), i)).filter((x) => x.kind === 'item');
         return `<tr class="${+r.level === 2 ? 'mb-sub' : 'mb-ch'}"><td colspan="7"><div class="mb-dl">${code(i)}<span>${esc(r.desc)}</span></div></td><td class="r">${dmoney(sub.reduce((a, x) => a + period(x), 0), t)}</td></tr>`;
       }
       const pc = Math.max(0, Math.min(100, num(r.cum)));
-      return `<tr><td><div class="mb-dl">${code(i)}<span class="pre">${esc(r.desc)}</span></div></td><td class="r">${dnum2(r.qty)}<span class="mb-u">${esc(r.unit || '')}</span></td>
+      return `<tr class="${moved(r) ? 'mb-cur' : ''}"><td><div class="mb-dl">${code(i)}<span class="pre">${esc(r.desc)}</span></div></td><td class="r">${dnum2(r.qty)}<span class="mb-u">${esc(r.unit || '')}</span></td>
         <td class="r">${pv(r, r.prev)}</td><td class="r"><b>+ ${pv(r, num(r.cum) - num(r.prev))}</b></td><td class="r"><b>${pv(r, r.cum)}</b><div class="mb-bar"><i style="width:${pc}%"></i></div></td><td class="r">${pv(r, 100 - num(r.cum))}</td><td class="r">${dmoney(r.price, t)}</td><td class="r">${dmoney(period(r), t)}</td></tr>`;
     }).join('')}</tbody></table>`;
 }
@@ -377,6 +382,16 @@ function printDocPage(kind, id, it, d, c, project, title, html, typ, co, fname) 
   if (kind === 'invoice' && (it.data.lines || []).length > 1) {
     const v = docVariant() === 'simple' ? 'simple' : '';
     $('.print-shell .top-actions').insertAdjacentHTML('afterbegin', `<div class="seg no-print"><a class="${v ? '' : 'on'}" href="#/print/invoice/${id}">Détaillée</a><a class="${v ? 'on' : ''}" href="#/print/invoice/${id}?v=simple">Simplifiée</a></div>`);
+  }
+  // état d'avancement : tous les postes, ou seulement ceux avancés dans cet état (enregistré sur le document : PDF et e-mail suivent)
+  if (!isField() && kind === 'invoice' && it.data.kind === 'situation' && (it.data.progressRows || []).length && docVariant() !== 'simple') {
+    const only = !!it.data.eaOnlyCurrent;
+    $('.print-shell .top-actions').insertAdjacentHTML('afterbegin', `<div class="seg no-print" title="Postes affichés"><a href="#" class="${only ? '' : 'on'}" data-eaonly="">Tous les postes</a><a href="#" class="${only ? 'on' : ''}" data-eaonly="1">Seulement cet état</a></div>`);
+    $$('[data-eaonly]').forEach((a) => { a.onclick = async (e) => {
+      e.preventDefault(); const v = !!a.dataset.eaonly; if (!!it.data.eaOnlyCurrent === v) return;
+      const fresh = await db.get(typ, it.id); if (v) fresh.data.eaOnlyCurrent = true; else delete fresh.data.eaOnlyCurrent;
+      await persist(typ, fresh, { silent: true }); render();
+    }; });
   }
   // orientation de la feuille : portrait / paysage (enregistrée sur le document ; un nouvel état d'avancement reprend le dernier choix)
   if (!isField()) {
