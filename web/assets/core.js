@@ -242,11 +242,11 @@ const SPACES_FIELD = () => [];
 const isChef = () => !!(S.me && S.me.role === 'chef' && !S.me.super);
 const CHEF_BLOCK = ['invoices', 'invoice', 'payments', 'progress', 'export', 'stats', 'settings', 'abonnement', 'expenses', 'purchase', 'platform', 'security'];
 // libellés en français ou en roumain (choix du responsable, voir resp.js)
-const SPACES_CHEF = () => { const n = typeof rz === 'function' ? rz('nav') : ['Accueil', 'Projets', 'Équipe', 'Factures et rapports', 'Estimatifs', 'Heures', 'Planning', 'Absences', 'Demandes de facture', 'Rapports au patron', 'Tâches']; return [
+const SPACES_CHEF = () => { const n = typeof rz === 'function' ? rz('nav') : ['Accueil', 'Projets', 'Équipe', 'Factures et rapports', 'Estimatifs', 'Heures', 'Planning']; return [
   { k: 'resp', l: n[0], i: 'sun', h: '#/resp', sec: [] },
-  { k: 'works', l: n[1], i: 'crane', h: '#/projects', sec: [[n[1], '#/projects', '#/project/', '#/contact/', '#/order/', '#/orders/', '#/intervention/', '#/interventions'], [n[4], '#/quotes', '#/quote/', '#/library']] },
-  { k: 'crew', l: n[2], i: 'helmet', h: '#/hr/timesheets', sec: [[n[5], '#/hr/timesheets', '#/crew/', '#/crew'], [n[6], '#/planning/team', '#/planning/projects'], [n[7], '#/hr/absences']] },
-  { k: 'more', l: n[3], i: 'send', h: '#/resp/demandes', sec: [[n[8], '#/resp/demandes'], [n[9], '#/resp/rapports', '#/resp/rapport/'], [n[10], '#/tasks']] },
+  { k: 'works', l: n[1], i: 'crane', h: '#/resp/proiecte', sec: [[n[1], '#/resp/proiecte', '#/resp/p/', '#/project/', '#/contact/', '#/order/', '#/intervention/'], [n[4], '#/resp/estimative', '#/quote/', '#/library']] },
+  { k: 'crew', l: n[2], i: 'helmet', h: '#/resp/echipa', sec: [[n[5], '#/resp/echipa', '#/crew/', '#/hr/'], [n[6], '#/planning/team', '#/planning/projects']] },
+  { k: 'more', l: n[3], i: 'send', h: '#/resp/trimise', sec: [] },
 ]; };
 const spaces = () => (isField() ? SPACES_FIELD() : isSimple() ? SPACES_SIMPLE : isChef() ? SPACES_CHEF() : SPACES);
 const ui = (() => { try { return JSON.parse(localStorage.getItem('bp-ui') || '{}'); } catch (e) { return {}; } })();
@@ -273,7 +273,7 @@ function dock(cur) {
     <div class="dock-tools">
       ${isField() ? '' : `<button class="dock-cmd" data-act="search" title="Rechercher ou faire une action">${I.search}<span>Rechercher ou faire…</span><kbd>⌘K</kbd></button>`}
       ${S.ai ? `<button class="dock-ai" data-act="ai" title="Assistant IA">${I.spark}</button>` : ''}
-      ${isField() ? '' : `<button class="dock-add" data-act="qadd">${I.plus}<span>Créer</span></button>`}
+      ${isField() || isChef() ? '' : `<button class="dock-add" data-act="qadd">${I.plus}<span>Créer</span></button>`}
       <button class="dock-me" data-act="account" title="Mon compte">${avatar(S.me.id)}</button>
     </div></header>`;
 }
@@ -405,7 +405,7 @@ function mobileActions() {
   const box = $('.top-actions'); if (!box || !isPhone()) return;
   let items = [...box.querySelectorAll('a, button')].filter((x) => !x.closest('label'));
   // pas de bouton principal sur la page : « + Créer » à sa place (en haut à droite, comme sur iPhone)
-  if (!isField() && !items.some((x) => x.classList.contains('primary'))) {
+  if (!isField() && !isChef() && !items.some((x) => x.classList.contains('primary'))) {
     box.insertAdjacentHTML('beforeend', `<button class="btn primary m-create" data-act="qadd">${I.plus}<span>Créer</span></button>`);
     $('.m-create', box).onclick = () => quickAddMenu();
     items = [...box.querySelectorAll('a, button')].filter((x) => !x.closest('label'));
@@ -634,6 +634,9 @@ async function render() {
   // responsable : pas de facturation ni de paramètres ; son accueil est son tableau de bord
   if (isChef() && CHEF_BLOCK.includes(parts[0])) { location.hash = '#/resp'; return; }
   if (isChef() && (!parts[0] || parts[0] === 'dashboard')) parts.splice(0, parts.length, 'resp');
+  // responsable : les listes complètes renvoient à ses pages simples
+  const CHEF_SIMPLE = { projects: '#/resp/proiecte', quotes: '#/resp/estimative', crew: parts[1] ? null : '#/resp/echipa' };
+  if (isChef() && CHEF_SIMPLE[parts[0]]) { location.hash = CHEF_SIMPLE[parts[0]]; return; }
   // abonnement expiré : seule la page « Mon abonnement » reste ouverte (le serveur refuse le reste)
   if (S.sub && S.sub.locked && !S.me.super && parts[0] !== 'abonnement') { if (typeof subLocked === 'function') return subLocked(); }
   const fn = ROUTES[parts[0] || 'dashboard'] || ROUTES.dashboard;

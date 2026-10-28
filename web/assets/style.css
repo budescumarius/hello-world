@@ -1985,3 +1985,17 @@ a.pp-miss { text-decoration: none; display: flex; }
 .rz-lang { display: flex; justify-content: flex-end; margin: -4px 0 10px; }
 .rz-dates { font-size: 15px; } .rz-who { font-size: 15px; color: var(--text); }
 .rz-link { display: block; text-align: center; margin-top: 12px; font-weight: 700; color: var(--navy, #1c2550); }
+/* Pages simples du responsable */
+a.rz-link-c { color: inherit; text-decoration: none; background: var(--surface); margin: 0 0 12px; }
+.rz-tag-bill { align-self: flex-start; background: #fff4e6; color: #a34700; font-weight: 800; border-radius: 10px; padding: 6px 10px; }
+.rz-empty { text-align: center; padding: 30px 16px; } .rz-empty b { font-size: 19px; }
+.rz-line { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); color: inherit; text-decoration: none; font-size: 16px; }
+.rz-line:first-of-type { border-top: 0; }
+.rz-btns { display: flex; flex-direction: column; gap: 4px; } a.rz-big { display: flex; align-items: center; justify-content: center; text-decoration: none; }
+.rz-st2 { display: inline-block; font-weight: 800; font-size: 14px; border-radius: 8px; padding: 4px 8px; align-self: flex-start; }
+.rz-st2.ok { background: #ebfbee; color: #2b6b3a; } .rz-st2.wait { background: #e7f0ff; color: #2849a8; } .rz-st2.bad { background: #fff4e6; color: #a34700; } .rz-st2.draft { background: var(--surface-2); color: var(--muted); }
+.rz-days { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 8px; }
+.rz-day { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 0; border-radius: 12px; border: 2px solid var(--border); background: var(--surface); }
+.rz-day small { font-size: 12px; color: var(--muted); text-transform: capitalize; } .rz-day b { font-size: 18px; min-height: 22px; }
+.rz-day.ok { border-color: #2f9e44; background: #ebfbee; } .rz-day.no { border-color: #e8590c; background: #fff4e6; color: #a34700; } .rz-day.off { opacity: .6; } .rz-day.fut { opacity: .5; }
+.rz > .rz-bill { width: 100%; margin-top: 12px; } .rz > .rz-pct { margin-top: 12px; } .rz > .rz-bad, .rz > .rz-ok { margin-top: 10px; }
