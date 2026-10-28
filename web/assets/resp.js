@@ -108,6 +108,12 @@ route('resp', async (sub, id) => {
   const uid = isChef() ? S.me.id : (q.has('u') ? +q.get('u') : (ui.respU != null ? +ui.respU : (chefs[0] || {}).id || 0));
   if (!isChef() && q.has('u')) { ui.respU = uid; saveUi(); }
   const period = ui.respP && ui.respP !== 'an' ? ui.respP : 'sem';
+  if (isChef()) {
+    const page = layout({ title: `Bonjour ${(S.me.name || '').split(' ')[0]}`, icon: 'sun', sub: esc(new Date().toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric', month: 'long' })) });
+    page.innerHTML = '<div class="empty">Un instant…</div>';
+    const [D, ests] = await Promise.all([respData(S.me.id, 'sem'), db.list('quote', { estimate: true }).then((l) => l.filter((x) => x.data.estimate))]);
+    return respSimple(page, D, ests);
+  }
   const page = layout({ title: isChef() ? 'Mon tableau de bord' : 'Responsables', icon: 'chart', sub: esc(respName(uid)),
     actions: `<button class="btn" data-act="rep">${I.send} ${isChef() ? "Rapport au patron" : "Préparer un rapport"}</button>${isChef() ? `<button class="btn primary" data-act="breq">${I.coins} Demander une facture</button>` : `<a class="btn" href="#/resp/demandes">${I.coins} Demandes de facture</a>`}` });
   page.innerHTML = '<div class="empty">Calcul en cours…</div>';
@@ -178,17 +184,7 @@ route('resp', async (sub, id) => {
         <p class="muted sm" style="margin-top:8px">Produit = heures × valeur d'une heure sur chaque projet (montant réalisé selon l'avancement, moins les achats, divisé par toutes les heures du projet). Coût = heures × coût horaire chargé de la fiche. Une marge négative : le projet consomme plus d'heures que prévu.</p>` : '<div class="empty sm">Personne dans l\'équipe.</div>'}
     </details>`;
   // le responsable pointe pour quelqu'un (pas de téléphone, pas à l'aise) : le jour, puis chantier et heures en grands boutons
-  const pointFor = async (eid, day) => {
-    const e = D.people.find((x) => x.e.id === eid).e;
-    if (!day) {
-      const days = daysOf(addDays(today(), -6), today()).filter((d2) => isWorkday(d2) || d2 === today()).reverse();
-      return menuSheet(`Heures de ${e.data.name} : quel jour ?`, days.map((d2) => ({ label: `${new Date(d2 + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric', month: 'long' })}${D.hours.some((t) => +t.data.employeeId === eid && t.data.date === d2) ? ' ✓' : ''}`, primary: d2 === today(), run: () => pointFor(eid, d2) })));
-    }
-    const r = await pointPick({ title: `${e.data.name} – ${new Date(day + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric' })} : où ?`, projects: D.projects.filter((p) => !['termine', 'annule'].includes(p.data.status)), lang: 'fr', def: num(e.data.dayHours) || 8 });
-    if (!r) return;
-    await persist('timesheet', { project_id: r.pid, data: { employeeId: e.id, who: e.data.name, date: day, hours: r.hours, rate: num(e.data.costRate), task: '', byChef: S.me.id, ...(r.pid ? {} : { site: r.site }) } }, { silent: true });
-    toast(`${fnum(r.hours, 1)} h enregistrées pour ${e.data.name} ✓`, 3000); render();
-  };
+  const pointFor = (eid, day) => respPointFor(D, eid, day);
   $$('[data-ptr]', page).forEach((b) => { b.onclick = () => pointFor(+b.dataset.ptr); });
   $$('[data-cell]', page).forEach((c) => { c.onclick = () => { const [eid, d2] = c.dataset.cell.split('|'); pointFor(+eid, d2); }; });
   const td = $('[data-act=helpok]', page); if (td) td.onclick = () => { ui.respHelp = 1; saveUi(); render(); };
@@ -206,12 +202,70 @@ route('resp', async (sub, id) => {
   const tm = $('[data-act=team]', page); if (tm) tm.onclick = () => respTeamPicker(uid, D.m.employee);
 });
 
-async function respSetPct(p) {
-  const v = await ask(`Avancement – ${p.data.name}`, [{ name: 'pct', label: 'Combien du travail est fait ? (%)', type: 'percent', required: true, hint: 'Ex. : 50 = la moitié est faite. Sert à savoir quoi facturer et si le projet gagne de l\'argent.' }], { pct: p.data.progress ?? '' });
-  if (!v) return;
-  if (v.pct === '' || v.pct == null) delete p.data.progress; else p.data.progress = Math.max(0, Math.min(100, num(v.pct)));
-  p.data.progressAt = today(); p.data.progressBy = S.me.id;
-  await persist('project', p, { silent: true }); toast('Avancement enregistré'); render();
+// le responsable pointe pour quelqu'un (pas de téléphone, pas à l'aise) : le jour, puis chantier et heures en grands boutons
+async function respPointFor(D, eid, day) {
+  const e = D.people.find((x) => x.e.id === eid).e;
+  if (!day) {
+    const days = daysOf(addDays(today(), -6), today()).filter((d2) => isWorkday(d2) || d2 === today()).reverse();
+    return menuSheet(`Heures de ${e.data.name} : quel jour ?`, days.map((d2) => ({ label: `${new Date(d2 + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric', month: 'long' })}${D.hours.some((t) => +t.data.employeeId === eid && t.data.date === d2) ? ' ✓' : ''}`, primary: d2 === today(), run: () => respPointFor(D, eid, d2) })));
+  }
+  const r = await pointPick({ title: `${e.data.name} – ${new Date(day + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric' })} : où ?`, projects: D.projects.filter((p) => !['termine', 'annule'].includes(p.data.status)), lang: 'fr', def: num(e.data.dayHours) || 8 });
+  if (!r) return;
+  await persist('timesheet', { project_id: r.pid, data: { employeeId: e.id, who: e.data.name, date: day, hours: r.hours, rate: num(e.data.costRate), task: '', byChef: S.me.id, ...(r.pid ? {} : { site: r.site }) } }, { silent: true });
+  toast(`${fnum(r.hours, 1)} h enregistrées pour ${e.data.name} ✓`, 3000); render();
+}
+// avancement en grands boutons (10 % … 100 %)
+function respSetPct(p) {
+  const cur = p.data.progress;
+  const m = modal(`<div class="pp"><div class="pp-top"><button class="pp-x" data-x>✕</button><b class="pp-where">${esc(p.data.name)}</b></div><h2 class="pp-q">Combien du travail est fait ?</h2>
+    <div class="pp-hours">${[10, 20, 30, 40, 50, 60, 70, 80, 90].map((v) => `<button class="pp-h ${+cur === v ? 'def' : ''}" data-v="${v}">${v} %</button>`).join('')}</div>
+    <button class="pp-ok" data-v="100">✓ Terminé : 100 %</button></div>`, { full: true }); m.el.classList.add('pp-modal');
+  $('[data-x]', m.el).onclick = () => m.close();
+  $$('[data-v]', m.el).forEach((b) => { b.onclick = async () => {
+    p.data.progress = +b.dataset.v; p.data.progressAt = today(); p.data.progressBy = S.me.id;
+    await persist('project', p, { silent: true }); m.close(); toast('Avancement enregistré ✓'); render();
+  }; });
+}
+// ---------------------------------------------------------------- Accueil du responsable : 3 blocs, rien d'autre
+// 1) mon équipe aujourd'hui (qui a pointé, pointer pour lui)  2) mes projets (% fait → demander la facture)  3) envoyer
+function respSimple(page, D, ests) {
+  const wd = (d) => new Date(d + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'long' });
+  const hOf = (eid, d) => D.hours.filter((t) => +t.data.employeeId === eid && t.data.date === d).reduce((a, t) => a + num(t.data.hours), 0);
+  const abs = (eid, d) => D.m.absence.some((a) => +a.data.employeeId === eid && a.data.from <= d && a.data.to >= d);
+  let tmw = addDays(today(), 1); while (!isWorkday(tmw)) tmw = addDays(tmw, 1);
+  const pname = (pid) => (byId(D.m.project, pid) || { data: { name: 'Autre chantier' } }).data.name;
+  const tomorrow = D.people.map((x) => ({ x, a: D.m.assign.filter((a) => +a.data.employeeId === x.e.id && a.data.date === tmw) })).filter((y) => y.a.length);
+  const back = ests.filter((q) => q.created_by === S.me.id && q.data.estStatus === 'a_revoir');
+  const live = D.rows.filter((r) => !['termine', 'annule'].includes(r.p.data.status)).sort((a, b) => b.toBill - a.toBill);
+  const sent = D.m.mgrreport.some((r) => r.created_by === S.me.id && r.data.date >= D.from);
+  page.innerHTML = `
+    ${back.map((q) => `<a class="pp-miss" href="#/quote/${q.id}"><b>⚠ Estimatif à revoir : ${esc(q.data.title || q.number)}</b><small>${esc(q.data.estNote || 'Le bureau a une remarque')}</small></a>`).join('')}
+    <section class="rz"><h2 class="rz-h">${I.helmet} Mon équipe aujourd'hui</h2>
+      ${D.people.length ? D.people.map((x) => { const h = hOf(x.e.id, today()); const a = abs(x.e.id, today()); const miss = x.missing;
+        return `<div class="rz-p"><span class="rz-st ${h ? 'ok' : a ? 'off' : 'no'}">${h ? '✓' : a ? '–' : '?'}</span>
+          <span class="grow"><b>${esc(x.e.data.name)}</b><small>${h ? `${fnum(h, 1)} h aujourd'hui` : a ? 'absent' : 'pas encore pointé'} · ${fnum(x.h, 1)} h cette semaine</small>
+          ${miss.length ? `<button class="rz-miss" data-pt="${x.e.id}|${miss[0]}">⚠ rien pointé ${esc(wd(miss[0]))}${miss.length > 1 ? ` (+${miss.length - 1} jour${miss.length > 2 ? 's' : ''})` : ''}</button>` : ''}</span>
+          ${a ? '' : `<button class="rz-btn" data-pt="${x.e.id}|${today()}">＋ Heures</button>`}</div>`; }).join('') : '<p class="muted">Personne dans votre équipe : demandez au bureau de vous l\'attribuer.</p>'}
+      ${tomorrow.length ? `<div class="rz-tmw"><b>${esc(wd(tmw).replace(/^./, (c) => c.toUpperCase()))} :</b> ${tomorrow.map((y) => `${esc(y.x.e.data.name)} → ${esc([...new Set(y.a.map((a) => pname(a.project_id)))].join(', '))}`).join(' · ')}</div>` : ''}
+    </section>
+    <section class="rz"><h2 class="rz-h">${I.crane} Mes projets</h2>
+      ${live.length ? live.map((r) => `<div class="rz-c">
+        <a class="rz-t" href="#/project/${r.p.id}"><b>${esc(r.p.data.name)}</b>${r.client !== '—' ? `<small>${esc(r.client)}</small>` : ''}</a>
+        <button class="rz-pct" data-pct="${r.p.id}"><span class="rz-bar"><i style="width:${Math.max(0, Math.min(100, r.pc.v))}%"></i></span><span class="rz-pv">${pctTxt(r.pc.v)} fait</span><span class="rz-ch">changer</span></button>
+        ${r.toBill > 0.5 ? `<button class="rz-bill" data-breq="${r.p.id}">Demander la facture · ${money(r.toBill)}</button>`
+          : r.asked ? '<div class="rz-ok">✓ Facture demandée au bureau</div>' : ''}
+        ${r.f.budget && r.margin < -0.5 ? '<div class="rz-bad">⚠ Ce projet perd de l\'argent : trop d\'heures ou d\'achats</div>' : ''}
+      </div>`).join('') : '<p class="muted">Aucun projet pour l\'instant.</p>'}
+    </section>
+    <section class="rz"><h2 class="rz-h">${I.send} Envoyer</h2>
+      <button class="rz-big" data-act="rep2">${sent ? '✓ Rapport envoyé cette semaine — en renvoyer un' : 'Envoyer mon rapport de la semaine au patron'}</button>
+      <button class="rz-big alt" data-act="est">＋ Faire un estimatif</button>
+    </section>`;
+  $$('[data-pt]', page).forEach((b) => { b.onclick = () => { const [eid, d] = b.dataset.pt.split('|'); respPointFor(D, +eid, d); }; });
+  $$('[data-pct]', page).forEach((b) => { b.onclick = () => respSetPct(byId(D.projects, +b.dataset.pct)); });
+  $$('[data-breq]', page).forEach((b) => { b.onclick = () => { const r = D.rows.find((x) => x.p.id === +b.dataset.breq); billRequest(r.p, { amount: r2(r.toBill), pct: r2(r.pc.v), budget: r.f.budget, invoiced: r.f.invoiced + r.asked }); }; });
+  $('[data-act=rep2]', page).onclick = () => respNewReport(S.me.id);
+  $('[data-act=est]', page).onclick = () => newQuote();
 }
 // patron : rattacher des personnes à un responsable
 function respTeamPicker(uid, employees) {
@@ -297,7 +351,7 @@ async function respRequests() {
 
 // ---------------------------------------------------------------- Rapport au patron (figé à l'envoi)
 async function respNewReport(uid) {
-  const per = ui.respP && ui.respP !== 'an' ? ui.respP : 'sem';
+  const per = isChef() ? (new Date().getDay() === 1 ? 'semp' : 'sem') : ui.respP && ui.respP !== 'an' ? ui.respP : 'sem';
   const v = await ask(`Rapport – ${RESP_PERIODS.find(([x]) => x === per)[1].toLowerCase()}`, [
     { name: 'comment', label: 'Un message pour le patron ? (facultatif)', type: 'textarea', placeholder: 'Problèmes, retards, matériel à commander…', hint: 'Le rapport contient automatiquement les heures, les projets, ce qu\'il faut facturer et le planning.' },
   ]);
