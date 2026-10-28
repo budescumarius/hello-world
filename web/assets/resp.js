@@ -33,7 +33,7 @@ function respPct(p, f, invs) {
 
 // Toutes les données du tableau de bord pour un responsable (uid) ou toute l'entreprise (uid = 0), sur une période
 async function respData(uid, period) {
-  const m = await db.many(['employee', 'project', 'quote', 'invoice', 'order', 'expense', 'timesheet', 'assign', 'absence', 'intervention', 'task', 'billreq', 'contact', 'mgrreport']);
+  const m = await db.many(['employee', 'project', 'quote', 'invoice', 'order', 'expense', 'timesheet', 'assign', 'absence', 'intervention', 'task', 'billreq', 'contact', 'mgrreport', 'phase']);
   const [from, to] = respRange(period);
   const active = m.employee.filter((e) => e.data.active !== false);
   let team = uid ? active.filter((e) => +e.data.chefId === uid) : active;
@@ -109,7 +109,7 @@ route('resp', async (sub, id) => {
   if (!isChef() && q.has('u')) { ui.respU = uid; saveUi(); }
   const period = ui.respP && ui.respP !== 'an' ? ui.respP : 'sem';
   if (isChef()) {
-    const page = layout({ title: `Bonjour ${(S.me.name || '').split(' ')[0]}`, icon: 'sun', sub: esc(new Date().toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric', month: 'long' })) });
+    const page = layout({ title: `${rz('hello')} ${(S.me.name || '').split(' ')[0]}`, icon: 'sun', sub: esc(rzDate(today(), { weekday: 'long', day: 'numeric', month: 'long' })) });
     page.innerHTML = '<div class="empty">Un instant…</div>';
     const [D, ests] = await Promise.all([respData(S.me.id, 'sem'), db.list('quote', { estimate: true }).then((l) => l.filter((x) => x.data.estimate))]);
     return respSimple(page, D, ests);
@@ -207,60 +207,114 @@ async function respPointFor(D, eid, day) {
   const e = D.people.find((x) => x.e.id === eid).e;
   if (!day) {
     const days = daysOf(addDays(today(), -6), today()).filter((d2) => isWorkday(d2) || d2 === today()).reverse();
-    return menuSheet(`Heures de ${e.data.name} : quel jour ?`, days.map((d2) => ({ label: `${new Date(d2 + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric', month: 'long' })}${D.hours.some((t) => +t.data.employeeId === eid && t.data.date === d2) ? ' ✓' : ''}`, primary: d2 === today(), run: () => respPointFor(D, eid, d2) })));
+    return menuSheet(rz('whichDay').replace('{n}', e.data.name), days.map((d2) => ({ label: `${rzDate(d2, { weekday: 'long', day: 'numeric', month: 'long' })}${D.hours.some((t) => +t.data.employeeId === eid && t.data.date === d2) ? ' ✓' : ''}`, primary: d2 === today(), run: () => respPointFor(D, eid, d2) })));
   }
-  const r = await pointPick({ title: `${e.data.name} – ${new Date(day + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric' })} : où ?`, projects: D.projects.filter((p) => !['termine', 'annule'].includes(p.data.status)), lang: 'fr', def: num(e.data.dayHours) || 8 });
+  const r = await pointPick({ title: `${e.data.name} – ${rzDate(day, { weekday: 'long', day: 'numeric' })} : ${rz('where')}`, projects: D.projects.filter((p) => !['termine', 'annule'].includes(p.data.status)), lang: rzLang(), def: num(e.data.dayHours) || 8 });
   if (!r) return;
   await persist('timesheet', { project_id: r.pid, data: { employeeId: e.id, who: e.data.name, date: day, hours: r.hours, rate: num(e.data.costRate), task: '', byChef: S.me.id, ...(r.pid ? {} : { site: r.site }) } }, { silent: true });
-  toast(`${fnum(r.hours, 1)} h enregistrées pour ${e.data.name} ✓`, 3000); render();
+  toast(`${fnum(r.hours, 1)} h ${rz('hSaved')} ${e.data.name} ✓`, 3000); render();
 }
+// ---------------------------------------------------------------- Textes de l'accueil du responsable : français ou roumain (bouton 🌐)
+const RZ = {
+  hello: ['Bonjour', 'Bună'], team: ["Mon équipe aujourd'hui", 'Echipa mea azi'], hToday: ["h aujourd'hui", 'ore azi'], week: ['cette semaine', 'săptămâna asta'],
+  absent: ['absent', 'absent'], notYet: ['pas encore pointé', 'n-a pontat încă'], missDay: ['rien pointé', 'nimic pontat'], moreDays: ['jour(s)', 'zi(le)'],
+  addH: ['＋ Heures', '＋ Ore'], noTeam: ["Personne dans votre équipe : demandez au bureau de vous l'attribuer.", 'Nimeni în echipa ta: cere biroului să ți-o atribuie.'],
+  projects: ['Mes projets et planning', 'Proiectele mele și planningul'], done: ['fait', 'gata'], change: ['changer', 'schimbă'],
+  bill: ['Demander la facture', 'Cere factura'], asked: ['✓ Facture demandée au bureau', '✓ Factură cerută la birou'],
+  loses: ["⚠ Ce projet perd de l'argent : trop d'heures ou d'achats", '⚠ Proiectul pierde bani: prea multe ore sau achiziții'],
+  noProj: ["Aucun projet pour l'instant.", 'Niciun proiect deocamdată.'], send: ['Envoyer', 'Trimite'],
+  report: ['Envoyer mon rapport de la semaine au patron', 'Trimite raportul săptămânii la patron'], reportSent: ['✓ Rapport envoyé cette semaine — en renvoyer un', '✓ Raport trimis săptămâna asta — trimite din nou'],
+  est: ['＋ Faire un estimatif', '＋ Fă un estimativ'], estBack: ['Estimatif à revoir', 'Estimativ de revăzut'], estNote: ['Le bureau a une remarque', 'Biroul are o observație'],
+  from: ['du', 'de la'], to: ['au', 'până la'], endIn: ['fin dans {n} jour(s)', 'se termină în {n} zi(le)'], endToday: ["fin prévue aujourd'hui", 'se termină azi'],
+  endPassed: ['⚠ date de fin dépassée', '⚠ termenul de final a trecut'], late: ['⚠ en retard sur le planning', '⚠ în urmă față de planning'], notStarted: ['commence le', 'începe pe'],
+  thisWeek: ['Cette semaine', 'Săptămâna asta'], now: ['En cours', 'Acum se lucrează la'], nobody: ['personne de prévu', 'nimeni planificat'], next: ['Prochaine étape', 'Următoarea etapă'], noDates: ['dates pas encore fixées', 'date încă nefixate'],
+  diagram: ['Voir le planning en diagramme', 'Vezi planningul ca diagramă'],
+  howMuch: ['Combien du travail est fait ?', 'Cât din lucrare e gata?'], finished: ['✓ Terminé : 100 %', '✓ Terminat: 100 %'], pctSaved: ['Avancement enregistré ✓', 'Avans salvat ✓'],
+  whichDay: ['Heures de {n} : quel jour ?', 'Orele lui {n}: ce zi?'], where: ['où ?', 'unde?'], hSaved: ['h enregistrées pour', 'ore salvate pentru'],
+  billT: ['Demander une facture', 'Cere o factură'], amount: ['Montant à facturer (hors TVA)', 'Suma de facturat (fără TVA)'], what: ["Qu'est-ce qui a été fait ? (facultatif)", 'Ce s-a făcut? (opțional)'],
+  calc: ['Calcul : {a} de {b} = {c}, moins {d} déjà facturé.', 'Calcul: {a} din {b} = {c}, minus {d} deja facturat.'], reqSent: ['Demande envoyée au bureau ✓', 'Cerere trimisă la birou ✓'],
+  repT: ['Rapport de la semaine', 'Raportul săptămânii'], msg: ['Un message pour le patron ? (facultatif)', 'Un mesaj pentru patron? (opțional)'], msgPh: ['Problèmes, retards, matériel à commander…', 'Probleme, întârzieri, material de comandat…'],
+  repHint: ["Le rapport contient tout seul les heures, les projets, ce qu'il faut facturer et le planning.", 'Raportul conține singur orele, proiectele, ce e de facturat și planningul.'], repSent: ['Rapport envoyé au patron ✓', 'Raport trimis la patron ✓'],
+  nav: [['Accueil', 'Projets', 'Équipe', 'Factures et rapports', 'Estimatifs', 'Heures', 'Planning', 'Absences', 'Demandes de facture', 'Rapports au patron', 'Tâches'], ['Acasă', 'Proiecte', 'Echipa', 'Facturi și rapoarte', 'Estimative', 'Ore', 'Planning', 'Absențe', 'Cereri de factură', 'Rapoarte la patron', 'Sarcini']],
+};
+const rzBtns = (send) => (rzLang() === 'ro' ? { ok: send ? 'Trimite' : 'Trimite cererea', cancel: 'Anulează' } : { ok: send ? 'Envoyer' : 'Envoyer la demande', cancel: 'Annuler' });
+const rzLang = () => (tLang() === 'ro' ? 'ro' : 'fr');
+const rz = (k) => (RZ[k] || [k, k])[rzLang() === 'ro' ? 1 : 0];
+const rzDate = (d, o) => new Date(d + 'T12:00:00').toLocaleDateString(rzLang() === 'ro' ? 'ro-RO' : 'fr-BE', o);
 // avancement en grands boutons (10 % … 100 %)
 function respSetPct(p) {
   const cur = p.data.progress;
-  const m = modal(`<div class="pp"><div class="pp-top"><button class="pp-x" data-x>✕</button><b class="pp-where">${esc(p.data.name)}</b></div><h2 class="pp-q">Combien du travail est fait ?</h2>
+  const m = modal(`<div class="pp"><div class="pp-top"><button class="pp-x" data-x>✕</button><b class="pp-where">${esc(p.data.name)}</b></div><h2 class="pp-q">${rz('howMuch')}</h2>
     <div class="pp-hours">${[10, 20, 30, 40, 50, 60, 70, 80, 90].map((v) => `<button class="pp-h ${+cur === v ? 'def' : ''}" data-v="${v}">${v} %</button>`).join('')}</div>
-    <button class="pp-ok" data-v="100">✓ Terminé : 100 %</button></div>`, { full: true }); m.el.classList.add('pp-modal');
+    <button class="pp-ok" data-v="100">${rz('finished')}</button></div>`, { full: true }); m.el.classList.add('pp-modal');
   $('[data-x]', m.el).onclick = () => m.close();
   $$('[data-v]', m.el).forEach((b) => { b.onclick = async () => {
     p.data.progress = +b.dataset.v; p.data.progressAt = today(); p.data.progressBy = S.me.id;
-    await persist('project', p, { silent: true }); m.close(); toast('Avancement enregistré ✓'); render();
+    await persist('project', p, { silent: true }); m.close(); toast(rz('pctSaved')); render();
   }; });
 }
 // ---------------------------------------------------------------- Accueil du responsable : 3 blocs, rien d'autre
-// 1) mon équipe aujourd'hui (qui a pointé, pointer pour lui)  2) mes projets (% fait → demander la facture)  3) envoyer
+// 1) mon équipe aujourd'hui  2) mes projets et leur planning (% fait → demander la facture)  3) envoyer
 function respSimple(page, D, ests) {
-  const wd = (d) => new Date(d + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'long' });
+  const wd = (d) => rzDate(d, { weekday: 'long' });
   const hOf = (eid, d) => D.hours.filter((t) => +t.data.employeeId === eid && t.data.date === d).reduce((a, t) => a + num(t.data.hours), 0);
   const abs = (eid, d) => D.m.absence.some((a) => +a.data.employeeId === eid && a.data.from <= d && a.data.to >= d);
   let tmw = addDays(today(), 1); while (!isWorkday(tmw)) tmw = addDays(tmw, 1);
   const pname = (pid) => (byId(D.m.project, pid) || { data: { name: 'Autre chantier' } }).data.name;
+  const ename = (eid) => (byId(D.m.employee, eid) || { data: {} }).data.name;
   const tomorrow = D.people.map((x) => ({ x, a: D.m.assign.filter((a) => +a.data.employeeId === x.e.id && a.data.date === tmw) })).filter((y) => y.a.length);
   const back = ests.filter((q) => q.created_by === S.me.id && q.data.estStatus === 'a_revoir');
   const live = D.rows.filter((r) => !['termine', 'annule'].includes(r.p.data.status)).sort((a, b) => b.toBill - a.toBill);
   const sent = D.m.mgrreport.some((r) => r.created_by === S.me.id && r.data.date >= D.from);
+  // planning d'un projet : dates, retard, qui cette semaine, prochaine étape
+  const plan = (r) => {
+    const d = r.p.data; const t = today(); const out = [];
+    if (d.start && d.end) {
+      const left = Math.round(dnum(d.end) - dnum(t)); const tp = Math.max(0, Math.min(100, (dnum(t) - dnum(d.start)) / Math.max(1, dnum(d.end) - dnum(d.start)) * 100));
+      out.push(`<div class="rz-dates">📅 ${rz('from')} <b>${esc(rzDate(d.start, { day: 'numeric', month: 'short' }))}</b> ${rz('to')} <b>${esc(rzDate(d.end, { day: 'numeric', month: 'short' }))}</b> · ${d.start > t ? `${rz('notStarted')} ${esc(rzDate(d.start, { weekday: 'long', day: 'numeric' }))}` : left > 0 ? rz('endIn').replace('{n}', left) : left === 0 ? rz('endToday') : ''}</div>`);
+      if (left < 0) out.push(`<div class="rz-bad">${rz('endPassed')}</div>`);
+      else if (d.start <= t && tp - r.pc.v > 15) out.push(`<div class="rz-bad">${rz('late')}</div>`);
+    } else out.push(`<div class="rz-dates muted">📅 ${rz('noDates')}</div>`);
+    const wk = (a, b) => a <= D.to && b >= D.from;
+    const who = [...new Set([
+      ...D.m.assign.filter((a) => a.project_id === r.p.id && wk(a.data.date, a.data.date)).map((a) => +a.data.employeeId),
+      ...D.m.phase.filter((x) => x.project_id === r.p.id && x.data.start && x.data.end && wk(x.data.start, x.data.end)).flatMap((x) => (x.data.staff || []).map(Number)),
+      ...D.hours.filter((h) => h.project_id === r.p.id).map((h) => +h.data.employeeId),
+    ].map(ename).filter(Boolean))];
+    out.push(`<div class="rz-who">👷 ${rz('thisWeek')} : ${who.length ? esc(who.join(', ')) : `<span class="muted">${rz('nobody')}</span>`}</div>`);
+    const phs = D.m.phase.filter((x) => x.project_id === r.p.id && num(x.data.progress) < 100).sort((a, b) => (a.data.start || '').localeCompare(b.data.start || ''));
+    const now = phs.filter((x) => x.data.start && x.data.start <= t && (x.data.end || '9') >= t);
+    const nxt = phs.find((x) => x.data.start && x.data.start > t);
+    if (now.length) out.push(`<div class="rz-who">🔨 ${rz('now')} : <b>${esc(now.map((x) => x.data.name).join(', '))}</b></div>`);
+    if (nxt) out.push(`<div class="rz-who">➜ ${rz('next')} : <b>${esc(nxt.data.name)}</b> (${esc(rzDate(nxt.data.start, { weekday: 'short', day: 'numeric', month: 'short' }))})</div>`);
+    return out.join('');
+  };
   page.innerHTML = `
-    ${back.map((q) => `<a class="pp-miss" href="#/quote/${q.id}"><b>⚠ Estimatif à revoir : ${esc(q.data.title || q.number)}</b><small>${esc(q.data.estNote || 'Le bureau a une remarque')}</small></a>`).join('')}
-    <section class="rz"><h2 class="rz-h">${I.helmet} Mon équipe aujourd'hui</h2>
+    <div class="rz-lang"><button class="pp-lang" data-lang>🌐 ${rzLang() === 'ro' ? 'Română' : 'Français'}</button></div>
+    ${back.map((q) => `<a class="pp-miss" href="#/quote/${q.id}"><b>⚠ ${rz('estBack')} : ${esc(q.data.title || q.number)}</b><small>${esc(q.data.estNote || rz('estNote'))}</small></a>`).join('')}
+    <section class="rz"><h2 class="rz-h">${I.helmet} ${rz('team')}</h2>
       ${D.people.length ? D.people.map((x) => { const h = hOf(x.e.id, today()); const a = abs(x.e.id, today()); const miss = x.missing;
         return `<div class="rz-p"><span class="rz-st ${h ? 'ok' : a ? 'off' : 'no'}">${h ? '✓' : a ? '–' : '?'}</span>
-          <span class="grow"><b>${esc(x.e.data.name)}</b><small>${h ? `${fnum(h, 1)} h aujourd'hui` : a ? 'absent' : 'pas encore pointé'} · ${fnum(x.h, 1)} h cette semaine</small>
-          ${miss.length ? `<button class="rz-miss" data-pt="${x.e.id}|${miss[0]}">⚠ rien pointé ${esc(wd(miss[0]))}${miss.length > 1 ? ` (+${miss.length - 1} jour${miss.length > 2 ? 's' : ''})` : ''}</button>` : ''}</span>
-          ${a ? '' : `<button class="rz-btn" data-pt="${x.e.id}|${today()}">＋ Heures</button>`}</div>`; }).join('') : '<p class="muted">Personne dans votre équipe : demandez au bureau de vous l\'attribuer.</p>'}
+          <span class="grow"><b>${esc(x.e.data.name)}</b><small>${h ? `${fnum(h, 1)} ${rz('hToday')}` : a ? rz('absent') : rz('notYet')} · ${fnum(x.h, 1)} h ${rz('week')}</small>
+          ${miss.length ? `<button class="rz-miss" data-pt="${x.e.id}|${miss[0]}">⚠ ${rz('missDay')} ${esc(wd(miss[0]))}${miss.length > 1 ? ` (+${miss.length - 1} ${rz('moreDays')})` : ''}</button>` : ''}</span>
+          ${a ? '' : `<button class="rz-btn" data-pt="${x.e.id}|${today()}">${rz('addH')}</button>`}</div>`; }).join('') : `<p class="muted">${rz('noTeam')}</p>`}
       ${tomorrow.length ? `<div class="rz-tmw"><b>${esc(wd(tmw).replace(/^./, (c) => c.toUpperCase()))} :</b> ${tomorrow.map((y) => `${esc(y.x.e.data.name)} → ${esc([...new Set(y.a.map((a) => pname(a.project_id)))].join(', '))}`).join(' · ')}</div>` : ''}
     </section>
-    <section class="rz"><h2 class="rz-h">${I.crane} Mes projets</h2>
+    <section class="rz"><h2 class="rz-h">${I.crane} ${rz('projects')}</h2>
       ${live.length ? live.map((r) => `<div class="rz-c">
         <a class="rz-t" href="#/project/${r.p.id}"><b>${esc(r.p.data.name)}</b>${r.client !== '—' ? `<small>${esc(r.client)}</small>` : ''}</a>
-        <button class="rz-pct" data-pct="${r.p.id}"><span class="rz-bar"><i style="width:${Math.max(0, Math.min(100, r.pc.v))}%"></i></span><span class="rz-pv">${pctTxt(r.pc.v)} fait</span><span class="rz-ch">changer</span></button>
-        ${r.toBill > 0.5 ? `<button class="rz-bill" data-breq="${r.p.id}">Demander la facture · ${money(r.toBill)}</button>`
-          : r.asked ? '<div class="rz-ok">✓ Facture demandée au bureau</div>' : ''}
-        ${r.f.budget && r.margin < -0.5 ? '<div class="rz-bad">⚠ Ce projet perd de l\'argent : trop d\'heures ou d\'achats</div>' : ''}
-      </div>`).join('') : '<p class="muted">Aucun projet pour l\'instant.</p>'}
+        ${plan(r)}
+        <button class="rz-pct" data-pct="${r.p.id}"><span class="rz-bar"><i style="width:${Math.max(0, Math.min(100, r.pc.v))}%"></i></span><span class="rz-pv">${pctTxt(r.pc.v)} ${rz('done')}</span><span class="rz-ch">${rz('change')}</span></button>
+        ${r.toBill > 0.5 ? `<button class="rz-bill" data-breq="${r.p.id}">${rz('bill')} · ${money(r.toBill)}</button>` : r.asked ? `<div class="rz-ok">${rz('asked')}</div>` : ''}
+        ${r.f.budget && r.margin < -0.5 ? `<div class="rz-bad">${rz('loses')}</div>` : ''}
+      </div>`).join('') : `<p class="muted">${rz('noProj')}</p>`}
+      ${live.length ? `<a class="rz-link" href="#/planning/projects">📊 ${rz('diagram')}</a>` : ''}
     </section>
-    <section class="rz"><h2 class="rz-h">${I.send} Envoyer</h2>
-      <button class="rz-big" data-act="rep2">${sent ? '✓ Rapport envoyé cette semaine — en renvoyer un' : 'Envoyer mon rapport de la semaine au patron'}</button>
-      <button class="rz-big alt" data-act="est">＋ Faire un estimatif</button>
+    <section class="rz"><h2 class="rz-h">${I.send} ${rz('send')}</h2>
+      <button class="rz-big" data-act="rep2">${sent ? rz('reportSent') : rz('report')}</button>
+      <button class="rz-big alt" data-act="est">${rz('est')}</button>
     </section>`;
+  $('[data-lang]', page).onclick = () => menuSheet('Langue / Limba', [['fr', 'Français'], ['ro', 'Română']].map(([k, l]) => ({ label: l, primary: k === rzLang(), run: () => { try { localStorage.setItem('bp-tlang', k); } catch (e) { /* */ } render(); } })));
   $$('[data-pt]', page).forEach((b) => { b.onclick = () => { const [eid, d] = b.dataset.pt.split('|'); respPointFor(D, +eid, d); }; });
   $$('[data-pct]', page).forEach((b) => { b.onclick = () => respSetPct(byId(D.projects, +b.dataset.pct)); });
   $$('[data-breq]', page).forEach((b) => { b.onclick = () => { const r = D.rows.find((x) => x.p.id === +b.dataset.breq); billRequest(r.p, { amount: r2(r.toBill), pct: r2(r.pc.v), budget: r.f.budget, invoiced: r.f.invoiced + r.asked }); }; });
@@ -286,18 +340,18 @@ function respTeamPicker(uid, employees) {
 // ---------------------------------------------------------------- Demandes de facture (responsable → bureau)
 async function billRequest(p, pre = {}) {
   const projects = p ? [p] : (await db.list('project')).filter((x) => ['preparation', 'encours', 'reception', 'termine'].includes(x.data.status));
-  const calc = pre.budget ? `Calcul : ${pctTxt(pre.pct)} de ${money(pre.budget)} = ${money(pre.budget * pre.pct / 100)}, moins ${money(pre.invoiced)} déjà facturé.` : 'Le montant hors TVA que le bureau doit facturer au client.';
-  const v = await ask(p ? `Demander une facture – ${p.data.name}` : 'Demander une facture au bureau', [
+  const calc = pre.budget ? rz('calc').replace('{a}', pctTxt(pre.pct)).replace('{b}', money(pre.budget)).replace('{c}', money(pre.budget * pre.pct / 100)).replace('{d}', money(pre.invoiced)) : '';
+  const v = await ask(p ? `${rz('billT')} – ${p.data.name}` : rz('billT'), [
     ...(p ? [] : [{ name: 'pid', label: 'Quel projet ?', type: 'select', required: true, options: [['', '— choisir —'], ...projects.map((x) => [x.id, x.data.name])] }]),
-    { name: 'amount', label: 'Montant à facturer (hors TVA)', type: 'money', required: true, hint: calc },
-    { name: 'note', label: 'Qu\'est-ce qui a été fait ? (facultatif)', type: 'textarea', placeholder: 'Ex. : meubles de cuisine posés, reste le plan de travail' },
-  ], pre);
+    { name: 'amount', label: rz('amount'), type: 'money', required: true, hint: calc },
+    { name: 'note', label: rz('what'), type: 'textarea', placeholder: rzLang() === 'ro' ? 'Ex.: mobila de bucătărie montată, rămâne blatul' : 'Ex. : meubles de cuisine posés, reste le plan de travail' },
+  ], pre, rzBtns());
   if (!v) return;
   const pid = p ? p.id : +v.pid; if (!pid) return toast('Choisissez le projet', 3000);
   if (!(num(v.amount) > 0)) return toast('Indiquez le montant à facturer', 3000);
   const pct = pre.pct != null ? num(pre.pct) : null;
   await persist('billreq', { project_id: pid, data: { date: today(), kind: pct != null && pct >= 99.5 ? 'solde' : pct != null ? 'avancement' : 'autre', amount: r2(num(v.amount)), pct, note: v.note || '', status: 'demandee', by: S.me.id } });
-  toast('Demande envoyée au bureau ✓', 3000); render();
+  toast(rz('reqSent'), 3000); render();
 }
 // bureau : faire la facture demandée (liée à la demande : elle passe « facturée » quand la facture est soumise)
 async function respBill(r, req) {
@@ -352,15 +406,16 @@ async function respRequests() {
 // ---------------------------------------------------------------- Rapport au patron (figé à l'envoi)
 async function respNewReport(uid) {
   const per = isChef() ? (new Date().getDay() === 1 ? 'semp' : 'sem') : ui.respP && ui.respP !== 'an' ? ui.respP : 'sem';
-  const v = await ask(`Rapport – ${RESP_PERIODS.find(([x]) => x === per)[1].toLowerCase()}`, [
-    { name: 'comment', label: 'Un message pour le patron ? (facultatif)', type: 'textarea', placeholder: 'Problèmes, retards, matériel à commander…', hint: 'Le rapport contient automatiquement les heures, les projets, ce qu\'il faut facturer et le planning.' },
-  ]);
+  const v = await ask(isChef() ? rz('repT') : `Rapport – ${RESP_PERIODS.find(([x]) => x === per)[1].toLowerCase()}`, [
+    { name: 'comment', label: rz('msg'), type: 'textarea', placeholder: rz('msgPh'), hint: rz('repHint') },
+  ], {}, isChef() ? rzBtns(true) : {});
   if (v) v.period = per;
   if (!v) return;
   const D = await respData(uid, v.period);
   const title = `${respName(uid)} – ${RESP_PERIODS.find(([x]) => x === v.period)[1].toLowerCase()} (${fmtDate(D.from)} → ${fmtDate(D.to)})`;
   const it = await persist('mgrreport', { data: { title, uid, period: v.period, from: D.from, to: D.to, comment: v.comment || '', date: today(), html: respReportHtml(D, title, v.comment || '') } });
-  toast(isChef() ? 'Rapport envoyé au patron ✓' : 'Rapport enregistré', 3000); go(`#/resp/rapport/${it.id}`);
+  if (isChef()) { toast(rz('repSent'), 3000); return render(); }
+  toast('Rapport enregistré', 3000); go(`#/resp/rapport/${it.id}`);
 }
 function respReportHtml(D, title, comment) {
   const k = D.k; const kv = (l, v) => `<tr><td class="muted">${l}</td><td class="r"><b>${v}</b></td></tr>`;

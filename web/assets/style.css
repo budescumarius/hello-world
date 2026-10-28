@@ -1982,3 +1982,6 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 .rz-big { width: 100%; min-height: 60px; border-radius: 16px; border: 0; background: var(--navy, #1c2550); color: #fff; font-weight: 800; font-size: 17px; padding: 12px; margin-top: 8px; }
 .rz-big.alt { background: var(--surface); color: var(--navy, #1c2550); border: 2px solid var(--navy, #1c2550); }
 a.pp-miss { text-decoration: none; display: flex; }
+.rz-lang { display: flex; justify-content: flex-end; margin: -4px 0 10px; }
+.rz-dates { font-size: 15px; } .rz-who { font-size: 15px; color: var(--text); }
+.rz-link { display: block; text-align: center; margin-top: 12px; font-weight: 700; color: var(--navy, #1c2550); }

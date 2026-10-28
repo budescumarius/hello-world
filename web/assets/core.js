@@ -241,13 +241,14 @@ const SPACES_FIELD = () => [];
 // Responsable d'équipe / d'atelier : son équipe, ses projets, le planning et l'état de facturation (sans faire les factures)
 const isChef = () => !!(S.me && S.me.role === 'chef' && !S.me.super);
 const CHEF_BLOCK = ['invoices', 'invoice', 'payments', 'progress', 'export', 'stats', 'settings', 'abonnement', 'expenses', 'purchase', 'platform', 'security'];
-const SPACES_CHEF = [
-  { k: 'resp', l: 'Accueil', i: 'sun', h: '#/resp', sec: [] },
-  { k: 'works', l: 'Projets', i: 'crane', h: '#/projects', sec: [['Projets', '#/projects', '#/project/', '#/contact/', '#/order/', '#/orders/', '#/intervention/', '#/interventions'], ['Estimatifs', '#/quotes', '#/quote/', '#/library']] },
-  { k: 'crew', l: 'Équipe', i: 'helmet', h: '#/hr/timesheets', sec: [['Heures', '#/hr/timesheets', '#/crew/', '#/crew'], ['Planning', '#/planning/team', '#/planning/projects'], ['Absences', '#/hr/absences']] },
-  { k: 'more', l: 'Factures et rapports', i: 'send', h: '#/resp/demandes', sec: [['Demandes de facture', '#/resp/demandes'], ['Rapports au patron', '#/resp/rapports', '#/resp/rapport/'], ['Tâches', '#/tasks']] },
-];
-const spaces = () => (isField() ? SPACES_FIELD() : isSimple() ? SPACES_SIMPLE : isChef() ? SPACES_CHEF : SPACES);
+// libellés en français ou en roumain (choix du responsable, voir resp.js)
+const SPACES_CHEF = () => { const n = typeof rz === 'function' ? rz('nav') : ['Accueil', 'Projets', 'Équipe', 'Factures et rapports', 'Estimatifs', 'Heures', 'Planning', 'Absences', 'Demandes de facture', 'Rapports au patron', 'Tâches']; return [
+  { k: 'resp', l: n[0], i: 'sun', h: '#/resp', sec: [] },
+  { k: 'works', l: n[1], i: 'crane', h: '#/projects', sec: [[n[1], '#/projects', '#/project/', '#/contact/', '#/order/', '#/orders/', '#/intervention/', '#/interventions'], [n[4], '#/quotes', '#/quote/', '#/library']] },
+  { k: 'crew', l: n[2], i: 'helmet', h: '#/hr/timesheets', sec: [[n[5], '#/hr/timesheets', '#/crew/', '#/crew'], [n[6], '#/planning/team', '#/planning/projects'], [n[7], '#/hr/absences']] },
+  { k: 'more', l: n[3], i: 'send', h: '#/resp/demandes', sec: [[n[8], '#/resp/demandes'], [n[9], '#/resp/rapports', '#/resp/rapport/'], [n[10], '#/tasks']] },
+]; };
+const spaces = () => (isField() ? SPACES_FIELD() : isSimple() ? SPACES_SIMPLE : isChef() ? SPACES_CHEF() : SPACES);
 const ui = (() => { try { return JSON.parse(localStorage.getItem('bp-ui') || '{}'); } catch (e) { return {}; } })();
 // les sélections (Set) ne sont pas enregistrées : elles repartent vides à la prochaine visite
 const saveUi = () => { try { localStorage.setItem('bp-ui', JSON.stringify(ui, (k, v) => (v instanceof Set ? undefined : v))); } catch (e) { /* stockage indisponible */ } };
@@ -462,10 +463,10 @@ function menuSheet(title, items) {
   $$('[data-i]', m.el).forEach((b) => { b.onclick = () => { m.close(); items[+b.dataset.i].run(); }; });
   return m;
 }
-function ask(title, fields, values = {}) {
+function ask(title, fields, values = {}, opt = {}) {
   return new Promise((res) => {
     let done = false;
-    formModal({ title, fields, values, saveLabel: 'Valider', async onSave(v) { done = true; res(v); }, onClose: () => { if (!done) res(null); } });
+    formModal({ title, fields, values, saveLabel: opt.ok || 'Valider', cancelLabel: opt.cancel || 'Annuler', async onSave(v) { done = true; res(v); }, onClose: () => { if (!done) res(null); } });
   });
 }
 
@@ -530,10 +531,10 @@ function fieldsGrid(fields, values) {
   return `<div class="grid-form">${fields.map((f) => fieldHTML(f, values[f.name])).join('')}</div>`;
 }
 // side : panneau à côté du formulaire (ex. la facture à recopier), rempli dans after(form, m) via $('[data-side]', m.el)
-function formModal({ title, fields, values = {}, onSave, onDelete, onClose, extra = '', wide = false, saveLabel = 'Enregistrer', after, side = false }) {
+function formModal({ title, fields, values = {}, onSave, onDelete, onClose, extra = '', wide = false, saveLabel = 'Enregistrer', cancelLabel = 'Annuler', after, side = false }) {
   const body = `<form class="m-body">${fieldsGrid(fields, values)}${extra}<button type="submit" hidden></button></form>`;
   const m = modal(`${mhead(title)}${side ? `<div class="m-split"><aside class="m-side" data-side></aside>${body}</div>` : body}
-    <div class="m-foot">${onDelete ? `<button class="btn danger ghost" data-del>${I.trash} Supprimer</button>` : ''}<span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-save>${esc(saveLabel)}</button></div>`, { wide, split: side, onClose });
+    <div class="m-foot">${onDelete ? `<button class="btn danger ghost" data-del>${I.trash} Supprimer</button>` : ''}<span class="grow"></span><button class="btn" data-close>${esc(cancelLabel)}</button><button class="btn primary" data-save>${esc(saveLabel)}</button></div>`, { wide, split: side, onClose });
   const form = $('form', m.el);
   $$('[data-close]', m.el).forEach((b) => { b.onclick = () => m.close(); });
   const submit = async () => {
