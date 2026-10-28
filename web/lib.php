@@ -393,7 +393,7 @@ function next_counter(string $key): int {
 
 function make_number(string $kind): string {
     $prefixes = setting('prefixes', []) ?: [];
-    $defaults = NUMBERED + ['invoice' => 'FAC', 'avoir' => 'NC'];
+    $defaults = NUMBERED + ['invoice' => 'FAC', 'avoir' => 'NC', 'proforma' => 'PF'];
     $prefix = $prefixes[$kind] ?? ($defaults[$kind] ?? strtoupper(substr($kind, 0, 3)));
     $y = date('Y');
     $n = next_counter("$kind-$y");

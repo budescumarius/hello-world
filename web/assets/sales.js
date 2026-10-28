@@ -492,6 +492,12 @@ async function invoiceFromQuote(q) {
       mk({ kind: 'acompte', lines: acompteLines(q, { amount: num(v.amount) }) });
     } },
     { label: "Facture d'avancement (état des travaux)", run: () => progressInvoice(q, prev, base) },
+    { label: `Pro forma du devis total (${money(qt.base)} HT) – sans valeur fiscale`, run: () => mk({ kind: 'proforma', proformaKind: 'facture', discount: num(d.discount), lines: d.lines.filter((l) => !l.option).map((l) => ({ ...l, id: lid() })) }) },
+    { label: "Pro forma d'acompte (% ou montant HTVA) – sans valeur fiscale", run: async () => {
+      const v = await ask("Pro forma d'acompte", [{ name: 'pct', label: 'Pourcentage du devis (laisser vide si montant)', type: 'percent' }, { name: 'amount', label: `ou montant HTVA (devis : ${money(qt.base)} HT)`, type: 'money' }], { pct: 30 });
+      if (!v || !(num(v.pct) > 0 || num(v.amount) > 0)) return;
+      mk({ kind: 'proforma', proformaKind: 'acompte', lines: acompteLines(q, num(v.amount) > 0 ? { amount: num(v.amount) } : { pct: num(v.pct) }) });
+    } },
     { label: 'Reprendre des factures déjà émises (autre logiciel)…', run: () => historyFromOtherApp(q, prev, base) },
     { label: 'Facture de solde (reste à facturer)', run: async () => {
       const pb = prevBase(prev);

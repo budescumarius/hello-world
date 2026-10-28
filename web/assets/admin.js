@@ -288,6 +288,7 @@ route('settings', async (tab = 'company') => {
     { name: 'numh', type: 'html', cls: 'full', html: `<h3 class="set-h">Numérotation ${new Date().getFullYear()}</h3><small class="muted">Le prochain numéro permet de continuer la numérotation de votre ancien logiciel (ex. 118 si la dernière facture était 117). Il repart à 1 chaque nouvelle année.</small>` },
     { name: 'p_invoice', label: 'Préfixe factures' }, { name: 'n_invoice', label: 'Prochain n° de facture', type: 'number' },
     { name: 'p_avoir', label: 'Préfixe notes de crédit' }, { name: 'n_avoir', label: 'Prochain n° de note de crédit', type: 'number' },
+    { name: 'p_proforma', label: 'Préfixe factures pro forma', hint: 'Numérotation séparée, sans valeur fiscale' },
     { name: 'p_quote', label: 'Préfixe devis' }, { name: 'n_quote', label: 'Prochain n° de devis', type: 'number' },
     { name: 'p_order', label: 'Préfixe commandes' }, { name: 'n_order', label: 'Prochain n° de commande', type: 'number' },
     { name: 'p_project', label: 'Préfixe chantiers' }, { name: 'p_intervention', label: 'Préfixe interventions' },
@@ -299,7 +300,7 @@ route('settings', async (tab = 'company') => {
   const pre = S.settings.prefixes || {};
   // ancienne adresse sur plusieurs lignes : découpée en rue / code postal / localité
   const a0 = splitAddress(co.address);
-  const values = { ...co, street: co.street || a0.street, zip: co.zip || a0.zip, city: co.city || a0.city, vatRates: vatList().join('; '), defaultVat: defVat(), p_quote: pre.quote ?? 'DEV', p_invoice: pre.invoice ?? 'FAC', p_avoir: pre.avoir ?? 'NC', p_order: pre.order ?? 'BC', p_project: pre.project ?? 'CH', p_intervention: pre.intervention ?? 'INT' };
+  const values = { ...co, street: co.street || a0.street, zip: co.zip || a0.zip, city: co.city || a0.city, vatRates: vatList().join('; '), defaultVat: defVat(), p_quote: pre.quote ?? 'DEV', p_invoice: pre.invoice ?? 'FAC', p_proforma: pre.proforma ?? 'PF', p_avoir: pre.avoir ?? 'NC', p_order: pre.order ?? 'BC', p_project: pre.project ?? 'CH', p_intervention: pre.intervention ?? 'INT' };
   // compteurs de l'année : le prochain numéro = dernier attribué + 1
   const NUMK = ['invoice', 'avoir', 'quote', 'order']; const yr = new Date().getFullYear();
   if (tab === 'docs') { const cnt = await api('GET', 'counters'); NUMK.forEach((k) => { values['n_' + k] = (cnt[`${k}-${yr}`] || 0) + 1; }); values.numpad = S.settings.numpad ?? 4; }
@@ -316,7 +317,7 @@ route('settings', async (tab = 'company') => {
     if (tab === 'company') { Object.assign(co, v); delete co.logo; co.address = [v.street, [v.zip, v.city].filter(Boolean).join(' ')].filter(Boolean).join('\n'); await api('PUT', 'settings', { company: co }); S.settings.company = co; } else {
       const rates = String(v.vatRates).split(/[;\s]+/).map((x) => parseFloat(x.replace(',', '.'))).filter((x) => !isNaN(x));
       Object.assign(co, { vatRates: rates.length ? rates : [21, 6, 0], defaultVat: num(v.defaultVat), quoteValidity: num(v.quoteValidity), paymentDays: num(v.paymentDays), quoteNotes: v.quoteNotes, terms: v.terms, invoiceNotes: v.invoiceNotes, footer: v.footer });
-      const prefixes = { quote: v.p_quote, invoice: v.p_invoice, avoir: v.p_avoir, order: v.p_order, project: v.p_project, intervention: v.p_intervention };
+      const prefixes = { quote: v.p_quote, invoice: v.p_invoice, avoir: v.p_avoir, proforma: v.p_proforma, order: v.p_order, project: v.p_project, intervention: v.p_intervention };
       // un prochain numéro déjà utilisé donnerait des doublons
       const used = await db.many(['invoice', 'quote', 'order']);
       const last = (k) => Math.max(0, ...(k === 'quote' ? used.quote : k === 'order' ? used.order : used.invoice.filter((i) => (i.data.kind === 'avoir') === (k === 'avoir')))

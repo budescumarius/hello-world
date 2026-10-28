@@ -14,6 +14,7 @@ function invDisp(i) {
   if (isEA(i)) { const e = eaState(i); return e.late ? { k: 'ea_late', l: 'Délai d\'approbation passé', c: '#e8590c', sub: `depuis le ${fmtDate(e.approveBy)}` } : { k: 'ea_' + e.k, l: EA_ST[e.k][0], c: EA_ST[e.k][1], sub: e.k === 'envoye' && e.approveBy ? `avant le ${fmtDate(e.approveBy)}` : '' }; }
   const lastPay = (d.payments || []).map((p) => p.date).filter(Boolean).sort().pop();
   if (s.s === 'brouillon') return { k: 'brouillon', l: 'Brouillon', c: '#868e96' };
+  if (d.kind === 'proforma') return d.convertedTo ? { k: 'proforma', l: 'Pro forma → facturée', c: '#2f9e44', sub: d.convertedNumber || '' } : { k: 'proforma', l: 'Pro forma', c: '#7048e8', sub: (d.sent || []).length ? 'envoyée' : '' };
   if (s.s === 'avoir') return { k: 'avoir', l: 'Note de crédit', c: '#adb5bd' };
   if (s.s === 'payee') return { k: 'payee', l: 'Payé', c: '#2f9e44', sub: fmtDate(lastPay) };
   if (s.s === 'partielle') return { k: 'partielle', l: 'Part. payé', c: '#e8a10c', sub: fmtDate(lastPay) };
@@ -26,7 +27,7 @@ const invDispHtml = (i) => { const x = invDisp(i); return `<span class="pst">${b
 // Facturation électronique (Peppol)
 function invEInv(i, contacts) {
   const d = i.data;
-  if (d.status !== 'emise') return '<span class="muted">—</span>';
+  if (d.status !== 'emise' || d.kind === 'proforma') return '<span class="muted">—</span>';
   if (d.peppol && d.peppol.sentAt) return `<span class="pst">${badge('Envoyé', '#3b5bdb')}<small class="muted">Peppol ${fmtDate(d.peppol.sentAt)}</small></span>`;
   const c = byId(contacts, d.clientId);
   return c && buyerInfo(c).peppolId && buyerInfo(c).isCompany ? badge('À envoyer', '#f08c00') : '<small class="muted">Hors Peppol</small>';
@@ -58,18 +59,19 @@ const invChangeValidated = (it) => validatedInvoiceChange(it, null, { edit: `#/i
 
 // ---------------------------------------------------------------- Liste
 route('invoices', async () => {
-  const [invoices, contacts, projects] = await Promise.all([db.list('invoice'), db.list('contact'), db.list('project')]);
+  const [invoices, contacts, projects] = await Promise.all([db.list('invoice', { proforma: true }), db.list('contact'), db.list('project')]);
   const rows = invoices.map((i) => ({ ...i, st: invState(i) }));
+  const real = rows.filter((r) => r.data.kind !== 'proforma'); // les pro forma ne comptent dans aucun total
   const y = String(new Date().getFullYear());
-  const yr = rows.filter((r) => (r.data.date || '').startsWith(y) && r.st.s !== 'brouillon');
+  const yr = real.filter((r) => (r.data.date || '').startsWith(y) && r.st.s !== 'brouillon');
   const page = layout({ active: 'finances', icon: 'coins', title: 'Factures clients', actions: `<button class="btn" data-act="csv">${I.mail} Envoyer au comptable</button><button class="btn primary" data-act="new">${I.plus} Nouveau</button>` });
-  page.innerHTML = `<div class="kpis">${kpi(`Facturé ${y} HT`, money(yr.reduce((a, r) => a + r.st.t.base, 0)))}${kpi('Brouillons', rows.filter((r) => r.st.s === 'brouillon').length, { sub: money(rows.filter((r) => r.st.s === 'brouillon').reduce((a, r) => a + r.st.t.total, 0)) + ' TTC' })}
-    ${kpi('À recevoir TTC', money(rows.filter((r) => ['impayee', 'partielle', 'retard'].includes(r.st.s)).reduce((a, r) => a + r.st.rest, 0)))}${kpi('En retard', money(rows.filter((r) => r.st.s === 'retard').reduce((a, r) => a + r.st.rest, 0)), { cls: rows.some((r) => r.st.s === 'retard') ? 'bad' : '', sub: `${rows.filter((r) => r.st.s === 'retard').length} facture(s)` })}</div><div id="tbl"></div>`;
+  page.innerHTML = `<div class="kpis">${kpi(`Facturé ${y} HT`, money(yr.reduce((a, r) => a + r.st.t.base, 0)))}${kpi('Brouillons', real.filter((r) => r.st.s === 'brouillon').length, { sub: money(real.filter((r) => r.st.s === 'brouillon').reduce((a, r) => a + r.st.t.total, 0)) + ' TTC' })}
+    ${kpi('À recevoir TTC', money(real.filter((r) => ['impayee', 'partielle', 'retard'].includes(r.st.s)).reduce((a, r) => a + r.st.rest, 0)))}${kpi('En retard', money(real.filter((r) => r.st.s === 'retard').reduce((a, r) => a + r.st.rest, 0)), { cls: real.some((r) => r.st.s === 'retard') ? 'bad' : '', sub: `${real.filter((r) => r.st.s === 'retard').length} facture(s)` })}</div><div id="tbl"></div>`;
   const tbl = $('#tbl');
   dataTable(tbl, {
     rows, state: ui.tbl_inv2 || (ui.tbl_inv2 = { sort: -2 }), pageSize: 20, select: { actions: (p) => multiActions('invoice', p) },
     search: (i) => [i.number, i.data.title, i.data.ref, contactName(byId(contacts, i.data.clientId)), (byId(projects, i.project_id) || { data: {} }).data.name, fnum(i.st.t.total)].join(' '),
-    filters: { def: '', options: [['', 'Toutes'], ['brouillon', 'Brouillons', '#868e96'], ['aenvoyer', 'À envoyer', '#f08c00'], ['envoye', 'Envoyées', '#3b5bdb'], ['partielle', 'Part. payées', '#e8a10c'], ['payee', 'Payées', '#2f9e44'], ['retard', 'En retard', '#e5484d'], ['avoir', 'Notes de crédit', '#adb5bd']], match: (i, f) => invDisp(i).k === f },
+    filters: { def: '', options: [['', 'Toutes'], ['brouillon', 'Brouillons', '#868e96'], ['aenvoyer', 'À envoyer', '#f08c00'], ['envoye', 'Envoyées', '#3b5bdb'], ['partielle', 'Part. payées', '#e8a10c'], ['payee', 'Payées', '#2f9e44'], ['retard', 'En retard', '#e5484d'], ['avoir', 'Notes de crédit', '#adb5bd'], ['proforma', 'Pro forma', '#7048e8']], match: (i, f) => invDisp(i).k === f },
     columns: [
       { l: 'N°', v: (i) => `<b class="nowrap">${esc(i.number || '—')}</b>${i.data.external ? '<br><small class="muted" title="Facture émise dans l\'ancien logiciel">reprise</small>' : ''}`, sort: (i) => i.number || '' },
       { l: 'Date', v: (i) => fmtDate(i.data.date), sort: (i) => `${i.data.date || ''}${String(i.id).padStart(8, '0')}` },
@@ -83,7 +85,7 @@ route('invoices', async () => {
     ],
     onRow: (i) => go(`#/invoice/${i.id}`), empty: 'Aucune facture',
     footer: (l) => {
-      const f = l.filter((r) => r.st.s !== 'brouillon');
+      const f = l.filter((r) => r.st.s !== 'brouillon' && r.data.kind !== 'proforma');
       const sum = (fn) => f.reduce((a, r) => a + fn(r), 0);
       return `<tr><td colspan="9"><div class="inv-tot"><div><small>Total HT</small><b>${money(sum((r) => r.st.t.base))}</b></div><div><small>Total TVA</small><b>${money(sum((r) => r.st.t.vat))}</b></div><div><small>Total TTC</small><b>${money(sum((r) => r.st.t.total))}</b></div><div><small>Montant à recevoir TTC</small><b>${money(sum((r) => (['impayee', 'partielle', 'retard'].includes(r.st.s) ? r.st.rest : 0)))}</b></div></div></td></tr>`;
     },
@@ -98,13 +100,45 @@ route('invoices', async () => {
   $('[data-act=new]').onclick = () => menuSheet('Nouvelle facture', [
     { label: 'Facture simple', icon: 'file', primary: true, run: () => newInvoice({ data: { kind: 'facture' } }) },
     { label: 'Facture d\'acompte', icon: 'coins', run: () => newInvoice({ data: { kind: 'acompte' } }) },
+    { label: 'Facture pro forma (sans valeur fiscale)', icon: 'file', run: () => newInvoice({ data: { kind: 'proforma' } }) },
     { label: 'Facture d\'avancement ou depuis un devis…', icon: 'calc', run: () => go('#/quotes') },
     { label: 'Note de crédit', icon: 'copy', run: () => newInvoice({ data: { kind: 'avoir' } }) },
   ]);
   $('[data-act=csv]').onclick = () => go('#/export');
 });
 
+// ---------------------------------------------------------------- Pro forma : document sans valeur fiscale, numéroté à part (PF-…),
+// jamais compté ni envoyé au comptable ; converti ensuite en vraie facture (mêmes lignes) quand le client confirme / paie
+function proformaActions(it) {
+  const d = it.data; const locked = d.status === 'emise';
+  return [
+    ...(!d.convertedTo ? [{ label: 'Convertir en facture…', icon: 'coins', primary: true, run: () => proformaConvert(it) }] : [{ label: `Ouvrir la facture ${d.convertedNumber || ''}`.trim(), icon: 'file', primary: true, run: () => go(`#/invoice/${d.convertedTo}`) }]),
+    { label: 'PDF / Imprimer', icon: 'print', run: () => go(`#/print/invoice/${it.id}`) },
+    ...(locked ? [{ label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/invoice/${it.id}?mail=1`) },
+      ...(!(d.sent || []).length ? [{ label: 'Marquer comme envoyée (envoi manuel)…', icon: 'check', run: () => invMarkSent([it]) }] : [])] : []),
+    ...(locked && !d.convertedTo ? [{ label: 'Modifier la pro forma', icon: 'edit', run: async () => { d.status = 'brouillon'; d.reopened = { at: new Date().toISOString() }; await persist('invoice', it); go(`#/invoice/${it.id}/encodage`); } }] : []),
+    ...(d.quoteId ? [{ label: 'Ouvrir le devis', icon: 'calc', run: () => go(`#/quote/${d.quoteId}`) }] : []),
+    { label: 'Commentaires', icon: 'chat', run: () => invComments(it) },
+    { sep: true },
+    { label: 'Supprimer la pro forma', icon: 'trash', danger: true, run: async () => { if (confirm('Supprimer cette facture pro forma ? (sans valeur fiscale : elle peut être supprimée)')) { await db.del('invoice', it.id); go('#/invoices'); } } },
+  ];
+}
+async function proformaConvert(it) {
+  const d = it.data;
+  menuSheet(`Convertir la pro forma ${it.number || ''} en facture`, [['facture', 'Facture'], ['acompte', 'Facture d\'acompte (déduite ensuite des états / du solde)']].map(([k, l]) => ({
+    label: l, primary: k === (d.proformaKind || 'facture'),
+    run: async () => {
+      const copy = JSON.parse(JSON.stringify(d));
+      ['sent', 'payments', 'peppol', 'reopened', 'emittedAt', 'convertedTo', 'convertedNumber', 'proformaKind', 'comments', 'communication'].forEach((x) => delete copy[x]);
+      const co = company();
+      const inv = await persist('invoice', { project_id: it.project_id || null, data: { ...copy, kind: k, status: 'brouillon', date: today(), due: addDays(today(), num(copy.payDays) || num(co.paymentDays) || 30), fromProformaId: it.id, fromProforma: it.number || '', docNote: [copy.docNote, it.number ? `Suite à la facture pro forma ${it.number}.` : ''].filter(Boolean).join('\n') } });
+      d.convertedTo = inv.id; d.convertedNumber = ''; await persist('invoice', it, { silent: true });
+      toast('Facture créée depuis la pro forma : vérifiez-la puis soumettez-la', 4000); go(`#/invoice/${inv.id}`);
+    },
+  })));
+}
 function invMenu(it) {
+  if (it.data.kind === 'proforma') return menuSheet(`Facture pro forma ${it.number || '(brouillon)'}`, proformaActions(it));
   const d = it.data; const locked = d.status === 'emise';
   menuSheet(`${INV_TYPE[d.kind] || 'Facture'} ${it.number || '(brouillon)'}`, [
     { label: 'Ouvrir', icon: 'edit', run: () => go(`#/invoice/${it.id}`) },
@@ -290,12 +324,13 @@ route('invoice', async (id, tab = 'informations') => {
     if (isEA(it) && eaState(it).k !== 'approuve' && !eaState(it).late && !confirm('Le client n\'a pas encore approuvé cet état d\'avancement. Le facturer quand même ?')) return;
     if (!confirm(d.reopened && it.number ? `Valider à nouveau la facture n° ${it.number} (même numéro) ?` : 'Soumettre la facture ? Elle reçoit son numéro définitif et ne sera plus modifiable.')) return;
     // facture rouverte : elle garde son numéro
-    const r = d.reopened && it.number ? { number: it.number } : await api('POST', `number/${d.kind === 'avoir' ? 'avoir' : 'invoice'}`);
+    const r = d.reopened && it.number ? { number: it.number } : await api('POST', `number/${d.kind === 'avoir' ? 'avoir' : d.kind === 'proforma' ? 'proforma' : 'invoice'}`);
     if (d.reopened) d.reopened.revalidatedAt = new Date().toISOString();
     it.number = r.number; d.status = 'emise'; d.emittedAt = today();
     if (d.ea) d.ea.invoicedAt = today();
     if (!d.communication && company().country !== 'FR') d.communication = structComm(r.number.replace(/\D/g, ''));
-    await persist('invoice', it); toast(`Facture ${it.number} soumise`);
+    await persist('invoice', it); toast(`${d.kind === 'proforma' ? 'Pro forma' : 'Facture'} ${it.number} soumise`);
+    if (d.fromProformaId) db.get('invoice', +d.fromProformaId).then((pf) => { if (pf && pf.data.kind === 'proforma') { pf.data.convertedTo = it.id; pf.data.convertedNumber = it.number; return persist('invoice', pf, { silent: true }); } }).catch(() => {});
     if (after === 'mail') return go(`#/print/invoice/${it.id}?mail=1`);
     if (after === 'peppol') { go(`#/invoice/${it.id}/visualisation`); return setTimeout(() => peppolInvoice(it), 600); }
     if (after === 'manual') return invMarkSent([it], () => go(`#/invoice/${it.id}/visualisation`));
@@ -303,7 +338,7 @@ route('invoice', async (id, tab = 'informations') => {
   };
   const sub = $('[data-submit]', page); if (sub) sub.onclick = () => emit();
   const snd = $('[data-send]', page); if (snd) snd.onclick = () => go(`#/print/invoice/${it.id}?mail=1`);
-  $('[data-more]', page).onclick = () => menuSheet(locked ? 'Facture' : 'Soumettre', locked ? [
+  $('[data-more]', page).onclick = () => (d.kind === 'proforma' && locked ? menuSheet('Facture pro forma', proformaActions(it)) : menuSheet(locked ? 'Facture' : 'Soumettre', locked ? [
     { label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/invoice/${it.id}?mail=1`) },
     { label: 'Peppol – facture électronique', icon: 'file', primary: true, run: () => peppolInvoice(it) },
     ...(d.kind !== 'avoir' && invState(it).rest > 0.005 ? [{ label: 'Ajouter un paiement', icon: 'coins', run: () => invPayment(it, null) }] : []),
@@ -322,8 +357,8 @@ route('invoice', async (id, tab = 'informations') => {
     { label: 'Enregistrer le brouillon', icon: 'file', run: async () => { await save.flush(); toast('Brouillon enregistré'); } },
     ...(d.quoteId ? [{ label: 'Ouvrir le devis', icon: 'calc', run: () => go(`#/quote/${d.quoteId}`) }] : []),
     { sep: true },
-    { label: 'Supprimer le brouillon', danger: true, icon: 'trash', run: async () => { if (confirm('Supprimer ce brouillon ?')) { await db.del('invoice', it.id); go('#/invoices'); } } },
-  ]);
+    { label: 'Supprimer le brouillon', danger: true, icon: 'trash', run: async () => { if (confirm('Supprimer ce brouillon ?')) { await db.del('invoice', it.id); if (d.fromProformaId) { const pf = await db.get('invoice', +d.fromProformaId).catch(() => null); if (pf && +pf.data.convertedTo === it.id) { delete pf.data.convertedTo; delete pf.data.convertedNumber; await persist('invoice', pf, { silent: true }); } } go('#/invoices'); } } },
+  ]));
   cleanupView = () => save.flush();
 });
 

@@ -249,6 +249,7 @@ async function totalsBlock(kind, it, t, paid) {
       ${qr ? `<figure class="mb-qr"><img src="${qr}" alt="QR code de paiement"><figcaption>Scannez avec votre app bancaire</figcaption></figure>` : ''}</div>`);
   }
   if (kind === 'quote' && d.valid) side.push(`<div class="mb-accept"><h4>Validité</h4>Offre valable jusqu'au <b>${esc(dateFr(d.valid))}</b>. Les travaux démarrent après signature du devis${d.deposit ? ' et paiement de l\'acompte' : ''}.</div>`);
+  if (kind === 'invoice' && d.kind === 'proforma') side.push('<div class="mb-note"><b>Facture pro forma</b> – document sans valeur fiscale, ne peut servir de justificatif de TVA. La facture définitive sera établie à la confirmation de la commande / au paiement.</div>');
   if (d.docNote) side.push(`<div class="mb-note pre">${esc(d.docNote)}</div>`);
   return `<div class="mb-bottom"><div class="mb-side">${side.join('')}</div>${card}</div>`;
 }
@@ -346,7 +347,7 @@ async function docHtml(kind, id, variant = '') {
 // nom des fichiers PDF : « Facture_2026-122 », « Devis_2026-075 » (préfixe FAC- / DEV- retiré du numéro)
 function docFileName(kind, it, variant = '') {
   const d = it.data || {};
-  const label = kind === 'quote' ? (d.avenantOf ? `Avenant-${d.avenantNo || ''}` : 'Devis') : kind === 'order' ? 'Commande' : d.kind === 'avoir' ? 'Note-de-credit' : 'Facture';
+  const label = kind === 'quote' ? (d.avenantOf ? `Avenant-${d.avenantNo || ''}` : 'Devis') : kind === 'order' ? 'Commande' : d.kind === 'avoir' ? 'Note-de-credit' : d.kind === 'proforma' ? 'Pro-forma' : 'Facture';
   const no = String(it.number || '').replace(/^[A-Za-z]{1,6}[-_ ]?(?=\d)/, '').trim() || 'brouillon';
   return `${label}_${fileTitle(no)}${variant === 'simple' ? '_simplifiee' : ''}`;
 }

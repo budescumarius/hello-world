@@ -287,13 +287,13 @@ async function tabPOrders(p, el, contacts) {
   const fq = $('[data-act=fq]', el); if (fq) fq.onclick = () => (quotes.length === 1 ? ordersFromQuote(quotes[0]) : menuSheet('Quel devis ?', quotes.map((q) => ({ label: `${q.number} · ${q.data.title || ''}`, run: () => ordersFromQuote(q) }))));
 }
 async function tabPInvoices(p, el, contacts) {
-  const [invoices, quotes] = await Promise.all([db.list('invoice', { project: p.id }), db.list('quote', { project: p.id })]);
+  const [invoices, quotes] = await Promise.all([db.list('invoice', { project: p.id, proforma: true }), db.list('quote', { project: p.id })]);
   const acc = quotes.filter((q) => q.data.status === 'accepte');
   el.innerHTML = `<div class="toolbar"><span class="grow"></span>${acc.length ? '<button class="btn" data-act="fq">Facturer un devis…</button>' : ''}<button class="btn primary" data-act="ni">${I.plus} Facture libre</button></div><div id="tbl"></div>`;
   dataTable($('#tbl', el), {
     rows: invoices.map((i) => ({ ...i, st: invState(i) })), select: { actions: (x) => multiActions('invoice', x) },
     columns: [{ l: 'N°', v: (i) => `<b>${esc(i.number || 'Brouillon')}</b>` }, { l: 'Type', v: (i) => esc(IKIND[i.data.kind]) }, { l: 'Date', v: (i) => fmtDate(i.data.date) }, { l: 'Échéance', v: (i) => fmtDate(i.data.due) },
-      { l: 'Statut', v: (i) => st(IST, i.st.s) }, { l: 'Total HT', cls: 'r', v: (i) => money(i.st.t.base) }, { l: 'Total TVAC', cls: 'r', v: (i) => `<b>${money(i.st.t.total)}</b>` }, { l: 'Reste', cls: 'r', v: (i) => (['brouillon', 'avoir'].includes(i.st.s) ? '' : money(i.st.rest)) }],
+      { l: 'Statut', v: (i) => (i.data.kind === 'proforma' ? badge(i.data.convertedTo ? 'Pro forma → facturée' : 'Pro forma', '#7048e8') : st(IST, i.st.s)) }, { l: 'Total HT', cls: 'r', v: (i) => money(i.st.t.base) }, { l: 'Total TVAC', cls: 'r', v: (i) => `<b>${money(i.st.t.total)}</b>` }, { l: 'Reste', cls: 'r', v: (i) => (['brouillon', 'avoir'].includes(i.st.s) || i.data.kind === 'proforma' ? '' : money(i.st.rest)) }],
     onRow: (i) => go(`#/invoice/${i.id}`), empty: 'Aucune facture',
   });
   $('[data-act=ni]', el).onclick = () => newInvoice({ project_id: p.id, data: { clientId: p.data.clientId, title: p.data.name } });

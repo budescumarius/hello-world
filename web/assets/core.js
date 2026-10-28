@@ -65,9 +65,12 @@ async function api(method, path, body) {
   if (!res.ok) { const err = new Error((data && data.error) || `Erreur ${res.status}`); err.status = res.status; err.conflict = data && data.conflict; throw err; }
   return data;
 }
+// factures pro forma : sans valeur fiscale → écartées des listes de factures (totaux, statistiques, export comptable,
+// états d'avancement…) ; seules la liste des factures et la fiche chantier les demandent ({ proforma: true })
+const noProforma = (l) => l.filter((x) => !x.data || x.data.kind !== 'proforma');
 const db = {
-  list: (type, opt = {}) => api('GET', `items/${type}${opt.project != null ? `&project=${opt.project}` : ''}${opt.parent != null ? `&parent=${opt.parent}` : ''}`),
-  many: (types, project) => api('GET', `items&types=${types.join(',')}${project != null ? `&project=${project}` : ''}`),
+  list: (type, opt = {}) => api('GET', `items/${type}${opt.project != null ? `&project=${opt.project}` : ''}${opt.parent != null ? `&parent=${opt.parent}` : ''}`).then((r) => (type === 'invoice' && !opt.proforma && Array.isArray(r) ? noProforma(r) : r)),
+  many: (types, project) => api('GET', `items&types=${types.join(',')}${project != null ? `&project=${project}` : ''}`).then((r) => { if (r && Array.isArray(r.invoice)) r.invoice = noProforma(r.invoice); return r; }),
   get: (type, id) => api('GET', `items/${type}/${id}`),
   async save(type, it, opt = {}) {
     try {
