@@ -1,0 +1,291 @@
+/* Pilotage d'un responsable d'équipe / d'atelier (rôle « chef ») – vu aussi par le patron (Équipe → Responsables).
+   Son équipe = fiches du personnel dont il est le « Responsable » ; ses projets = ceux qu'il conduit, où il est dans l'équipe
+   ou où son équipe a pointé / est planifiée. Il ne fait pas les factures : il indique l'avancement et « demande une facture »
+   (type billreq) au bureau, et envoie un rapport (type mgrreport, figé au moment de l'envoi). */
+
+const RESP_PERIODS = [['sem', 'Cette semaine'], ['semp', 'Semaine passée'], ['mois', 'Ce mois'], ['moisp', 'Mois passé'], ['an', 'Cette année']];
+const BRQ_KIND = { acompte: 'Acompte', avancement: 'État d\'avancement', solde: 'Solde / facture finale', autre: 'Autre' };
+const BRQ_ST = { demandee: ['À facturer', '#e8590c'], facturee: ['Facturée ✓', '#2f9e44'], annulee: ['Annulée', '#868e96'] };
+const chefUsers = () => S.users.filter((u) => u.role === 'chef' && u.active);
+
+function respRange(k) {
+  const t = today(); const y = +t.slice(0, 4); const m = +t.slice(5, 7);
+  const mon = addDays(t, -((new Date(t + 'T12:00:00').getDay() + 6) % 7));
+  if (k === 'semp') return [addDays(mon, -7), addDays(mon, -1)];
+  if (k === 'mois') return [t.slice(0, 8) + '01', t];
+  if (k === 'moisp') return [`${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, '0')}-01`, addDays(t.slice(0, 8) + '01', -1)];
+  if (k === 'an') return [`${y}-01-01`, t];
+  return [mon, addDays(mon, 6)];
+}
+const isWorkday = (d) => { const w = new Date(d + 'T12:00:00').getDay(); return w !== 0 && w !== 6; };
+const daysOf = (a, b) => { const r = []; for (let d = a; d <= b; d = addDays(d, 1)) r.push(d); return r; };
+
+// Avancement d'un projet : indiqué par le responsable, sinon dernier état d'avancement, sinon part déjà facturée
+function respPct(p, f, invs) {
+  if (p.data.progress !== undefined && p.data.progress !== null && p.data.progress !== '') return { v: num(p.data.progress), src: 'indiqué' };
+  if (p.data.status === 'termine') return { v: 100, src: 'terminé' };
+  const sit = invs.filter((i) => i.data.kind === 'situation' && i.data.status === 'emise').sort((a, b) => num(b.data.situationNo) - num(a.data.situationNo))[0];
+  const rows = sit ? (sit.data.progressRows || []).filter((r) => r.kind === 'item') : [];
+  const market = rows.reduce((a, r) => a + num(r.qty) * num(r.price), 0);
+  if (market) return { v: rows.reduce((a, r) => a + num(r.qty) * num(r.price) * num(r.cum) / 100, 0) / market * 100, src: 'état d\'avancement' };
+  return { v: f.budget ? Math.min(100, f.invoiced / f.budget * 100) : 0, src: 'estimé (facturé)' };
+}
+
+// Toutes les données du tableau de bord pour un responsable (uid) ou toute l'entreprise (uid = 0), sur une période
+async function respData(uid, period) {
+  const m = await db.many(['employee', 'project', 'quote', 'invoice', 'order', 'expense', 'timesheet', 'assign', 'absence', 'intervention', 'task', 'billreq', 'contact']);
+  const [from, to] = respRange(period);
+  const active = m.employee.filter((e) => e.data.active !== false);
+  let team = uid ? active.filter((e) => +e.data.chefId === uid) : active;
+  const noTeam = !!uid && !team.length; if (noTeam) team = active;
+  const teamIds = new Set(team.map((e) => e.id));
+  const inTeam = (x) => teamIds.has(+x.data.employeeId);
+  const by = (list, pid) => list.filter((x) => x.project_id === pid);
+  const inPer = (d) => d && d >= from && d <= to;
+  const live = (p) => ['preparation', 'encours', 'reception'].includes(p.data.status);
+  const projects = m.project.filter((p) => (uid
+    ? +p.data.managerId === uid || (p.data.team || []).map(Number).includes(uid) || m.timesheet.some((t) => t.project_id === p.id && inTeam(t) && (live(p) || inPer(t.data.date))) || m.assign.some((a) => a.project_id === p.id && inTeam(a) && a.data.date >= from)
+    : live(p) || m.timesheet.some((t) => t.project_id === p.id && inPer(t.data.date))) && p.data.status !== 'annule');
+  const pids = new Set(projects.map((p) => p.id));
+  const rows = projects.map((p) => {
+    const invs = by(m.invoice, p.id);
+    const f = projectFinance(p, { quote: by(m.quote, p.id), invoice: invs, order: by(m.order, p.id), expense: m.expense, timesheet: by(m.timesheet, p.id) });
+    const pc = respPct(p, f, invs); const value = f.budget * pc.v / 100;
+    const asked = by(m.billreq, p.id).filter((b) => b.data.status === 'demandee').reduce((a, b) => a + num(b.data.amount), 0);
+    const buy = f.real - (f.realBy.mo || 0);
+    const hPer = by(m.timesheet, p.id).filter((t) => inPer(t.data.date)).reduce((a, t) => a + num(t.data.hours), 0);
+    return { p, f, pc, value, asked, toBill: Math.max(0, value - f.invoiced - asked), rest: Math.max(0, f.budget - f.invoiced), margin: value - f.real, hPer, perHour: f.hours ? (value - buy) / f.hours : 0, client: contactName(byId(m.contact, p.data.clientId)) };
+  });
+  const rowOf = (pid) => rows.find((r) => r.p.id === pid);
+  // personnes : heures, coût, valeur produite (heures × valeur d'une heure sur le projet), présence attendue
+  const hours = m.timesheet.filter((t) => inTeam(t) && inPer(t.data.date));
+  const absent = (e, d) => m.absence.some((a) => +a.data.employeeId === e.id && a.data.from <= d && a.data.to >= d);
+  // jours à pointer : jusqu'à hier (aujourd'hui n'est pas fini), aujourd'hui seulement s'il a déjà des heures
+  const yday = addDays(today(), -1); const lastDay = to < yday ? to : yday;
+  const people = team.map((e) => {
+    const hs = hours.filter((t) => +t.data.employeeId === e.id);
+    const h = hs.reduce((a, t) => a + num(t.data.hours), 0);
+    const cost = hs.reduce((a, t) => a + num(t.data.hours) * num(t.data.rate || e.data.costRate), 0);
+    const prod = hs.reduce((a, t) => { const r = t.project_id && rowOf(t.project_id); return a + (r ? num(t.data.hours) * r.perHour : 0); }, 0);
+    const loose = hs.filter((t) => !t.project_id).reduce((a, t) => a + num(t.data.hours), 0);
+    const tday = today() >= from && today() <= to && hs.some((t) => t.data.date === today()) ? 1 : 0;
+    const expected = (daysOf(from, lastDay).filter((d) => isWorkday(d) && !absent(e, d)).length + tday) * (num(e.data.dayHours) || 8);
+    const missing = daysOf(from, lastDay).filter((d) => isWorkday(d) && !absent(e, d) && !hs.some((t) => t.data.date === d));
+    const byP = {}; hs.forEach((t) => { const k = t.project_id || 0; byP[k] = (byP[k] || 0) + num(t.data.hours); });
+    return { e, h, cost, prod, margin: prod - cost, loose, expected, missing, byP };
+  });
+  const sumBy = (l, k) => l.reduce((a, x) => a + x[k], 0);
+  const sc = m.invoice.filter((i) => pids.has(i.project_id) && i.data.status === 'emise');
+  const invoicedPer = sc.filter((i) => inPer(i.data.date)).reduce((a, i) => a + totals(i.data).base * (i.data.kind === 'avoir' && totals(i.data).base > 0 ? -1 : 1), 0);
+  const cashedPer = sc.reduce((a, i) => a + (i.data.payments || []).filter((x) => inPer(x.date)).reduce((s, x) => s + num(x.amount), 0), 0);
+  // agenda : rendez-vous / interventions, tâches, début et fin de projets, équipe planifiée (14 jours)
+  const end = addDays(today(), 13); const soon = (d) => d && d >= today() && d <= end;
+  const ag = [];
+  m.intervention.filter((x) => soon(x.data.date) && (!uid || !x.project_id || pids.has(x.project_id) || +x.data.assigneeId === uid)).forEach((x) => ag.push({ d: x.data.date, t: x.data.time || '', icon: 'tool', l: x.data.title || 'Intervention', s: [x.project_id && (byId(m.project, x.project_id) || { data: {} }).data.name, contactName(byId(m.contact, x.data.clientId)) !== '—' && contactName(byId(m.contact, x.data.clientId))].filter(Boolean).join(' · '), h: `#/intervention/${x.id}` }));
+  m.task.filter((x) => soon(x.data.due) && x.data.status !== 'done' && (!uid || +x.data.assigneeId === uid || pids.has(x.project_id))).forEach((x) => ag.push({ d: x.data.due, icon: 'tasks', l: x.data.title, s: 'Tâche à terminer', h: '#/tasks' }));
+  projects.forEach((p) => { if (soon(p.data.start)) ag.push({ d: p.data.start, icon: 'crane', l: `Début : ${p.data.name}`, s: '', h: `#/project/${p.id}` }); if (soon(p.data.end)) ag.push({ d: p.data.end, icon: 'crane', l: `Fin prévue : ${p.data.name}`, s: '', h: `#/project/${p.id}` }); });
+  const asg = {}; m.assign.filter((a) => soon(a.data.date) && inTeam(a)).forEach((a) => { const k = `${a.data.date}|${a.project_id}`; (asg[k] = asg[k] || []).push((byId(team, +a.data.employeeId) || { data: {} }).data.name); });
+  Object.entries(asg).forEach(([k, names]) => { const [d, pid] = k.split('|'); ag.push({ d, icon: 'helmet', l: (byId(m.project, +pid) || { data: { name: 'Projet' } }).data.name, s: names.filter(Boolean).join(', '), h: '#/planning/team' }); });
+  ag.sort((a, b) => (a.d + (a.t || '')).localeCompare(b.d + (b.t || '')));
+  const reqs = m.billreq.filter((b) => !uid || pids.has(b.project_id) || b.created_by === uid);
+  return { uid, period, from, to, team, noTeam, projects, rows, people, hours, ag, reqs, m,
+    k: { hours: sumBy(people, 'h'), cost: sumBy(people, 'cost'), prod: sumBy(people, 'prod'), toBill: sumBy(rows, 'toBill'), asked: sumBy(rows, 'asked'), rest: sumBy(rows, 'rest'), margin: sumBy(rows, 'margin'), invoicedPer, cashedPer, missing: people.reduce((a, x) => a + x.missing.length, 0) } };
+}
+
+const respName = (uid) => (uid ? `Équipe de ${userName(uid)}` : 'Toute l\'entreprise');
+const pctTxt = (v) => `${fnum(v, 0)} %`;
+const signMoney = (v) => `<span style="color:${v < -0.5 ? '#e5484d' : v > 0.5 ? '#2f9e44' : 'inherit'}">${money(v)}</span>`;
+
+// ---------------------------------------------------------------- Tableau de bord
+route('resp', async (sub, id) => {
+  if (sub === 'demandes') return respRequests();
+  if (sub === 'rapports') return respReports();
+  if (sub === 'rapport' && id) return respReportView(+id);
+  const q = new URLSearchParams(location.hash.split('?')[1] || '');
+  const chefs = chefUsers();
+  const uid = isChef() ? S.me.id : (q.has('u') ? +q.get('u') : (ui.respU != null ? +ui.respU : (chefs[0] || {}).id || 0));
+  if (!isChef() && q.has('u')) { ui.respU = uid; saveUi(); }
+  const period = ui.respP || 'sem';
+  const page = layout({ title: isChef() ? 'Mon tableau de bord' : 'Responsables', icon: 'chart', sub: esc(respName(uid)),
+    actions: `<button class="btn" data-act="rep">${I.send} ${isChef() ? "Rapport au patron" : "Préparer un rapport"}</button>${isChef() ? `<button class="btn primary" data-act="breq">${I.coins} Demander une facture</button>` : `<a class="btn" href="#/resp/demandes">${I.coins} Demandes de facture</a>`}` });
+  page.innerHTML = '<div class="empty">Calcul en cours…</div>';
+  const D = await respData(uid, period);
+  const k = D.k; const [from, to] = [D.from, D.to];
+  const lastDay = addDays(today(), -1);
+  const gridDays = ['sem', 'semp'].includes(period) ? daysOf(from, to).filter((d) => isWorkday(d) || D.hours.some((t) => t.data.date === d)) : [];
+  page.innerHTML = `
+    ${isChef() ? '' : `<div class="chips" style="margin-bottom:10px">${[[0, 'Toute l\'entreprise'], ...chefs.map((u) => [u.id, u.name])].map(([v, l]) => `<button class="chip ${v === uid ? 'on' : ''}" data-u="${v}">${esc(l)}</button>`).join('')}
+      ${!chefs.length ? '<small class="muted">Aucun responsable : créez son accès dans Paramètres → Utilisateurs (rôle « Responsable d\'équipe / d\'atelier »).</small>' : ''}</div>`}
+    <div class="chips" style="margin-bottom:12px">${RESP_PERIODS.map(([v, l]) => `<button class="chip ${v === period ? 'on' : ''}" data-p="${v}">${l}</button>`).join('')}<small class="muted">du ${fmtDate(from)} au ${fmtDate(to)}</small></div>
+    ${D.noTeam ? `<div class="hint-box" style="margin-bottom:12px">Aucune personne n'est encore rattachée à ${isChef() ? 'vous' : 'ce responsable'} : tout le personnel est affiché. ${isChef() ? 'Demandez au bureau de vous attribuer votre équipe.' : '<button class="btn sm" data-act="team">Choisir son équipe</button>'}</div>` : (!isChef() && uid ? '<div style="margin:-4px 0 10px"><button class="btn sm" data-act="team">Modifier son équipe</button></div>' : '')}
+    <div class="kpis">
+      ${kpi('Heures de l\'équipe', `${fnum(k.hours, 1)} h`, { sub: `coût ${money(k.cost)}${k.missing ? `<br><span style="color:#e5484d;font-weight:700">${k.missing} jour(s) non pointé(s)</span>` : ''}` })}
+      ${kpi('Produit par l\'équipe', money(k.prod), { sub: `marge ${money(k.prod - k.cost)} sur la période` })}
+      ${kpi('À facturer maintenant', `<span style="color:${k.toBill > 0.5 ? '#e8590c' : 'inherit'}">${money(k.toBill)}</span>`, { sub: k.asked ? `${money(k.asked)} déjà demandé au bureau` : 'travail fait, pas encore facturé' })}
+      ${kpi('Reste à facturer', money(k.rest), { sub: 'sur les projets en cours' })}
+      ${kpi('Facturé / encaissé', money(k.invoicedPer), { sub: `encaissé ${money(k.cashedPer)} sur la période` })}
+      ${kpi('Marge des projets', signMoney(k.margin), { sub: 'à ce jour (avancement − coûts)' })}
+    </div>
+    <div class="card"><div class="card-h"><h3>Projets : avancement et facturation</h3><small class="muted">Touchez le % pour indiquer l'avancement réel</small></div>
+      ${D.rows.length ? `<div class="dt-body"><table class="dt"><thead><tr><th>Projet</th><th>Période</th><th class="r">Avancement</th><th class="r">Montant HT</th><th class="r">Facturé HT</th><th class="r">Encaissé</th><th class="r">À facturer</th><th class="r">Heures</th><th class="r">Coûts</th><th class="r">Marge</th><th></th></tr></thead><tbody>
+        ${D.rows.sort((a, b) => b.toBill - a.toBill).map((r) => `<tr><td data-l="Projet"><a href="#/project/${r.p.id}"><b>${esc(r.p.data.name)}</b></a><br><small class="muted">${esc(r.client !== '—' ? r.client : '')} ${st(PST, r.p.data.status)}</small></td>
+          <td data-l="Période"><small>${r.p.data.start ? fmtDate(r.p.data.start) : '—'} → ${r.p.data.end ? `<span style="color:${r.p.data.end < today() && r.p.data.status !== 'termine' ? '#e5484d' : 'inherit'}">${fmtDate(r.p.data.end)}</span>` : '—'}</small></td>
+          <td data-l="Avancement" class="r"><button class="btn sm" data-pct="${r.p.id}" title="${esc(r.pc.src)}">${pctTxt(r.pc.v)}</button><br><small class="muted">${esc(r.pc.src)}</small></td>
+          <td data-l="Montant HT" class="r">${money(r.f.budget)}</td><td data-l="Facturé HT" class="r">${money(r.f.invoiced)}</td><td data-l="Encaissé" class="r">${money(r.f.cashed)}</td>
+          <td data-l="À facturer" class="r">${r.toBill > 0.5 ? `<b style="color:#e8590c">${money(r.toBill)}</b>` : '—'}${r.asked ? `<br><small class="muted">${money(r.asked)} demandé</small>` : ''}</td>
+          <td data-l="Heures" class="r">${fnum(r.f.hours, 1)} h${r.hPer ? `<br><small class="muted">${fnum(r.hPer, 1)} h période</small>` : ''}</td><td data-l="Coûts" class="r">${money(r.f.real)}</td><td data-l="Marge" class="r">${signMoney(r.margin)}</td>
+          <td>${r.toBill > 0.5 && isChef() ? `<button class="btn sm primary" data-breq="${r.p.id}">Demander</button>` : r.toBill > 0.5 ? `<button class="btn sm primary" data-bill="${r.p.id}">Facturer</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty sm">Aucun projet en cours.</div>'}</div>
+    ${gridDays.length ? `<div class="card"><div class="card-h"><h3>Pointage de la semaine</h3><a class="btn sm" href="#/hr/timesheets">Tout le pointage</a></div><div class="dt-body"><table class="dt resp-grid"><thead><tr><th>Personne</th>${gridDays.map((d) => `<th class="r">${new Date(d + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'short', day: 'numeric' })}</th>`).join('')}<th class="r">Total</th></tr></thead><tbody>
+      ${D.people.map((x) => `<tr><td data-l="Personne"><a href="#/crew/e/${x.e.id}"><b>${esc(x.e.data.name)}</b></a></td>${gridDays.map((d) => { const h = D.hours.filter((t) => +t.data.employeeId === x.e.id && t.data.date === d).reduce((a, t) => a + num(t.data.hours), 0); const abs = D.m.absence.some((a) => +a.data.employeeId === x.e.id && a.data.from <= d && a.data.to >= d);
+        return `<td class="r" data-l="${fmtDate(d)}">${h ? `<b>${fnum(h, 1)}</b>` : abs ? '<small class="muted">absent</small>' : d <= lastDay && isWorkday(d) ? '<b style="color:#e5484d">0</b>' : '<span class="muted">·</span>'}</td>`; }).join('')}<td class="r" data-l="Total"><b>${fnum(x.h, 1)} h</b></td></tr>`).join('')}</tbody></table></div></div>` : ''}
+    <div class="card"><div class="card-h"><h3>Rentabilité par personne</h3><small class="muted">${esc(RESP_PERIODS.find(([v]) => v === period)[1])}</small></div>
+      ${D.people.length ? `<div class="dt-body"><table class="dt"><thead><tr><th>Personne</th><th class="r">Heures</th><th class="r">Occupation</th><th class="r">Coût</th><th class="r">Produit</th><th class="r">Marge</th><th class="r">Produit / h</th><th>Projets</th></tr></thead><tbody>
+        ${D.people.sort((a, b) => b.margin - a.margin).map((x) => `<tr><td data-l="Personne"><a href="#/crew/e/${x.e.id}"><b>${esc(x.e.data.name)}</b></a>${x.missing.length ? `<br><small style="color:#e5484d">${x.missing.length} jour(s) sans heures</small>` : ''}</td>
+          <td data-l="Heures" class="r">${fnum(x.h, 1)} h${x.loose ? `<br><small class="muted">${fnum(x.loose, 1)} h hors projet</small>` : ''}</td><td data-l="Occupation" class="r">${x.expected ? pctTxt(x.h / x.expected * 100) : '—'}</td>
+          <td data-l="Coût" class="r">${money(x.cost)}</td><td data-l="Produit" class="r">${money(x.prod)}</td><td data-l="Marge" class="r"><b>${signMoney(x.margin)}</b></td><td data-l="Produit / h" class="r">${x.h ? `${money(x.prod / x.h)}<br><small class="muted">coût ${money(x.cost / x.h)}</small>` : '—'}</td>
+          <td data-l="Projets"><small>${Object.entries(x.byP).sort((a, b) => b[1] - a[1]).map(([pid, h]) => `${esc(+pid ? (byId(D.m.project, +pid) || { data: { name: '?' } }).data.name : 'hors projet')} ${fnum(h, 1)} h`).join(' · ') || '—'}</small></td></tr>`).join('')}</tbody></table></div>
+        <p class="muted sm" style="margin-top:8px">Produit = heures × valeur d'une heure sur chaque projet (montant réalisé selon l'avancement, moins les achats, divisé par toutes les heures du projet). Coût = heures × coût horaire chargé de la fiche. Une marge négative : le projet consomme plus d'heures que prévu.</p>` : '<div class="empty sm">Personne dans l\'équipe.</div>'}</div>
+    <div class="card"><div class="card-h"><h3>Planning et rendez-vous – 14 prochains jours</h3><a class="btn sm" href="#/planning/team">Planning de l'équipe</a></div>
+      ${D.ag.length ? `<div class="rows">${D.ag.map((x, i) => `${i === 0 || D.ag[i - 1].d !== x.d ? `<div class="mo-h" style="margin:10px 0 2px"><b>${esc(new Date(x.d + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric', month: 'long' }))}</b></div>` : ''}<a class="row" href="${x.h}"><span>${I[x.icon] || ''}</span><span class="grow"><b>${x.t ? `${esc(x.t)} · ` : ''}${esc(x.l)}</b>${x.s ? `<small class="muted">${esc(x.s)}</small>` : ''}</span></a>`).join('')}</div>` : '<div class="empty sm">Rien de planifié.</div>'}</div>`;
+  $$('[data-u]', page).forEach((b) => { b.onclick = () => go(`#/resp?u=${b.dataset.u}`); });
+  $$('[data-p]', page).forEach((b) => { b.onclick = () => { ui.respP = b.dataset.p; saveUi(); render(); }; });
+  $$('[data-pct]', page).forEach((b) => { b.onclick = () => respSetPct(byId(D.projects, +b.dataset.pct)); });
+  $$('[data-breq]', page).forEach((b) => { b.onclick = () => { const r = D.rows.find((x) => x.p.id === +b.dataset.breq); billRequest(r.p, { amount: r2(r.toBill), pct: r2(r.pc.v) }); }; });
+  $$('[data-bill]', page).forEach((b) => { b.onclick = () => respBill(D.rows.find((x) => x.p.id === +b.dataset.bill)); });
+  $('[data-act=rep]').onclick = () => respNewReport(uid);
+  const br = $('[data-act=breq]'); if (br) br.onclick = () => billRequest();
+  const tm = $('[data-act=team]', page); if (tm) tm.onclick = () => respTeamPicker(uid, D.m.employee);
+});
+
+async function respSetPct(p) {
+  const v = await ask(`Avancement – ${p.data.name}`, [{ name: 'pct', label: 'Travail réellement fait (%)', type: 'percent', required: true, hint: 'Sert à calculer ce qui est à facturer et la rentabilité. Laissez vide pour revenir au calcul automatique.' }], { pct: p.data.progress ?? '' });
+  if (!v) return;
+  if (v.pct === '' || v.pct == null) delete p.data.progress; else p.data.progress = Math.max(0, Math.min(100, num(v.pct)));
+  p.data.progressAt = today(); p.data.progressBy = S.me.id;
+  await persist('project', p, { silent: true }); toast('Avancement enregistré'); render();
+}
+// patron : rattacher des personnes à un responsable
+function respTeamPicker(uid, employees) {
+  const act = employees.filter((e) => e.data.active !== false);
+  formModal({ title: `Équipe de ${userName(uid)}`, values: { ids: act.filter((e) => +e.data.chefId === uid).map((e) => e.id) },
+    fields: [{ name: 'ids', label: 'Personnes dont il est responsable', type: 'multi', options: act.map((e) => [e.id, `${e.data.name}${e.data.chefId && +e.data.chefId !== uid ? ` (actuellement : ${userName(+e.data.chefId)})` : ''}`]), cls: 'full' }],
+    async onSave(v) {
+      const ids = (v.ids || []).map(Number);
+      for (const e of act) {
+        const want = ids.includes(e.id); const has = +e.data.chefId === uid;
+        if (want && !has) { e.data.chefId = uid; await persist('employee', e, { silent: true }); }
+        if (!want && has) { delete e.data.chefId; await persist('employee', e, { silent: true }); }
+      }
+      toast('Équipe enregistrée'); render();
+    } });
+}
+
+// ---------------------------------------------------------------- Demandes de facture (responsable → bureau)
+async function billRequest(p, pre = {}) {
+  const projects = p ? [p] : (await db.list('project')).filter((x) => ['preparation', 'encours', 'reception', 'termine'].includes(x.data.status));
+  const v = await ask('Demander une facture au bureau', [
+    ...(p ? [] : [{ name: 'pid', label: 'Projet', type: 'select', required: true, options: [['', '— choisir —'], ...projects.map((x) => [x.id, x.data.name])] }]),
+    { name: 'kind', label: 'Type de facture', type: 'select', options: Object.entries(BRQ_KIND) },
+    { name: 'pct', label: 'Avancement réel du projet (%)', type: 'percent' },
+    { name: 'amount', label: 'Montant à facturer HT (€)', type: 'money', required: true },
+    { name: 'note', label: 'Ce qui a été fait / précisions pour le bureau', type: 'textarea' },
+  ], { kind: pre.pct >= 99.5 ? 'solde' : 'avancement', ...pre });
+  if (!v) return;
+  const pid = p ? p.id : +v.pid; if (!pid) return toast('Choisissez le projet', 3000);
+  if (!(num(v.amount) > 0)) return toast('Indiquez le montant à facturer', 3000);
+  const proj = p || byId(projects, pid);
+  if (v.pct !== '' && v.pct != null && proj) { proj.data.progress = Math.max(0, Math.min(100, num(v.pct))); proj.data.progressAt = today(); proj.data.progressBy = S.me.id; await persist('project', proj, { silent: true }); }
+  await persist('billreq', { project_id: pid, data: { date: today(), kind: v.kind, amount: r2(num(v.amount)), pct: v.pct === '' ? null : num(v.pct), note: v.note || '', status: 'demandee', by: S.me.id } });
+  toast('Demande envoyée au bureau ✓', 3000); render();
+}
+// bureau : faire la facture demandée (liée à la demande : elle passe « facturée » quand la facture est soumise)
+async function respBill(r, req) {
+  const p = r ? r.p : await db.get('project', req.project_id);
+  const quotes = (await db.list('quote', { project: p.id })).filter((q) => q.data.status === 'accepte' && !q.data.avenantOf);
+  const amount = req ? num(req.data.amount) : r2(r.toBill);
+  const free = () => newInvoice({ project_id: p.id, data: { clientId: p.data.clientId, title: p.data.name, kind: req && req.data.kind === 'acompte' ? 'acompte' : 'facture', billreqId: req ? req.id : undefined,
+    lines: [{ id: lid(), kind: 'item', desc: `${req ? BRQ_KIND[req.data.kind] || 'Travaux' : 'Travaux'} – ${p.data.name}${req && req.data.note ? `\n${req.data.note}` : ''}`, unit: 'forfait', qty: 1, price: amount, vat: defVat(), type: 'divers' }] } });
+  menuSheet(`Facturer ${money(amount)} HT – ${p.data.name}`, [
+    ...quotes.map((q) => ({ label: `Depuis le devis ${q.number} (état d'avancement, acompte, solde…)`, icon: 'calc', primary: true, run: () => { if (req) { S.billreqPending = req.id; } invoiceFromQuote(q); } })),
+    { label: 'Facture libre avec ce montant', icon: 'coins', primary: !quotes.length, run: free },
+    ...(req ? [{ label: 'Marquer comme facturée (déjà faite)…', icon: 'check', run: () => respMarkBilled(req) }, { label: 'Annuler la demande', icon: 'x', run: async () => { req.data.status = 'annulee'; await persist('billreq', req); render(); } }] : []),
+  ]);
+}
+async function respMarkBilled(req, inv) {
+  if (!inv) {
+    const invs = (await db.list('invoice', { project: req.project_id })).filter((i) => i.data.status === 'emise');
+    const v = await ask('Facture faite', [{ name: 'iid', label: 'Quelle facture ?', type: 'select', options: [['', '— (pas dans la liste) —'], ...invs.map((i) => [i.id, `${i.number} · ${fmtDate(i.data.date)} · ${money(totals(i.data).base)} HT`])] }]);
+    if (!v) return; inv = byId(invs, +v.iid);
+  }
+  Object.assign(req.data, { status: 'facturee', billedAt: today(), invoiceId: inv ? inv.id : null, invoiceNumber: inv ? inv.number : '' });
+  await persist('billreq', req); toast('Demande marquée facturée ✓'); if (location.hash.startsWith('#/resp')) render();
+}
+// appelé quand une facture est soumise (invoice.js)
+async function billreqDone(inv) {
+  const id = +inv.data.billreqId; if (!id) return;
+  const req = await db.get('billreq', id).catch(() => null);
+  if (req && req.data.status === 'demandee') { Object.assign(req.data, { status: 'facturee', billedAt: today(), invoiceId: inv.id, invoiceNumber: inv.number }); await persist('billreq', req, { silent: true }); }
+}
+
+async function respRequests() {
+  const [reqs, projects] = await Promise.all([db.list('billreq'), db.list('project')]);
+  const mine = isChef() ? reqs.filter((r) => r.created_by === S.me.id) : reqs;
+  const page = layout({ title: 'Demandes de facture', icon: 'coins', sub: isChef() ? 'Ce que vous avez demandé au bureau de facturer' : 'Envoyées par les responsables d\'équipe',
+    actions: isChef() ? `<button class="btn primary" data-act="new">${I.plus} Demander une facture</button>` : '' });
+  const open = mine.filter((r) => r.data.status === 'demandee');
+  dataTable(page, {
+    rows: mine.sort((a, b) => (a.data.status === 'demandee' ? 0 : 1) - (b.data.status === 'demandee' ? 0 : 1) || (b.data.date || '').localeCompare(a.data.date || '')),
+    toolbar: open.length ? `<b>${open.length} à facturer · ${money(open.reduce((a, r) => a + num(r.data.amount), 0))} HT</b>` : '',
+    columns: [{ l: 'Date', v: (r) => fmtDate(r.data.date) }, { l: 'Projet', v: (r) => `<b>${esc((byId(projects, r.project_id) || { data: { name: '—' } }).data.name)}</b>` },
+      { l: 'Type', v: (r) => esc(BRQ_KIND[r.data.kind] || '') }, { l: 'Avancement', cls: 'r', v: (r) => (r.data.pct != null ? pctTxt(num(r.data.pct)) : '') },
+      { l: 'Montant HT', cls: 'r', v: (r) => `<b>${money(num(r.data.amount))}</b>` }, { l: 'Précisions', v: (r) => `<small>${esc(String(r.data.note || '').slice(0, 140))}</small>` },
+      { l: 'Demandé par', v: (r) => esc(userName(r.created_by)) },
+      { l: 'Statut', v: (r) => `${st(BRQ_ST, r.data.status)}${r.data.invoiceNumber ? `<br><small class="muted">${esc(r.data.invoiceNumber)}</small>` : ''}` }],
+    onRow: (r) => (isChef() ? (r.data.status === 'demandee' ? menuSheet('Demande de facture', [{ label: 'Ouvrir le projet', icon: 'crane', run: () => go(`#/project/${r.project_id}`) }, { label: 'Annuler la demande', icon: 'x', danger: true, run: async () => { r.data.status = 'annulee'; await persist('billreq', r); render(); } }]) : go(`#/project/${r.project_id}`))
+      : r.data.status === 'demandee' ? respBill(null, r) : r.data.invoiceId ? go(`#/invoice/${r.data.invoiceId}`) : go(`#/project/${r.project_id}`)),
+    empty: isChef() ? 'Aucune demande : quand un travail est fait, « Demander une facture »' : 'Aucune demande des responsables',
+  });
+  const n = $('[data-act=new]'); if (n) n.onclick = () => billRequest();
+}
+
+// ---------------------------------------------------------------- Rapport au patron (figé à l'envoi)
+async function respNewReport(uid) {
+  const v = await ask('Rapport au patron', [
+    { name: 'period', label: 'Période', type: 'select', options: RESP_PERIODS },
+    { name: 'comment', label: 'Commentaire (problèmes, besoins, retards, matériel…)', type: 'textarea' },
+  ], { period: ui.respP === 'sem' && new Date().getDay() === 1 ? 'semp' : ui.respP || 'sem' });
+  if (!v) return;
+  const D = await respData(uid, v.period);
+  const title = `${respName(uid)} – ${RESP_PERIODS.find(([x]) => x === v.period)[1].toLowerCase()} (${fmtDate(D.from)} → ${fmtDate(D.to)})`;
+  const it = await persist('mgrreport', { data: { title, uid, period: v.period, from: D.from, to: D.to, comment: v.comment || '', date: today(), html: respReportHtml(D, title, v.comment || '') } });
+  toast(isChef() ? 'Rapport envoyé au patron ✓' : 'Rapport enregistré', 3000); go(`#/resp/rapport/${it.id}`);
+}
+function respReportHtml(D, title, comment) {
+  const k = D.k; const kv = (l, v) => `<tr><td class="muted">${l}</td><td class="r"><b>${v}</b></td></tr>`;
+  return `<div class="doc">${fieldHead({ data: { name: title } }, 'Rapport d\'activité')}
+    ${comment ? `<div class="d-sec"><h2>Commentaire du responsable</h2><p class="pre">${esc(comment)}</p></div>` : ''}
+    <div class="d-sec"><h2>Résumé</h2><table class="d-lines"><tbody>
+      ${kv('Heures de l\'équipe', `${fnum(k.hours, 1)} h${k.missing ? ` · ${k.missing} jour(s) non pointé(s)` : ''}`)}${kv('Coût de la main d\'œuvre', money(k.cost))}${kv('Produit par l\'équipe', money(k.prod))}${kv('Marge de la période', money(k.prod - k.cost))}
+      ${kv('<b>À facturer maintenant</b>', money(k.toBill))}${kv('Déjà demandé au bureau, pas encore facturé', money(k.asked))}${kv('Reste à facturer (projets en cours)', money(k.rest))}
+      ${kv('Facturé sur la période (HT)', money(k.invoicedPer))}${kv('Encaissé sur la période', money(k.cashedPer))}${kv('Marge des projets à ce jour', money(k.margin))}</tbody></table></div>
+    <div class="d-sec"><h2>Projets : avancement et facturation</h2><table class="d-lines"><thead><tr><th>Projet</th><th>Fin prévue</th><th class="r">Avanc.</th><th class="r">Montant HT</th><th class="r">Facturé</th><th class="r">Encaissé</th><th class="r">À facturer</th><th class="r">Heures</th><th class="r">Marge</th></tr></thead><tbody>
+      ${D.rows.map((r) => `<tr><td><b>${esc(r.p.data.name)}</b><br><small class="muted">${esc(r.client !== '—' ? r.client : '')} · ${esc((PST[r.p.data.status] || [''])[0])}</small></td><td>${r.p.data.end ? fmtDate(r.p.data.end) : '—'}</td><td class="r">${pctTxt(r.pc.v)}</td><td class="r">${money(r.f.budget)}</td><td class="r">${money(r.f.invoiced)}</td><td class="r">${money(r.f.cashed)}</td><td class="r"><b>${r.toBill > 0.5 ? money(r.toBill) : '—'}</b></td><td class="r">${fnum(r.f.hours, 1)} h</td><td class="r">${money(r.margin)}</td></tr>`).join('') || '<tr><td colspan="9" class="muted">Aucun projet</td></tr>'}</tbody></table></div>
+    <div class="d-sec"><h2>Équipe : heures et rentabilité</h2><table class="d-lines"><thead><tr><th>Personne</th><th class="r">Heures</th><th class="r">Occupation</th><th class="r">Coût</th><th class="r">Produit</th><th class="r">Marge</th><th>Jours sans heures</th></tr></thead><tbody>
+      ${D.people.map((x) => `<tr><td><b>${esc(x.e.data.name)}</b></td><td class="r">${fnum(x.h, 1)} h</td><td class="r">${x.expected ? pctTxt(x.h / x.expected * 100) : '—'}</td><td class="r">${money(x.cost)}</td><td class="r">${money(x.prod)}</td><td class="r"><b>${money(x.margin)}</b></td><td><small>${x.missing.map((d) => fmtDate(d)).join(', ') || '—'}</small></td></tr>`).join('')}</tbody></table></div>
+    ${D.reqs.filter((r) => r.data.status === 'demandee').length ? `<div class="d-sec"><h2>Demandes de facture en attente</h2><table class="d-lines"><tbody>${D.reqs.filter((r) => r.data.status === 'demandee').map((r) => `<tr><td>${fmtDate(r.data.date)}</td><td><b>${esc((byId(D.m.project, r.project_id) || { data: { name: '' } }).data.name)}</b> – ${esc(BRQ_KIND[r.data.kind] || '')}${r.data.note ? `<br><small class="muted">${esc(r.data.note)}</small>` : ''}</td><td class="r"><b>${money(num(r.data.amount))}</b></td></tr>`).join('')}</tbody></table></div>` : ''}
+    <div class="d-sec"><h2>Planning – 14 prochains jours</h2>${D.ag.length ? `<table class="d-lines"><tbody>${D.ag.map((x) => `<tr><td style="white-space:nowrap">${fmtDate(x.d)}${x.t ? ` ${esc(x.t)}` : ''}</td><td><b>${esc(x.l)}</b>${x.s ? ` <span class="muted">– ${esc(x.s)}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Rien de planifié.</p>'}</div>
+  </div>`;
+}
+async function respReports() {
+  const reps = await db.list('mgrreport');
+  const mine = isChef() ? reps.filter((r) => r.created_by === S.me.id) : reps;
+  const page = layout({ title: isChef() ? 'Rapports au patron' : 'Rapports des responsables', icon: 'send', actions: `<button class="btn primary" data-act="new">${I.plus} ${isChef() ? 'Envoyer un rapport' : 'Préparer un rapport'}</button>` });
+  dataTable(page, { rows: mine.sort((a, b) => b.id - a.id),
+    columns: [{ l: 'Date', v: (r) => fmtDate(r.data.date) }, { l: 'Rapport', v: (r) => `<b>${esc(r.data.title)}</b>${r.data.comment ? `<br><small class="muted">${esc(String(r.data.comment).slice(0, 120))}</small>` : ''}` }, { l: 'Par', v: (r) => esc(userName(r.created_by)) }],
+    onRow: (r) => go(`#/resp/rapport/${r.id}`), empty: 'Aucun rapport' });
+  $('[data-act=new]').onclick = () => respNewReport(isChef() ? S.me.id : (ui.respU != null ? +ui.respU : 0));
+}
+async function respReportView(id) {
+  const r = await db.get('mgrreport', id);
+  printPage(r.data.title, r.data.html || '<p>Rapport vide</p>', '#/resp/rapports', null, fileTitle(`Rapport ${r.data.title}`));
+}

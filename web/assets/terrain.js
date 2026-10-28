@@ -318,7 +318,7 @@ async function tPlanning() {
 // ================================================================ Côté bureau : rapports de terrain
 // Rapports envoyés par les ouvriers / sous-traitants (remarques, photos) et rapports envoyés par le bureau au terrain.
 const fieldUsers = () => S.users.filter((u) => ['ouvrier', 'soustraitant'].includes(u.role) && u.active);
-const ROLE_LABELS = { admin: ['Administrateur', '#7048e8'], user: ['Bureau', '#1c2550'], ouvrier: ['Ouvrier', '#3f7a68'], soustraitant: ['Sous-traitant', '#c98a17'] };
+const ROLE_LABELS = { admin: ['Administrateur', '#7048e8'], user: ['Bureau', '#1c2550'], chef: ['Responsable', '#0b7285'], ouvrier: ['Ouvrier', '#3f7a68'], soustraitant: ['Sous-traitant', '#c98a17'] };
 function reportRows(list, projects) {
   return list.sort((a, b) => (b.data.date || '').localeCompare(a.data.date || '') || b.id - a.id).map((r) => {
     const u = S.users.find((x) => x.id === +r.created_by) || { name: '—', role: '' };

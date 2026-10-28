@@ -330,6 +330,7 @@ route('invoice', async (id, tab = 'informations') => {
     if (d.ea) d.ea.invoicedAt = today();
     if (!d.communication && company().country !== 'FR') d.communication = structComm(r.number.replace(/\D/g, ''));
     await persist('invoice', it); toast(`${d.kind === 'proforma' ? 'Pro forma' : 'Facture'} ${it.number} soumise`);
+    if (d.billreqId) billreqDone(it).catch(() => {});
     if (d.fromProformaId) db.get('invoice', +d.fromProformaId).then((pf) => { if (pf && pf.data.kind === 'proforma') { pf.data.convertedTo = it.id; pf.data.convertedNumber = it.number; return persist('invoice', pf, { silent: true }); } }).catch(() => {});
     if (after === 'mail') return go(`#/print/invoice/${it.id}?mail=1`);
     if (after === 'peppol') { go(`#/invoice/${it.id}/visualisation`); return setTimeout(() => peppolInvoice(it), 600); }

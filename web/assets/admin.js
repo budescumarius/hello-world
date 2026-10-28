@@ -15,6 +15,8 @@ route('hr', async (sub = 'staff') => {
       { name: 'costRate', label: 'Coût horaire chargé', type: 'money', hint: 'Utilisé pour calculer le coût réel des chantiers' },
       { name: 'phone', label: 'Téléphone', type: 'tel' }, { name: 'email', label: 'Email', type: 'email' },
       { name: 'start', label: 'Date d\'entrée', type: 'date' }, { name: 'userId', label: 'Compte utilisateur lié', type: 'user' },
+      { name: 'chefId', label: 'Responsable (chef d\'équipe / d\'atelier)', type: 'select', options: () => [['', '— aucun —'], ...S.users.filter((u) => u.role === 'chef' && u.active).map((u) => [u.id, u.name])], hint: 'Il voit ses heures, son planning et sa rentabilité' },
+      { name: 'dayHours', label: 'Heures par jour (horaire normal)', type: 'number', placeholder: '8' },
       { name: 'skills', label: 'Compétences / certificats (VCA, permis…)', cls: 'full' },
       { name: 'color', label: 'Couleur (planning)', type: 'color' },
       { name: 'active', label: 'Actif', type: 'check' }, { name: 'notes', label: 'Notes', type: 'textarea', cls: 'full' },
@@ -83,7 +85,7 @@ async function hrAbsences() {
 // chaque ligne avec son action (relancer, payer, facturer, c'est fait) ; à côté, l'argent et les chantiers en cours.
 route('dashboard', async () => {
   if (isSimple()) return homeSimple();
-  const all = await db.many(['opportunity', 'quote', 'invoice', 'project', 'task', 'point', 'intervention', 'expense', 'contact', 'report', 'timesheet']);
+  const all = await db.many(['opportunity', 'quote', 'invoice', 'project', 'task', 'point', 'intervention', 'expense', 'contact', 'report', 'timesheet', 'billreq']);
   const team = !!ui.dashAll;
   const page = layout({ active: 'dashboard', icon: 'sun', title: 'Aujourd\'hui', sub: esc(longDate(today())),
     actions: `<div class="tseg" role="group" aria-label="Afficher"><button type="button" data-team="0" class="${team ? '' : 'on'}">Moi</button><button type="button" data-team="1" class="${team ? 'on' : ''}">Toute l'équipe</button></div>` });
@@ -95,6 +97,9 @@ route('dashboard', async () => {
   const inv = all.invoice.filter((i) => team || i.created_by === S.me.id).map((i) => ({ i, s: invState(i) }));
   const items = [];
   const add = (rank, o) => items.push({ rank, ...o });
+  // demandes de facture des responsables d'équipe : à faire en premier (le travail est fait)
+  const breq = all.billreq.filter((b) => b.data.status === 'demandee');
+  if (breq.length) add(0, { tone: 'todo', icon: 'coins', title: breq.length > 1 ? `${breq.length} factures demandées par les responsables` : `Facture demandée : ${(byId(all.project, breq[0].project_id) || { data: { name: '' } }).data.name}`, sub: breq.map((b) => `${userName(b.created_by)} · ${(byId(all.project, b.project_id) || { data: { name: '' } }).data.name}`).slice(0, 3).join(' – '), amount: breq.reduce((a, b) => a + num(b.data.amount), 0), href: '#/resp/demandes', act: ['Facturer', '#/resp/demandes'] });
   // trop d'éléments du même genre : une seule ligne qui renvoie à la liste
   const many = (list, n, rank, one, group) => { if (list.length > n) add(rank, group(list)); else list.forEach((x) => add(rank, one(x))); };
   many(inv.filter((x) => x.s.s === 'retard').sort((a, b) => (a.i.data.due || '').localeCompare(b.i.data.due || '')), 5, 0,
@@ -339,7 +344,7 @@ async function settingsUsers(page) {
     const m = formModal({
       title: u ? u.name : 'Nouvel accès', values: u ? { ...u, active: !!u.active, ...linkOf(u) } : { role: 'user', color: '#' + Math.floor(Math.random() * 0xbbbbbb + 0x222222).toString(16).padStart(6, '0'), active: true },
       fields: [{ name: 'name', label: 'Nom', required: true }, { name: 'email', label: 'Email (identifiant)', type: 'email', required: true },
-        { name: 'role', label: 'Rôle', type: 'select', options: [['user', 'Bureau (accès complet)'], ['admin', 'Administrateur'], ['ouvrier', 'Ouvrier / employé (espace terrain)'], ['soustraitant', 'Sous-traitant (espace terrain)']] }, { name: 'color', label: 'Couleur', type: 'color' },
+        { name: 'role', label: 'Rôle', type: 'select', options: [['user', 'Bureau (accès complet)'], ['admin', 'Administrateur'], ['chef', 'Responsable d\'équipe / d\'atelier (sans facturation)'], ['ouvrier', 'Ouvrier / employé (espace terrain)'], ['soustraitant', 'Sous-traitant (espace terrain)']] }, { name: 'color', label: 'Couleur', type: 'color' },
         { name: 'employeeId', label: 'Fiche du personnel (RH)', type: 'select', options: [['', staff.length ? '— choisir —' : '— ajoutez-le d\'abord dans RH → Personnel —'], ...staff.map((e) => [e.id, e.data.name])], cls: 'full', hint: 'Ses heures, ses affectations et les phases où il est prévu viennent de cette fiche.' },
         { name: 'contactId', label: 'Fiche du sous-traitant (Carnet)', type: 'select', options: [['', subs.length ? '— choisir —' : '— ajoutez-le d\'abord dans Carnet → Sous-traitants —'], ...subs.map((c) => [c.id, contactName(c)])], cls: 'full', hint: 'Il voit les chantiers où il est prévu, ses bons de commande (envoyés) et leur statut de facturation.' },
         { name: 'info', type: 'html', cls: 'full', html: '<div class="s-info" data-fi>Espace terrain : il voit uniquement ses chantiers, encode ses heures, envoie des rapports et des photos, lit les rapports que vous lui envoyez et son planning. Il ne voit ni prix, ni devis, ni factures, ni clients.</div>' },
@@ -455,7 +460,7 @@ async function backupsCard(box) {
 
 const EDITIONS = [['simple', 'BâtiPro Simplifié (indépendants)'], ['avance', 'BâtiPro Avancé (complet)']];
 // Actions de création (recherche rapide et bouton « + » de la barre mobile)
-const quickActions = () => [['Nouveau devis', () => newQuote()], ['Nouveau chantier', () => editProject()], ['Nouveau contact', () => editContact().then((c) => c && go(`#/contact/${c.id}`))], ['Nouvelle opportunité', () => editOpportunity()], ['Nouvelle intervention', () => editIntervention()], ['Nouvelle tâche', () => editTask()], ['Encoder des heures', () => editTimesheet()], ['Nouvel achat', () => editExpense()]];
+const quickActions = () => (isChef() ? [['Demander une facture au bureau', () => billRequest()]] : []).concat([['Nouveau devis', () => newQuote()], ['Nouveau chantier', () => editProject()], ['Nouveau contact', () => editContact().then((c) => c && go(`#/contact/${c.id}`))], ['Nouvelle opportunité', () => editOpportunity()], ['Nouvelle intervention', () => editIntervention()], ['Nouvelle tâche', () => editTask()], ['Encoder des heures', () => editTimesheet()], ...(isChef() ? [] : [['Nouvel achat', () => editExpense()]])]);
 const QA_ICONS = ['calc', 'crane', 'contacts', 'target', 'tool', 'tasks', 'people', 'coins'];
 const quickActionsSimple = () => [['Faire une facture', 'coins', () => go('#/s/facture/new')], ['Faire un devis', 'calc', () => go('#/s/devis/new')], ['J\'ai acheté (photo du ticket)', 'camera', () => go('#/s/achat')],
   ['On m\'a payé', 'check', () => go('#/s/paye')], ['Note de crédit', 'copy', () => go('#/s/avoir')], ['Nouveau chantier', 'crane', () => editProject()], ['Nouveau client', 'contacts', () => sNewClient().then((c) => c && go(`#/contact/${c.id}`))]];

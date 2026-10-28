@@ -448,6 +448,8 @@ const structComm = (n) => {
 };
 async function newInvoice(preset) {
   const co = company();
+  // facture faite pour une demande d'un responsable (Pilotage → Demandes de facture)
+  if (S.billreqPending) { preset = { ...preset, data: { billreqId: S.billreqPending, ...(preset.data || {}) } }; S.billreqPending = null; }
   const it = await persist('invoice', { project_id: preset.project_id || null, data: { kind: 'facture', status: 'brouillon', date: today(), due: addDays(today(), num(co.paymentDays) || 30), payDays: num(co.paymentDays) || 30, defaultVat: defVat(), ownerId: S.me.id, billSame: true, lines: [], payments: [], discount: 0, reverse: false, notes: co.invoiceNotes || '', ...preset.data } });
   go(`#/invoice/${it.id}`);
 }

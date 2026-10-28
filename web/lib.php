@@ -186,7 +186,17 @@ function require_admin(): array {
 // Comptes limités : ils ne voient que les chantiers qui leur sont attribués, leurs heures, leurs rapports,
 // les rapports qu'on leur envoie, leurs bons de commande et leur planning. Tout est vérifié ici, côté serveur.
 const FIELD_ROLES = ['ouvrier', 'soustraitant'];
-const USER_ROLES = ['admin', 'user', 'ouvrier', 'soustraitant'];
+const USER_ROLES = ['admin', 'user', 'chef', 'ouvrier', 'soustraitant'];
+// Responsable d'équipe / d'atelier : bureau sans la facturation (il la demande au patron via « billreq »)
+const CHEF_READONLY = ['invoice', 'contract'];
+function is_chef(array $u): bool { return ($u['role'] ?? '') === 'chef' && empty($u['super']); }
+// responsable(s) d'un membre du personnel (fiche RH → « Responsable »)
+function chef_of_employee(int $eid): array {
+    if (!$eid) return [];
+    $r = q("SELECT data FROM items WHERE id = ? AND type = 'employee' AND company_id = ?", [$eid, cid()])->fetch();
+    $c = (int)(($r ? json_decode($r['data'], true) : [])['chefId'] ?? 0);
+    return $c ? [$c] : [];
+}
 function is_field(array $u): bool { return in_array($u['role'], FIELD_ROLES, true) && !$u['super']; }
 function require_staff(): array {
     $u = require_user();
@@ -776,7 +786,7 @@ function notify_item(array $me, string $type, array $row, ?array $before = null)
     if (is_field($me) && !$before && $cfg['events']) {
         if ($type === 'timesheet') {
             $where = $site !== '' ? $site : ((string)($d['site'] ?? '') !== '' ? 'Chantier pas encore créé : ' . $d['site'] : '');
-            notify(office_ids($pid), 'hours', "{$me['name']} a encodé " . rtrim(rtrim(number_format((float)($d['hours'] ?? 0), 2, ',', ''), '0'), ',') . ' h', trim($where . ((string)($d['task'] ?? '') !== '' ? ' – ' . $d['task'] : '')), $pid ? "#/project/$pid/hours" : '#/hr/timesheets', (bool)$cfg['emailEvents']);
+            notify(array_merge(office_ids($pid), chef_of_employee((int)($d['employeeId'] ?? 0))), 'hours', "{$me['name']} a encodé " . rtrim(rtrim(number_format((float)($d['hours'] ?? 0), 2, ',', ''), '0'), ',') . ' h', trim($where . ((string)($d['task'] ?? '') !== '' ? ' – ' . $d['task'] : '')), $pid ? "#/project/$pid/hours" : '#/hr/timesheets', (bool)$cfg['emailEvents']);
         }
         if ($type === 'report') {
             $n = count((array)($d['photos'] ?? []));
@@ -786,6 +796,14 @@ function notify_item(array $me, string $type, array $row, ?array $before = null)
         return;
     }
     if (is_field($me)) return;
+    if ($type === 'billreq' && !$before) {
+        notify(office_ids(), 'billreq', "{$me['name']} demande une facture" . ($site !== '' ? " : $site" : ''), trim(rtrim(rtrim(number_format((float)($d['amount'] ?? 0), 2, ',', '.'), '0'), ',') . ' € HT' . ((string)($d['note'] ?? '') !== '' ? ' – ' . mb_substr((string)$d['note'], 0, 160) : '')), '#/resp/demandes', true);
+    }
+    if ($type === 'billreq' && $before) {
+        $was = json_decode((string)$before['data'], true) ?: [];
+        if (($d['status'] ?? '') === 'facturee' && ($was['status'] ?? '') !== 'facturee' && (int)$row['created_by'] !== $me['id']) notify([(int)$row['created_by']], 'billreq', 'Facture faite ✓' . ($site !== '' ? " : $site" : ''), (string)($d['invoiceNumber'] ?? ''), '#/resp/demandes');
+    }
+    if ($type === 'mgrreport' && !$before) notify(office_ids(), 'report', "Rapport de {$me['name']} : " . ($d['title'] ?? ''), mb_substr((string)($d['comment'] ?? ''), 0, 160), '#/resp/rapport/' . (int)$row['id'], true);
     // bureau → terrain
     if ($type === 'report' && !$before && !empty($d['to'])) notify((array)$d['to'], 'report', 'Nouveau rapport du bureau : ' . ($d['title'] ?? ''), mb_substr((string)($d['text'] ?? ''), 0, 160), '#/t/rapport/' . (int)$row['id'], (bool)$cfg['emailEvents']);
     if ($type === 'order' && ($d['status'] ?? 'brouillon') !== 'brouillon') {
@@ -825,7 +843,7 @@ function daily_reminders(bool $force = false): array {
     }
     set_setting('remind_done', $day);
     $items = q("SELECT type, project_id, data FROM items WHERE company_id = ? AND type IN ('timesheet', 'absence', 'phase', 'assign')", [cid()])->fetchAll();
-    $missing = [];
+    $missing = []; $byChef = [];
     foreach (q("SELECT id, name, email, role, 0 AS super FROM users WHERE company_id = ? AND active = 1 AND role IN ('ouvrier', 'soustraitant')", [cid()])->fetchAll() as $u) {
         $u['id'] = (int)$u['id']; $u['super'] = 0;
         $sc = field_scope($u);
@@ -840,9 +858,11 @@ function daily_reminders(bool $force = false): array {
         if ($u['role'] === 'ouvrier' && $sc['employee']) $expected = true; // un ouvrier pointe chaque jour ouvrable
         if (!$expected || $absent || $hours > 0) continue;
         $missing[] = $u['name'];
+        foreach (chef_of_employee((int)$sc['employee']) as $c) $byChef[$c][] = $u['name'];
         if ($cfg['remind']) notify([$u['id']], 'remind', "N'oubliez pas vos heures d'aujourd'hui", 'Touchez ici pour les encoder (30 secondes).', '#/t/heures', (bool)$cfg['emailRemind']);
     }
     if ($missing && $cfg['summary']) notify(office_ids(), 'summary', count($missing) > 1 ? count($missing) . " personnes n'ont pas encodé leurs heures aujourd'hui" : "1 personne n'a pas encodé ses heures aujourd'hui", implode(', ', $missing), '#/hr/timesheets', (bool)$cfg['emailSummary']);
+    if ($cfg['summary']) foreach ($byChef as $c => $names) notify([$c], 'summary', count($names) > 1 ? count($names) . " personnes de votre équipe n'ont pas encodé leurs heures" : "1 personne de votre équipe n'a pas encodé ses heures", implode(', ', $names), '#/resp');
     return $missing;
 }
 

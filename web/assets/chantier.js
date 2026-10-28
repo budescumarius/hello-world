@@ -107,7 +107,7 @@ function projectFinance(p, all) {
 route('project', async (id, tab = 'overview', sub) => {
   const p = await db.get('project', +id);
   if (tab === 'plan' && sub) return viewPlan(p, +sub);
-  const tabs = isSimple() ? PTABS.filter(([k]) => ['overview', 'quotes', 'invoices', 'expenses', 'contracts', 'documents'].includes(k)) : PTABS;
+  const tabs = isSimple() ? PTABS.filter(([k]) => ['overview', 'quotes', 'invoices', 'expenses', 'contracts', 'documents'].includes(k)) : isChef() ? PTABS.filter(([k]) => !['invoices', 'progress', 'expenses', 'contracts'].includes(k)) : PTABS;
   if (!tabs.some(([k]) => k === tab)) tab = 'overview';
   const contacts = await db.list('contact');
   const c = byId(contacts, p.data.clientId);
@@ -127,9 +127,9 @@ route('project', async (id, tab = 'overview', sub) => {
   ]);
   else $('[data-act=padd]').onclick = () => menuSheet('Ajouter au chantier', [
     { label: 'Devis', icon: 'calc', run: () => newQuote({ projectId: p.id, clientId: p.data.clientId, title: p.data.name, siteAddress: [p.data.address, p.data.city].filter(Boolean).join(', ') }) },
-    { label: 'Facture', icon: 'coins', run: () => newInvoice({ project_id: p.id, data: { clientId: p.data.clientId, title: p.data.name } }) },
+    ...(isChef() ? [{ label: 'Demander une facture au bureau', icon: 'coins', run: () => billRequest(p) }] : [{ label: 'Facture', icon: 'coins', run: () => newInvoice({ project_id: p.id, data: { clientId: p.data.clientId, title: p.data.name } }) },
+      { label: 'Achat / dépense', icon: 'coins', run: () => editExpense(null, { project_id: p.id }) }]),
     { label: 'Commande fournisseur', icon: 'truck', run: () => newOrder({ project_id: p.id, kind: 'fournisseur' }) },
-    { label: 'Achat / dépense', icon: 'coins', run: () => editExpense(null, { project_id: p.id }) },
     { label: 'Heures prestées', icon: 'people', run: () => editTimesheet(null, { project_id: p.id }) },
     { label: 'Point (observation / réserve)', icon: 'pin', run: () => editPoint(p, null) },
     { label: 'PV de réunion', icon: 'fiche', run: () => editMeeting(p, null) },

@@ -218,10 +218,10 @@ const SPACES = [
   { k: 'today', l: "Aujourd'hui", i: 'sun', h: '#/dashboard', sec: [["Aujourd'hui", '#/dashboard'], ['Tâches', '#/tasks'], ['Planning chantiers', '#/planning/projects']] },
   { k: 'deals', l: 'Affaires', i: 'target', h: '#/quotes', sec: [['Devis', '#/quotes', '#/quote/'], ['Opportunités', '#/opportunities'], ['Prix et ouvrages', '#/library']] },
   { k: 'works', l: 'Chantiers', i: 'crane', h: '#/projects', sec: [['Chantiers', '#/projects', '#/project/'], ['Interventions', '#/interventions', '#/intervention/'], ['Installations', '#/installations', '#/installation/'], ['Fiches techniques', '#/fiches', '#/fiche/'], ['Dossiers de fin', '#/fiches/dossiers', '#/dossier/']] },
-  { k: 'money', l: 'Argent', i: 'coins', h: '#/invoices', sec: [['Factures', '#/invoices', '#/invoice/'], ['États d\'avancement', '#/progress'], ['Paiements', '#/payments'], ['Achats', '#/expenses', '#/purchase/', '#/expense/'], ['Commandes', '#/orders/fournisseur', '#/order/'], ['Sous-traitance', '#/orders/soustraitant'], ['Chiffres', '#/stats'], ['Envoyer au comptable', '#/export']] },
+  { k: 'money', l: 'Argent', i: 'coins', h: '#/invoices', sec: [['Factures', '#/invoices', '#/invoice/'], ['États d\'avancement', '#/progress'], ['Paiements', '#/payments'], ['Achats', '#/expenses', '#/purchase/', '#/expense/'], ['Commandes', '#/orders/fournisseur', '#/order/'], ['Sous-traitance', '#/orders/soustraitant'], ['Demandes de facture', '#/resp/demandes'], ['Chiffres', '#/stats'], ['Envoyer au comptable', '#/export']] },
   { k: 'people', l: 'Carnet', i: 'people', h: '#/contacts/client', sec: [['Clients', '#/contacts/client', '#/contact/'], ['Prospects', '#/contacts/prospect'], ['Fournisseurs', '#/contacts/fournisseur'], ['Sous-traitants', '#/contacts/soustraitant'], ['Tous', '#/contacts/all']] },
   // ouvriers et sous-traitants : leurs chantiers, heures, bons de commande, rapports
-  { k: 'crew', l: 'Équipe', i: 'helmet', h: '#/crew', sec: [['Personnes', '#/crew', '#/crew/'], ['Pointage', '#/hr/timesheets'], ['Planning équipes', '#/planning/team'], ['Rapports terrain', '#/reports', '#/report/'], ['Absences', '#/hr/absences'], ['Personnel (RH)', '#/hr/staff']] },
+  { k: 'crew', l: 'Équipe', i: 'helmet', h: '#/crew', sec: [['Personnes', '#/crew', '#/crew/'], ['Pointage', '#/hr/timesheets'], ['Planning équipes', '#/planning/team'], ['Rapports terrain', '#/reports', '#/report/'], ['Absences', '#/hr/absences'], ['Personnel (RH)', '#/hr/staff'], ['Responsables', '#/resp', '#/resp/']] },
 ];
 // « BâtiPro Simplifié » (indépendants) : devis, factures, achats par chantier, contacts – sans planning, commandes, RH, assistant…
 const isSimple = () => S.edition === 'simple';
@@ -236,7 +236,16 @@ const SPACES_SIMPLE = [
 const isField = () => !!(S.me && ['ouvrier', 'soustraitant'].includes(S.me.role) && !S.me.super);
 // compte terrain : pas d'onglets, l'accueil (ses chantiers) mène à tout
 const SPACES_FIELD = () => [];
-const spaces = () => (isField() ? SPACES_FIELD() : isSimple() ? SPACES_SIMPLE : SPACES);
+// Responsable d'équipe / d'atelier : son équipe, ses projets, le planning et l'état de facturation (sans faire les factures)
+const isChef = () => !!(S.me && S.me.role === 'chef' && !S.me.super);
+const CHEF_BLOCK = ['invoices', 'invoice', 'payments', 'progress', 'export', 'stats', 'settings', 'abonnement', 'expenses', 'purchase', 'platform', 'security'];
+const SPACES_CHEF = [
+  { k: 'resp', l: 'Pilotage', i: 'chart', h: '#/resp', sec: [['Tableau de bord', '#/resp'], ['Demandes de facture', '#/resp/demandes'], ['Rapports au patron', '#/resp/rapports', '#/resp/rapport/'], ['Tâches', '#/tasks']] },
+  { k: 'works', l: 'Projets', i: 'crane', h: '#/projects', sec: [['Projets / commandes', '#/projects', '#/project/'], ['Rendez-vous / interventions', '#/interventions', '#/intervention/'], ['Commandes fournisseurs', '#/orders/fournisseur', '#/order/'], ['Devis', '#/quotes', '#/quote/']] },
+  { k: 'crew', l: 'Équipe', i: 'helmet', h: '#/crew', sec: [['Personnes', '#/crew', '#/crew/'], ['Pointage', '#/hr/timesheets'], ['Planning équipe', '#/planning/team'], ['Planning projets', '#/planning/projects'], ['Rapports terrain', '#/reports', '#/report/'], ['Absences', '#/hr/absences']] },
+  { k: 'people', l: 'Carnet', i: 'people', h: '#/contacts/client', sec: [['Clients', '#/contacts/client', '#/contact/'], ['Fournisseurs', '#/contacts/fournisseur'], ['Sous-traitants', '#/contacts/soustraitant']] },
+];
+const spaces = () => (isField() ? SPACES_FIELD() : isSimple() ? SPACES_SIMPLE : isChef() ? SPACES_CHEF : SPACES);
 const ui = (() => { try { return JSON.parse(localStorage.getItem('bp-ui') || '{}'); } catch (e) { return {}; } })();
 // les sélections (Set) ne sont pas enregistrées : elles repartent vides à la prochaine visite
 const saveUi = () => { try { localStorage.setItem('bp-ui', JSON.stringify(ui, (k, v) => (v instanceof Set ? undefined : v))); } catch (e) { /* stockage indisponible */ } };
@@ -619,6 +628,9 @@ async function render() {
   if (isSimple() && parts[0] && !SIMPLE_ROUTES.includes(parts[0])) { location.hash = '#/dashboard'; return; }
   // compte terrain : uniquement son espace (et l'impression de ses bons de commande)
   if (isField() && !(parts[0] === 't' || (parts[0] === 'print' && parts[1] === 'order'))) { location.hash = '#/t'; return; }
+  // responsable : pas de facturation ni de paramètres ; son accueil est son tableau de bord
+  if (isChef() && CHEF_BLOCK.includes(parts[0])) { location.hash = '#/resp'; return; }
+  if (isChef() && (!parts[0] || parts[0] === 'dashboard')) parts.splice(0, parts.length, 'resp');
   // abonnement expiré : seule la page « Mon abonnement » reste ouverte (le serveur refuse le reste)
   if (S.sub && S.sub.locked && !S.me.super && parts[0] !== 'abonnement') { if (typeof subLocked === 'function') return subLocked(); }
   const fn = ROUTES[parts[0] || 'dashboard'] || ROUTES.dashboard;

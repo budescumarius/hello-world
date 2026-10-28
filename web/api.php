@@ -258,9 +258,10 @@ switch ($seg[0] ?? '') {
 
     // ------------------------------------------------------------ Numéro définitif (ex. facture émise)
     case 'number':
-        require_staff();
+        $me = require_staff();
         $kind = $seg[1] ?? '';
         if (!preg_match($TYPE_RE, $kind) || $method !== 'POST') fail(400, 'Type invalide');
+        if (in_array($kind, ['invoice', 'avoir', 'proforma'], true) && is_chef($me)) fail(403, 'La facturation est gérée par le bureau.');
         db()->beginTransaction();
         $n = make_number($kind);
         db()->commit();
@@ -287,6 +288,7 @@ switch ($seg[0] ?? '') {
             out($res);
         }
         if (!preg_match($TYPE_RE, $type)) fail(400, 'Type invalide');
+        if ($method !== 'GET' && is_chef($me) && in_array($type, CHEF_READONLY, true)) fail(403, 'La facturation est gérée par le bureau : utilisez « Demander une facture ».');
 
         if ($method === 'GET' && !$id) {
             $sql = 'SELECT * FROM items WHERE company_id = ? AND type = ?'; $args = [cid(), $type];
