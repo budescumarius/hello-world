@@ -1917,3 +1917,6 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
   .rs-t { flex-wrap: wrap; } .rs-t .btn { width: 100%; justify-content: center; }
   .rs-grid { display: none; }
 }
+/* Estimatif du responsable : bandeau au-dessus des postes */
+.est-box { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.est-box .grow { min-width: 220px; } .est-note { margin-top: 6px; padding: 6px 10px; border-radius: 8px; background: #fff4e6; color: #a34700; }

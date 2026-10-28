@@ -77,6 +77,7 @@ function clientLabel(c) {
 const isEAdoc = (kind, d) => kind === 'invoice' && d.kind === 'situation' && d.status !== 'emise';
 function docLabel(kind, d, t) {
   if (isEAdoc(kind, d)) return 'État d\'avancement';
+  if (kind === 'quote' && d.estimate) return 'Estimatif';
   if (kind === 'quote' && d.avenantOf) return `Avenant n° ${d.avenantNo || ''}${d.parentNumber ? ` au devis ${d.parentNumber}` : ''}`;
   const raw = kind === 'quote' ? t.quoteTitle : kind === 'order' ? t.orderTitle : d.kind === 'avoir' ? t.creditTitle
     : d.kind && d.kind !== 'facture' && IKIND[d.kind] ? IKIND[d.kind] : t.invoiceTitle;
@@ -347,7 +348,7 @@ async function docHtml(kind, id, variant = '') {
 // nom des fichiers PDF : « Facture_2026-122 », « Devis_2026-075 » (préfixe FAC- / DEV- retiré du numéro)
 function docFileName(kind, it, variant = '') {
   const d = it.data || {};
-  const label = kind === 'quote' ? (d.avenantOf ? `Avenant-${d.avenantNo || ''}` : 'Devis') : kind === 'order' ? 'Commande' : d.kind === 'avoir' ? 'Note-de-credit' : d.kind === 'proforma' ? 'Pro-forma' : 'Facture';
+  const label = kind === 'quote' ? (d.estimate ? 'Estimatif' : d.avenantOf ? `Avenant-${d.avenantNo || ''}` : 'Devis') : kind === 'order' ? 'Commande' : d.kind === 'avoir' ? 'Note-de-credit' : d.kind === 'proforma' ? 'Pro-forma' : 'Facture';
   const no = String(it.number || '').replace(/^[A-Za-z]{1,6}[-_ ]?(?=\d)/, '').trim() || 'brouillon';
   return `${label}_${fileTitle(no)}${variant === 'simple' ? '_simplifiee' : ''}`;
 }

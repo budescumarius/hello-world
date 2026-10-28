@@ -313,9 +313,11 @@ switch ($seg[0] ?? '') {
                 if (!field_can_write($me, $type, $pid, is_array($data) ? $data : [], null)) fail(403, 'Action non autorisée pour votre compte.');
                 $parent = null;
             }
+            // responsable : il prépare des estimatifs (numérotés EST-…), le bureau les vérifie et en fait des devis
+            if ($type === 'quote' && is_chef($me)) { $data = is_array($data) ? $data : []; $data['estimate'] = true; $data['estStatus'] = $data['estStatus'] ?? 'brouillon'; }
             db()->beginTransaction();
             $number = null;
-            if (isset(NUMBERED[$type])) $number = make_number($type);
+            if (isset(NUMBERED[$type])) $number = make_number($type === 'quote' && is_array($data) && !empty($data['estimate']) ? 'estimate' : $type);
             if ($type === 'point' && $pid) $number = (string)next_counter("point-$pid");
             q('INSERT INTO items (company_id, type, project_id, parent_id, number, data, version, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,1,?,?,?,?)',
               [cid(), $type, $pid, $parent, $number, json_encode($data, JSON_UNESCAPED_UNICODE), $me['id'], $me['id'], now(), now()]);
@@ -347,6 +349,11 @@ switch ($seg[0] ?? '') {
                 }
                 $b['data'] = $nd; unset($b['number']);
             }
+            if ($type === 'quote' && is_chef($me)) {
+                $was = json_decode((string)$cur['data'], true) ?: [];
+                if (empty($was['estimate']) || (array_key_exists('data', $b) && empty($b['data']['estimate']))) fail(403, 'Les devis sont gérés par le bureau : vous pouvez préparer des estimatifs.');
+                unset($b['number']);
+            }
             if (isset($b['version']) && (int)$b['version'] !== (int)$cur['version'] && empty($b['force'])) {
                 out(['error' => 'Cet élément a été modifié par un autre utilisateur entre-temps.', 'conflict' => $view($cur)], 409);
             }
@@ -358,13 +365,15 @@ switch ($seg[0] ?? '') {
             $d = json_decode($data, true) ?: [];
             if (empty($b['silent'])) log_activity($me['id'], 'update', $type, $id, $pid !== null ? (int)$pid : ($type === 'project' ? $id : null), $d['name'] ?? $d['title'] ?? $number);
             $row = q('SELECT * FROM items WHERE id = ?', [$id])->fetch();
-            if (in_array($type, ['order', 'point'], true)) { try { notify_item($me, $type, $row, $cur); } catch (Throwable $e) { error_log('[batipro notif] ' . $e->getMessage()); } }
+            if (in_array($type, ['order', 'point', 'quote'], true)) { try { notify_item($me, $type, $row, $cur); } catch (Throwable $e) { error_log('[batipro notif] ' . $e->getMessage()); } }
             out($view($row));
         }
         if ($method === 'DELETE' && $id) {
             $cur = q('SELECT * FROM items WHERE id = ? AND type = ? AND company_id = ?', [$id, $type, cid()])->fetch();
             if (!$cur) out(['ok' => true]);
             if ($field && (!in_array($type, ['timesheet', 'report'], true) || (int)$cur['created_by'] !== $me['id'])) fail(403, 'Action non autorisée pour votre compte.');
+            if ($type === 'quote' && is_chef($me) && empty((json_decode((string)$cur['data'], true) ?: [])['estimate'])) fail(403, 'Les devis sont gérés par le bureau.');
+            if (is_chef($me) && in_array($type, CHEF_READONLY, true)) fail(403, 'La facturation est gérée par le bureau.');
             $d = json_decode($cur['data'], true) ?: [];
             if ($field && $type === 'timesheet' && !field_month_open($d['date'] ?? '')) fail(403, 'Ce mois est clôturé : demandez au bureau de corriger ces heures.');
             db()->beginTransaction();

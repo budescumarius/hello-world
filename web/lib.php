@@ -403,7 +403,7 @@ function next_counter(string $key): int {
 
 function make_number(string $kind): string {
     $prefixes = setting('prefixes', []) ?: [];
-    $defaults = NUMBERED + ['invoice' => 'FAC', 'avoir' => 'NC', 'proforma' => 'PF'];
+    $defaults = NUMBERED + ['invoice' => 'FAC', 'avoir' => 'NC', 'proforma' => 'PF', 'estimate' => 'EST'];
     $prefix = $prefixes[$kind] ?? ($defaults[$kind] ?? strtoupper(substr($kind, 0, 3)));
     $y = date('Y');
     $n = next_counter("$kind-$y");
@@ -802,6 +802,14 @@ function notify_item(array $me, string $type, array $row, ?array $before = null)
     if ($type === 'billreq' && $before) {
         $was = json_decode((string)$before['data'], true) ?: [];
         if (($d['status'] ?? '') === 'facturee' && ($was['status'] ?? '') !== 'facturee' && (int)$row['created_by'] !== $me['id']) notify([(int)$row['created_by']], 'billreq', 'Facture faite ✓' . ($site !== '' ? " : $site" : ''), (string)($d['invoiceNumber'] ?? ''), '#/resp/demandes');
+    }
+    // estimatif du responsable : envoyé au bureau, renvoyé avec une remarque, transformé en devis
+    if ($type === 'quote' && $before) {
+        $was = json_decode((string)$before['data'], true) ?: [];
+        $t = (string)($d['title'] ?? '') !== '' ? (string)$d['title'] : (string)$row['number'];
+        if (!empty($d['estimate']) && ($d['estStatus'] ?? '') === 'soumis' && ($was['estStatus'] ?? '') !== 'soumis') notify(office_ids(), 'quote', "{$me['name']} envoie un estimatif à vérifier : $t", trim($site . ' – ' . number_format((float)($d['estTotal'] ?? 0), 2, ',', '.') . ' € HT', ' –'), '#/quote/' . (int)$row['id'], true);
+        if (!empty($d['estimate']) && ($d['estStatus'] ?? '') === 'a_revoir' && ($was['estStatus'] ?? '') !== 'a_revoir') notify([(int)$row['created_by']], 'quote', "Estimatif à revoir : $t", mb_substr((string)($d['estNote'] ?? ''), 0, 160), '#/quote/' . (int)$row['id']);
+        if (empty($d['estimate']) && !empty($was['estimate']) && (int)$row['created_by'] !== $me['id']) notify([(int)$row['created_by']], 'quote', "Votre estimatif est devenu le devis {$row['number']}", $t, '#/quote/' . (int)$row['id']);
     }
     if ($type === 'mgrreport' && !$before) notify(office_ids(), 'report', "Rapport de {$me['name']} : " . ($d['title'] ?? ''), mb_substr((string)($d['comment'] ?? ''), 0, 160), '#/resp/rapport/' . (int)$row['id'], true);
     // bureau → terrain

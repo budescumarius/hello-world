@@ -109,7 +109,7 @@ route('resp', async (sub, id) => {
   const page = layout({ title: isChef() ? 'Mon tableau de bord' : 'Responsables', icon: 'chart', sub: esc(respName(uid)),
     actions: `<button class="btn" data-act="rep">${I.send} ${isChef() ? "Rapport au patron" : "Préparer un rapport"}</button>${isChef() ? `<button class="btn primary" data-act="breq">${I.coins} Demander une facture</button>` : `<a class="btn" href="#/resp/demandes">${I.coins} Demandes de facture</a>`}` });
   page.innerHTML = '<div class="empty">Calcul en cours…</div>';
-  const D = await respData(uid, period);
+  const [D, ests] = await Promise.all([respData(uid, period), db.list('quote', { estimate: true }).then((l) => l.filter((q) => q.data.estimate))]);
   const k = D.k; const [from, to] = [D.from, D.to];
   const lastDay = addDays(today(), -1);
   const gridDays = ['sem', 'semp'].includes(period) ? daysOf(from, to).filter((d) => isWorkday(d) || D.hours.some((t) => t.data.date === d)) : [];
@@ -121,6 +121,7 @@ route('resp', async (sub, id) => {
   D.rows.filter((r) => ['preparation', 'encours', 'reception'].includes(r.p.data.status) && (!r.p.data.progressAt || r.p.data.progressAt < addDays(today(), -7))).forEach((r) => todo.push({ tone: 'todo', icon: 'percent', t: `Où en est « ${r.p.data.name} » ?`, s: r.p.data.progressAt ? `Avancement indiqué le ${fmtDate(r.p.data.progressAt)} : mettez-le à jour` : 'Indiquez le % de travail fait (pour savoir quoi facturer)', btn: ['Indiquer le %', 'pct', r.p.id] }));
   D.rows.filter((r) => r.p.data.end && r.p.data.end < today() && !['termine', 'annule'].includes(r.p.data.status)).forEach((r) => todo.push({ tone: 'late', icon: 'calendar', t: `« ${r.p.data.name} » devait finir le ${fmtDate(r.p.data.end)}`, s: 'Terminé ? Changez son statut. Sinon, donnez une nouvelle date de fin.', btn: ['Ouvrir', 'href', `#/project/${r.p.id}`] }));
   D.people.filter((x) => x.h && x.margin < -0.5).forEach((x) => todo.push({ tone: 'late', icon: 'helmet', t: `${x.e.data.name} n'est pas rentable sur la période`, s: `rapporte ${money(x.prod / x.h)}/h mais coûte ${money(x.cost / x.h)}/h`, btn: ['Voir ses heures', 'href', `#/crew/e/${x.e.id}`] }));
+  ests.filter((q) => (isChef() ? q.created_by === S.me.id && q.data.estStatus === 'a_revoir' : q.data.estStatus === 'soumis' && (!uid || q.created_by === uid))).forEach((q) => todo.push({ tone: 'todo', icon: 'calc', t: isChef() ? `Estimatif à revoir : ${q.data.title || q.number}` : `Estimatif à vérifier : ${q.data.title || q.number}`, s: isChef() ? (q.data.estNote || 'Le bureau a une remarque') : `de ${userName(q.created_by)} · ${money(totals(q.data).base)} HT`, btn: [isChef() ? 'Ouvrir' : 'Vérifier', 'href', `#/quote/${q.id}`] }));
   if (isChef() && !D.m.mgrreport.some((r) => r.created_by === S.me.id && r.data.date >= from)) todo.push({ tone: 'todo', icon: 'send', t: 'Envoyez votre rapport au patron', s: 'Un clic : il reçoit tous ces chiffres en PDF', btn: ['Envoyer le rapport', 'rep', 0] });
   const gain = k.prod - k.cost;
   const verdict = (x) => (!x.h ? ['Pas d\'heures', '#868e96'] : x.margin < -0.5 ? ['Pas rentable', '#e5484d'] : x.prod < x.cost * 1.15 ? ['Juste', '#e8590c'] : ['Rentable', '#2f9e44']);
@@ -143,6 +144,7 @@ route('resp', async (sub, id) => {
         <a href="#/project/${r.p.id}" class="rs-ct"><b>${esc(r.p.data.name)}</b><small>${esc(r.client !== '—' ? r.client : '')}${r.p.data.end ? ` · fin ${fmtDate(r.p.data.end)}` : ''}</small></a>
         <div class="rs-line"><span>Travail fait</span><button class="btn sm" data-pct="${r.p.id}">${pctTxt(r.pc.v)} ${I.edit}</button></div>${bar(r.pc.v, '#1c2550')}
         ${r.f.budget ? `<div class="rs-line"><span>Facturé</span><b>${money(r.f.invoiced)} <small class="muted">sur ${money(r.f.budget)}</small></b></div>${bar(r.f.invoiced / r.f.budget * 100, '#2f9e44')}
+        <div class="rs-line"><span>Dépensé</span><small>achats ${money(r.f.real - (r.f.realBy.mo || 0))} · main d'œuvre ${money(r.f.realBy.mo || 0)}</small></div>
         <div class="rs-line"><span>${r.margin < -0.5 ? 'Perte' : 'Bénéfice'} à ce jour</span><b style="color:${r.margin < -0.5 ? '#e5484d' : '#2f9e44'}">${money(Math.abs(r.margin))}</b></div>`
     : `<div class="rs-line"><small class="muted">Pas encore de devis accepté : le bénéfice sera calculé dès qu'il y en a un. Dépensé : ${money(r.f.real)} · ${fnum(r.f.hours, 1)} h</small></div>`}
         ${r.toBill > 0.5 ? `<button class="btn primary rs-go" data-${isChef() ? 'breq' : 'bill'}="${r.p.id}">${isChef() ? `Demander la facture : ${money(r.toBill)}` : `Facturer ${money(r.toBill)}`}</button>` : r.asked ? `<div class="rs-line"><small class="muted">${money(r.asked)} demandé au bureau, en attente</small></div>` : ''}

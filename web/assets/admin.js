@@ -99,6 +99,8 @@ route('dashboard', async () => {
   const add = (rank, o) => items.push({ rank, ...o });
   // demandes de facture des responsables d'équipe : à faire en premier (le travail est fait)
   const breq = all.billreq.filter((b) => b.data.status === 'demandee');
+  const ests = (await db.list('quote', { estimate: true })).filter((q) => q.data.estimate && q.data.estStatus === 'soumis');
+  if (ests.length) add(0, { tone: 'todo', icon: 'calc', title: ests.length > 1 ? `${ests.length} estimatifs à vérifier` : `Estimatif à vérifier : ${ests[0].data.title || ests[0].number}`, sub: ests.map((q) => `${userName(q.created_by)} · ${q.data.title || q.number}`).slice(0, 3).join(' – '), amount: ests.reduce((a, q) => a + totals(q.data).base, 0), href: ests.length > 1 ? '#/quotes' : `#/quote/${ests[0].id}`, act: ['Vérifier', ests.length > 1 ? '#/quotes' : `#/quote/${ests[0].id}`] });
   if (breq.length) add(0, { tone: 'todo', icon: 'coins', title: breq.length > 1 ? `${breq.length} factures demandées par les responsables` : `Facture demandée : ${(byId(all.project, breq[0].project_id) || { data: { name: '' } }).data.name}`, sub: breq.map((b) => `${userName(b.created_by)} · ${(byId(all.project, b.project_id) || { data: { name: '' } }).data.name}`).slice(0, 3).join(' – '), amount: breq.reduce((a, b) => a + num(b.data.amount), 0), href: '#/resp/demandes', act: ['Facturer', '#/resp/demandes'] });
   // trop d'éléments du même genre : une seule ligne qui renvoie à la liste
   const many = (list, n, rank, one, group) => { if (list.length > n) add(rank, group(list)); else list.forEach((x) => add(rank, one(x))); };

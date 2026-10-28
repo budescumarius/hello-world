@@ -265,10 +265,10 @@ async function overviewSimple(p, el, contacts, f, d) {
 const TYPE_LABELS = { project: 'chantier', quote: 'devis', invoice: 'facture', order: 'commande', expense: 'achat', timesheet: 'heures', point: 'point', meeting: 'PV', form: 'formulaire', diary: 'journal', plan: 'plan', phase: 'phase', task: 'tâche', document: 'document', contact: 'contact', opportunity: 'opportunité', intervention: 'intervention' };
 
 async function tabPQuotes(p, el, contacts) {
-  const quotes = await db.list('quote', { project: p.id });
-  el.innerHTML = `<div class="toolbar"><span class="grow"></span><button class="btn primary" data-act="nq">${I.plus} Nouveau devis</button></div><div id="tbl"></div>`;
+  const quotes = await db.list('quote', { project: p.id, estimate: true });
+  el.innerHTML = `<div class="toolbar"><span class="grow"></span><button class="btn primary" data-act="nq">${I.plus} ${isChef() ? 'Nouvel estimatif' : 'Nouveau devis'}</button></div><div id="tbl"></div>`;
   dataTable($('#tbl', el), {
-    rows: quotes, select: { actions: (x) => multiActions('quote', x) }, columns: [{ l: 'N°', v: (q) => `<b>${esc(q.number)}</b>` }, { l: 'Objet', v: (q) => `${q.data.avenantOf ? `<small class="badge-av">Avenant ${esc(q.data.avenantNo)} · ${esc(q.data.parentNumber || '')}</small> ` : ''}${esc(q.data.title || '')}` }, { l: 'Date', v: (q) => fmtDate(q.data.date) }, { l: 'Statut', v: (q) => st(QST, q.data.status) },
+    rows: quotes, select: { actions: (x) => multiActions('quote', x) }, columns: [{ l: 'N°', v: (q) => `<b>${esc(q.number)}</b>${q.data.estimate ? '<br><small class="badge-av">Estimatif</small>' : ''}` }, { l: 'Objet', v: (q) => `${q.data.avenantOf ? `<small class="badge-av">Avenant ${esc(q.data.avenantNo)} · ${esc(q.data.parentNumber || '')}</small> ` : ''}${esc(q.data.title || '')}` }, { l: 'Date', v: (q) => fmtDate(q.data.date) }, { l: 'Statut', v: (q) => (q.data.estimate ? st(EST_ST, q.data.estStatus || 'brouillon') : st(QST, q.data.status)) },
       { l: 'Déboursé', cls: 'r', v: (q) => money(totals(q.data).cost) }, { l: 'Total HT', cls: 'r', v: (q) => `<b>${money(totals(q.data).base)}</b>` }],
     onRow: (q) => go(`#/quote/${q.id}`), empty: 'Aucun devis pour ce chantier',
   });

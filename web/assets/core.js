@@ -68,9 +68,11 @@ async function api(method, path, body) {
 // factures pro forma : sans valeur fiscale → écartées des listes de factures (totaux, statistiques, export comptable,
 // états d'avancement…) ; seules la liste des factures et la fiche chantier les demandent ({ proforma: true })
 const noProforma = (l) => l.filter((x) => !x.data || x.data.kind !== 'proforma');
+// estimatifs des responsables (devis pas encore vérifiés par le bureau) : hors des chiffres, sauf demande explicite
+const noEstimate = (l) => l.filter((x) => !x.data || !x.data.estimate);
 const db = {
-  list: (type, opt = {}) => api('GET', `items/${type}${opt.project != null ? `&project=${opt.project}` : ''}${opt.parent != null ? `&parent=${opt.parent}` : ''}`).then((r) => (type === 'invoice' && !opt.proforma && Array.isArray(r) ? noProforma(r) : r)),
-  many: (types, project) => api('GET', `items&types=${types.join(',')}${project != null ? `&project=${project}` : ''}`).then((r) => { if (r && Array.isArray(r.invoice)) r.invoice = noProforma(r.invoice); return r; }),
+  list: (type, opt = {}) => api('GET', `items/${type}${opt.project != null ? `&project=${opt.project}` : ''}${opt.parent != null ? `&parent=${opt.parent}` : ''}`).then((r) => (type === 'invoice' && !opt.proforma && Array.isArray(r) ? noProforma(r) : type === 'quote' && !opt.estimate && Array.isArray(r) ? noEstimate(r) : r)),
+  many: (types, project) => api('GET', `items&types=${types.join(',')}${project != null ? `&project=${project}` : ''}`).then((r) => { if (r && Array.isArray(r.invoice)) r.invoice = noProforma(r.invoice); if (r && Array.isArray(r.quote)) r.quote = noEstimate(r.quote); return r; }),
   get: (type, id) => api('GET', `items/${type}/${id}`),
   async save(type, it, opt = {}) {
     try {
@@ -241,7 +243,7 @@ const isChef = () => !!(S.me && S.me.role === 'chef' && !S.me.super);
 const CHEF_BLOCK = ['invoices', 'invoice', 'payments', 'progress', 'export', 'stats', 'settings', 'abonnement', 'expenses', 'purchase', 'platform', 'security'];
 const SPACES_CHEF = [
   { k: 'resp', l: 'Pilotage', i: 'chart', h: '#/resp', sec: [['Tableau de bord', '#/resp'], ['Demandes de facture', '#/resp/demandes'], ['Rapports au patron', '#/resp/rapports', '#/resp/rapport/'], ['Tâches', '#/tasks']] },
-  { k: 'works', l: 'Projets', i: 'crane', h: '#/projects', sec: [['Projets / commandes', '#/projects', '#/project/'], ['Rendez-vous / interventions', '#/interventions', '#/intervention/'], ['Commandes fournisseurs', '#/orders/fournisseur', '#/order/'], ['Devis', '#/quotes', '#/quote/']] },
+  { k: 'works', l: 'Projets', i: 'crane', h: '#/projects', sec: [['Projets / commandes', '#/projects', '#/project/'], ['Rendez-vous / interventions', '#/interventions', '#/intervention/'], ['Commandes fournisseurs', '#/orders/fournisseur', '#/order/'], ['Estimatifs', '#/quotes', '#/quote/'], ['Prix et ouvrages', '#/library']] },
   { k: 'crew', l: 'Équipe', i: 'helmet', h: '#/crew', sec: [['Personnes', '#/crew', '#/crew/'], ['Pointage', '#/hr/timesheets'], ['Planning équipe', '#/planning/team'], ['Planning projets', '#/planning/projects'], ['Rapports terrain', '#/reports', '#/report/'], ['Absences', '#/hr/absences']] },
   { k: 'people', l: 'Carnet', i: 'people', h: '#/contacts/client', sec: [['Clients', '#/contacts/client', '#/contact/'], ['Fournisseurs', '#/contacts/fournisseur'], ['Sous-traitants', '#/contacts/soustraitant']] },
 ];

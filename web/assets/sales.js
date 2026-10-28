@@ -266,28 +266,32 @@ route('dossier', async (id) => {
 // ---------------------------------------------------------------- Devis
 async function newQuote(preset = {}) {
   const co = company();
+  // responsable : un estimatif (le bureau le vérifie puis en fait un devis)
+  if (isChef()) preset = { ...preset, estimate: true, estStatus: 'brouillon' };
   const it = await persist('quote', { project_id: preset.projectId || null, data: { status: 'brouillon', date: today(), valid: addDays(today(), num(co.quoteValidity) || 30), ownerId: S.me.id, lines: [], discount: 0, reverse: false, notes: co.quoteNotes || '', ...preset } });
   go(`#/quote/${it.id}`);
 }
 
 route('quotes', async () => {
-  const [quotes, contacts, projects] = await Promise.all([db.list('quote'), db.list('contact'), db.list('project')]);
+  const [all, contacts, projects] = await Promise.all([db.list('quote', { estimate: true }), db.list('contact'), db.list('project')]);
+  const quotes = all.filter((q) => !q.data.estimate); const ests = all.filter((q) => q.data.estimate);
   const sum = (s) => quotes.filter((q) => q.data.status === s).reduce((a, q) => a + totals(q.data).base, 0);
-  const page = layout({ active: 'quotes', icon: 'calc', title: 'Devis', actions: `<button class="btn" data-act="xls">${I.file} Devis depuis Excel / PDF</button><button class="btn primary" data-act="new">${I.plus} Nouveau devis</button>` });
+  const page = layout({ active: 'quotes', icon: 'calc', title: isChef() ? 'Estimatifs' : 'Devis', sub: isChef() ? 'Vous chiffrez, le bureau vérifie et en fait un devis pour le client' : '',
+    actions: `<button class="btn" data-act="xls">${I.file} ${isChef() ? 'Depuis' : 'Devis depuis'} Excel / PDF</button><button class="btn primary" data-act="new">${I.plus} ${isChef() ? 'Nouvel estimatif' : 'Nouveau devis'}</button>` });
   $('[data-act=xls]').onclick = () => quoteFromExcel();
   page.innerHTML = `<div class="kpis">${kpi('À envoyer', money(sum('brouillon')), { sub: `${quotes.filter((q) => q.data.status === 'brouillon').length} devis` })}${kpi('En cours (envoyés)', money(sum('envoye')), { sub: `${quotes.filter((q) => q.data.status === 'envoye').length} devis` })}
     ${kpi('Acceptés', money(sum('accepte')), { cls: 'good', sub: `${quotes.filter((q) => q.data.status === 'accepte').length} devis` })}${kpi('Taux de transformation', `${quotes.filter((q) => ['accepte', 'refuse'].includes(q.data.status)).length ? Math.round(quotes.filter((q) => q.data.status === 'accepte').length / quotes.filter((q) => ['accepte', 'refuse'].includes(q.data.status)).length * 100) : 0} %`)}</div><div id="tbl"></div>`;
   dataTable($('#tbl'), {
-    rows: quotes, state: ui.tbl_quotes || (ui.tbl_quotes = {}), select: { actions: (p) => multiActions('quote', p) },
+    rows: all, state: isChef() ? (ui.tbl_quotes_c || (ui.tbl_quotes_c = { f: 'est' })) : ui.tbl_quotes || (ui.tbl_quotes = {}), select: { actions: (p) => multiActions('quote', p) },
     search: (q) => [q.number, q.data.title, contactName(byId(contacts, q.data.clientId)), (byId(projects, q.project_id) || { data: {} }).data.name].join(' '),
-    filters: { def: '', options: [['', 'Tous'], ...Object.entries(QST).map(([k, [l, c]]) => [k, l, c])], match: (q, f) => q.data.status === f },
+    filters: { def: isChef() ? 'est' : '', options: [['', 'Tous'], ['est', `Estimatifs${ests.filter((q) => q.data.estStatus === 'soumis').length && !isChef() ? ` (${ests.filter((q) => q.data.estStatus === 'soumis').length} à vérifier)` : ''}`, '#0b7285'], ...Object.entries(QST).map(([k, [l, c]]) => [k, l, c])], match: (q, f) => (f === 'est' ? !!q.data.estimate : !q.data.estimate && q.data.status === f) },
     columns: [
-      { l: 'N°', v: (q) => `<b>${esc(q.number)}</b>`, sort: (q) => q.number },
+      { l: 'N°', v: (q) => `<b>${esc(q.number)}</b>${q.data.estimate ? '<br><small class="badge-av">Estimatif</small>' : ''}`, sort: (q) => q.number },
       { l: 'Objet', v: (q) => `${q.data.avenantOf ? `<small class="badge-av">Avenant ${esc(q.data.avenantNo)} · ${esc(q.data.parentNumber || '')}</small> ` : ''}${esc(q.data.title || '')}` },
       { l: 'Client', v: (q) => esc(contactName(byId(contacts, q.data.clientId))) },
       { l: 'Chantier', v: (q) => esc((byId(projects, q.project_id) || { data: {} }).data.name || '') },
       { l: 'Date', v: (q) => fmtDate(q.data.date), sort: (q) => q.data.date },
-      { l: 'Statut', v: (q) => st(QST, q.data.status) },
+      { l: 'Statut', v: (q) => (q.data.estimate ? st(EST_ST, q.data.estStatus || 'brouillon') : st(QST, q.data.status)) },
       { l: '', v: (q) => avatar(+q.data.ownerId || q.created_by) },
       { l: 'Total HT', cls: 'r', v: (q) => `<b>${money(totals(q.data).base)}</b>`, sort: (q) => totals(q.data).base },
     ],
@@ -299,7 +303,7 @@ route('quotes', async () => {
 
 async function quoteHead(q, contacts, projects, onSaved) {
   formModal({
-    title: `Devis ${q.number}`, wide: true, values: { ...q.data, project_id: q.project_id },
+    title: `${q.data.estimate ? 'Estimatif' : 'Devis'} ${q.number}`, wide: true, values: { ...q.data, project_id: q.project_id },
     fields: [
       { name: 'title', label: 'Objet du devis', cls: 'full', required: true },
       { name: 'clientId', label: 'Client', type: 'contact', contacts, kinds: ['client', 'prospect', 'architecte', 'autre'] },
@@ -321,16 +325,38 @@ async function quoteHead(q, contacts, projects, onSaved) {
   });
 }
 
+const EST_ST = { brouillon: ['Estimatif en préparation', '#868e96'], soumis: ['À vérifier par le bureau', '#3b5bdb'], a_revoir: ['À revoir', '#e8590c'] };
+// Estimatif → vrai devis (numéro DEV, statut « À envoyer ») : le responsable est prévenu
+async function estimateToQuote(q) {
+  if (!confirm(`Transformer l'estimatif ${q.number} en devis ?\n\nIl reçoit un numéro de devis. Vérifiez les prix, la marge et les conditions avant de l'envoyer au client.`)) return;
+  const r = await api('POST', 'number/quote'); const d = q.data;
+  d.fromEstimate = { number: q.number, by: q.created_by, at: today() };
+  ['estimate', 'estStatus', 'estNote', 'estSentAt', 'estTotal'].forEach((k) => delete d[k]);
+  Object.assign(d, { status: 'brouillon', date: today(), valid: addDays(today(), num(company().quoteValidity) || 30) });
+  q.number = r.number; await persist('quote', q); toast(`Devis ${q.number} créé depuis l'estimatif`, 4000); render();
+}
+function estBanner(q) {
+  const d = q.data; const s = d.estStatus || 'brouillon';
+  if (isChef()) return `<div class="hint-box est-box"><div class="grow"><b>Estimatif ${st(EST_ST, s)}</b>
+      <div>${s === 'soumis' ? `Envoyé au bureau le ${fmtDate(d.estSentAt)}. Il va le vérifier et en faire un devis pour le client.` : 'Chiffrez les postes. Quand c\'est prêt, envoyez-le au bureau : il le vérifie et en fait un devis.'}</div>
+      ${s === 'a_revoir' && d.estNote ? `<div class="est-note"><b>Remarque du bureau :</b> ${esc(d.estNote)}</div>` : ''}</div>
+    ${s === 'soumis' ? '<button class="btn" data-est="back">Reprendre pour modifier</button>' : '<button class="btn primary" data-est="send">Envoyer au bureau pour vérification</button>'}</div>`;
+  return `<div class="hint-box est-box"><div class="grow"><b>Estimatif préparé par ${esc(userName(q.created_by))}</b> ${st(EST_ST, s)}
+      <div>Vérifiez les quantités, les prix et la marge, puis transformez-le en devis pour l'envoyer au client.</div>${d.estNote ? `<div class="est-note">Votre dernière remarque : ${esc(d.estNote)}</div>` : ''}</div>
+    <button class="btn" data-est="review">Renvoyer avec une remarque</button><button class="btn primary" data-est="convert">Transformer en devis</button></div>`;
+}
 route('quote', async (id) => {
   const q = await db.get('quote', +id);
+  // responsable : les vrais devis en lecture (PDF), ses estimatifs en modification
+  if (isChef() && !q.data.estimate) { location.replace(`#/print/quote/${q.id}`); return; }
   const [contacts, projects, invoices, quotes] = await Promise.all([db.list('contact'), db.list('project'), db.list('invoice'), db.list('quote')]);
   const d = q.data;
   const parent = d.avenantOf ? quotes.find((x) => x.id === +d.avenantOf) : null; const avs = d.avenantOf ? [] : avenantsOf(q, quotes);
   const c = byId(contacts, d.clientId);
   const pr = byId(projects, q.project_id);
   const save = debounce(async () => { try { await persist('quote', q, { silent: true }); $('[data-saved]').textContent = 'Enregistré'; } catch (e) { toast('Erreur : ' + e.message); } }, 800);
-  const page = layout({ active: 'quotes', icon: 'calc', title: d.avenantOf ? `Avenant n° ${d.avenantNo} · ${q.number}` : `Devis ${q.number}`, back: parent ? `#/quote/${parent.id}` : pr ? `#/project/${pr.id}/quotes` : '#/quotes',
-    sub: `${st(QST, d.status)}${parent ? ` <a class="muted" href="#/quote/${parent.id}">au devis ${esc(parent.number)}</a>` : ''} <span class="muted" data-saved></span>`,
+  const page = layout({ active: 'quotes', icon: 'calc', title: d.estimate ? `Estimatif ${q.number}` : d.avenantOf ? `Avenant n° ${d.avenantNo} · ${q.number}` : `Devis ${q.number}`, back: parent ? `#/quote/${parent.id}` : pr ? `#/project/${pr.id}/quotes` : '#/quotes',
+    sub: `${d.estimate ? st(EST_ST, d.estStatus || 'brouillon') : st(QST, d.status)}${d.fromEstimate ? ` <small class="muted">depuis l'estimatif ${esc(d.fromEstimate.number)} de ${esc(userName(+d.fromEstimate.by))}</small>` : ''}${parent ? ` <a class="muted" href="#/quote/${parent.id}">au devis ${esc(parent.number)}</a>` : ''} <span class="muted" data-saved></span>`,
     actions: `<a class="btn" href="#/print/quote/${q.id}">${I.print} PDF</a><button class="btn" data-act="more">${I.more} Actions</button>` });
   const inv = invoices.filter((i) => +i.data.quoteId === q.id);
   page.innerHTML = `<div class="card doc-head" data-act="head">
@@ -340,7 +366,7 @@ route('quote', async (id) => {
       <div><small class="muted">Date · validité</small><b>${fmtDate(d.date)} → ${fmtDate(d.valid)}</b></div>
       <div><small class="muted">Responsable</small><b>${esc(userName(+d.ownerId))}</b></div>
       <button class="btn sm">${I.edit} Modifier</button></div>
-    <div class="status-bar">${Object.entries(QST).map(([k, [l, col]]) => `<button class="${d.status === k ? 'on' : ''}" data-st="${k}" style="--c:${col}">${l}</button>`).join('')}</div>
+    ${d.estimate ? estBanner(q) : ''}<div class="status-bar" ${d.estimate ? 'hidden' : ''}>${Object.entries(QST).map(([k, [l, col]]) => `<button class="${d.status === k ? 'on' : ''}" data-st="${k}" style="--c:${col}">${l}</button>`).join('')}</div>
     ${parent ? `<div class="hint-box">Avenant n° ${esc(d.avenantNo)} au devis <a href="#/quote/${parent.id}">${esc(parent.number)}</a> : postes en plus (ou en moins avec une quantité ou un prix négatif). Une fois <b>accepté</b>, il s'ajoute au marché : les états d'avancement et la facture de solde du devis principal l'incluent.${d.status === 'accepte' ? ` <button class="btn sm primary" data-goea>Faire l'état d'avancement du devis ${esc(parent.number)}</button>` : ''}</div>` : ''}
     <div id="lines"></div>
     ${avs.length ? (() => { const acc = avs.filter((x) => x.data.status === 'accepte'); const tq = totals(d).base; const ta = acc.reduce((t, x) => t + totals(x.data).base, 0);
@@ -368,6 +394,24 @@ route('quote', async (id) => {
       render();
     };
   });
+  $$('[data-est]').forEach((b) => { b.onclick = async () => {
+    await save.flush(); const a = b.dataset.est;
+    if (a === 'convert') return estimateToQuote(q);
+    if (a === 'review') { const v = await ask('Renvoyer l\'estimatif au responsable', [{ name: 'note', label: 'Ce qu\'il doit revoir', type: 'textarea', required: true }], { note: d.estNote || '' }); if (!v) return; Object.assign(d, { estStatus: 'a_revoir', estNote: v.note }); }
+    if (a === 'send') { if (!d.lines.some((l) => l.kind === 'item')) return toast('Ajoutez au moins un poste', 3000); Object.assign(d, { estStatus: 'soumis', estSentAt: today(), estTotal: totals(d).base }); }
+    if (a === 'back') d.estStatus = 'brouillon';
+    await persist('quote', q); toast(a === 'send' ? 'Estimatif envoyé au bureau ✓' : a === 'review' ? 'Renvoyé au responsable' : 'Vous pouvez le modifier', 3000); render();
+  }; });
+  if (d.estimate) {
+    $('[data-act=more]').onclick = () => menuSheet(`Estimatif ${q.number}`, [
+      { label: 'Modifier l\'en-tête (objet, client, projet)', icon: 'edit', run: () => quoteHead(q, contacts, projects, render) },
+      ...(!isChef() ? [{ label: 'Transformer en devis', icon: 'calc', primary: true, run: async () => { await save.flush(); estimateToQuote(q); } }] : []),
+      { label: 'PDF', icon: 'print', run: () => go(`#/print/quote/${q.id}`) },
+      { sep: true },
+      { label: 'Supprimer l\'estimatif', danger: true, icon: 'trash', run: async () => { if (confirm(`Supprimer l'estimatif ${q.number} ?`)) { await db.del('quote', q.id); go('#/quotes'); } } },
+    ]);
+    cleanupView = () => save.flush(); return;
+  }
   $('[data-act=more]').onclick = () => menuSheet(`Devis ${q.number}`, [
     { label: 'Modifier l\'en-tête', icon: 'edit', run: () => quoteHead(q, contacts, projects, render) },
     { label: 'Créer une facture…', icon: 'coins', run: async () => { await save.flush(); invoiceFromQuote(q); } },
