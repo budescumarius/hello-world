@@ -3,7 +3,7 @@
    ou où son équipe a pointé / est planifiée. Il ne fait pas les factures : il indique l'avancement et « demande une facture »
    (type billreq) au bureau, et envoie un rapport (type mgrreport, figé au moment de l'envoi). */
 
-const RESP_PERIODS = [['sem', 'Cette semaine'], ['semp', 'Semaine passée'], ['mois', 'Ce mois'], ['moisp', 'Mois passé'], ['an', 'Cette année']];
+const RESP_PERIODS = [['sem', 'Cette semaine'], ['semp', 'La semaine passée'], ['mois', 'Ce mois'], ['moisp', 'Le mois passé'], ['an', 'Cette année']];
 const BRQ_KIND = { acompte: 'Acompte', avancement: 'État d\'avancement', solde: 'Solde / facture finale', autre: 'Autre' };
 const BRQ_ST = { demandee: ['À facturer', '#e8590c'], facturee: ['Facturée ✓', '#2f9e44'], annulee: ['Annulée', '#868e96'] };
 const chefUsers = () => S.users.filter((u) => u.role === 'chef' && u.active);
@@ -33,7 +33,7 @@ function respPct(p, f, invs) {
 
 // Toutes les données du tableau de bord pour un responsable (uid) ou toute l'entreprise (uid = 0), sur une période
 async function respData(uid, period) {
-  const m = await db.many(['employee', 'project', 'quote', 'invoice', 'order', 'expense', 'timesheet', 'assign', 'absence', 'intervention', 'task', 'billreq', 'contact']);
+  const m = await db.many(['employee', 'project', 'quote', 'invoice', 'order', 'expense', 'timesheet', 'assign', 'absence', 'intervention', 'task', 'billreq', 'contact', 'mgrreport']);
   const [from, to] = respRange(period);
   const active = m.employee.filter((e) => e.data.active !== false);
   let team = uid ? active.filter((e) => +e.data.chefId === uid) : active;
@@ -105,7 +105,7 @@ route('resp', async (sub, id) => {
   const chefs = chefUsers();
   const uid = isChef() ? S.me.id : (q.has('u') ? +q.get('u') : (ui.respU != null ? +ui.respU : (chefs[0] || {}).id || 0));
   if (!isChef() && q.has('u')) { ui.respU = uid; saveUi(); }
-  const period = ui.respP || 'sem';
+  const period = ui.respP && ui.respP !== 'an' ? ui.respP : 'sem';
   const page = layout({ title: isChef() ? 'Mon tableau de bord' : 'Responsables', icon: 'chart', sub: esc(respName(uid)),
     actions: `<button class="btn" data-act="rep">${I.send} ${isChef() ? "Rapport au patron" : "Préparer un rapport"}</button>${isChef() ? `<button class="btn primary" data-act="breq">${I.coins} Demander une facture</button>` : `<a class="btn" href="#/resp/demandes">${I.coins} Demandes de facture</a>`}` });
   page.innerHTML = '<div class="empty">Calcul en cours…</div>';
@@ -113,20 +113,50 @@ route('resp', async (sub, id) => {
   const k = D.k; const [from, to] = [D.from, D.to];
   const lastDay = addDays(today(), -1);
   const gridDays = ['sem', 'semp'].includes(period) ? daysOf(from, to).filter((d) => isWorkday(d) || D.hours.some((t) => t.data.date === d)) : [];
+  // ce qu'il faut faire maintenant, en clair
+  const todo = [];
+  const late = D.people.filter((x) => x.missing.length);
+  late.forEach((x) => todo.push({ tone: 'late', icon: 'clock', t: `${x.e.data.name} n'a pas encodé ses heures`, s: x.missing.map((d) => new Date(d + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric' })).join(', '), btn: ['Voir le pointage', 'href', '#/hr/timesheets'] }));
+  D.rows.filter((r) => r.toBill > 0.5).forEach((r) => todo.push({ tone: 'money', icon: 'coins', t: `${r.p.data.name} : ${money(r.toBill)} à facturer`, s: `${pctTxt(r.pc.v)} du travail fait, ${money(r.f.invoiced)} déjà facturé`, btn: isChef() ? ['Demander la facture', 'breq', r.p.id] : ['Facturer', 'bill', r.p.id] }));
+  D.rows.filter((r) => ['preparation', 'encours', 'reception'].includes(r.p.data.status) && (!r.p.data.progressAt || r.p.data.progressAt < addDays(today(), -7))).forEach((r) => todo.push({ tone: 'todo', icon: 'percent', t: `Où en est « ${r.p.data.name} » ?`, s: r.p.data.progressAt ? `Avancement indiqué le ${fmtDate(r.p.data.progressAt)} : mettez-le à jour` : 'Indiquez le % de travail fait (pour savoir quoi facturer)', btn: ['Indiquer le %', 'pct', r.p.id] }));
+  D.rows.filter((r) => r.p.data.end && r.p.data.end < today() && !['termine', 'annule'].includes(r.p.data.status)).forEach((r) => todo.push({ tone: 'late', icon: 'calendar', t: `« ${r.p.data.name} » devait finir le ${fmtDate(r.p.data.end)}`, s: 'Terminé ? Changez son statut. Sinon, donnez une nouvelle date de fin.', btn: ['Ouvrir', 'href', `#/project/${r.p.id}`] }));
+  D.people.filter((x) => x.h && x.margin < -0.5).forEach((x) => todo.push({ tone: 'late', icon: 'helmet', t: `${x.e.data.name} n'est pas rentable sur la période`, s: `rapporte ${money(x.prod / x.h)}/h mais coûte ${money(x.cost / x.h)}/h`, btn: ['Voir ses heures', 'href', `#/crew/e/${x.e.id}`] }));
+  if (isChef() && !D.m.mgrreport.some((r) => r.created_by === S.me.id && r.data.date >= from)) todo.push({ tone: 'todo', icon: 'send', t: 'Envoyez votre rapport au patron', s: 'Un clic : il reçoit tous ces chiffres en PDF', btn: ['Envoyer le rapport', 'rep', 0] });
+  const gain = k.prod - k.cost;
+  const verdict = (x) => (!x.h ? ['Pas d\'heures', '#868e96'] : x.margin < -0.5 ? ['Pas rentable', '#e5484d'] : x.prod < x.cost * 1.15 ? ['Juste', '#e8590c'] : ['Rentable', '#2f9e44']);
+  const bar = (v, c) => `<div class="meter" style="--c:${c}"><i style="width:${Math.max(0, Math.min(100, v))}%"></i></div>`;
   page.innerHTML = `
     ${isChef() ? '' : `<div class="chips" style="margin-bottom:10px">${[[0, 'Toute l\'entreprise'], ...chefs.map((u) => [u.id, u.name])].map(([v, l]) => `<button class="chip ${v === uid ? 'on' : ''}" data-u="${v}">${esc(l)}</button>`).join('')}
       ${!chefs.length ? '<small class="muted">Aucun responsable : créez son accès dans Paramètres → Utilisateurs (rôle « Responsable d\'équipe / d\'atelier »).</small>' : ''}</div>`}
-    <div class="chips" style="margin-bottom:12px">${RESP_PERIODS.map(([v, l]) => `<button class="chip ${v === period ? 'on' : ''}" data-p="${v}">${l}</button>`).join('')}<small class="muted">du ${fmtDate(from)} au ${fmtDate(to)}</small></div>
+    <div class="chips" style="margin-bottom:12px">${RESP_PERIODS.filter(([v]) => v !== 'an').map(([v, l]) => `<button class="chip ${v === period ? 'on' : ''}" data-p="${v}">${l}</button>`).join('')}</div>
+    ${ui.respHelp ? '' : `<div class="hint-box rs-help"><b>Comment ça marche ?</b><ol><li>L'équipe encode ses heures sur le téléphone, chaque jour, par projet.</li><li>${isChef() ? 'Vous indiquez' : 'Le responsable indique'} le <b>%</b> de travail fait sur chaque projet.</li><li>L'application calcule ce qu'il faut facturer et qui est rentable. ${isChef() ? 'Vous demandez la facture au bureau et envoyez votre rapport.' : 'Vous recevez ses demandes de facture et ses rapports.'}</li></ol><button class="btn sm" data-act="helpok">J'ai compris</button></div>`}
     ${D.noTeam ? `<div class="hint-box" style="margin-bottom:12px">Aucune personne n'est encore rattachée à ${isChef() ? 'vous' : 'ce responsable'} : tout le personnel est affiché. ${isChef() ? 'Demandez au bureau de vous attribuer votre équipe.' : '<button class="btn sm" data-act="team">Choisir son équipe</button>'}</div>` : (!isChef() && uid ? '<div style="margin:-4px 0 10px"><button class="btn sm" data-act="team">Modifier son équipe</button></div>' : '')}
-    <div class="kpis">
-      ${kpi('Heures de l\'équipe', `${fnum(k.hours, 1)} h`, { sub: `coût ${money(k.cost)}${k.missing ? `<br><span style="color:#e5484d;font-weight:700">${k.missing} jour(s) non pointé(s)</span>` : ''}` })}
-      ${kpi('Produit par l\'équipe', money(k.prod), { sub: `marge ${money(k.prod - k.cost)} sur la période` })}
-      ${kpi('À facturer maintenant', `<span style="color:${k.toBill > 0.5 ? '#e8590c' : 'inherit'}">${money(k.toBill)}</span>`, { sub: k.asked ? `${money(k.asked)} déjà demandé au bureau` : 'travail fait, pas encore facturé' })}
-      ${kpi('Reste à facturer', money(k.rest), { sub: 'sur les projets en cours' })}
-      ${kpi('Facturé / encaissé', money(k.invoicedPer), { sub: `encaissé ${money(k.cashedPer)} sur la période` })}
-      ${kpi('Marge des projets', signMoney(k.margin), { sub: 'à ce jour (avancement − coûts)' })}
+    <div class="rs-big">
+      <div class="rs-n"><small>Heures travaillées</small><b>${fnum(k.hours, 1)} h</b><span>${k.missing ? `<em class="bad">${k.missing} jour(s) sans heures</em>` : 'tout le monde a pointé ✓'}</span></div>
+      <div class="rs-n"><small>À facturer maintenant</small><b style="color:${k.toBill > 0.5 ? '#e8590c' : 'inherit'}">${money(k.toBill)}</b><span>${k.toBill > 0.5 ? 'travail fait, pas encore facturé' : k.asked ? `${money(k.asked)} déjà demandé au bureau` : 'rien en attente ✓'}</span></div>
+      <div class="rs-n"><small>${gain < -0.5 ? 'Perdu' : 'Gagné'} ${esc(RESP_PERIODS.find(([v]) => v === period)[1].toLowerCase())}</small><b style="color:${gain < -0.5 ? '#e5484d' : '#2f9e44'}">${money(Math.abs(gain))}</b><span>l'équipe a produit ${money(k.prod)} et coûté ${money(k.cost)}</span></div>
     </div>
-    <div class="card"><div class="card-h"><h3>Projets : avancement et facturation</h3><small class="muted">Touchez le % pour indiquer l'avancement réel</small></div>
+    <div class="card"><div class="card-h"><h3>${todo.length ? `À faire (${todo.length})` : 'À faire'}</h3></div>
+      ${todo.length ? `<div class="rs-todo">${todo.map((x, i) => `<div class="rs-t rs-k-${x.tone}"><span class="rs-ic">${I[x.icon] || ''}</span><span class="grow"><b>${esc(x.t)}</b><small>${esc(x.s)}</small></span><button class="btn sm ${x.tone === 'money' ? 'primary' : ''}" data-todo="${i}">${esc(x.btn[0])}</button></div>`).join('')}</div>` : '<div class="empty sm">Tout est en ordre 👍</div>'}</div>
+    <div class="card"><div class="card-h"><h3>Projets</h3></div>
+      ${D.rows.length ? `<div class="rs-cards">${D.rows.sort((a, b) => b.toBill - a.toBill).map((r) => `<div class="rs-card">
+        <a href="#/project/${r.p.id}" class="rs-ct"><b>${esc(r.p.data.name)}</b><small>${esc(r.client !== '—' ? r.client : '')}${r.p.data.end ? ` · fin ${fmtDate(r.p.data.end)}` : ''}</small></a>
+        <div class="rs-line"><span>Travail fait</span><button class="btn sm" data-pct="${r.p.id}">${pctTxt(r.pc.v)} ${I.edit}</button></div>${bar(r.pc.v, '#1c2550')}
+        ${r.f.budget ? `<div class="rs-line"><span>Facturé</span><b>${money(r.f.invoiced)} <small class="muted">sur ${money(r.f.budget)}</small></b></div>${bar(r.f.invoiced / r.f.budget * 100, '#2f9e44')}
+        <div class="rs-line"><span>${r.margin < -0.5 ? 'Perte' : 'Bénéfice'} à ce jour</span><b style="color:${r.margin < -0.5 ? '#e5484d' : '#2f9e44'}">${money(Math.abs(r.margin))}</b></div>`
+    : `<div class="rs-line"><small class="muted">Pas encore de devis accepté : le bénéfice sera calculé dès qu'il y en a un. Dépensé : ${money(r.f.real)} · ${fnum(r.f.hours, 1)} h</small></div>`}
+        ${r.toBill > 0.5 ? `<button class="btn primary rs-go" data-${isChef() ? 'breq' : 'bill'}="${r.p.id}">${isChef() ? `Demander la facture : ${money(r.toBill)}` : `Facturer ${money(r.toBill)}`}</button>` : r.asked ? `<div class="rs-line"><small class="muted">${money(r.asked)} demandé au bureau, en attente</small></div>` : ''}
+      </div>`).join('')}</div>` : '<div class="empty sm">Aucun projet en cours.</div>'}</div>
+    <div class="card"><div class="card-h"><h3>L'équipe</h3><a class="btn sm" href="#/hr/timesheets">Toutes les heures</a></div>
+      ${D.people.length ? `<div class="rs-people">${D.people.sort((a, b) => b.margin - a.margin).map((x) => { const v = verdict(x); return `<a class="rs-p" href="#/crew/e/${x.e.id}"><span class="grow"><b>${esc(x.e.data.name)}</b><small>${fnum(x.h, 1)} h${x.h ? ` · rapporte ${money(x.prod / x.h)}/h, coûte ${money(x.cost / x.h)}/h` : ''}</small></span>${badge(v[0], v[1])}</a>`; }).join('')}</div>` : '<div class="empty sm">Personne dans l\'équipe.</div>'}
+      ${gridDays.length ? `<div class="dt-body rs-grid" style="margin-top:12px"><table class="dt resp-grid"><thead><tr><th>Heures par jour</th>${gridDays.map((d) => `<th class="r">${new Date(d + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'short', day: 'numeric' })}</th>`).join('')}<th class="r">Total</th></tr></thead><tbody>
+      ${D.people.map((x) => `<tr><td data-l="Personne"><b>${esc(x.e.data.name)}</b></td>${gridDays.map((d) => { const h = D.hours.filter((t) => +t.data.employeeId === x.e.id && t.data.date === d).reduce((a, t) => a + num(t.data.hours), 0); const abs = D.m.absence.some((a) => +a.data.employeeId === x.e.id && a.data.from <= d && a.data.to >= d);
+        return `<td class="r" data-l="${fmtDate(d)}">${h ? `<b>${fnum(h, 1)}</b>` : abs ? '<small class="muted">absent</small>' : d <= lastDay && isWorkday(d) ? '<b style="color:#e5484d">✗</b>' : '<span class="muted">·</span>'}</td>`; }).join('')}<td class="r" data-l="Total"><b>${fnum(x.h, 1)} h</b></td></tr>`).join('')}</tbody></table></div>` : ''}</div>
+    <div class="card"><div class="card-h"><h3>Les 14 prochains jours</h3><a class="btn sm" href="#/planning/team">Planning</a></div>
+      ${D.ag.length ? `<div class="rows">${D.ag.map((x, i) => `${i === 0 || D.ag[i - 1].d !== x.d ? `<div class="mo-h" style="margin:10px 0 2px"><b>${esc(new Date(x.d + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric', month: 'long' }))}</b></div>` : ''}<a class="row" href="${x.h}"><span>${I[x.icon] || ''}</span><span class="grow"><b>${x.t ? `${esc(x.t)} · ` : ''}${esc(x.l)}</b>${x.s ? `<small class="muted">${esc(x.s)}</small>` : ''}</span></a>`).join('')}</div>` : '<div class="empty sm">Rien de planifié.</div>'}</div>
+    <details class="card rs-more"${ui.respMore ? ' open' : ''}><summary><b>Voir tous les chiffres</b> <small class="muted">tableaux détaillés : montants, encaissé, coûts, heures</small></summary>
+      <div class="kpis" style="margin-top:12px">${kpi('Reste à facturer', money(k.rest), { sub: 'sur les projets en cours' })}${kpi('Facturé sur la période', money(k.invoicedPer), { sub: `encaissé ${money(k.cashedPer)}` })}${kpi('Bénéfice des projets', signMoney(k.margin), { sub: 'à ce jour' })}</div>
+    <h3 class="mo-h">Projets</h3>
       ${D.rows.length ? `<div class="dt-body"><table class="dt"><thead><tr><th>Projet</th><th>Période</th><th class="r">Avancement</th><th class="r">Montant HT</th><th class="r">Facturé HT</th><th class="r">Encaissé</th><th class="r">À facturer</th><th class="r">Heures</th><th class="r">Coûts</th><th class="r">Marge</th><th></th></tr></thead><tbody>
         ${D.rows.sort((a, b) => b.toBill - a.toBill).map((r) => `<tr><td data-l="Projet"><a href="#/project/${r.p.id}"><b>${esc(r.p.data.name)}</b></a><br><small class="muted">${esc(r.client !== '—' ? r.client : '')} ${st(PST, r.p.data.status)}</small></td>
           <td data-l="Période"><small>${r.p.data.start ? fmtDate(r.p.data.start) : '—'} → ${r.p.data.end ? `<span style="color:${r.p.data.end < today() && r.p.data.status !== 'termine' ? '#e5484d' : 'inherit'}">${fmtDate(r.p.data.end)}</span>` : '—'}</small></td>
@@ -134,23 +164,24 @@ route('resp', async (sub, id) => {
           <td data-l="Montant HT" class="r">${money(r.f.budget)}</td><td data-l="Facturé HT" class="r">${money(r.f.invoiced)}</td><td data-l="Encaissé" class="r">${money(r.f.cashed)}</td>
           <td data-l="À facturer" class="r">${r.toBill > 0.5 ? `<b style="color:#e8590c">${money(r.toBill)}</b>` : '—'}${r.asked ? `<br><small class="muted">${money(r.asked)} demandé</small>` : ''}</td>
           <td data-l="Heures" class="r">${fnum(r.f.hours, 1)} h${r.hPer ? `<br><small class="muted">${fnum(r.hPer, 1)} h période</small>` : ''}</td><td data-l="Coûts" class="r">${money(r.f.real)}</td><td data-l="Marge" class="r">${signMoney(r.margin)}</td>
-          <td>${r.toBill > 0.5 && isChef() ? `<button class="btn sm primary" data-breq="${r.p.id}">Demander</button>` : r.toBill > 0.5 ? `<button class="btn sm primary" data-bill="${r.p.id}">Facturer</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty sm">Aucun projet en cours.</div>'}</div>
-    ${gridDays.length ? `<div class="card"><div class="card-h"><h3>Pointage de la semaine</h3><a class="btn sm" href="#/hr/timesheets">Tout le pointage</a></div><div class="dt-body"><table class="dt resp-grid"><thead><tr><th>Personne</th>${gridDays.map((d) => `<th class="r">${new Date(d + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'short', day: 'numeric' })}</th>`).join('')}<th class="r">Total</th></tr></thead><tbody>
-      ${D.people.map((x) => `<tr><td data-l="Personne"><a href="#/crew/e/${x.e.id}"><b>${esc(x.e.data.name)}</b></a></td>${gridDays.map((d) => { const h = D.hours.filter((t) => +t.data.employeeId === x.e.id && t.data.date === d).reduce((a, t) => a + num(t.data.hours), 0); const abs = D.m.absence.some((a) => +a.data.employeeId === x.e.id && a.data.from <= d && a.data.to >= d);
-        return `<td class="r" data-l="${fmtDate(d)}">${h ? `<b>${fnum(h, 1)}</b>` : abs ? '<small class="muted">absent</small>' : d <= lastDay && isWorkday(d) ? '<b style="color:#e5484d">0</b>' : '<span class="muted">·</span>'}</td>`; }).join('')}<td class="r" data-l="Total"><b>${fnum(x.h, 1)} h</b></td></tr>`).join('')}</tbody></table></div></div>` : ''}
-    <div class="card"><div class="card-h"><h3>Rentabilité par personne</h3><small class="muted">${esc(RESP_PERIODS.find(([v]) => v === period)[1])}</small></div>
+          <td>${r.toBill > 0.5 && isChef() ? `<button class="btn sm primary" data-breq="${r.p.id}">Demander</button>` : r.toBill > 0.5 ? `<button class="btn sm primary" data-bill="${r.p.id}">Facturer</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    <h3 class="mo-h">Rentabilité par personne</h3>
       ${D.people.length ? `<div class="dt-body"><table class="dt"><thead><tr><th>Personne</th><th class="r">Heures</th><th class="r">Occupation</th><th class="r">Coût</th><th class="r">Produit</th><th class="r">Marge</th><th class="r">Produit / h</th><th>Projets</th></tr></thead><tbody>
         ${D.people.sort((a, b) => b.margin - a.margin).map((x) => `<tr><td data-l="Personne"><a href="#/crew/e/${x.e.id}"><b>${esc(x.e.data.name)}</b></a>${x.missing.length ? `<br><small style="color:#e5484d">${x.missing.length} jour(s) sans heures</small>` : ''}</td>
           <td data-l="Heures" class="r">${fnum(x.h, 1)} h${x.loose ? `<br><small class="muted">${fnum(x.loose, 1)} h hors projet</small>` : ''}</td><td data-l="Occupation" class="r">${x.expected ? pctTxt(x.h / x.expected * 100) : '—'}</td>
           <td data-l="Coût" class="r">${money(x.cost)}</td><td data-l="Produit" class="r">${money(x.prod)}</td><td data-l="Marge" class="r"><b>${signMoney(x.margin)}</b></td><td data-l="Produit / h" class="r">${x.h ? `${money(x.prod / x.h)}<br><small class="muted">coût ${money(x.cost / x.h)}</small>` : '—'}</td>
           <td data-l="Projets"><small>${Object.entries(x.byP).sort((a, b) => b[1] - a[1]).map(([pid, h]) => `${esc(+pid ? (byId(D.m.project, +pid) || { data: { name: '?' } }).data.name : 'hors projet')} ${fnum(h, 1)} h`).join(' · ') || '—'}</small></td></tr>`).join('')}</tbody></table></div>
-        <p class="muted sm" style="margin-top:8px">Produit = heures × valeur d'une heure sur chaque projet (montant réalisé selon l'avancement, moins les achats, divisé par toutes les heures du projet). Coût = heures × coût horaire chargé de la fiche. Une marge négative : le projet consomme plus d'heures que prévu.</p>` : '<div class="empty sm">Personne dans l\'équipe.</div>'}</div>
-    <div class="card"><div class="card-h"><h3>Planning et rendez-vous – 14 prochains jours</h3><a class="btn sm" href="#/planning/team">Planning de l'équipe</a></div>
-      ${D.ag.length ? `<div class="rows">${D.ag.map((x, i) => `${i === 0 || D.ag[i - 1].d !== x.d ? `<div class="mo-h" style="margin:10px 0 2px"><b>${esc(new Date(x.d + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric', month: 'long' }))}</b></div>` : ''}<a class="row" href="${x.h}"><span>${I[x.icon] || ''}</span><span class="grow"><b>${x.t ? `${esc(x.t)} · ` : ''}${esc(x.l)}</b>${x.s ? `<small class="muted">${esc(x.s)}</small>` : ''}</span></a>`).join('')}</div>` : '<div class="empty sm">Rien de planifié.</div>'}</div>`;
+        <p class="muted sm" style="margin-top:8px">Produit = heures × valeur d'une heure sur chaque projet (montant réalisé selon l'avancement, moins les achats, divisé par toutes les heures du projet). Coût = heures × coût horaire chargé de la fiche. Une marge négative : le projet consomme plus d'heures que prévu.</p>` : '<div class="empty sm">Personne dans l\'équipe.</div>'}
+    </details>`;
+  const td = $('[data-act=helpok]', page); if (td) td.onclick = () => { ui.respHelp = 1; saveUi(); render(); };
+  const more = $('.rs-more', page); if (more) more.ontoggle = () => { ui.respMore = more.open; saveUi(); };
+  $$('[data-todo]', page).forEach((b) => { b.onclick = () => { const [, a, v] = todo[+b.dataset.todo].btn; if (a === 'href') go(v); if (a === 'pct') respSetPct(byId(D.projects, v)); if (a === 'rep') respNewReport(uid);
+    if (a === 'breq') { const r = D.rows.find((x) => x.p.id === v); billRequest(r.p, { amount: r2(r.toBill), pct: r2(r.pc.v), budget: r.f.budget, invoiced: r.f.invoiced + r.asked }); }
+    if (a === 'bill') respBill(D.rows.find((x) => x.p.id === v)); }; });
   $$('[data-u]', page).forEach((b) => { b.onclick = () => go(`#/resp?u=${b.dataset.u}`); });
   $$('[data-p]', page).forEach((b) => { b.onclick = () => { ui.respP = b.dataset.p; saveUi(); render(); }; });
   $$('[data-pct]', page).forEach((b) => { b.onclick = () => respSetPct(byId(D.projects, +b.dataset.pct)); });
-  $$('[data-breq]', page).forEach((b) => { b.onclick = () => { const r = D.rows.find((x) => x.p.id === +b.dataset.breq); billRequest(r.p, { amount: r2(r.toBill), pct: r2(r.pc.v) }); }; });
+  $$('[data-breq]', page).forEach((b) => { b.onclick = () => { const r = D.rows.find((x) => x.p.id === +b.dataset.breq); billRequest(r.p, { amount: r2(r.toBill), pct: r2(r.pc.v), budget: r.f.budget, invoiced: r.f.invoiced + r.asked }); }; });
   $$('[data-bill]', page).forEach((b) => { b.onclick = () => respBill(D.rows.find((x) => x.p.id === +b.dataset.bill)); });
   $('[data-act=rep]').onclick = () => respNewReport(uid);
   const br = $('[data-act=breq]'); if (br) br.onclick = () => billRequest();
@@ -158,7 +189,7 @@ route('resp', async (sub, id) => {
 });
 
 async function respSetPct(p) {
-  const v = await ask(`Avancement – ${p.data.name}`, [{ name: 'pct', label: 'Travail réellement fait (%)', type: 'percent', required: true, hint: 'Sert à calculer ce qui est à facturer et la rentabilité. Laissez vide pour revenir au calcul automatique.' }], { pct: p.data.progress ?? '' });
+  const v = await ask(`Avancement – ${p.data.name}`, [{ name: 'pct', label: 'Combien du travail est fait ? (%)', type: 'percent', required: true, hint: 'Ex. : 50 = la moitié est faite. Sert à savoir quoi facturer et si le projet gagne de l\'argent.' }], { pct: p.data.progress ?? '' });
   if (!v) return;
   if (v.pct === '' || v.pct == null) delete p.data.progress; else p.data.progress = Math.max(0, Math.min(100, num(v.pct)));
   p.data.progressAt = today(); p.data.progressBy = S.me.id;
@@ -183,19 +214,17 @@ function respTeamPicker(uid, employees) {
 // ---------------------------------------------------------------- Demandes de facture (responsable → bureau)
 async function billRequest(p, pre = {}) {
   const projects = p ? [p] : (await db.list('project')).filter((x) => ['preparation', 'encours', 'reception', 'termine'].includes(x.data.status));
-  const v = await ask('Demander une facture au bureau', [
-    ...(p ? [] : [{ name: 'pid', label: 'Projet', type: 'select', required: true, options: [['', '— choisir —'], ...projects.map((x) => [x.id, x.data.name])] }]),
-    { name: 'kind', label: 'Type de facture', type: 'select', options: Object.entries(BRQ_KIND) },
-    { name: 'pct', label: 'Avancement réel du projet (%)', type: 'percent' },
-    { name: 'amount', label: 'Montant à facturer HT (€)', type: 'money', required: true },
-    { name: 'note', label: 'Ce qui a été fait / précisions pour le bureau', type: 'textarea' },
-  ], { kind: pre.pct >= 99.5 ? 'solde' : 'avancement', ...pre });
+  const calc = pre.budget ? `Calcul : ${pctTxt(pre.pct)} de ${money(pre.budget)} = ${money(pre.budget * pre.pct / 100)}, moins ${money(pre.invoiced)} déjà facturé.` : 'Le montant hors TVA que le bureau doit facturer au client.';
+  const v = await ask(p ? `Demander une facture – ${p.data.name}` : 'Demander une facture au bureau', [
+    ...(p ? [] : [{ name: 'pid', label: 'Quel projet ?', type: 'select', required: true, options: [['', '— choisir —'], ...projects.map((x) => [x.id, x.data.name])] }]),
+    { name: 'amount', label: 'Montant à facturer (hors TVA)', type: 'money', required: true, hint: calc },
+    { name: 'note', label: 'Qu\'est-ce qui a été fait ? (facultatif)', type: 'textarea', placeholder: 'Ex. : meubles de cuisine posés, reste le plan de travail' },
+  ], pre);
   if (!v) return;
   const pid = p ? p.id : +v.pid; if (!pid) return toast('Choisissez le projet', 3000);
   if (!(num(v.amount) > 0)) return toast('Indiquez le montant à facturer', 3000);
-  const proj = p || byId(projects, pid);
-  if (v.pct !== '' && v.pct != null && proj) { proj.data.progress = Math.max(0, Math.min(100, num(v.pct))); proj.data.progressAt = today(); proj.data.progressBy = S.me.id; await persist('project', proj, { silent: true }); }
-  await persist('billreq', { project_id: pid, data: { date: today(), kind: v.kind, amount: r2(num(v.amount)), pct: v.pct === '' ? null : num(v.pct), note: v.note || '', status: 'demandee', by: S.me.id } });
+  const pct = pre.pct != null ? num(pre.pct) : null;
+  await persist('billreq', { project_id: pid, data: { date: today(), kind: pct != null && pct >= 99.5 ? 'solde' : pct != null ? 'avancement' : 'autre', amount: r2(num(v.amount)), pct, note: v.note || '', status: 'demandee', by: S.me.id } });
   toast('Demande envoyée au bureau ✓', 3000); render();
 }
 // bureau : faire la facture demandée (liée à la demande : elle passe « facturée » quand la facture est soumise)
@@ -250,10 +279,11 @@ async function respRequests() {
 
 // ---------------------------------------------------------------- Rapport au patron (figé à l'envoi)
 async function respNewReport(uid) {
-  const v = await ask('Rapport au patron', [
-    { name: 'period', label: 'Période', type: 'select', options: RESP_PERIODS },
-    { name: 'comment', label: 'Commentaire (problèmes, besoins, retards, matériel…)', type: 'textarea' },
-  ], { period: ui.respP === 'sem' && new Date().getDay() === 1 ? 'semp' : ui.respP || 'sem' });
+  const per = ui.respP && ui.respP !== 'an' ? ui.respP : 'sem';
+  const v = await ask(`Rapport – ${RESP_PERIODS.find(([x]) => x === per)[1].toLowerCase()}`, [
+    { name: 'comment', label: 'Un message pour le patron ? (facultatif)', type: 'textarea', placeholder: 'Problèmes, retards, matériel à commander…', hint: 'Le rapport contient automatiquement les heures, les projets, ce qu\'il faut facturer et le planning.' },
+  ]);
+  if (v) v.period = per;
   if (!v) return;
   const D = await respData(uid, v.period);
   const title = `${respName(uid)} – ${RESP_PERIODS.find(([x]) => x === v.period)[1].toLowerCase()} (${fmtDate(D.from)} → ${fmtDate(D.to)})`;
