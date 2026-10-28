@@ -107,11 +107,14 @@ function projectFinance(p, all) {
 route('project', async (id, tab = 'overview', sub) => {
   const p = await db.get('project', +id);
   if (tab === 'plan' && sub) return viewPlan(p, +sub);
-  const tabs = isSimple() ? PTABS.filter(([k]) => ['overview', 'quotes', 'invoices', 'expenses', 'contracts', 'documents'].includes(k)) : isChef() ? PTABS.filter(([k]) => !['invoices', 'progress', 'expenses', 'contracts'].includes(k)) : PTABS;
+  // responsable : sa page simple du projet ; ici seulement plans, points, rapports, documents, planning, heures
+  const CHEF_TABS = ['plans', 'points', 'reports', 'documents', 'planning', 'hours'];
+  if (isChef() && !CHEF_TABS.includes(tab)) { location.replace(`#/resp/p/${id}`); return; }
+  const tabs = isSimple() ? PTABS.filter(([k]) => ['overview', 'quotes', 'invoices', 'expenses', 'contracts', 'documents'].includes(k)) : isChef() ? PTABS.filter(([k]) => CHEF_TABS.includes(k)) : PTABS;
   if (!tabs.some(([k]) => k === tab)) tab = 'overview';
   const contacts = await db.list('contact');
   const c = byId(contacts, p.data.clientId);
-  const page = layout({ active: 'projects', icon: 'crane', title: p.data.name, back: '#/projects',
+  const page = layout({ active: 'projects', icon: 'crane', title: p.data.name, back: isChef() ? `#/resp/p/${p.id}` : '#/projects',
     sub: `${esc(p.number)} · ${st(PST, p.data.status)}${c ? ` · <a href="#/contact/${c.id}">${esc(contactName(c))}</a>` : ''}${p.data.city ? ' · ' + esc(p.data.city) : ''}`,
     actions: `<button class="btn" data-act="sum">${I.print} Résumé</button><button class="btn" data-act="edit">${I.edit} Modifier</button><button class="btn primary" data-act="padd">${I.plus} Ajouter…</button>`,
     tabs: tabs.map(([k, l, g], i) => `${g && g !== (tabs[i - 1] || [])[2] ? `<span class="tab-g">${g}</span>` : ''}<a href="#/project/${p.id}/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
