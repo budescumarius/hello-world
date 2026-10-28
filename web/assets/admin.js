@@ -20,8 +20,20 @@ route('hr', async (sub = 'staff') => {
       { name: 'skills', label: 'Compétences / certificats (VCA, permis…)', cls: 'full' },
       { name: 'color', label: 'Couleur (planning)', type: 'color' },
       { name: 'active', label: 'Actif', type: 'check' }, { name: 'notes', label: 'Notes', type: 'textarea', cls: 'full' },
+      // accès pour pointer sur le téléphone, créé ici (sans passer par Paramètres → Utilisateurs)
+      ...(s && s.data.userId ? [] : [{ name: 'acc', type: 'html', cls: 'full', html: '<div class="hint-box"><b>Pointer sur le téléphone</b> (facultatif) : donnez-lui un email et un mot de passe. Il encode ses heures chaque jour, par projet, et son responsable les voit tout de suite.</div>' },
+        { name: 'accEmail', label: 'Email pour se connecter', type: 'email' }, { name: 'accPass', label: 'Mot de passe (8 caractères min.)', type: 'password' }]),
     ],
-    async onSave(v) { const it = s || { data: {} }; it.data = { ...it.data, ...v }; await persist('employee', it); render(); },
+    async onSave(v) {
+      const accEmail = (v.accEmail || '').trim(); const accPass = v.accPass || ''; delete v.accEmail; delete v.accPass; delete v.acc;
+      if (accEmail && accPass.length < 8) throw new Error('Mot de passe : 8 caractères minimum');
+      const it = s || { data: {} }; it.data = { ...it.data, ...v }; const saved = await persist('employee', it);
+      if (accEmail) {
+        await api('POST', 'users', { name: v.name, email: accEmail, password: accPass, role: 'ouvrier', color: v.color || '#3f7a68', link: { employeeId: (saved || it).id } });
+        toast(`Accès créé : ${v.name} se connecte avec ${accEmail} et pointe ses heures sur le téléphone`, 6000);
+      }
+      render();
+    },
     onDelete: s ? async () => { await db.del('employee', s.id); render(); } : null,
   });
   dataTable(page, {
@@ -344,25 +356,32 @@ async function settingsUsers(page) {
   const linkOf = (u) => ({ employeeId: (staff.find((e) => +e.data.userId === u.id) || {}).id || '', contactId: (subs.find((c) => +c.data.userId === u.id) || {}).id || '' });
   const edit = (u) => {
     const m = formModal({
-      title: u ? u.name : 'Nouvel accès', values: u ? { ...u, active: !!u.active, ...linkOf(u) } : { role: 'user', color: '#' + Math.floor(Math.random() * 0xbbbbbb + 0x222222).toString(16).padStart(6, '0'), active: true },
+      title: u ? u.name : 'Nouvel accès', values: u ? { ...u, active: !!u.active, ...linkOf(u), team: staff.filter((e) => +e.data.chefId === u.id).map((e) => e.id) } : { role: 'user', color: '#' + Math.floor(Math.random() * 0xbbbbbb + 0x222222).toString(16).padStart(6, '0'), active: true },
       fields: [{ name: 'name', label: 'Nom', required: true }, { name: 'email', label: 'Email (identifiant)', type: 'email', required: true },
         { name: 'role', label: 'Rôle', type: 'select', options: [['user', 'Bureau (accès complet)'], ['admin', 'Administrateur'], ['chef', 'Responsable d\'équipe / d\'atelier (sans facturation)'], ['ouvrier', 'Ouvrier / employé (espace terrain)'], ['soustraitant', 'Sous-traitant (espace terrain)']] }, { name: 'color', label: 'Couleur', type: 'color' },
         { name: 'employeeId', label: 'Fiche du personnel (RH)', type: 'select', options: [['', staff.length ? '— choisir —' : '— ajoutez-le d\'abord dans RH → Personnel —'], ...staff.map((e) => [e.id, e.data.name])], cls: 'full', hint: 'Ses heures, ses affectations et les phases où il est prévu viennent de cette fiche.' },
         { name: 'contactId', label: 'Fiche du sous-traitant (Carnet)', type: 'select', options: [['', subs.length ? '— choisir —' : '— ajoutez-le d\'abord dans Carnet → Sous-traitants —'], ...subs.map((c) => [c.id, contactName(c)])], cls: 'full', hint: 'Il voit les chantiers où il est prévu, ses bons de commande (envoyés) et leur statut de facturation.' },
         { name: 'info', type: 'html', cls: 'full', html: '<div class="s-info" data-fi>Espace terrain : il voit uniquement ses chantiers, encode ses heures, envoie des rapports et des photos, lit les rapports que vous lui envoyez et son planning. Il ne voit ni prix, ni devis, ni factures, ni clients.</div>' },
+        { name: 'team', label: 'Son équipe : les personnes dont il est responsable', type: 'multi', options: staff.filter((e) => e.data.active !== false).map((e) => [e.id, e.data.name]), cls: 'full', hint: staff.length ? 'Il verra leurs heures, leur planning et leur rentabilité' : 'Ajoutez d\'abord les personnes dans Équipe → Personnel (RH)' },
         { name: 'password', label: u ? 'Nouveau mot de passe (laisser vide pour ne pas changer)' : 'Mot de passe (8 caractères min.)', type: 'password', required: !u },
         ...(u && u.id !== S.me.id ? [{ name: 'active', label: 'Compte actif', type: 'check' }] : []),
         ...(u && u.id !== S.me.id && u.has2fa ? [{ name: 'reset2fa', label: 'Téléphone perdu : retirer sa validation en deux étapes (il pourra la réactiver)', type: 'check', cls: 'full' }] : [])],
       async onSave(v) {
         if (v.role === 'ouvrier' && !v.employeeId) throw new Error('Choisissez sa fiche du personnel (RH → Personnel)');
         if (v.role === 'soustraitant' && !v.contactId) throw new Error('Choisissez la fiche du sous-traitant');
-        const body = { ...v, link: { employeeId: +v.employeeId || 0, contactId: +v.contactId || 0 } }; delete body.employeeId; delete body.contactId; delete body.info;
-        if (u) await api('PUT', `users/${u.id}`, body); else await api('POST', 'users', body);
+        const body = { ...v, link: { employeeId: +v.employeeId || 0, contactId: +v.contactId || 0 } }; delete body.employeeId; delete body.contactId; delete body.info; delete body.team;
+        const r = u ? await api('PUT', `users/${u.id}`, body) : await api('POST', 'users', body);
+        // responsable : son équipe = fiches du personnel qui le désignent comme « Responsable »
+        const uid = u ? u.id : +(r && r.id);
+        if (uid) for (const e of staff) {
+          const want = v.role === 'chef' && (v.team || []).map(Number).includes(e.id); const has = +e.data.chefId === uid;
+          if (want !== has) { if (want) e.data.chefId = uid; else delete e.data.chefId; await persist('employee', e, { silent: true }); }
+        }
         toast(u ? 'Accès modifié' : 'Accès créé – communiquez-lui son email et son mot de passe', 4000); render();
       },
     });
     const form = $('form', m.el); const role = $('[name=role]', form);
-    const sync = () => { const r = role.value; $('[name=employeeId]', form).closest('.field').hidden = r !== 'ouvrier'; $('[name=contactId]', form).closest('.field').hidden = r !== 'soustraitant'; $('[data-fi]', form).closest('.field').hidden = !['ouvrier', 'soustraitant'].includes(r); };
+    const sync = () => { const r = role.value; $('[name=employeeId]', form).closest('.field').hidden = r !== 'ouvrier'; $('[name=contactId]', form).closest('.field').hidden = r !== 'soustraitant'; $('[data-multi=team]', form).closest('.field').hidden = r !== 'chef'; $('[data-fi]', form).closest('.field').hidden = !['ouvrier', 'soustraitant'].includes(r); };
     role.addEventListener('change', sync); sync();
     // nom et email repris de la fiche choisie
     const fill = (sel, list, name, email) => { $(sel, form).addEventListener('change', (e) => { const x = byId(list, +e.target.value); if (!x) return; const n = $('[name=name]', form); const em = $('[name=email]', form); if (!n.value) n.value = name(x); if (!em.value && email(x)) em.value = email(x); }); };
