@@ -1920,3 +1920,43 @@ mark.ct-todo { background: #ffe8a3; color: inherit; padding: 0 3px; border-radiu
 /* Estimatif du responsable : bandeau au-dessus des postes */
 .est-box { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 .est-box .grow { min-width: 220px; } .est-note { margin-top: 6px; padding: 6px 10px; border-radius: 8px; background: #fff4e6; color: #a34700; }
+
+/* Pointage en 2 touches (ouvriers) : très grand, une question par écran */
+.pp-hello { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0 14px; }
+.pp-hello b { display: block; font-size: 24px; } .pp-hello span { color: var(--muted); text-transform: capitalize; }
+.pp-lang { border: 1.5px solid var(--border); background: var(--surface); border-radius: 12px; padding: 10px 12px; font-weight: 800; font-size: 15px; }
+.pp-ask { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 26px 16px; border-radius: 22px; border: 0; background: var(--navy, #1c2550); color: #fff; box-shadow: 0 6px 0 var(--ochre, #e2a12b); margin-bottom: 18px; }
+.pp-ask b { font-size: 24px; line-height: 1.2; text-align: center; } .pp-ask small { opacity: .8; font-size: 15px; }
+.pp-ask-ic svg { width: 44px; height: 44px; }
+.pp-today { display: flex; align-items: center; gap: 12px; padding: 16px; border-radius: 18px; background: #ebfbee; border: 2px solid #2f9e44; margin-bottom: 10px; }
+.pp-today b { display: block; font-size: 20px; } .pp-today small { color: #2b6b3a; }
+.pp-more { width: 100%; padding: 16px; border-radius: 16px; border: 2px dashed var(--border); background: var(--surface); font-weight: 700; font-size: 17px; margin-bottom: 14px; }
+.pp-miss { width: 100%; display: flex; flex-direction: column; gap: 2px; padding: 16px; border-radius: 16px; border: 2px solid #e8590c; background: #fff4e6; color: #a34700; margin-bottom: 14px; text-align: left; }
+.pp-miss b { font-size: 18px; }
+.pp-check { display: grid; place-items: center; width: 84px; height: 84px; border-radius: 50%; background: #2f9e44; color: #fff; font-size: 48px; font-weight: 900; margin: 10px auto; }
+.pp-check.sm { width: 40px; height: 40px; font-size: 24px; margin: 0; flex: 0 0 auto; }
+.modal.pp-modal { max-width: 560px; }
+.pp { padding: 14px 16px 24px; display: flex; flex-direction: column; gap: 12px; }
+.pp-top { display: flex; align-items: center; gap: 12px; }
+.pp-x { width: 52px; height: 52px; border-radius: 14px; border: 1.5px solid var(--border); background: var(--surface); font-size: 22px; font-weight: 800; flex: 0 0 auto; }
+.pp-where { font-size: 18px; }
+.pp-q { font-size: 26px; line-height: 1.2; margin: 6px 0; text-align: center; }
+.pp-sites { display: flex; flex-direction: column; gap: 10px; }
+.pp-site { display: flex; align-items: center; gap: 14px; padding: 18px 16px; border-radius: 18px; border: 2px solid var(--border); background: var(--surface); text-align: left; border-left: 10px solid var(--c); min-height: 76px; }
+.pp-site b { display: block; font-size: 20px; } .pp-site small { color: var(--muted); font-size: 15px; }
+.pp-site.now { border-color: #2f9e44; border-left-color: #2f9e44; background: #ebfbee; } .pp-site.now small { color: #2b6b3a; font-weight: 700; }
+.pp-site.other { border-style: dashed; border-left: 2px dashed var(--border); }
+.pp-ic svg { width: 30px; height: 30px; }
+.pp-hours { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.pp-h { height: 74px; border-radius: 18px; border: 2px solid var(--border); background: var(--surface); font-size: 30px; font-weight: 800; }
+.pp-h.def { background: var(--navy, #1c2550); color: #fff; border-color: var(--navy, #1c2550); }
+.pp-halves { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; } .pp-h.sm { height: 52px; font-size: 18px; }
+.pp-in { width: 100%; font-size: 20px; padding: 14px; border-radius: 14px; border: 2px solid var(--border); }
+.pp-ok { height: 64px; border-radius: 18px; border: 0; background: var(--navy, #1c2550); color: #fff; font-size: 22px; font-weight: 800; }
+.pp-done { text-align: center; } .pp-sum { font-size: 20px; margin: 0; } .pp-sum b { font-size: 36px; }
+.pp-row { display: flex; justify-content: center; gap: 18px; flex-wrap: wrap; }
+.pp-lnk { border: 0; background: none; font-weight: 700; font-size: 16px; color: var(--navy, #1c2550); text-decoration: underline; padding: 8px; }
+.pp-say { position: relative; } .pp-say .s-mic { position: absolute; right: 8px; bottom: 8px; }
+.rs-p .rs-pn { color: inherit; text-decoration: none; min-width: 0; }
+.rs-p .btn { flex: 0 0 auto; }
+.rs-cell { cursor: pointer; } .rs-cell:hover { background: var(--surface-2); }

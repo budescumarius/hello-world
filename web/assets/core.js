@@ -242,10 +242,10 @@ const SPACES_FIELD = () => [];
 const isChef = () => !!(S.me && S.me.role === 'chef' && !S.me.super);
 const CHEF_BLOCK = ['invoices', 'invoice', 'payments', 'progress', 'export', 'stats', 'settings', 'abonnement', 'expenses', 'purchase', 'platform', 'security'];
 const SPACES_CHEF = [
-  { k: 'resp', l: 'Pilotage', i: 'chart', h: '#/resp', sec: [['Tableau de bord', '#/resp'], ['Demandes de facture', '#/resp/demandes'], ['Rapports au patron', '#/resp/rapports', '#/resp/rapport/'], ['Tâches', '#/tasks']] },
-  { k: 'works', l: 'Projets', i: 'crane', h: '#/projects', sec: [['Projets / commandes', '#/projects', '#/project/'], ['Rendez-vous / interventions', '#/interventions', '#/intervention/'], ['Commandes fournisseurs', '#/orders/fournisseur', '#/order/'], ['Estimatifs', '#/quotes', '#/quote/'], ['Prix et ouvrages', '#/library']] },
-  { k: 'crew', l: 'Équipe', i: 'helmet', h: '#/crew', sec: [['Personnes', '#/crew', '#/crew/'], ['Pointage', '#/hr/timesheets'], ['Planning équipe', '#/planning/team'], ['Planning projets', '#/planning/projects'], ['Rapports terrain', '#/reports', '#/report/'], ['Absences', '#/hr/absences']] },
-  { k: 'people', l: 'Carnet', i: 'people', h: '#/contacts/client', sec: [['Clients', '#/contacts/client', '#/contact/'], ['Fournisseurs', '#/contacts/fournisseur'], ['Sous-traitants', '#/contacts/soustraitant']] },
+  { k: 'resp', l: 'Accueil', i: 'sun', h: '#/resp', sec: [] },
+  { k: 'works', l: 'Projets', i: 'crane', h: '#/projects', sec: [['Projets', '#/projects', '#/project/', '#/contact/', '#/order/', '#/orders/', '#/intervention/', '#/interventions'], ['Estimatifs', '#/quotes', '#/quote/', '#/library']] },
+  { k: 'crew', l: 'Équipe', i: 'helmet', h: '#/hr/timesheets', sec: [['Heures', '#/hr/timesheets', '#/crew/', '#/crew'], ['Planning', '#/planning/team', '#/planning/projects'], ['Absences', '#/hr/absences']] },
+  { k: 'more', l: 'Factures et rapports', i: 'send', h: '#/resp/demandes', sec: [['Demandes de facture', '#/resp/demandes'], ['Rapports au patron', '#/resp/rapports', '#/resp/rapport/'], ['Tâches', '#/tasks']] },
 ];
 const spaces = () => (isField() ? SPACES_FIELD() : isSimple() ? SPACES_SIMPLE : isChef() ? SPACES_CHEF : SPACES);
 const ui = (() => { try { return JSON.parse(localStorage.getItem('bp-ui') || '{}'); } catch (e) { return {}; } })();

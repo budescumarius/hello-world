@@ -37,12 +37,99 @@ route('t', async (screen, a) => {
   if (screen === 'planning') return tPlanning();
   return tHome();
 });
+const isWorkdayT = (d) => { const w = new Date(d + 'T12:00:00').getDay(); return w !== 0 && w !== 6; };
 const tPage = (p) => { const page = layout(p); page.classList.add('s-page', 't-page'); return page; };
+
+// ---------------------------------------------------------------- Pointage en 2 touches : le chantier, puis les heures (grands boutons)
+// Dans la langue de l'ouvrier (choisie sur son téléphone) ; sert aussi au responsable qui pointe pour quelqu'un.
+const T_LANGS = [['fr', 'Français'], ['ro', 'Română'], ['nl', 'Nederlands'], ['pl', 'Polski'], ['pt', 'Português'], ['es', 'Español'], ['tr', 'Türkçe'], ['en', 'English']];
+const T_TXT = {
+  hello: ['Bonjour', 'Bună', 'Hallo', 'Dzień dobry', 'Olá', 'Hola', 'Merhaba', 'Hello'],
+  where: ["Où avez-vous travaillé aujourd'hui ?", 'Unde ai lucrat azi?', 'Waar heb je vandaag gewerkt?', 'Gdzie dziś pracowałeś?', 'Onde trabalhou hoje?', '¿Dónde has trabajado hoy?', 'Bugün nerede çalıştın?', 'Where did you work today?'],
+  whereY: ['Où avez-vous travaillé hier ?', 'Unde ai lucrat ieri?', 'Waar heb je gisteren gewerkt?', 'Gdzie wczoraj pracowałeś?', 'Onde trabalhou ontem?', '¿Dónde trabajaste ayer?', 'Dün nerede çalıştın?', 'Where did you work yesterday?'],
+  hours: ["Combien d'heures ?", 'Câte ore?', 'Hoeveel uur?', 'Ile godzin?', 'Quantas horas?', '¿Cuántas horas?', 'Kaç saat?', 'How many hours?'],
+  done: ["C'est noté, merci !", 'Gata, mulțumim!', 'Genoteerd, bedankt!', 'Zapisane, dziękujemy!', 'Registado, obrigado!', '¡Anotado, gracias!', 'Kaydedildi, teşekkürler!', 'Saved, thank you!'],
+  today: ["Aujourd'hui", 'Azi', 'Vandaag', 'Dziś', 'Hoje', 'Hoy', 'Bugün', 'Today'],
+  more: ["J'ai aussi travaillé ailleurs", 'Am lucrat și în alt loc', 'Ik heb ook ergens anders gewerkt', 'Pracowałem też gdzie indziej', 'Também trabalhei noutro sítio', 'También trabajé en otro sitio', 'Başka yerde de çalıştım', 'I also worked somewhere else'],
+  undo: ['Annuler', 'Anulează', 'Ongedaan maken', 'Cofnij', 'Anular', 'Deshacer', 'Geri al', 'Undo'],
+  fix: ['Corriger', 'Corectează', 'Aanpassen', 'Popraw', 'Corrigir', 'Corregir', 'Düzelt', 'Change'],
+  other: ['Autre endroit', 'Alt loc', 'Andere plaats', 'Inne miejsce', 'Outro local', 'Otro sitio', 'Başka yer', 'Other place'],
+  otherName: ["Écrivez le nom ou l'adresse", 'Scrie numele sau adresa', 'Schrijf de naam of het adres', 'Wpisz nazwę lub adres', 'Escreva o nome ou a morada', 'Escribe el nombre o la dirección', 'Adını veya adresini yaz', 'Write the name or address'],
+  planned: ['prévu ici', 'planificat aici', 'hier gepland', 'zaplanowane tutaj', 'previsto aqui', 'previsto aquí', 'burada planlı', 'planned here'],
+  say: ["Dire ce que j'ai fait", 'Spune ce ai făcut', 'Zeg wat je gedaan hebt', 'Powiedz, co zrobiłeś', 'Diga o que fez', 'Di lo que hiciste', 'Ne yaptığını söyle', 'Say what you did'],
+  ok: ['OK', 'OK', 'OK', 'OK', 'OK', 'OK', 'Tamam', 'OK'],
+  back: ['Retour', 'Înapoi', 'Terug', 'Wstecz', 'Voltar', 'Volver', 'Geri', 'Back'],
+  noY: ["Hier : pas d'heures", 'Ieri: fără ore', 'Gisteren: geen uren', 'Wczoraj: brak godzin', 'Ontem: sem horas', 'Ayer: sin horas', 'Dün: saat yok', 'Yesterday: no hours'],
+  tapFill: ['Touchez pour compléter', 'Atinge ca să completezi', 'Tik om in te vullen', 'Dotknij, aby uzupełnić', 'Toque para preencher', 'Toca para completar', 'Doldurmak için dokun', 'Tap to fill in'],
+  sites: ['Mes chantiers', 'Șantierele mele', 'Mijn werven', 'Moje budowy', 'As minhas obras', 'Mis obras', 'Şantiyelerim', 'My sites'],
+  lang: ['Langue', 'Limba', 'Taal', 'Język', 'Língua', 'Idioma', 'Dil', 'Language'],
+  msgs: ['du bureau', 'de la birou', 'van kantoor', 'z biura', 'do escritório', 'de la oficina', 'ofisten', 'from the office'],
+  todo: ['à faire', 'de făcut', 'te doen', 'do zrobienia', 'a fazer', 'por hacer', 'yapılacak', 'to do'],
+  plan: ['Mon planning', 'Programul meu', 'Mijn planning', 'Mój plan', 'O meu planeamento', 'Mi planificación', 'Planım', 'My schedule'],
+  here: ["Aujourd'hui ici", 'Azi aici', 'Vandaag hier', 'Dziś tutaj', 'Hoje aqui', 'Hoy aquí', 'Bugün burada', 'Today here'],
+  none: ["Rien de prévu pour l'instant", 'Nimic planificat deocamdată', 'Nog niets gepland', 'Na razie nic nie zaplanowano', 'Nada previsto por agora', 'Nada previsto por ahora', 'Şimdilik plan yok', 'Nothing planned yet'],
+  save: ['Enregistrer', 'Salvează', 'Opslaan', 'Zapisz', 'Guardar', 'Guardar', 'Kaydet', 'Save'],
+};
+const tLang = () => { let l = ''; try { l = localStorage.getItem('bp-tlang') || ''; } catch (e) { /* */ } if (!l) l = (navigator.language || 'fr').slice(0, 2); return T_LANGS.some(([k]) => k === l) ? l : 'fr'; };
+const tx = (k, lang = tLang()) => (T_TXT[k] || [k])[Math.max(0, T_LANGS.findIndex(([x]) => x === lang))] || T_TXT[k][0];
+function tLangPick() {
+  menuSheet(tx('lang'), T_LANGS.map(([k, l]) => ({ label: l, primary: k === tLang(), run: () => { try { localStorage.setItem('bp-tlang', k); } catch (e) { /* */ } render(); } })));
+}
+// Écran plein : 1) le chantier (grandes tuiles) 2) les heures (grands chiffres). Résout { pid, site, hours } ou null.
+// opt : { title, projects, planned:Set, lang, step2Only:{pid,site} }
+function pointPick(opt) {
+  const lang = opt.lang || tLang(); const T = (k) => tx(k, lang);
+  return new Promise((resolve) => {
+    let pick = opt.step2Only || null; let done = false;
+    const close = (v) => { if (done) return; done = true; m.close(); resolve(v); };
+    const m = modal('<div class="pp"></div>', { full: true, onClose: () => close(null) }); m.el.classList.add('pp-modal');
+    const box = $('.pp', m.el);
+    const step1 = () => {
+      const list = [...opt.projects].sort((a, b) => ((opt.planned && opt.planned.has(b.id)) - (opt.planned && opt.planned.has(a.id))) || (a.data.name || '').localeCompare(b.data.name || ''));
+      box.innerHTML = `<div class="pp-top"><button class="pp-x" data-x aria-label="${T('back')}">✕</button></div><h2 class="pp-q">${esc(opt.title)}</h2>
+        <div class="pp-sites">${list.map((p) => `<button class="pp-site ${opt.planned && opt.planned.has(p.id) ? 'now' : ''}" data-p="${p.id}" style="--c:${esc(p.data.color || '#1c2550')}"><span class="pp-ic">${I.crane}</span><span><b>${esc(p.data.name)}</b>${opt.planned && opt.planned.has(p.id) ? `<small>★ ${T('planned')}</small>` : p.data.city ? `<small>${esc(p.data.city)}</small>` : ''}</span></button>`).join('')}
+          ${opt.noOther ? '' : `<button class="pp-site other" data-p="new"><span class="pp-ic">${I.pin}</span><span><b>${T('other')}</b></span></button>`}</div>`;
+      $('[data-x]', box).onclick = () => close(null);
+      $$('[data-p]', box).forEach((b) => { b.onclick = () => {
+        if (b.dataset.p !== 'new') { pick = { pid: +b.dataset.p, site: '' }; return step2(); }
+        box.innerHTML = `<div class="pp-top"><button class="pp-x" data-bk aria-label="${T('back')}">←</button></div><h2 class="pp-q">${T('otherName')}</h2><input class="pp-in" data-site autocomplete="off"><button class="pp-ok" data-go>${T('ok')}</button>`;
+        $('[data-site]', box).focus(); $('[data-bk]', box).onclick = step1;
+        $('[data-go]', box).onclick = () => { const v = $('[data-site]', box).value.trim(); if (!v) return $('[data-site]', box).focus(); pick = { pid: null, site: v }; step2(); };
+      }; });
+    };
+    const step2 = () => {
+      const p = pick.pid ? opt.projects.find((x) => x.id === pick.pid) : null;
+      box.innerHTML = `<div class="pp-top"><button class="pp-x" data-bk aria-label="${T('back')}">${opt.step2Only ? '✕' : '←'}</button><b class="pp-where">${esc(p ? p.data.name : pick.site)}</b></div><h2 class="pp-q">${T('hours')}</h2>
+        <div class="pp-hours">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((h) => `<button class="pp-h ${h === (opt.def || 8) ? 'def' : ''}" data-h="${h}">${h}</button>`).join('')}</div>
+        <div class="pp-halves"><button class="pp-h sm" data-h="0.5">½</button><button class="pp-h sm" data-h="1.5">1½</button><button class="pp-h sm" data-h="4.5">4½</button><button class="pp-h sm" data-h="7.5">7½</button><button class="pp-h sm" data-h="8.5">8½</button><button class="pp-h sm" data-h="9.5">9½</button></div>`;
+      $('[data-bk]', box).onclick = () => (opt.step2Only ? close(null) : step1());
+      $$('[data-h]', box).forEach((b) => { b.onclick = () => close({ ...pick, hours: +b.dataset.h }); });
+    };
+    if (pick) step2(); else step1();
+  });
+}
+// L'ouvrier pointe : enregistrement immédiat, puis « C'est noté » (avec annuler et « dire ce que j'ai fait »)
+async function tPointFlow(day, projects, planned) {
+  const lang = tLang(); const T = (k) => tx(k, lang);
+  const r = await pointPick({ title: day === today() ? T('where') : T('whereY'), projects: tActive(projects), planned });
+  if (!r) return;
+  const it = { project_id: r.pid, data: { date: day, hours: r.hours, task: '', ...(r.pid ? {} : { site: r.site }) } };
+  try { await persist('timesheet', it, { silent: true }); } catch (e) { toast(e.message, 5000); return; }
+  const where = r.pid ? tName(projects, r.pid) : r.site;
+  const m = modal(`<div class="pp pp-done"><div class="pp-check">✓</div><h2 class="pp-q">${T('done')}</h2><p class="pp-sum"><b>${fnum(r.hours, 1)} h</b><br>${esc(where)}</p>
+    <div class="pp-say" hidden><textarea class="pp-in" rows="3"></textarea><button type="button" class="s-mic" data-mic>🎤</button></div>
+    <button class="pp-ok" data-ok>${T('ok')}</button><div class="pp-row"><button class="pp-lnk" data-say>🎤 ${T('say')}</button><button class="pp-lnk" data-undo>↺ ${T('undo')}</button></div></div>`, { full: true }); m.el.classList.add('pp-modal');
+  const ta = $('textarea', m.el);
+  try { micFor($('[data-mic]', m.el), ta); } catch (e) { /* micro indisponible */ }
+  $('[data-say]', m.el).onclick = () => { $('.pp-say', m.el).hidden = false; ta.focus(); $('[data-say]', m.el).hidden = true; $('[data-ok]', m.el).textContent = T('save'); };
+  $('[data-undo]', m.el).onclick = async () => { await db.del('timesheet', it.id).catch(() => {}); m.close(); render(); };
+  $('[data-ok]', m.el).onclick = async () => { if (ta.value.trim()) { it.data.task = ta.value.trim(); await persist('timesheet', it, { silent: true }).catch(() => {}); } m.close(); render(); };
+}
 
 // ---------------------------------------------------------------- Accueil : mes chantiers (et c'est tout)
 async function tHome() {
   const [projects, m] = await Promise.all([tProjects(), db.many(['report', 'assign', 'point', 'timesheet', ...(isSub() ? ['order'] : [])])]);
-  const page = tPage({ title: 'Mes chantiers', icon: 'crane' });
+  const page = tPage({ title: tx('sites'), icon: 'crane' });
   const unread = tUnread(m.report); const todo = m.point.filter(isOpenPt);
   const next = m.assign.filter((x) => x.data.date >= today()).sort((x, y) => x.data.date.localeCompare(y.data.date));
   const here = new Set(next.filter((x) => x.data.date === today()).map((x) => +x.project_id));
@@ -50,21 +137,32 @@ async function tHome() {
   const loose = tGot(m.report).filter((r) => !r.project_id);
   const due = (m.order || []).filter((o) => !['facturee', 'annulee'].includes(o.data.status));
   const hToday = m.timesheet.filter((t) => t.data.date === today()).reduce((x, t) => x + num(t.data.hours), 0);
-  page.innerHTML = `<div class="today-hello"><b>Bonjour ${esc((S.me.name || '').split(' ')[0])}</b><span>${esc(T_DAY(today()))}</span></div>
-    <a class="s-big primary t-hbtn" href="#/t/heures?add=1">${I.clock}<span>Encoder mes heures<small>${hToday ? `${fnum(hToday, 1)} h encodées aujourd'hui` : 'sur un de mes chantiers ou un nouveau'}</small></span></a>
+  const lang = tLang(); const T = (k) => tx(k, lang);
+  const tHrs = m.timesheet.filter((t) => t.data.date === today());
+  // hier (jour ouvrable) sans heures : rappel à compléter en 2 touches
+  let yd = addDays(today(), -1); while (!isWorkdayT(yd)) yd = addDays(yd, -1);
+  const missY = !m.timesheet.some((t) => t.data.date === yd) && yd.slice(0, 7) === today().slice(0, 7);
+  page.innerHTML = `<div class="pp-hello"><div><b>${T('hello')} ${esc((S.me.name || '').split(' ')[0])}</b><span>${esc(new Date().toLocaleDateString(lang === 'fr' ? 'fr-BE' : lang, { weekday: 'long', day: 'numeric', month: 'long' }))}</span></div><button class="pp-lang" data-lang>🌐 ${lang.toUpperCase()}</button></div>
+    ${hToday ? `<div class="pp-today"><span class="pp-check sm">✓</span><span class="grow"><b>${T('today')} : ${fnum(hToday, 1)} h</b><small>${tHrs.map((t) => esc(tName(projects, t.project_id) || t.data.site || '')).join(' · ')}</small></span><a class="pp-lnk" href="#/t/heures">${T('fix')}</a></div>
+      <button class="pp-more" data-point="${today()}">＋ ${T('more')}</button>`
+    : `<button class="pp-ask" data-point="${today()}"><span class="pp-ask-ic">${I.clock}</span><b>${T('where')}</b><small>${T('tapFill')}</small></button>`}
+    ${missY ? `<button class="pp-miss" data-point="${yd}"><b>⚠ ${T('noY')}</b><small>${T('tapFill')}</small></button>` : ''}
+    <h3 class="t-h">${T('sites')}</h3>
     ${pushState() !== 'on' && pushState() !== 'denied' ? `<button type="button" class="t-alert soft" data-push>${I.bell}<span><b>Activer les notifications</b><br><small>Pour ne rien rater du bureau</small></span>${I.chevron}</button>` : ''}
     <div class="t-sites">${list.map((p) => { const u = unread.filter((r) => +r.project_id === p.id).length; const n = todo.filter((x) => +x.project_id === p.id).length;
       return `<a class="t-site ${here.has(p.id) ? 'now' : ''}" href="#/t/chantier/${p.id}"><span class="t-site-ic">${I.crane}</span>
         <span class="t-site-tx"><b>${esc(p.data.name)}</b>${tAddr(p) ? `<small>${esc(tAddr(p))}</small>` : ''}
-        ${here.has(p.id) || u || n ? `<span class="t-tags">${here.has(p.id) ? '<i class="tg now">Aujourd\'hui ici</i>' : ''}${u ? `<i class="tg new">${u} rapport${u > 1 ? 's' : ''} du bureau</i>` : ''}${n ? `<i class="tg pt">${n} point${n > 1 ? 's' : ''} à faire</i>` : ''}</span>` : ''}</span>
+        ${here.has(p.id) || u || n ? `<span class="t-tags">${here.has(p.id) ? `<i class="tg now">${tx('here')}</i>` : ''}${u ? `<i class="tg new">✉ ${u} ${tx('msgs')}</i>` : ''}${n ? `<i class="tg pt">⚑ ${n} ${tx('todo')}</i>` : ''}</span>` : ''}</span>
         <span class="t-site-go">${I.chevron}</span></a>`; }).join('')
       || `<div class="todo-empty">${I.crane}<b>Aucun chantier pour l'instant</b><span>Le bureau vous ajoutera à vos chantiers.</span></div>`}</div>
     <div class="s-list t-more">
-      ${sBtn('data-go="#/t/planning"', 'calendar', 'Mon planning', next[0] ? esc(`${next[0].data.date === today() ? 'Aujourd\'hui' : T_DAY(next[0].data.date)} : ${tName(projects, next[0].project_id) || 'chantier'}`) : 'Rien de prévu pour l\'instant')}
+      ${sBtn('data-go="#/t/planning"', 'calendar', tx('plan'), next[0] ? esc(`${next[0].data.date === today() ? tx('today') : new Date(next[0].data.date + 'T12:00:00').toLocaleDateString(tLang() === 'fr' ? 'fr-BE' : tLang(), { weekday: 'long', day: 'numeric', month: 'long' })} : ${tName(projects, next[0].project_id) || ''}`) : tx('none'))}
       ${isSub() ? sBtn('data-go="#/t/commandes"', 'truck', 'Mes bons de commande', due.length ? `${due.length} pas encore facturé${due.length > 1 ? 's' : ''}` : (m.order || []).length ? 'Tous facturés ✓' : 'Aucun pour l\'instant') : ''}
       ${loose.length ? sBtn('data-go="#/t/rapports"', 'fiche', 'Messages du bureau', `${loose.length} message${loose.length > 1 ? 's' : ''}`) : ''}</div>`;
   $$('[data-go]', page).forEach((b) => { b.onclick = () => go(b.dataset.go); });
   const pb = $('[data-push]', page); if (pb) pb.onclick = () => pushEnable();
+  $('[data-lang]', page).onclick = () => tLangPick();
+  $$('[data-point]', page).forEach((b) => { b.onclick = () => tPointFlow(b.dataset.point, projects, b.dataset.point === today() ? here : new Set()); });
 }
 
 // ---------------------------------------------------------------- Un chantier : 3 gestes + ce que le bureau m'a envoyé
@@ -303,7 +401,7 @@ async function tOrders() {
 // ---------------------------------------------------------------- Mon planning
 async function tPlanning() {
   const [projects, assigns, phases] = await Promise.all([tProjects(), db.list('assign'), db.list('phase')]);
-  const page = tPage({ title: 'Mon planning', icon: 'calendar', back: '#/t' });
+  const page = tPage({ title: tx('plan'), icon: 'calendar', back: '#/t' });
   const F = S.field || {};
   const ass = assigns.filter((x) => x.data.date >= today()).sort((a, b) => a.data.date.localeCompare(b.data.date));
   const ph = phases.filter((x) => (x.data.end || '') >= today() && ((F.employeeId && (x.data.staff || []).map(Number).includes(F.employeeId)) || (F.contactId && +x.data.companyId === F.contactId)))
