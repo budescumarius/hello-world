@@ -188,7 +188,7 @@ function require_admin(): array {
 const FIELD_ROLES = ['ouvrier', 'soustraitant'];
 const USER_ROLES = ['admin', 'user', 'chef', 'ouvrier', 'soustraitant'];
 // Responsable d'équipe / d'atelier : bureau sans la facturation (il la demande au patron via « billreq »)
-const CHEF_READONLY = ['invoice', 'contract'];
+const CHEF_READONLY = ['invoice', 'contract', 'expense'];
 function is_chef(array $u): bool { return ($u['role'] ?? '') === 'chef' && empty($u['super']); }
 // responsable(s) d'un membre du personnel (fiche RH → « Responsable »)
 function chef_of_employee(int $eid): array {
@@ -321,6 +321,91 @@ function field_can_file(array $me, array $f): bool {
         $ids = $r['type'] === 'plan' ? [(int)($d['fileId'] ?? 0), (int)($d['thumbId'] ?? 0)]
             : array_map(fn($x) => (int)(is_array($x) ? ($x['id'] ?? 0) : $x), array_merge((array)($d['photos'] ?? []), (array)($d['files'] ?? [])));
         if (in_array((int)$f['id'], $ids, true)) return true;
+    }
+    return false;
+}
+// ---------------------------------------------------------------- Responsable : uniquement ses projets et son équipe
+// Ses projets : ceux dont il est le conducteur ou dans l'équipe ; son équipe : les fiches du personnel qui le désignent (et la sienne).
+// Les clients de ses projets ; fournisseurs et sous-traitants restent visibles (commandes). Le reste de l'entreprise lui est caché.
+function chef_scope(array $me, bool $fresh = false): array {
+    static $cache = [];
+    if (!$fresh && isset($cache[$me['id']])) return $cache[$me['id']];
+    $uid = (int)$me['id']; $projects = []; $team = []; $clients = [];
+    foreach (q("SELECT id, type, data FROM items WHERE company_id = ? AND type IN ('project', 'employee')", [cid()])->fetchAll() as $r) {
+        $d = json_decode($r['data'], true) ?: [];
+        if ($r['type'] === 'project' && ((int)($d['managerId'] ?? 0) === $uid || in_array($uid, array_map('intval', (array)($d['team'] ?? [])), true))) {
+            $projects[] = (int)$r['id'];
+            if (!empty($d['clientId'])) $clients[] = (int)$d['clientId'];
+        }
+        if ($r['type'] === 'employee' && ((int)($d['chefId'] ?? 0) === $uid || (int)($d['userId'] ?? 0) === $uid)) $team[] = (int)$r['id'];
+    }
+    return $cache[$me['id']] = ['projects' => $projects, 'team' => $team, 'clients' => $clients];
+}
+function chef_can_read(array $me, array $row): bool {
+    $sc = chef_scope($me);
+    $d = json_decode((string)$row['data'], true) ?: [];
+    $pid = $row['project_id'] !== null ? (int)$row['project_id'] : 0;
+    $inProj = $pid && in_array($pid, $sc['projects'], true);
+    $mine = (int)$row['created_by'] === (int)$me['id'];
+    $emp = (int)($d['employeeId'] ?? 0);
+    switch ($row['type']) {
+        case 'project': return in_array((int)$row['id'], $sc['projects'], true);
+        case 'employee': return in_array((int)$row['id'], $sc['team'], true);
+        // heures, planning, absences de son équipe (sur un autre chantier : sans le nom, voir chef_view)
+        case 'timesheet': case 'assign': case 'absence': return $inProj || ($emp && in_array($emp, $sc['team'], true)) || $mine;
+        case 'contact': return in_array((string)($d['kind'] ?? ''), ['client', 'prospect'], true) ? ($mine || in_array((int)$row['id'], $sc['clients'], true)) : true;
+        case 'article': return true;
+        case 'expense':
+            if ($inProj || $mine) return true;
+            foreach ((array)($d['alloc'] ?? []) as $a) if (in_array((int)($a['pid'] ?? 0), $sc['projects'], true)) return true;
+            return false;
+        case 'task': case 'intervention': return $inProj || $mine || (int)($d['assigneeId'] ?? 0) === (int)$me['id'];
+        case 'report': return $inProj || $mine || in_array((int)$me['id'], array_map('intval', (array)($d['to'] ?? [])), true);
+        default: return $inProj || $mine;
+    }
+}
+// Ce qu'il reçoit : les heures / le planning de son équipe sur un chantier qui n'est pas à lui, sans le nom du chantier ;
+// un achat réparti sur plusieurs chantiers : seulement la part de ses projets
+function chef_view(array $me, array $r): array {
+    $sc = chef_scope($me);
+    $pid = $r['project_id'] !== null ? (int)$r['project_id'] : 0;
+    $d = json_decode((string)$r['data'], true) ?: [];
+    if (in_array($r['type'], ['timesheet', 'assign'], true) && $pid && !in_array($pid, $sc['projects'], true)) {
+        $r['project_id'] = null; $d['site'] = 'Autre chantier'; $d['otherSite'] = true; unset($d['task'], $d['note']);
+        $r['data'] = json_encode($d, JSON_UNESCAPED_UNICODE);
+    }
+    if ($r['type'] === 'expense' && !empty($d['alloc']) && is_array($d['alloc'])) {
+        $d['alloc'] = array_values(array_filter($d['alloc'], fn($a) => in_array((int)($a['pid'] ?? 0), $sc['projects'], true)));
+        if (!$pid || !in_array($pid, $sc['projects'], true)) { $r['project_id'] = $d['alloc'] ? (int)$d['alloc'][0]['pid'] : null; $d['amount'] = array_sum(array_map(fn($a) => (float)($a['amount'] ?? 0), $d['alloc'])); unset($d['lines'], $d['items']); }
+        $r['data'] = json_encode($d, JSON_UNESCAPED_UNICODE);
+    }
+    return $r;
+}
+// Peut-il écrire cet élément ? (déjà lisible par lui, et sur un de ses projets ou sans projet)
+function chef_can_write(array $me, string $type, ?int $pid, ?array $cur): bool {
+    $sc = chef_scope($me);
+    if ($cur && !chef_can_read($me, $cur)) return false;
+    if ($cur && in_array($type, ['timesheet', 'assign'], true) && $cur['project_id'] !== null && !in_array((int)$cur['project_id'], $sc['projects'], true)) return false;
+    if ($type === 'project') return true;
+    return !$pid || in_array($pid, $sc['projects'], true);
+}
+// Fichier lisible par le responsable : envoyé par lui, logo, fichier d'un de ses projets, ou joint à un élément qu'il peut lire
+function chef_can_file(array $me, array $f): bool {
+    if ((int)$f['created_by'] === (int)$me['id']) return true;
+    $co = setting('company', []) ?: [];
+    if ((int)($co['logoId'] ?? 0) === (int)$f['id']) return true;
+    if ($f['project_id'] !== null && in_array((int)$f['project_id'], chef_scope($me)['projects'], true)) return true;
+    $needle = (int)$f['id'];
+    foreach (q("SELECT * FROM items WHERE company_id = ? AND data LIKE ?", [cid(), '%' . $needle . '%'])->fetchAll() as $r) {
+        if (!chef_can_read($me, $r)) continue;
+        $found = false;
+        $walk = function ($v, $k = '') use (&$walk, &$found, $needle) {
+            if ($found) return;
+            if (is_array($v)) { foreach ($v as $kk => $vv) $walk($vv, is_string($kk) ? $kk : $k); return; }
+            if ((int)$v === $needle && preg_match('/^(fileId|thumbId|photos|files|attachments|docs|fileIds|logoId|signatureId)$/', (string)$k)) $found = true;
+        };
+        $walk(json_decode($r['data'], true) ?: []);
+        if ($found) return true;
     }
     return false;
 }

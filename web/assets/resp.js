@@ -63,16 +63,18 @@ async function respData(uid, period) {
   // jours à pointer : jusqu'à hier (aujourd'hui n'est pas fini), aujourd'hui seulement s'il a déjà des heures
   const yday = addDays(today(), -1); const lastDay = to < yday ? to : yday;
   const people = team.map((e) => {
+    // jours à pointer : à partir de son entrée (date d'entrée, sinon création de sa fiche)
+    const since = (e.data.start || String(e.created_at || '').slice(0, 10) || from) > from ? (e.data.start || String(e.created_at).slice(0, 10)) : from;
     const hs = hours.filter((t) => +t.data.employeeId === e.id);
     const h = hs.reduce((a, t) => a + num(t.data.hours), 0);
     const cost = hs.reduce((a, t) => a + num(t.data.hours) * num(t.data.rate || e.data.costRate), 0);
     const prod = hs.reduce((a, t) => { const r = t.project_id && rowOf(t.project_id); return a + (r ? num(t.data.hours) * r.perHour : 0); }, 0);
     const loose = hs.filter((t) => !t.project_id).reduce((a, t) => a + num(t.data.hours), 0);
     const tday = today() >= from && today() <= to && hs.some((t) => t.data.date === today()) ? 1 : 0;
-    const expected = (daysOf(from, lastDay).filter((d) => isWorkday(d) && !absent(e, d)).length + tday) * (num(e.data.dayHours) || 8);
-    const missing = daysOf(from, lastDay).filter((d) => isWorkday(d) && !absent(e, d) && !hs.some((t) => t.data.date === d));
+    const expected = (daysOf(since, lastDay).filter((d) => isWorkday(d) && !absent(e, d)).length + tday) * (num(e.data.dayHours) || 8);
+    const missing = daysOf(since, lastDay).filter((d) => isWorkday(d) && !absent(e, d) && !hs.some((t) => t.data.date === d));
     const byP = {}; hs.forEach((t) => { const k = t.project_id || 0; byP[k] = (byP[k] || 0) + num(t.data.hours); });
-    return { e, h, cost, prod, margin: prod - cost, loose, expected, missing, byP };
+    return { e, h, cost, prod, margin: prod - cost, loose, expected, missing, byP, since };
   });
   const sumBy = (l, k) => l.reduce((a, x) => a + x[k], 0);
   const sc = m.invoice.filter((i) => pids.has(i.project_id) && i.data.status === 'emise');
@@ -85,7 +87,7 @@ async function respData(uid, period) {
   m.task.filter((x) => soon(x.data.due) && x.data.status !== 'done' && (!uid || +x.data.assigneeId === uid || pids.has(x.project_id))).forEach((x) => ag.push({ d: x.data.due, icon: 'tasks', l: x.data.title, s: 'Tâche à terminer', h: '#/tasks' }));
   projects.forEach((p) => { if (soon(p.data.start)) ag.push({ d: p.data.start, icon: 'crane', l: `Début : ${p.data.name}`, s: '', h: `#/project/${p.id}` }); if (soon(p.data.end)) ag.push({ d: p.data.end, icon: 'crane', l: `Fin prévue : ${p.data.name}`, s: '', h: `#/project/${p.id}` }); });
   const asg = {}; m.assign.filter((a) => soon(a.data.date) && inTeam(a)).forEach((a) => { const k = `${a.data.date}|${a.project_id}`; (asg[k] = asg[k] || []).push((byId(team, +a.data.employeeId) || { data: {} }).data.name); });
-  Object.entries(asg).forEach(([k, names]) => { const [d, pid] = k.split('|'); ag.push({ d, icon: 'helmet', l: (byId(m.project, +pid) || { data: { name: 'Projet' } }).data.name, s: names.filter(Boolean).join(', '), h: '#/planning/team' }); });
+  Object.entries(asg).forEach(([k, names]) => { const [d, pid] = k.split('|'); ag.push({ d, icon: 'helmet', l: (byId(m.project, +pid) || { data: { name: 'Autre chantier' } }).data.name, s: names.filter(Boolean).join(', '), h: '#/planning/team' }); });
   ag.sort((a, b) => (a.d + (a.t || '')).localeCompare(b.d + (b.t || '')));
   const reqs = m.billreq.filter((b) => !uid || pids.has(b.project_id) || b.created_by === uid);
   return { uid, period, from, to, team, noTeam, projects, rows, people, hours, ag, reqs, m,
@@ -153,7 +155,7 @@ route('resp', async (sub, id) => {
       ${D.people.length ? `<div class="rs-people">${D.people.sort((a, b) => b.margin - a.margin).map((x) => { const v = verdict(x); return `<a class="rs-p" href="#/crew/e/${x.e.id}"><span class="grow"><b>${esc(x.e.data.name)}</b><small>${fnum(x.h, 1)} h${x.h ? ` · rapporte ${money(x.prod / x.h)}/h, coûte ${money(x.cost / x.h)}/h` : ''}</small></span>${badge(v[0], v[1])}</a>`; }).join('')}</div>` : '<div class="empty sm">Personne dans l\'équipe.</div>'}
       ${gridDays.length ? `<div class="dt-body rs-grid" style="margin-top:12px"><table class="dt resp-grid"><thead><tr><th>Heures par jour</th>${gridDays.map((d) => `<th class="r">${new Date(d + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'short', day: 'numeric' })}</th>`).join('')}<th class="r">Total</th></tr></thead><tbody>
       ${D.people.map((x) => `<tr><td data-l="Personne"><b>${esc(x.e.data.name)}</b></td>${gridDays.map((d) => { const h = D.hours.filter((t) => +t.data.employeeId === x.e.id && t.data.date === d).reduce((a, t) => a + num(t.data.hours), 0); const abs = D.m.absence.some((a) => +a.data.employeeId === x.e.id && a.data.from <= d && a.data.to >= d);
-        return `<td class="r" data-l="${fmtDate(d)}">${h ? `<b>${fnum(h, 1)}</b>` : abs ? '<small class="muted">absent</small>' : d <= lastDay && isWorkday(d) ? '<b style="color:#e5484d">✗</b>' : '<span class="muted">·</span>'}</td>`; }).join('')}<td class="r" data-l="Total"><b>${fnum(x.h, 1)} h</b></td></tr>`).join('')}</tbody></table></div>` : ''}</div>
+        return `<td class="r" data-l="${fmtDate(d)}">${h ? `<b>${fnum(h, 1)}</b>` : abs ? '<small class="muted">absent</small>' : d <= lastDay && d >= x.since && isWorkday(d) ? '<b style="color:#e5484d">✗</b>' : '<span class="muted">·</span>'}</td>`; }).join('')}<td class="r" data-l="Total"><b>${fnum(x.h, 1)} h</b></td></tr>`).join('')}</tbody></table></div>` : ''}</div>
     <div class="card"><div class="card-h"><h3>Les 14 prochains jours</h3><a class="btn sm" href="#/planning/team">Planning</a></div>
       ${D.ag.length ? `<div class="rows">${D.ag.map((x, i) => `${i === 0 || D.ag[i - 1].d !== x.d ? `<div class="mo-h" style="margin:10px 0 2px"><b>${esc(new Date(x.d + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric', month: 'long' }))}</b></div>` : ''}<a class="row" href="${x.h}"><span>${I[x.icon] || ''}</span><span class="grow"><b>${x.t ? `${esc(x.t)} · ` : ''}${esc(x.l)}</b>${x.s ? `<small class="muted">${esc(x.s)}</small>` : ''}</span></a>`).join('')}</div>` : '<div class="empty sm">Rien de planifié.</div>'}</div>
     <details class="card rs-more"${ui.respMore ? ' open' : ''}><summary><b>Voir tous les chiffres</b> <small class="muted">tableaux détaillés : montants, encaissé, coûts, heures</small></summary>
@@ -172,7 +174,7 @@ route('resp', async (sub, id) => {
         ${D.people.sort((a, b) => b.margin - a.margin).map((x) => `<tr><td data-l="Personne"><a href="#/crew/e/${x.e.id}"><b>${esc(x.e.data.name)}</b></a>${x.missing.length ? `<br><small style="color:#e5484d">${x.missing.length} jour(s) sans heures</small>` : ''}</td>
           <td data-l="Heures" class="r">${fnum(x.h, 1)} h${x.loose ? `<br><small class="muted">${fnum(x.loose, 1)} h hors projet</small>` : ''}</td><td data-l="Occupation" class="r">${x.expected ? pctTxt(x.h / x.expected * 100) : '—'}</td>
           <td data-l="Coût" class="r">${money(x.cost)}</td><td data-l="Produit" class="r">${money(x.prod)}</td><td data-l="Marge" class="r"><b>${signMoney(x.margin)}</b></td><td data-l="Produit / h" class="r">${x.h ? `${money(x.prod / x.h)}<br><small class="muted">coût ${money(x.cost / x.h)}</small>` : '—'}</td>
-          <td data-l="Projets"><small>${Object.entries(x.byP).sort((a, b) => b[1] - a[1]).map(([pid, h]) => `${esc(+pid ? (byId(D.m.project, +pid) || { data: { name: '?' } }).data.name : 'hors projet')} ${fnum(h, 1)} h`).join(' · ') || '—'}</small></td></tr>`).join('')}</tbody></table></div>
+          <td data-l="Projets"><small>${Object.entries(x.byP).sort((a, b) => b[1] - a[1]).map(([pid, h]) => `${esc(+pid ? (byId(D.m.project, +pid) || { data: { name: '?' } }).data.name : 'autre chantier / hors projet')} ${fnum(h, 1)} h`).join(' · ') || '—'}</small></td></tr>`).join('')}</tbody></table></div>
         <p class="muted sm" style="margin-top:8px">Produit = heures × valeur d'une heure sur chaque projet (montant réalisé selon l'avancement, moins les achats, divisé par toutes les heures du projet). Coût = heures × coût horaire chargé de la fiche. Une marge négative : le projet consomme plus d'heures que prévu.</p>` : '<div class="empty sm">Personne dans l\'équipe.</div>'}
     </details>`;
   const td = $('[data-act=helpok]', page); if (td) td.onclick = () => { ui.respHelp = 1; saveUi(); render(); };

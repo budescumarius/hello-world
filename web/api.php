@@ -165,8 +165,15 @@ switch ($seg[0] ?? '') {
             out(['user' => $u, 'users' => $users, 'settings' => $settings, 'version' => APP_VERSION, 'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => true],
                 'edition' => edition(), 'ai' => false, 'translate' => ai_ready(), 'sub' => ['status' => sub_state(cid())['status'], 'locked' => sub_state(cid())['locked']], 'field' => ['employeeId' => $sc['employee'], 'contactId' => $sc['contact'], 'projects' => $sc['projects']]]);
         }
+        if (is_chef($u)) {
+            // responsable : le bureau, lui-même et les comptes de son équipe (pas les autres équipes)
+            $mine = [];
+            foreach (q("SELECT id, data FROM items WHERE company_id = ? AND type = 'employee'", [cid()])->fetchAll() as $r) if (in_array((int)$r['id'], chef_scope($u)['team'], true)) $mine[] = (int)((json_decode($r['data'], true) ?: [])['userId'] ?? 0);
+            $users = array_values(array_filter($users, fn($x) => $x['id'] === $u['id'] || in_array($x['role'], ['admin', 'user', 'soustraitant'], true) || in_array($x['id'], $mine, true)));
+            $users = array_map(fn($x) => $x['id'] === $u['id'] ? $x : ['id' => $x['id'], 'name' => $x['name'], 'role' => $x['role'], 'active' => $x['active'], 'color' => $x['color']], $users);
+        }
         out(['user' => $u, 'users' => $users, 'settings' => $settings, 'version' => APP_VERSION,
-            'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => cid() === $u['company_id']], 'edition' => edition(), 'ai' => edition() === 'simple' ? false : ai_ready(), 'translate' => ai_ready(),
+            'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => cid() === $u['company_id']], 'edition' => edition(), 'ai' => edition() === 'simple' || is_chef($u) ? false : ai_ready(), 'translate' => ai_ready(),
             'sub' => sub_state(cid()) + ['super' => (bool)$u['super']]]);
 
     // ------------------------------------------------------------ Utilisateurs
@@ -272,9 +279,9 @@ switch ($seg[0] ?? '') {
         $me = require_user();
         $type = $seg[1] ?? '';
         $id = isset($seg[2]) ? (int)$seg[2] : 0;
-        $field = is_field($me);
-        $see = fn(array $r) => !$field || field_can_read($me, $r);
-        $view = fn(array $r) => row_out($field ? field_view($r) : $r);
+        $field = is_field($me); $chef = is_chef($me);
+        $see = fn(array $r) => $field ? field_can_read($me, $r) : (!$chef || chef_can_read($me, $r));
+        $view = fn(array $r) => row_out($field ? field_view($r) : ($chef ? chef_view($me, $r) : $r));
 
         if ($method === 'GET' && $type === '') {
             // plusieurs types en une requête : ?types=a,b&project=ID
@@ -313,6 +320,13 @@ switch ($seg[0] ?? '') {
                 if (!field_can_write($me, $type, $pid, is_array($data) ? $data : [], null)) fail(403, 'Action non autorisée pour votre compte.');
                 $parent = null;
             }
+            if ($chef) {
+                $data = is_array($data) ? $data : [];
+                // un projet qu'il crée est à lui ; une personne qu'il ajoute est dans son équipe
+                if ($type === 'project' && (int)($data['managerId'] ?? 0) !== $me['id'] && !in_array($me['id'], array_map('intval', (array)($data['team'] ?? [])), true)) $data['managerId'] = $me['id'];
+                if ($type === 'employee') $data['chefId'] = $me['id'];
+                if (!chef_can_write($me, $type, $pid, null)) fail(403, 'Ce projet ne vous est pas attribué.');
+            }
             // responsable : il prépare des estimatifs (numérotés EST-…), le bureau les vérifie et en fait des devis
             if ($type === 'quote' && is_chef($me)) { $data = is_array($data) ? $data : []; $data['estimate'] = true; $data['estStatus'] = $data['estStatus'] ?? 'brouillon'; }
             db()->beginTransaction();
@@ -349,6 +363,12 @@ switch ($seg[0] ?? '') {
                 }
                 $b['data'] = $nd; unset($b['number']);
             }
+            if ($chef) {
+                $npid = array_key_exists('project_id', $b) ? ($b['project_id'] === null || $b['project_id'] === '' ? null : (int)$b['project_id']) : ($cur['project_id'] !== null ? (int)$cur['project_id'] : null);
+                if (!chef_can_write($me, $type, $npid, $cur)) fail(403, 'Ce projet ou cette personne ne vous est pas attribué(e).');
+                // il ne peut pas se retirer lui-même d'un projet (il le perdrait de vue)
+                if ($type === 'project' && isset($b['data']) && is_array($b['data']) && (int)($b['data']['managerId'] ?? 0) !== $me['id'] && !in_array($me['id'], array_map('intval', (array)($b['data']['team'] ?? [])), true)) $b['data']['managerId'] = $me['id'];
+            }
             if ($type === 'quote' && is_chef($me)) {
                 $was = json_decode((string)$cur['data'], true) ?: [];
                 if (empty($was['estimate']) || (array_key_exists('data', $b) && empty($b['data']['estimate']))) fail(403, 'Les devis sont gérés par le bureau : vous pouvez préparer des estimatifs.');
@@ -373,6 +393,7 @@ switch ($seg[0] ?? '') {
             if (!$cur) out(['ok' => true]);
             if ($field && (!in_array($type, ['timesheet', 'report'], true) || (int)$cur['created_by'] !== $me['id'])) fail(403, 'Action non autorisée pour votre compte.');
             if ($type === 'quote' && is_chef($me) && empty((json_decode((string)$cur['data'], true) ?: [])['estimate'])) fail(403, 'Les devis sont gérés par le bureau.');
+            if ($chef && !chef_can_write($me, $type, null, $cur)) fail(403, 'Ce projet ou cette personne ne vous est pas attribué(e).');
             if (is_chef($me) && in_array($type, CHEF_READONLY, true)) fail(403, 'La facturation est gérée par le bureau.');
             $d = json_decode($cur['data'], true) ?: [];
             if ($field && $type === 'timesheet' && !field_month_open($d['date'] ?? '')) fail(403, 'Ce mois est clôturé : demandez au bureau de corriger ces heures.');
@@ -474,12 +495,13 @@ switch ($seg[0] ?? '') {
             if (!move_uploaded_file($f['tmp_name'], __DIR__ . "/uploads/$rel")) fail(500, 'Impossible d\'enregistrer le fichier (droits du dossier uploads ?).');
             $pid = isset($_POST['project_id']) && $_POST['project_id'] !== '' ? (int)$_POST['project_id'] : null;
             if (is_field($me) && $pid && !in_array($pid, field_scope($me)['projects'], true)) $pid = null;
+            if (is_chef($me) && $pid && !in_array($pid, chef_scope($me)['projects'], true)) $pid = null;
             q('INSERT INTO files (company_id, project_id, name, mime, size, path, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)', [cid(), $pid, $name, $mime, (int)$f['size'], $rel, $me['id'], now()]);
             out(['id' => (int)db()->lastInsertId(), 'name' => $name, 'mime' => $mime, 'size' => (int)$f['size']]);
         }
         if ($method === 'GET' && $id) {
             $f = q('SELECT * FROM files WHERE id = ? AND company_id = ?', [$id, cid()])->fetch();
-            if (!$f || !is_file(__DIR__ . '/uploads/' . $f['path']) || (is_field($me) && !field_can_file($me, $f))) { http_response_code(404); exit('Fichier introuvable'); }
+            if (!$f || !is_file(__DIR__ . '/uploads/' . $f['path']) || (is_field($me) && !field_can_file($me, $f)) || (is_chef($me) && !chef_can_file($me, $f))) { http_response_code(404); exit('Fichier introuvable'); }
             $inline = preg_match('#^(image/|application/pdf)#', $f['mime']) && !isset($_GET['download']);
             header('Content-Type: ' . $f['mime']);
             header('Content-Length: ' . filesize(__DIR__ . '/uploads/' . $f['path']));
@@ -491,7 +513,7 @@ switch ($seg[0] ?? '') {
         }
         if ($method === 'DELETE' && $id) {
             $f = q('SELECT * FROM files WHERE id = ? AND company_id = ?', [$id, cid()])->fetch();
-            if ($f && is_field($me) && (int)$f['created_by'] !== $me['id']) fail(403, 'Action non autorisée pour votre compte.');
+            if ($f && (is_field($me) || is_chef($me)) && (int)$f['created_by'] !== $me['id']) fail(403, 'Action non autorisée pour votre compte.');
             if ($f) { @unlink(__DIR__ . '/uploads/' . $f['path']); q('DELETE FROM files WHERE id = ?', [$id]); }
             out(['ok' => true]);
         }
@@ -903,7 +925,7 @@ switch ($seg[0] ?? '') {
     // ------------------------------------------------------------ Assistant IA
     case 'ai':
         $me = require_user();
-        if (is_field($me) && ($seg[1] ?? '') !== 'translate') fail(403, 'Accès réservé au bureau.');
+        if ((is_field($me) || is_chef($me)) && ($seg[1] ?? '') !== 'translate') fail(403, 'Accès réservé au bureau.');
         db()->exec('CREATE TABLE IF NOT EXISTS ai_convs (id INT AUTO_INCREMENT PRIMARY KEY, company_id INT NOT NULL, user_id INT NOT NULL, title VARCHAR(190) NOT NULL, turns LONGTEXT NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, KEY owner (company_id, user_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
         $act = $seg[1] ?? '';
         $id = isset($seg[2]) ? (int)$seg[2] : 0;
@@ -989,8 +1011,10 @@ switch ($seg[0] ?? '') {
 
     // ------------------------------------------------------------ Historique des actions
     case 'activity':
-        require_staff();
+        $me = require_staff();
         $args = [cid()]; $sql = 'SELECT a.*, u.name AS user_name FROM activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.company_id = ?';
+        // responsable : le journal de ses projets et ses propres actions
+        if (is_chef($me)) { $ps = chef_scope($me)['projects']; $sql .= ' AND (a.user_id = ?' . ($ps ? ' OR a.project_id IN (' . implode(',', array_map('intval', $ps)) . ')' : '') . ')'; $args[] = $me['id']; }
         if (isset($_GET['project'])) { $sql .= ' AND a.project_id = ?'; $args[] = (int)$_GET['project']; }
         $limit = max(1, min(200, (int)($_GET['limit'] ?? 50)));
         out(q($sql . " ORDER BY a.id DESC LIMIT $limit", $args)->fetchAll());
