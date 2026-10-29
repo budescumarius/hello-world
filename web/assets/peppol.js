@@ -12,8 +12,10 @@ function countryCode(name, fallback) {
 const enterpriseNo = (vat) => { const dg = String(vat || '').replace(/\D/g, ''); return dg.length === 9 ? '0' + dg : dg.length === 10 ? dg : ''; };
 const vatId = (vat, cc) => { const v = String(vat || '').replace(/[\s.\-]/g, '').toUpperCase(); if (!v) return ''; return /^[A-Z]{2}/.test(v) ? v : (cc || 'BE') + v; };
 // Identifiant Peppol « schéma:valeur » ; en Belgique : 0208 + numéro d'entreprise
+// « 0208:0472.830.260 » → « 0208:0472830260 » (Peppol : sans espaces ni points)
+const peppolNorm = (id) => { const [sc, ...v] = String(id || '').trim().split(':'); return v.length ? `${sc.replace(/\D/g, '')}:${v.join(':').replace(/[\s.\-/]/g, '')}` : String(id || '').trim(); };
 function peppolIdOf(d, cc) {
-  if (d.peppolId) return String(d.peppolId).trim();
+  if (d.peppolId) return peppolNorm(d.peppolId);
   if ((cc || 'BE') === 'BE' && enterpriseNo(d.vat)) return '0208:' + enterpriseNo(d.vat);
   if (d.vat) return `${{ FR: '9957', NL: '9944', LU: '9938', DE: '9930' }[cc] || '9925'}:${vatId(d.vat, cc)}`;
   return '';
@@ -39,8 +41,8 @@ function sellerInfo() {
   const co = company();
   const a = splitAddress(co.address);
   const cc = countryCode(co.country, 'BE');
-  return { name: co.name, street: co.street || a.street, zip: co.zip || a.zip, city: co.city || a.city, cc, vat: vatId(co.vat, cc), enterprise: co.enterprise || enterpriseNo(co.vat),
-    peppolId: co.peppolId || (cc === 'BE' && (co.enterprise || enterpriseNo(co.vat)) ? '0208:' + (co.enterprise || enterpriseNo(co.vat)) : ''), email: co.email, phone: co.phone, iban: String(co.iban || '').replace(/\s/g, ''), bic: co.bic };
+  return { name: co.name, street: co.street || a.street, zip: co.zip || a.zip, city: co.city || a.city, cc, vat: vatId(co.vat, cc), enterprise: enterpriseNo(co.enterprise) || enterpriseNo(co.vat),
+    peppolId: co.peppolId ? peppolNorm(co.peppolId) : (cc === 'BE' && (enterpriseNo(co.enterprise) || enterpriseNo(co.vat)) ? '0208:' + (enterpriseNo(co.enterprise) || enterpriseNo(co.vat)) : ''), email: co.email, phone: co.phone, iban: String(co.iban || '').replace(/\s/g, ''), bic: co.bic };
 }
 function buyerInfo(c) {
   const d = (c && c.data) || {};
@@ -162,6 +164,8 @@ async function peppolInvoice(it) {
     if (!confirm(`Envoyer la facture ${it.number} à ${b.name} (${b.peppolId}) via Peppol ?`)) return;
     snd.disabled = true; snd.textContent = 'Envoi…';
     try {
+      const co = company();
+      if (!co.peppolId && sellerInfo().peppolId && isAdmin()) { const nco = { ...co, peppolId: sellerInfo().peppolId }; delete nco.logo; await api('PUT', 'settings', { company: nco }).catch(() => {}); S.settings.company = nco; }
       const r = await api('POST', 'peppol/send', { xml: buildUBL(it, client, project), recipient: b.peppolId, credit: it.data.kind === 'avoir', invoice_id: it.id });
       it.data.peppol = { ...pe, generatedAt: today(), sentAt: today(), sentBy: S.me.id, msgId: r.id || null, via: 'peppyrus' };
       await persist('invoice', it); m.close(); toast('Facture envoyée via Peppol', 3500); render();

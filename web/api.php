@@ -559,16 +559,16 @@ switch ($seg[0] ?? '') {
                     'confirmed' => (bool)($m['confirmed'] ?? false), 'imported' => $mid !== '' && (bool)q("SELECT id FROM items WHERE company_id = ? AND type = 'expense' AND data LIKE ?", [cid(), '%"peppolMsg":"' . $mid . '"%'])->fetch()];
             }
             out(['ok' => true, 'waiting' => (int)($l['meta']['total'] ?? count($l['items'] ?? [])), 'total' => (int)($all['meta']['total'] ?? count($all['items'] ?? [])), 'recent' => $recent,
-                'env' => (setting('peppolap', []) ?: [])['env'] ?? 'prod', 'peppolId' => (string)((setting('company', []) ?: [])['peppolId'] ?? ''), 'lastSync' => setting('peppol_sync', null)]);
+                'env' => (setting('peppolap', []) ?: [])['env'] ?? 'prod', 'peppolId' => company_peppol_id(), 'lastSync' => setting('peppol_sync', null)]);
         }
         if ($act === 'send' && $method === 'POST') {
             $b = body();
             $xml = (string)($b['xml'] ?? '');
             $rcpt = trim((string)($b['recipient'] ?? ''));
-            $co = setting('company', []) ?: [];
-            $sender = trim((string)($co['peppolId'] ?? ''));
+            if (str_contains($rcpt, ':')) { [$sc, $v] = explode(':', $rcpt, 2); $rcpt = preg_replace('/\D/', '', $sc) . ':' . preg_replace('/[\s.\-\/]/', '', $v); }
+            $sender = company_peppol_id();
             if (!preg_match('/^\d{4}:[A-Za-z0-9.\-]{2,50}$/', $rcpt)) fail(400, 'Identifiant Peppol du client invalide.');
-            if (!preg_match('/^\d{4}:[A-Za-z0-9.\-]{2,50}$/', $sender)) fail(400, 'Votre identifiant Peppol manque (Paramètres › Peppol).');
+            if (!preg_match('/^\d{4}:[A-Za-z0-9.\-]{2,50}$/', $sender)) fail(400, 'Votre identifiant Peppol manque : indiquez votre n° de TVA ou votre identifiant dans Paramètres › Peppol.');
             if ($xml === '' || strlen($xml) > 15 * 1024 * 1024) fail(400, 'Fichier UBL manquant ou trop lourd.');
             try {
                 $r = pap_req('POST', 'message', ['sender' => $sender, 'recipient' => $rcpt, 'processType' => PAP_PROCESS,

@@ -486,6 +486,19 @@ function next_counter(string $key): int {
     return $n;
 }
 
+// Identifiant Peppol de la firme : celui des paramètres, sinon (Belgique) 0208 + n° d'entreprise tiré du n° de TVA – comme l'écran
+function company_peppol_id(): string {
+    $co = setting('company', []) ?: [];
+    $id = trim((string)($co['peppolId'] ?? ''));
+    if ($id !== '' && str_contains($id, ':')) { [$sc, $v] = explode(':', $id, 2); return preg_replace('/\D/', '', $sc) . ':' . preg_replace('/[\s.\-\/]/', '', $v); }
+    if ($id !== '') return $id;
+    $c = strtoupper(trim((string)($co['country'] ?? '')));
+    $vat = strtoupper(preg_replace('/[\s.\-]/', '', (string)($co['vat'] ?? '')));
+    $be = $c === '' || $c === 'BE' || str_starts_with($c, 'BELG') || str_starts_with($vat, 'BE');
+    $dg = preg_replace('/\D/', '', (string)($co['enterprise'] ?? '')) ?: preg_replace('/\D/', '', $vat);
+    if (strlen($dg) === 9) $dg = '0' . $dg;
+    return $be && strlen($dg) === 10 ? '0208:' . $dg : '';
+}
 function make_number(string $kind): string {
     $prefixes = setting('prefixes', []) ?: [];
     $defaults = NUMBERED + ['invoice' => 'FAC', 'avoir' => 'NC', 'proforma' => 'PF', 'estimate' => 'EST'];
