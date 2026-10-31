@@ -281,7 +281,8 @@ app.post('/api/entries/photo', auth(), express.raw({ type: '*/*', limit: '25mb' 
   const body = req.body;
   if (!Buffer.isBuffer(body) || body.length < 8) return fail(res, 400, 'Fișier lipsă');
   const tlen = body.readUInt32BE(0);
-  const thumb = body.subarray(4, 4 + tlen), full = body.subarray(4 + tlen);
+  const full = body.subarray(4 + tlen);
+  const thumb = tlen > 0 ? body.subarray(4, 4 + tlen) : full; // fără miniatură: folosim poza
   if (!isJpeg(thumb) || !isJpeg(full)) return fail(res, 400, 'Format invalid (doar JPEG)');
 
   const takenAt = normDate(meta.takenAt);

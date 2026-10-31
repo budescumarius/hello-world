@@ -546,8 +546,8 @@ function route(string $route, string $path, string $method): void {
         $raw = (string) file_get_contents('php://input');
         if (strlen($raw) < 8) fail(400, 'Fișier lipsă (verifică post_max_size în PHP)');
         $tlen = unpack('N', substr($raw, 0, 4))[1];
-        $thumb = substr($raw, 4, $tlen);
         $full = substr($raw, 4 + $tlen);
+        $thumb = $tlen > 0 ? substr($raw, 4, $tlen) : $full; // fără miniatură: folosim poza
         if (!is_jpeg($thumb) || !is_jpeg($full)) fail(400, 'Format invalid (doar JPEG)');
         $taken = norm_date($meta['takenAt'] ?? null);
         $dir = substr($taken, 0, 7);

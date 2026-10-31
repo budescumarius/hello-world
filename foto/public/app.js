@@ -63,6 +63,7 @@ const idb = new Promise((res, rej) => {
   r.onsuccess = () => res(r.result);
   r.onerror = () => rej(r.error);
 });
+idb.catch(() => {}); // fără stocare în telefon: pozele se țin în memorie (vezi enqueue)
 async function store(mode, fn) {
   const d = await idb;
   return new Promise((res, rej) => {
@@ -77,6 +78,7 @@ const Q = {
   add: (it) => store('readwrite', (s) => s.put(it)),
   del: (id) => store('readwrite', (s) => s.delete(id)),
   all: () => store('readonly', (s) => s.getAll()),
+  mem: [],
   busy: false,
   offline: false,
   error: null,
@@ -84,13 +86,14 @@ const Q = {
 
 const thumbUrls = new Map();
 function localThumb(it) {
-  if (!it.thumb) return null;
-  if (!thumbUrls.has(it.clientId)) thumbUrls.set(it.clientId, URL.createObjectURL(it.thumb));
+  const src = it.thumb || it.full;
+  if (!src) return null;
+  if (!thumbUrls.has(it.clientId)) thumbUrls.set(it.clientId, URL.createObjectURL(src));
   return thumbUrls.get(it.clientId);
 }
 
 async function enqueue(it) {
-  await Q.add(it);
+  try { await Q.add(it); } catch { Q.mem.push(it); } // fără stocare în telefon: ținem în memorie până se trimite
   Q.items.push(it);
   onQueueChange();
   pump();
@@ -100,7 +103,7 @@ async function pump() {
   if (Q.busy) return;
   Q.busy = true;
   try {
-    Q.items = (await Q.all()).sort((a, b) => a.takenAt.localeCompare(b.takenAt));
+    Q.items = [...(await Q.all().catch(() => [])), ...Q.mem].sort((a, b) => a.takenAt.localeCompare(b.takenAt));
     onQueueChange();
     while (Q.items.length) {
       const it = Q.items[0];
@@ -110,13 +113,13 @@ async function pump() {
           saved = await api('api/entries/note', { method: 'POST', json: { clientId: it.clientId, siteId: it.siteId, comment: it.comment, takenAt: it.takenAt } });
         } else {
           const head = new Uint8Array(4);
-          new DataView(head.buffer).setUint32(0, it.thumb.size);
+          new DataView(head.buffer).setUint32(0, it.thumb ? it.thumb.size : 0);
           const meta = encodeURIComponent(JSON.stringify({ clientId: it.clientId, siteId: it.siteId, comment: it.comment, takenAt: it.takenAt }));
-          saved = await api('api/entries/photo', { method: 'POST', headers: { 'X-Meta': meta, 'Content-Type': 'application/octet-stream' }, body: new Blob([head, it.thumb, it.full]) });
+          saved = await api('api/entries/photo', { method: 'POST', headers: { 'X-Meta': meta, 'Content-Type': 'application/octet-stream' }, body: new Blob(it.thumb ? [head, it.thumb, it.full] : [head, it.full]) });
         }
         Q.offline = false; Q.error = null;
         if (it.siteId && saved.site_id == null) toast('Nu mai ai acces la șantierul ales – poza e la „Fără șantier”');
-        await Q.del(it.clientId);
+        await Q.del(it.clientId).catch(() => {}); Q.mem = Q.mem.filter((x) => x !== it);
         Q.items.shift();
         recent.unshift(saved);
         if (recent.length > 24) recent.length = 24;
@@ -128,7 +131,7 @@ async function pump() {
         if (e.status && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429) {
           // eroare definitivă (ex. fișier stricat) – îl scoatem ca să nu blocheze restul
           toast('O poză nu a putut fi salvată: ' + e.message);
-          await Q.del(it.clientId);
+          await Q.del(it.clientId).catch(() => {}); Q.mem = Q.mem.filter((x) => x !== it);
           Q.items.shift();
           onQueueChange();
           continue;
@@ -150,43 +153,81 @@ let onQueueChange = () => {};
 
 // ============ procesarea pozelor (micșorare în telefon = trimitere rapidă) ============
 const MAX_SIDE = 2048, THUMB_SIDE = 360;
+// Deschide poza. Pe iPhone/iPad încercăm mai multe metode, pentru că Safari
+// refuză uneori pozele mari (24–48 MP) cu una sau alta dintre ele.
 async function decode(file) {
-  try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch {}
+  const errors = [];
+  if (window.createImageBitmap) {
+    try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { errors.push(e); }
+    try { return await createImageBitmap(file); } catch (e) { errors.push(e); }
+  }
   const url = URL.createObjectURL(file);
   try {
-    const img = new Image();
-    img.src = url;
-    await img.decode();
-    return img;
-  } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+    return await new Promise((res, rej) => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = () => rej(new Error('format necunoscut'));
+      img.src = url;
+    });
+  } catch (e) {
+    errors.push(e);
+    throw new Error(errors.map((x) => x.message || x.name).filter(Boolean).join(' / ') || 'nu pot deschide imaginea');
+  } finally { setTimeout(() => URL.revokeObjectURL(url), 5000); }
 }
-function toJpeg(src, max, q) {
-  const w0 = src.width || src.naturalWidth, h0 = src.height || src.naturalHeight;
+
+// O singură pânză (canvas), golită după fiecare folosire: Safari are o limită
+// de memorie pentru canvas și altfel, după câteva poze, nu mai poate micșora.
+const canvas = document.createElement('canvas');
+async function toJpeg(src, max, q) {
+  const w0 = src.naturalWidth || src.width, h0 = src.naturalHeight || src.height;
+  if (!w0 || !h0) throw new Error('imagine goală');
   const k = Math.min(1, max / Math.max(w0, h0));
-  const w = Math.round(w0 * k), hh = Math.round(h0 * k);
-  const c = document.createElement('canvas');
-  c.width = w; c.height = hh;
-  const ctx = c.getContext('2d');
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(src, 0, 0, w, hh);
-  return new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('Nu pot procesa poza'))), 'image/jpeg', q));
+  canvas.width = Math.round(w0 * k);
+  canvas.height = Math.round(h0 * k);
+  try {
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', q));
+    if (!blob || blob.size < 100) throw new Error('micșorarea a eșuat');
+    return blob;
+  } finally {
+    canvas.width = 0; canvas.height = 0; // eliberează memoria
+  }
 }
+
+const isJpegFile = async (file) => {
+  const b = new Uint8Array(await file.slice(0, 3).arrayBuffer());
+  return b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
+};
 
 async function addPhotos(files, fromCamera) {
   const comment = ($('#comment')?.value || '').trim();
   const siteId = state.siteId;
   let n = 0;
   for (const file of files) {
+    const takenAt = new Date(fromCamera ? Date.now() : file.lastModified || Date.now()).toISOString();
+    let full, thumb;
     try {
       const img = await decode(file);
-      const full = await toJpeg(img, MAX_SIDE, 0.82);
-      const thumb = await toJpeg(img, THUMB_SIDE, 0.7);
-      img.close?.();
-      const takenAt = new Date(fromCamera ? Date.now() : file.lastModified || Date.now()).toISOString();
+      try {
+        full = await toJpeg(img, MAX_SIDE, 0.82);
+        thumb = await toJpeg(img, THUMB_SIDE, 0.7);
+      } finally { img.close?.(); }
+    } catch (e) {
+      // Ultima variantă: trimitem poza originală, ca să nu se piardă.
+      if (await isJpegFile(file).catch(() => false)) {
+        full = file; thumb = null; // serverul folosește poza și ca miniatură
+      } else {
+        toast(`Nu pot deschide ${file.name || 'poza'} (${e.message}). Încearcă: Setări → Cameră → Formate → „Cel mai compatibil”.`);
+        continue;
+      }
+    }
+    try {
       await enqueue({ clientId: uid(), kind: 'photo', siteId, comment, takenAt, full, thumb });
       n++;
     } catch (e) {
-      toast('Nu am putut citi fișierul ' + (file.name || '') + '. Încearcă din nou.');
+      toast('Nu am putut salva poza: ' + e.message);
     }
   }
   if (n) {
