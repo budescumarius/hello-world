@@ -3,13 +3,13 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { db, PHOTO_DIR, hashPassword, checkPassword } = require('./db');
+const { db, PHOTO_DIR, hashPassword, checkPassword, getSetting, setSetting } = require('./db');
 const drive = require('./drive');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '10'; // la fel ca APP_VERSION din app.js
+const VERSION = '11'; // la fel ca APP_VERSION din app.js
 
 const app = express();
 app.set('trust proxy', true);
@@ -143,7 +143,8 @@ app.get('/api/sites', auth('admin', 'responsabil'), (req, res) => {
       (SELECT COUNT(*) FROM entries e WHERE e.site_id = s.id) AS count,
       (SELECT MAX(taken_at) FROM entries e WHERE e.site_id = s.id) AS last_at,
       (SELECT thumb FROM entries e WHERE e.site_id = s.id AND e.kind='photo' ORDER BY taken_at DESC LIMIT 1) IS NOT NULL AS has_photo,
-      (SELECT id FROM entries e WHERE e.site_id = s.id AND e.kind='photo' ORDER BY taken_at DESC LIMIT 1) AS cover_id
+      (SELECT id FROM entries e WHERE e.site_id = s.id AND e.kind='photo' ORDER BY taken_at DESC LIMIT 1) AS cover_id,
+      (SELECT client_id FROM entries e WHERE e.site_id = s.id AND e.kind='photo' ORDER BY taken_at DESC LIMIT 1) AS cover_v
     FROM sites s ${where} ORDER BY s.archived, s.name COLLATE NOCASE`).all(isAdmin(u) ? {} : { uid: u.id });
   const members = db.prepare('SELECT su.site_id, u.id, u.name, u.role FROM site_users su JOIN users u ON u.id = su.user_id ORDER BY u.name').all();
   for (const s of sites) s.users = members.filter((m) => m.site_id === s.id).map(({ id, name, role }) => ({ id, name, role }));
@@ -274,6 +275,12 @@ function resolveSite(u, siteId) {
   if (siteId === null || siteId === undefined || siteId === '') return null;
   return canUseSite(u, siteId) && db.prepare('SELECT 1 FROM sites WHERE id = ?').get(Number(siteId)) ? Number(siteId) : null;
 }
+// Număr nou pentru fiecare poză, niciodată refolosit (vezi next_entry_id din api.php).
+function nextEntryId() {
+  const n = Math.max(db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM entries').get().m, Number(getSetting('entry_seq')) || 0) + 1;
+  setSetting('entry_seq', n);
+  return n;
+}
 const isJpeg = (b) => b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
 
 // Corp: [4 octeți lungime miniatură][miniatură JPEG][poza JPEG]
@@ -298,11 +305,12 @@ app.post('/api/entries/photo', auth(), express.raw({ type: '*/*', limit: '25mb' 
   fs.writeFileSync(path.join(PHOTO_DIR, base + '.jpg'), full);
   fs.writeFileSync(path.join(PHOTO_DIR, base + '_t.jpg'), thumb);
 
-  const r = db.prepare(`INSERT INTO entries(client_id, kind, site_id, user_id, comment, file, thumb, size, taken_at)
-    VALUES (?, 'photo', ?, ?, ?, ?, ?, ?, ?)`).run(clientId, resolveSite(req.user, meta.siteId), req.user.id,
+  const newId = nextEntryId();
+  db.prepare(`INSERT INTO entries(id, client_id, kind, site_id, user_id, comment, file, thumb, size, taken_at)
+    VALUES (?, ?, 'photo', ?, ?, ?, ?, ?, ?, ?)`).run(newId, clientId, resolveSite(req.user, meta.siteId), req.user.id,
     cleanStr(meta.comment, 2000), base + '.jpg', base + '_t.jpg', full.length, takenAt);
   drive.kick();
-  res.json(getEntry(Number(r.lastInsertRowid)));
+  res.json(getEntry(newId));
 });
 
 app.post('/api/entries/note', auth(), json, (req, res) => {
@@ -311,9 +319,10 @@ app.post('/api/entries/note', auth(), json, (req, res) => {
   if (!comment) return fail(res, 400, 'Scrie ceva în notă');
   const existing = db.prepare('SELECT id, user_id FROM entries WHERE client_id = ?').get(clientId);
   if (existing) return existing.user_id === req.user.id ? res.json(getEntry(existing.id)) : fail(res, 409, 'Conflict');
-  const r = db.prepare(`INSERT INTO entries(client_id, kind, site_id, user_id, comment, taken_at, drive_status)
-    VALUES (?, 'note', ?, ?, ?, ?, 'none')`).run(clientId, resolveSite(req.user, req.body.siteId), req.user.id, comment, normDate(req.body.takenAt));
-  res.json(getEntry(Number(r.lastInsertRowid)));
+  const newId = nextEntryId();
+  db.prepare(`INSERT INTO entries(id, client_id, kind, site_id, user_id, comment, taken_at, drive_status)
+    VALUES (?, ?, 'note', ?, ?, ?, ?, 'none')`).run(newId, clientId, resolveSite(req.user, req.body.siteId), req.user.id, comment, normDate(req.body.takenAt));
+  res.json(getEntry(newId));
 });
 
 // ?site=<id>|none  &mine=1  &user=<id>  &before=<taken_at>|<id>  &limit=

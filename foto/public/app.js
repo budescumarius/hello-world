@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '10'; // la fel ca VERSION din api.php / server.js
+const APP_VERSION = '11'; // la fel ca VERSION din api.php / server.js
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -52,6 +52,9 @@ async function api(url, opts = {}) {
   return data;
 }
 
+// Adresa pozei include codul unic al încărcării: o poză nouă nu poate fi confundată
+// cu una ștearsă din memoria telefonului, chiar dacă ar avea același număr.
+const fileUrl = (e, size) => `files/${e.id}/${size}?v=${encodeURIComponent(e.client_id || '')}`;
 const ROLE_LABEL = { admin: 'Admin', responsabil: 'Responsabil', muncitor: 'Muncitor' };
 const fmtTime = (iso) => new Date(iso).toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' });
 const fmtDate = (iso) => new Date(iso).toLocaleDateString('ro-RO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -350,7 +353,7 @@ function openViewer(list, index, onChange) {
     const canDelete = mine || can.admin();
     const imgBox = h('div', { class: 'img' },
       e.kind === 'photo'
-        ? h('img', { src: `files/${e.id}/full`, alt: '' })
+        ? h('img', { src: fileUrl(e, 'full'), alt: '' })
         : h('div', { class: 'note-big' }, e.comment));
     let x0 = null;
     imgBox.addEventListener('touchstart', (ev) => { x0 = ev.touches.length === 1 ? ev.touches[0].clientX : null; }, { passive: true });
@@ -374,7 +377,7 @@ function openViewer(list, index, onChange) {
         h('div', { class: 'btns' },
           canEdit ? h('button', { class: 'btn sm', onclick: () => editComment(e) }, '💬 Comentariu') : null,
           canEdit ? h('button', { class: 'btn sm', onclick: () => moveSite(e) }, '🏗 Șantier') : null,
-          e.kind === 'photo' ? h('a', { class: 'btn sm', href: `files/${e.id}/full?dl=1`, download: '' }, '⬇') : null,
+          e.kind === 'photo' ? h('a', { class: 'btn sm', href: fileUrl(e, 'full') + '&dl=1', download: '' }, '⬇') : null,
           canDelete ? h('button', { class: 'btn sm danger', onclick: () => del(e) }, '🗑') : null)));
   }
 
@@ -407,6 +410,8 @@ function openViewer(list, index, onChange) {
     try {
       await api('api/entries/' + e.id, { method: 'DELETE' });
       list.splice(i, 1);
+      const r = recent.findIndex((x) => x.id === e.id); // scoate-o și din „Ultimele”
+      if (r >= 0) recent.splice(r, 1);
       onChange?.();
       if (!list.length) return close();
       if (i >= list.length) i = list.length - 1;
@@ -443,7 +448,7 @@ function gallery(entries, { onChange, pending = [] } = {}) {
     const open = () => openViewer(entries, idx, onChange);
     grid.append(e.kind === 'photo'
       ? h('button', { class: 'tile', onclick: open },
-          h('img', { src: `files/${e.id}/thumb`, loading: 'lazy', alt: e.comment || '' }),
+          h('img', { src: fileUrl(e, 'thumb'), loading: 'lazy', alt: e.comment || '' }),
           e.comment ? h('span', { class: 'c' }, '💬') : null)
       : h('button', { class: 'tile note', onclick: open }, h('b', {}, '📝'), h('span', {}, e.comment)));
   });
@@ -590,7 +595,7 @@ async function screenSantiere() {
   const { sites, unassigned } = await api('api/sites');
   const active = sites.filter((s) => !s.archived), archived = sites.filter((s) => s.archived);
   const card = (s) => h('button', { class: 'item', onclick: () => { location.hash = 'santier/' + s.id; } },
-    h('div', { class: 'cover', style: s.cover_id ? `background-image:url(files/${s.cover_id}/thumb)` : '' }, s.cover_id ? '' : '🏗'),
+    h('div', { class: 'cover', style: s.cover_id ? `background-image:url(files/${s.cover_id}/thumb?v=${encodeURIComponent(s.cover_v || '')})` : '' }, s.cover_id ? '' : '🏗'),
     h('div', { class: 'txt' },
       h('div', { class: 't' }, s.name),
       h('div', { class: 's' }, [s.address, `${s.count} ${s.count === 1 ? 'poză' : 'poze'}`, s.last_at ? 'ultima ' + fmtShort(s.last_at) : null].filter(Boolean).join(' · ')),

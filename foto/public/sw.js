@@ -1,5 +1,5 @@
 // Ține interfața în cache ca aplicația să pornească instant (și fără semnal).
-const CACHE = 'foto-santier-v10';
+const CACHE = 'foto-santier-v11';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {

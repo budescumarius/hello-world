@@ -16,7 +16,7 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '10'; // la fel ca APP_VERSION din app.js
+const VERSION = '11'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
@@ -191,6 +191,13 @@ function norm_date($s): string {
 function resolve_site(array $u, $siteId) {
     if ($siteId === null || $siteId === '') return null;
     return can_use_site($u, $siteId) && val('SELECT 1 FROM sites WHERE id = ?', [(int) $siteId]) ? (int) $siteId : null;
+}
+// Număr nou pentru fiecare poză, niciodată refolosit (altfel, după ștergerea ultimei poze,
+// telefonul ar putea arăta poza veche din memoria lui pentru același număr).
+function next_entry_id(): int {
+    $n = max((int) val('SELECT COALESCE(MAX(id), 0) FROM entries'), (int) setting('entry_seq')) + 1;
+    set_setting('entry_seq', $n);
+    return $n;
 }
 function is_jpeg(string $b): bool { return strlen($b) > 3 && substr($b, 0, 3) === "\xFF\xD8\xFF"; }
 
@@ -416,7 +423,8 @@ function route(string $route, string $path, string $method): void {
         $sites = all("SELECT s.id, s.name, s.address, s.archived, s.created_at,
             (SELECT COUNT(*) FROM entries e WHERE e.site_id = s.id) AS count,
             (SELECT MAX(taken_at) FROM entries e WHERE e.site_id = s.id) AS last_at,
-            (SELECT id FROM entries e WHERE e.site_id = s.id AND e.kind='photo' ORDER BY taken_at DESC LIMIT 1) AS cover_id
+            (SELECT id FROM entries e WHERE e.site_id = s.id AND e.kind='photo' ORDER BY taken_at DESC LIMIT 1) AS cover_id,
+            (SELECT client_id FROM entries e WHERE e.site_id = s.id AND e.kind='photo' ORDER BY taken_at DESC LIMIT 1) AS cover_v
             FROM sites s $where ORDER BY s.archived, s.name COLLATE NOCASE", is_admin($u) ? [] : ['uid' => $u['id']]);
         $members = all('SELECT su.site_id, u.id, u.name, u.role FROM site_users su JOIN users u ON u.id = su.user_id ORDER BY u.name');
         foreach ($sites as &$s) {
@@ -566,9 +574,10 @@ function route(string $route, string $path, string $method): void {
         if (file_put_contents("$PHOTOS/$base.jpg", $full) === false || file_put_contents("$PHOTOS/{$base}_t.jpg", $thumb) === false) {
             fail(500, 'Nu pot salva poza (spațiu pe disc?)');
         }
-        q("INSERT INTO entries(client_id, kind, site_id, user_id, comment, file, thumb, size, taken_at) VALUES (?, 'photo', ?, ?, ?, ?, ?, ?, ?)",
-            [$cid, resolve_site($u, $meta['siteId'] ?? null), $u['id'], clean($meta['comment'] ?? '', 2000), "$base.jpg", "{$base}_t.jpg", strlen($full), $taken]);
-        out(get_entry((int) $db->lastInsertId()));
+        $newId = next_entry_id();
+        q("INSERT INTO entries(id, client_id, kind, site_id, user_id, comment, file, thumb, size, taken_at) VALUES (?, ?, 'photo', ?, ?, ?, ?, ?, ?, ?)",
+            [$newId, $cid, resolve_site($u, $meta['siteId'] ?? null), $u['id'], clean($meta['comment'] ?? '', 2000), "$base.jpg", "{$base}_t.jpg", strlen($full), $taken]);
+        out(get_entry($newId));
         if (drive_connected()) { finish_request(); drive_work(25); }
         return;
     }
@@ -580,9 +589,10 @@ function route(string $route, string $path, string $method): void {
         if ($comment === '') fail(400, 'Scrie ceva în notă');
         $ex = one('SELECT id, user_id FROM entries WHERE client_id = ?', [$cid]);
         if ($ex) { if ((int) $ex['user_id'] !== $u['id']) fail(409, 'Conflict'); out(get_entry((int) $ex['id'])); return; }
-        q("INSERT INTO entries(client_id, kind, site_id, user_id, comment, taken_at, drive_status) VALUES (?, 'note', ?, ?, ?, ?, 'none')",
-            [$cid, resolve_site($u, $b['siteId'] ?? null), $u['id'], $comment, norm_date($b['takenAt'] ?? null)]);
-        out(get_entry((int) $db->lastInsertId()));
+        $newId = next_entry_id();
+        q("INSERT INTO entries(id, client_id, kind, site_id, user_id, comment, taken_at, drive_status) VALUES (?, ?, 'note', ?, ?, ?, ?, 'none')",
+            [$newId, $cid, resolve_site($u, $b['siteId'] ?? null), $u['id'], $comment, norm_date($b['takenAt'] ?? null)]);
+        out(get_entry($newId));
         return;
     }
     if ($route === 'GET api/entries') {
