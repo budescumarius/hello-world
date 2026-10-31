@@ -1,4 +1,5 @@
 'use strict';
+const APP_VERSION = '10'; // la fel ca VERSION din api.php / server.js
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -737,13 +738,19 @@ async function editUser(u, sites) {
 
 async function screenCont(query) {
   const u = state.user;
+  const versionInfo = h('span', {}, 'aplicație v' + APP_VERSION);
+  api('api/state').then((st) => {
+    if (st.version === APP_VERSION) versionInfo.append(' · server v' + st.version + ' ✓');
+    else versionInfo.append(h('b', { style: 'color:var(--red)' }, ` · server ${st.version ? 'v' + st.version : 'vechi'} – urcă api.php nou!`));
+  }).catch(() => {});
   const box = h('div', {},
     h('h1', {}, 'Cont'),
     h('div', { class: 'card' }, h('div', { class: 'kv' },
       h('b', {}, 'Nume'), h('span', {}, u.name),
       h('b', {}, 'Utilizator'), h('span', {}, '@' + u.username),
       h('b', {}, 'Rol'), h('span', {}, ROLE_LABEL[u.role]),
-      h('b', {}, 'Șantiere'), h('span', {}, can.admin() ? 'toate' : state.sites.map((s) => s.name).join(', ') || '—'))),
+      h('b', {}, 'Șantiere'), h('span', {}, can.admin() ? 'toate' : state.sites.map((s) => s.name).join(', ') || '—'),
+      h('b', {}, 'Versiune'), versionInfo)),
     h('div', { class: 'row', style: 'margin-top:12px' },
       h('button', { class: 'btn grow', onclick: changePassword }, '🔑 Schimbă parola'),
       h('button', { class: 'btn grow danger', onclick: async () => {

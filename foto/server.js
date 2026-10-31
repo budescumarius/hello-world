@@ -9,6 +9,7 @@ const drive = require('./drive');
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const ROLES = ['admin', 'responsabil', 'muncitor'];
+const VERSION = '10'; // la fel ca APP_VERSION din app.js
 
 const app = express();
 app.set('trust proxy', true);
@@ -91,7 +92,7 @@ const json = express.json({ limit: '100kb' });
 
 app.get('/api/state', (req, res) => {
   const needsSetup = db.prepare('SELECT COUNT(*) AS n FROM users').get().n === 0;
-  res.json({ needsSetup, user: needsSetup ? null : currentUser(req) });
+  res.json({ needsSetup, user: needsSetup ? null : currentUser(req), version: VERSION });
 });
 
 app.post('/api/setup', json, (req, res) => {

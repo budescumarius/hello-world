@@ -16,6 +16,7 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
+const VERSION = '10'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
@@ -353,7 +354,7 @@ function route(string $route, string $path, string $method): void {
     // ---------- autentificare
     if ($route === 'GET api/state') {
         $needs = (int) val('SELECT COUNT(*) FROM users') === 0;
-        out(['needsSetup' => $needs, 'user' => $needs ? null : current_user()]);
+        out(['needsSetup' => $needs, 'user' => $needs ? null : current_user(), 'version' => VERSION]);
         return;
     }
     if ($route === 'POST api/setup') {
