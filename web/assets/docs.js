@@ -178,7 +178,8 @@ function progressTable(d, t) {
       const pc = Math.max(0, Math.min(100, num(r.cum)));
       return `<tr class="${moved(r) ? 'mb-cur' : ''}"><td><div class="mb-dl">${code(i)}<span class="pre">${esc(r.desc)}</span></div></td><td class="r">${dnum2(r.qty)}<span class="mb-u">${esc(r.unit || '')}</span></td>
         <td class="r">${pv(r, r.prev)}</td><td class="r"><b>+ ${pv(r, num(r.cum) - num(r.prev))}</b></td><td class="r"><b>${pv(r, r.cum)}</b><div class="mb-bar"><i style="width:${pc}%"></i></div></td><td class="r">${pv(r, 100 - num(r.cum))}</td><td class="r">${dmoney(r.price, t)}</td><td class="r">${dmoney(period(r), t)}</td></tr>`;
-    }).join('')}</tbody></table>`;
+    }).join('')}
+    ${(d.lines || []).filter((l) => l.extra && l.kind === 'item' && !isDeduction(l)).map((l) => `<tr class="mb-cur"><td colspan="7"><div class="mb-dl"><span class="pre">${esc(l.desc)}</span></div></td><td class="r">${dmoney(r2(num(l.qty) * num(l.price)), t)}</td></tr>`).join('')}</tbody></table>`;
 }
 function progressRecap(d, t) {
   const rows = (d.progressRows || []).filter((r) => r.kind === 'item');
@@ -213,7 +214,7 @@ async function totalsBlock(kind, it, t, paid) {
   const deds = (d.lines || []).filter((l) => l.kind === 'item' && !l.option && isDeduction(l));
   const gross = r2((d.lines || []).filter((l) => l.kind === 'item' && !l.option && !isDeduction(l)).reduce((a, l) => a + r2(num(l.qty) * num(l.price)), 0));
   const dedGroups = {};
-  for (const l of deds) { const k = l.deduction === 'acompte' || /acompte/i.test(l.desc) ? 'Déduction acompte' : String(l.desc).split(/[(–-]/)[0].trim() || 'Déduction'; dedGroups[k] = (dedGroups[k] || 0) + r2(num(l.qty) * num(l.price)); }
+  for (const l of deds) { const k = l.deduction === 'acompteLibre' ? String(l.desc).replace(/\s*\(TVA [^)]*\)\s*$/, '') : l.deduction === 'acompte' || /acompte/i.test(l.desc) ? 'Déduction acompte' : String(l.desc).split(/[(–-]/)[0].trim() || 'Déduction'; dedGroups[k] = (dedGroups[k] || 0) + r2(num(l.qty) * num(l.price)); }
   const row = (label, val, cls = '') => `<div class="mb-tr ${cls}"><span>${label}</span><b>${typeof val === 'number' ? dmoney(val, t) : val}</b></div>`;
   const isCn = d.kind === 'avoir';
   let rows = row('Total HT', gross, tt.discount || deds.length ? '' : 'mb-sum');
@@ -223,12 +224,23 @@ async function totalsBlock(kind, it, t, paid) {
   // état d'avancement : acompte encore à déduire après cet état (acomptes du devis − déductions jusqu'à cet état inclus)
   if (kind === 'invoice' && d.kind === 'situation' && d.quoteId) {
     const sib = (await db.list('invoice')).filter((i) => +i.data.quoteId === +d.quoteId);
-    const isAc = (l) => l.kind === 'item' && (l.deduction === 'acompte' || (isDeduction(l) && /acompte/i.test(l.desc || '')));
+    const isAc = (l) => l.kind === 'item' && (l.deduction === 'acompte' || (!l.deduction && isDeduction(l) && /acompte/i.test(l.desc || '')));
     const adv = r2(sib.filter((i) => i.data.kind === 'acompte').reduce((a, i) => a + totals(i.data).base, 0));
     const no = num(d.situationNo) || 1;
     const done = r2(sib.filter((i) => i.data.kind === 'situation' && i.id !== it.id && (num(i.data.situationNo) || 1) < no).reduce((a, i) => a - (i.data.lines || []).filter(isAc).reduce((x, l) => x + r2(num(l.qty) * num(l.price)), 0), 0)
       - deds.filter(isAc).reduce((x, l) => x + r2(num(l.qty) * num(l.price)), 0));
     if (adv > 0.005) leftRow = row(`Acompte restant à déduire <small>(acompte ${dmoney(adv, t)} · déduit à ce jour ${dmoney(done, t)})</small>`, Math.max(0, r2(adv - done)), 'mb-left');
+  }
+  // acompte non lié au devis, déduit à la main : ce qu'il en reste à déduire
+  const libres = [...new Set(deds.filter((l) => l.deduction === 'acompteLibre' && l.acId).map((l) => +l.acId))];
+  if (kind === 'invoice' && libres.length) {
+    const all = await db.list('invoice');
+    for (const aid of libres) {
+      const ac = all.find((i) => i.id === aid); if (!ac) continue;
+      const base = totals(ac.data).base;
+      const used = r2(-all.filter((i) => i.id !== it.id && i.id < it.id).concat([it]).reduce((a, i) => a + (i.data.lines || []).filter((l) => +l.acId === aid).reduce((x, l) => x + r2(num(l.qty) * num(l.price)), 0), 0));
+      leftRow += row(`Acompte ${esc(ac.number || '')} restant à déduire <small>(acompte ${dmoney(base, t)} · déduit à ce jour ${dmoney(used, t)})</small>`, Math.max(0, r2(base - used)), 'mb-left');
+    }
   }
   if (tt.discount || deds.length) rows += row('Total HT net', tt.base, 'mb-sum');
   rows += d.reverse ? row('TVA', 'Autoliquidation') : tt.vats.map((v) => row(`TVA ${fnum(v.rate)} % <small>sur ${dmoney(v.base, t)}</small>`, v.vat)).join('');

@@ -137,6 +137,31 @@ async function proformaConvert(it) {
     },
   })));
 }
+// Déduire (rembourser) une partie d'un acompte qui n'est pas lié au devis : choix de l'acompte, % ou montant, réparti par taux de TVA
+async function eaDeductAcompte(it, done) {
+  const d = it.data; const [all, contacts] = await Promise.all([db.list('invoice'), db.list('contact')]);
+  const acs = all.filter((i) => i.data.kind === 'acompte' && i.data.status === 'emise' && !(d.quoteId && +i.data.quoteId === +d.quoteId));
+  const list = [...acs.filter((i) => +i.data.clientId === +d.clientId), ...acs.filter((i) => +i.data.clientId !== +d.clientId)];
+  if (!list.length) return toast('Aucune facture d\'acompte validée à déduire', 4000);
+  const used = (ac) => r2(-all.filter((i) => i.id !== it.id).concat([it]).reduce((a, i) => a + (i.data.lines || []).filter((l) => +l.acId === ac.id).reduce((x, l) => x + r2(num(l.qty) * num(l.price)), 0), 0));
+  const cname = (id) => contactName(byId(contacts, id));
+  const v = await ask('Déduire un acompte', [
+    { name: 'acId', label: 'Quel acompte ?', type: 'select', cls: 'full', options: list.map((i) => { const b = totals(i.data).base; return [i.id, `${i.number} · ${fmtDate(i.data.date)} · ${money(b)} HT · reste à déduire ${money(r2(b - used(i)))}${+i.data.clientId === +d.clientId ? '' : ` · autre client ${cname(i.data.clientId)}`}`]; }) },
+    { name: 'pct', label: 'Pourcentage de l\'acompte à déduire (%)', type: 'percent' },
+    { name: 'amount', label: 'ou montant HT à déduire', type: 'money' },
+  ], { acId: list[0].id, pct: 10 });
+  if (!v) return;
+  const ac = byId(list, +v.acId); const at = totals(ac.data); const left = r2(at.base - used(ac));
+  let want = num(v.amount) > 0 ? num(v.amount) : r2(at.base * num(v.pct) / 100);
+  if (!(want > 0)) return toast('Indiquez un pourcentage ou un montant', 3000);
+  if (want > left + 0.005) { if (!confirm(`Il ne reste que ${money(left)} à déduire de cet acompte. Déduire ${money(left)} ?`)) return; want = left; }
+  const many = at.vats.length > 1; const lbl = num(v.amount) > 0 ? money(want) : `${fnum(num(v.pct))} %`;
+  for (const x of at.vats) {
+    const part = r2(want * (at.base ? x.base / at.base : 1));
+    if (part > 0) d.lines.push({ id: lid(), kind: 'item', extra: true, deduction: 'acompteLibre', acId: ac.id, acNumber: ac.number, desc: `Déduction ${lbl} de l'acompte ${ac.number}${many ? ` (TVA ${fnum(x.rate)} %)` : ''}`, unit: 'forfait', qty: 1, price: -part, vat: x.rate, type: 'divers' });
+  }
+  toast(`Déduction de ${money(want)} HT ajoutée`, 3000); done();
+}
 function invMenu(it) {
   if (it.data.kind === 'proforma') return menuSheet(`Facture pro forma ${it.number || '(brouillon)'}`, proformaActions(it));
   const d = it.data; const locked = d.status === 'emise';
@@ -276,6 +301,21 @@ route('invoice', async (id, tab = 'informations') => {
     const foot = () => { const t = totals(d); $('[data-ht]', body).textContent = money(t.base); const m = $('[data-marge]', body); m.innerHTML = t.cost > 0 ? `<small class="muted">Marge bénéficiaire</small><b>${fnum(t.base ? ((t.base - t.cost) / t.base) * 100 : 0, 1)} % / ${money(t.base - t.cost)}</b>` : ''; };
     linesEditor($('#lines', body), d, { showCost: false, defVat: d.defaultVat, readOnly: locked || prog, onChange: () => { foot(); changed(); } });
     const ro = $('[data-reopen]', body); if (ro) ro.onclick = () => invChangeValidated(it);
+    // état d'avancement : lignes ajoutées à la main (travaux en plus, déduction d'un acompte pas lié au devis…)
+    if (prog) {
+      const ex = d.lines.filter((l) => l.extra);
+      body.insertAdjacentHTML('beforeend', `<section class="card"><div class="card-h"><h3>Lignes supplémentaires</h3><small class="muted">en plus de l'avancement · gardées si vous modifiez l'avancement</small></div>
+        ${ex.length ? `<div class="rows">${ex.map((l) => `<div class="row"><span class="grow"><b>${esc(l.desc)}</b><small class="muted">TVA ${fnum(num(l.vat))} %</small></span><b>${money(r2(num(l.qty) * num(l.price)))}</b>${locked ? '' : `<button class="icon-btn sm" data-exdel="${l.id}" title="Retirer">${I.trash}</button>`}</div>`).join('')}</div>` : '<p class="muted">Aucune.</p>'}
+        ${locked ? '' : `<div class="btns" style="margin-top:10px"><button class="btn" data-exfree>${I.plus} Ligne libre</button><button class="btn" data-exac>${I.coins} Déduire un acompte (même non lié au chantier)</button></div>`}</section>`);
+      const done = () => { foot(); changed(); render(); };
+      $$('[data-exdel]', body).forEach((b) => { b.onclick = () => { d.lines = d.lines.filter((l) => l.id !== b.dataset.exdel); done(); }; });
+      const fr = $('[data-exfree]', body); if (fr) fr.onclick = async () => {
+        const v = await ask('Ligne libre', [{ name: 'desc', label: 'Description', required: true, cls: 'full' }, { name: 'amount', label: 'Montant HT (négatif pour une remise / un remboursement)', type: 'number', required: true }, { name: 'vat', label: 'TVA', type: 'select', options: vatList().map((x) => [x, `${fnum(x)} %`]) }], { vat: num(d.defaultVat) || defVat() });
+        if (!v || !num(v.amount)) return;
+        d.lines.push({ id: lid(), kind: 'item', extra: true, desc: v.desc.trim(), unit: 'forfait', qty: 1, price: r2(num(v.amount)), vat: num(v.vat), type: 'divers' }); done();
+      };
+      const ac = $('[data-exac]', body); if (ac) ac.onclick = () => eaDeductAcompte(it, done);
+    }
     foot();
     const pg = $('[data-prog]', body);
     if (pg) pg.onclick = async () => { const e = eaState(it); if (['envoye', 'approuve'].includes(e.k) && !confirm(`Cet état a déjà été ${e.k === 'approuve' ? 'approuvé par' : 'envoyé à'} votre client. Le modifier ? Il faudra le lui renvoyer pour approbation.`)) return; const q = await db.get('quote', +d.quoteId); const others = (await db.list('invoice')).filter((x) => +x.data.quoteId === q.id && x.id !== it.id); progressInvoice(q, others, { project_id: it.project_id, data: {} }, it); };
