@@ -53,6 +53,7 @@ function toast(msg, ms = 2600) {
 
 // ---------------------------------------------------------------- API
 async function api(method, path, body) {
+  if (method !== 'GET') dbcClear();
   const opt = { method, headers: { 'X-Requested-With': 'batipro' }, credentials: 'same-origin' };
   if (body instanceof FormData) opt.body = body;
   else if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
@@ -62,17 +63,42 @@ async function api(method, path, body) {
   try { data = await res.json(); } catch (e) { /* réponse vide */ }
   if (res.status === 401 && S.ready) { S.ready = false; showLogin(); }
   if (res.status === 402 && S.ready && !(S.sub && S.sub.locked)) window.dispatchEvent(new Event('bp-locked'));
+  if (method !== 'GET') dbcClear(); // aussi ce qui a été lu pendant la modification
   if (!res.ok) { const err = new Error((data && data.error) || `Erreur ${res.status}`); err.status = res.status; err.conflict = data && data.conflict; throw err; }
   return data;
 }
+// Listes gardées 45 s en mémoire : passer d'une page à l'autre (Argent, Chantiers…) ne recharge pas tout depuis le serveur.
+// Toute modification (enregistrer, supprimer, envoyer un fichier…) vide la mémoire : on ne voit jamais une liste périmée de ses propres changements.
+// Chaque page reçoit sa copie (les éditeurs modifient les objets avant d'enregistrer).
+const DBC = new Map(); const DBC_TTL = 45000;
+function dbcClear() { DBC.clear(); }
+const dbcClone = (x) => (typeof structuredClone === 'function' ? structuredClone(x) : JSON.parse(JSON.stringify(x)));
+const dbcFresh = (k) => { const e = DBC.get(k); return e && Date.now() - e.at < DBC_TTL ? e : null; };
+function dbcGet(key, path) {
+  let e = dbcFresh(key);
+  if (!e) { e = { at: Date.now(), p: api('GET', path) }; DBC.set(key, e); e.p.catch(() => { if (DBC.get(key) === e) DBC.delete(key); }); }
+  return e.p.then(dbcClone);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) for (const [k, e] of DBC) if (Date.now() - e.at >= DBC_TTL) DBC.delete(k); });
 // factures pro forma : sans valeur fiscale → écartées des listes de factures (totaux, statistiques, export comptable,
 // états d'avancement…) ; seules la liste des factures et la fiche chantier les demandent ({ proforma: true })
 const noProforma = (l) => l.filter((x) => !x.data || x.data.kind !== 'proforma');
 // estimatifs des responsables (devis pas encore vérifiés par le bureau) : hors des chiffres, sauf demande explicite
 const noEstimate = (l) => l.filter((x) => !x.data || !x.data.estimate);
+// plusieurs types en une requête ; sans chantier, chaque liste rejoint la mémoire (et en sort si elle y est déjà)
+async function dbMany(types, project) {
+  if (project != null) return dbcGet(`M:${types.join(',')}:${project}`, `items&types=${types.join(',')}&project=${project}`);
+  const miss = types.filter((t) => !dbcFresh(`T:${t}`));
+  if (miss.length) {
+    const at = Date.now(); const p = api('GET', `items&types=${miss.join(',')}`);
+    miss.forEach((t) => { const e = { at, p: p.then((r) => r[t] || []) }; DBC.set(`T:${t}`, e); e.p.catch(() => { if (DBC.get(`T:${t}`) === e) DBC.delete(`T:${t}`); }); });
+  }
+  const lists = await Promise.all(types.map((t) => dbcGet(`T:${t}`, `items/${t}`)));
+  return Object.fromEntries(types.map((t, i) => [t, lists[i]]));
+}
 const db = {
-  list: (type, opt = {}) => api('GET', `items/${type}${opt.project != null ? `&project=${opt.project}` : ''}${opt.parent != null ? `&parent=${opt.parent}` : ''}`).then((r) => (type === 'invoice' && !opt.proforma && Array.isArray(r) ? noProforma(r) : type === 'quote' && !opt.estimate && Array.isArray(r) ? noEstimate(r) : r)),
-  many: (types, project) => api('GET', `items&types=${types.join(',')}${project != null ? `&project=${project}` : ''}`).then((r) => { if (r && Array.isArray(r.invoice)) r.invoice = noProforma(r.invoice); if (r && Array.isArray(r.quote)) r.quote = noEstimate(r.quote); return r; }),
+  list: (type, opt = {}) => (opt.project == null && opt.parent == null ? dbcGet(`T:${type}`, `items/${type}`) : dbcGet(`L:${type}:${opt.project}:${opt.parent}`, `items/${type}${opt.project != null ? `&project=${opt.project}` : ''}${opt.parent != null ? `&parent=${opt.parent}` : ''}`)).then((r) => (type === 'invoice' && !opt.proforma && Array.isArray(r) ? noProforma(r) : type === 'quote' && !opt.estimate && Array.isArray(r) ? noEstimate(r) : r)),
+  many: (types, project) => dbMany(types, project).then((r) => { if (r && Array.isArray(r.invoice)) r.invoice = noProforma(r.invoice); if (r && Array.isArray(r.quote)) r.quote = noEstimate(r.quote); return r; }),
   get: (type, id) => api('GET', `items/${type}/${id}`),
   async save(type, it, opt = {}) {
     try {
@@ -641,11 +667,16 @@ async function render() {
   if (S.sub && S.sub.locked && !S.me.super && parts[0] !== 'abonnement') { if (typeof subLocked === 'function') return subLocked(); }
   const fn = ROUTES[parts[0] || 'dashboard'] || ROUTES.dashboard;
   const seq = ++renderSeq;
+  // barre de chargement en haut si la page met plus d'un instant à venir
+  const slow = setTimeout(() => { if (seq === renderSeq) document.body.classList.add('loading'); }, 120);
   try { await fn(...parts.slice(1)); } catch (e) {
     console.error(e);
     if (seq === renderSeq && e.status !== 402) toast('Erreur : ' + e.message, 5000);
   }
+  clearTimeout(slow); if (seq === renderSeq) document.body.classList.remove('loading');
   if (seq === renderSeq) window.scrollTo(0, 0);
+  // première page affichée : les listes les plus utilisées se chargent en arrière-plan (les autres pages s'ouvrent ensuite tout de suite)
+  if (!render.warm && !isField()) { render.warm = true; const go2 = () => db.many(isChef() ? ['project', 'employee', 'timesheet', 'quote'] : ['project', 'contact', 'invoice', 'quote', 'expense']).catch(() => {}); (window.requestIdleCallback || ((f) => setTimeout(f, 800)))(go2); }
 }
 window.addEventListener('hashchange', render);
 // « Remonter » : bouton flottant dès qu'on a fait défiler une longue page
