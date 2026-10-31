@@ -19,6 +19,13 @@ function h(tag, attrs, ...kids) {
   return el;
 }
 
+// append/replaceChildren care ignoră null/false (altfel ar apărea textul „null” pe ecran)
+{
+  const clean = (kids) => kids.flat(Infinity).filter((k) => k != null && k !== false);
+  const ap = Element.prototype.append, rc = Element.prototype.replaceChildren;
+  Element.prototype.append = function (...k) { return ap.apply(this, clean(k)); };
+  Element.prototype.replaceChildren = function (...k) { return rc.apply(this, clean(k)); };
+}
 // replaceChildren care ignoră null/false (altfel ar apărea textul „null”)
 const fill = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter((k) => k != null && k !== false));
 
