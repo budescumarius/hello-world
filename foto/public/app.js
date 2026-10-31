@@ -259,8 +259,40 @@ function pickSite(onPick, current, { allowNone = true, sites = state.sites } = {
     }
     if (allowNone) list.append(h('button', { class: current == null ? 'on' : '', onclick: () => { close(); onPick(null); } },
       'Fără șantier', h('small', {}, 'Poza se salvează, se poate atribui mai târziu')));
-    if (!sites.length) box.append(h('p', { class: 'muted' }, 'Nu ai încă niciun șantier atribuit.'));
+    if (can.manage()) {
+      // admin / responsabil: șantier nou direct de aici
+      list.append(h('button', { class: 'new', onclick: () => { close(); quickNewSite(onPick); } },
+        '+ Șantier nou', h('small', {}, 'Îl creezi acum și se alege automat')));
+    }
+    if (!sites.length) box.append(h('p', { class: 'muted' }, can.manage() ? 'Nu există încă niciun șantier. Creează unul mai jos.' : 'Nu ai încă niciun șantier atribuit. Cere-i responsabilului să te adauge.'));
     box.append(list);
+  });
+}
+
+function quickNewSite(onPick) {
+  sheet((box, close) => {
+    const name = h('input', { placeholder: 'Ex: Vila Popescu, Str. Lalelelor 4' });
+    const addr = h('input', { placeholder: 'Opțional' });
+    const err = h('div', { class: 'error' });
+    const save = async () => {
+      err.textContent = '';
+      try {
+        const r = await api('api/sites', { method: 'POST', json: { name: name.value, address: addr.value } });
+        close();
+        await refreshMe();
+        onPick(r.id);
+        toast('✓ Șantier creat');
+      } catch (e) { err.textContent = e.message; }
+    };
+    box.append(h('h2', {}, 'Șantier nou'),
+      h('label', { class: 'f' }, h('span', {}, 'Nume'), name),
+      h('label', { class: 'f' }, h('span', {}, 'Adresă'), addr), err,
+      h('p', { class: 'muted small' }, 'Oamenii care lucrează aici îi adaugi apoi din Șantiere → Editează.'),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn grow', onclick: close }, 'Renunță'),
+        h('button', { class: 'btn primary grow', onclick: save }, 'Creează')));
+    name.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+    setTimeout(() => name.focus(), 50);
   });
 }
 

@@ -104,13 +104,14 @@ textarea { resize: vertical; min-height: 80px; }
 #tabs a.on .i { filter: none; opacity: 1; }
 
 /* ----- foi (sheet) și vizualizare ----- */
-.overlay { position: fixed; inset: 0; background: #0007; z-index: 20; display: flex; align-items: flex-end; justify-content: center; animation: fade .15s; }
+.overlay { position: fixed; inset: 0; background: #0007; z-index: 40; /* deasupra pozei mărite (30) */ display: flex; align-items: flex-end; justify-content: center; animation: fade .15s; }
 .sheet { background: var(--bg); width: 100%; max-width: 640px; max-height: 92dvh; overflow: auto; border-radius: 22px 22px 0 0; padding: 8px 16px calc(20px + var(--safe-b)); animation: up .2s ease-out; }
 .sheet .grab { width: 40px; height: 5px; border-radius: 9px; background: #d4d4d8; margin: 4px auto 10px; }
 .sheet h2 { margin-top: 4px; }
 .pick-list { display: grid; gap: 8px; }
 .pick-list button { text-align: left; padding: 16px; border-radius: 14px; border: 1px solid var(--line); background: var(--card); font-size: 18px; font-weight: 700; }
 .pick-list button.on { border: 2px solid var(--blue); background: #eef2ff; }
+.pick-list button.new { border-style: dashed; color: var(--blue); }
 .pick-list button small { display: block; font-weight: 400; font-size: 14px; color: var(--muted); }
 @keyframes up { from { transform: translateY(40px); opacity: .5; } }
 @keyframes fade { from { opacity: 0; } }
