@@ -148,10 +148,19 @@ function assigned(int $userId): array {
     return array_map('intval', array_column(all('SELECT site_id FROM site_users WHERE user_id = ?', [$userId]), 'site_id'));
 }
 function can_use_site(array $u, $siteId): bool { return is_admin($u) || in_array((int) $siteId, assigned($u['id']), true); }
+// Vede: adminul tot; ceilalți pozele proprii + toate pozele de pe șantierele atribuite.
+// (Pozele „Fără șantier” ale altora le vede doar adminul.)
 function can_see_entry(array $u, array $e): bool {
     if (is_admin($u) || (int) $e['user_id'] === $u['id']) return true;
-    return $u['role'] === 'responsabil' && $e['site_id'] !== null && in_array((int) $e['site_id'], assigned($u['id']), true);
+    return $e['site_id'] !== null && in_array((int) $e['site_id'], assigned($u['id']), true);
 }
+// Comentariu / mutare: autorul, adminul și responsabilul șantierului.
+function can_edit_entry(array $u, array $e): bool {
+    if (is_admin($u) || (int) $e['user_id'] === $u['id']) return true;
+    return $u['role'] === 'responsabil' && can_see_entry($u, $e);
+}
+// Ștergere: doar autorul și adminul.
+function can_delete_entry(array $u, array $e): bool { return is_admin($u) || (int) $e['user_id'] === $u['id']; }
 function set_site_users(int $siteId, array $ids): void {
     q('DELETE FROM site_users WHERE site_id = ?', [$siteId]);
     foreach (array_unique(array_map('intval', $ids)) as $uid) {
@@ -581,8 +590,8 @@ function route(string $route, string $path, string $method): void {
         $site = $_GET['site'] ?? '';
         if ($site === 'none') $w[] = 'e.site_id IS NULL';
         elseif ($site !== '') { $w[] = 'e.site_id = :site'; $p['site'] = (int) $site; }
-        if ($u['role'] === 'muncitor' || !empty($_GET['mine'])) { $w[] = 'e.user_id = :me'; $p['me'] = $u['id']; }
-        elseif ($u['role'] === 'responsabil') {
+        if (!empty($_GET['mine'])) { $w[] = 'e.user_id = :me'; $p['me'] = $u['id']; }
+        elseif (!is_admin($u)) {
             $w[] = '(e.user_id = :me1 OR e.site_id IN (SELECT site_id FROM site_users WHERE user_id = :me2))';
             $p['me1'] = $u['id']; $p['me2'] = $u['id'];
         }
@@ -603,12 +612,14 @@ function route(string $route, string $path, string $method): void {
         if (!$e || !can_see_entry($u, $e)) fail(404, 'Nu există');
         $eid = (int) $e['id'];
         if ($m[1] === 'DELETE') {
+            if (!can_delete_entry($u, $e)) fail(403, 'Poți șterge doar pozele făcute de tine');
             q('DELETE FROM entries WHERE id = ?', [$eid]);
             foreach ([$e['file'], $e['thumb']] as $f) if ($f) @unlink("$PHOTOS/$f");
             out(['ok' => true]);
             if ($e['drive_file_id']) { finish_request(); drive_delete($e['drive_file_id']); }
             return;
         }
+        if (!can_edit_entry($u, $e)) fail(403, 'Poți modifica doar pozele făcute de tine');
         $b = body();
         $siteId = $e['site_id'] === null ? null : (int) $e['site_id'];
         if (array_key_exists('siteId', $b)) {

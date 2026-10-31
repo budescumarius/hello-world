@@ -315,7 +315,10 @@ function openViewer(list, index, onChange) {
   function render() {
     const e = list[i];
     ov.replaceChildren();
-    const canSite = can.manage() || e.user_id === state.user.id;
+    const mine = e.user_id === state.user.id;
+    // aceleași reguli ca pe server: modifică autorul, adminul și responsabilul; șterge doar autorul și adminul
+    const canEdit = mine || can.manage();
+    const canDelete = mine || can.admin();
     const imgBox = h('div', { class: 'img' },
       e.kind === 'photo'
         ? h('img', { src: `files/${e.id}/full`, alt: '' })
@@ -340,10 +343,10 @@ function openViewer(list, index, onChange) {
         h('div', { class: 'meta' }, `${e.site_name || 'Fără șantier'} · ${e.user_name || '—'} · ${fmtShort(e.taken_at)}`),
         e.kind === 'photo' && e.comment ? h('p', { class: 'cm' }, e.comment) : null,
         h('div', { class: 'btns' },
-          h('button', { class: 'btn sm', onclick: () => editComment(e) }, '💬 Comentariu'),
-          canSite ? h('button', { class: 'btn sm', onclick: () => moveSite(e) }, '🏗 Șantier') : null,
+          canEdit ? h('button', { class: 'btn sm', onclick: () => editComment(e) }, '💬 Comentariu') : null,
+          canEdit ? h('button', { class: 'btn sm', onclick: () => moveSite(e) }, '🏗 Șantier') : null,
           e.kind === 'photo' ? h('a', { class: 'btn sm', href: `files/${e.id}/full?dl=1`, download: '' }, '⬇') : null,
-          h('button', { class: 'btn sm danger', onclick: () => del(e) }, '🗑'))));
+          canDelete ? h('button', { class: 'btn sm danger', onclick: () => del(e) }, '🗑') : null)));
   }
 
   async function patch(e, body) {
@@ -533,14 +536,14 @@ function noteSheet() {
 }
 
 async function screenPoze() {
-  const mine = state.user.role === 'muncitor';
   const params = {};
   const content = h('div');
   const filters = h('div', { class: 'filters' });
-  fill(view, h('h1', {}, mine ? 'Pozele mele' : 'Poze'), filters, content);
+  fill(view, h('h1', {}, 'Poze'), filters, content);
   const draw = () => fill(content, feed({ ...params }));
-  if (!mine) {
-    const sites = (await api('api/sites')).sites;
+  {
+    // muncitorul vede doar șantierele lui (din /api/me); adminul/responsabilul și pe cele arhivate
+    const sites = can.manage() ? (await api('api/sites')).sites : state.sites;
     const sel = h('select', { onchange: () => { if (sel.value) params.site = sel.value; else delete params.site; draw(); } },
       h('option', { value: '' }, 'Toate șantierele'),
       sites.map((s) => h('option', { value: s.id }, s.name + (s.archived ? ' (arhivat)' : ''))),
@@ -670,8 +673,8 @@ async function editUser(u, sites) {
       seg.replaceChildren(...['muncitor', 'responsabil', 'admin'].map((r) => h('button', { type: 'button', class: role === r ? 'on' : '', onclick: () => { role = r; drawSeg(); } }, ROLE_LABEL[r])));
       siteBox.hidden = role === 'admin';
       help.textContent = {
-        muncitor: 'Face poze doar pe șantierele atribuite (sau fără șantier). Vede doar pozele lui.',
-        responsabil: 'Vede toate pozele de pe șantierele lui, poate crea șantiere și atribui oameni.',
+        muncitor: 'Face poze pe șantierele atribuite (sau fără șantier). Vede pozele lui și pe cele de pe șantierele lui. Șterge doar pozele lui.',
+        responsabil: 'Vede pozele de pe șantierele lui, poate crea șantiere și atribui oameni. Șterge doar pozele lui.',
         admin: 'Acces la tot: toate șantierele, echipa și Google Drive.',
       }[role];
     };
@@ -785,7 +788,7 @@ function changePassword() {
 
 // ============ navigare ============
 function tabs() {
-  const t = [['', '📷', 'Foto'], ['poze', '🖼', state.user.role === 'muncitor' ? 'Pozele mele' : 'Poze']];
+  const t = [['', '📷', 'Foto'], ['poze', '🖼', 'Poze']];
   if (can.manage()) t.push(['santiere', '🏗', 'Șantiere']);
   if (can.admin()) t.push(['echipa', '👷', 'Echipa']);
   t.push(['cont', '⚙️', 'Cont']);

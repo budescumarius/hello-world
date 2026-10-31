@@ -14,13 +14,13 @@ O aplicație simplă pentru telefon. Echipa face poze pe șantier, iar pozele aj
 **Merge și fără semnal:** pozele rămân în telefon și se trimit singure când revine internetul.
 
 ## Roluri
-| Rol | Ce poate face |
-|---|---|
-| **Admin** | Vede toate șantierele și toate pozele. Creează șantiere, adaugă oameni, atribuie șantiere, conectează Google Drive. |
-| **Responsabil** | Vede șantierele atribuite lui și **toate** pozele de pe ele. Poate crea șantiere (i se atribuie automat) și poate alege cine lucrează pe ele. |
-| **Muncitor** | Poate alege doar șantierele atribuite lui sau „Fără șantier”. Vede doar pozele lui. |
+| Rol | Ce vede | Ce poate modifica / șterge |
+|---|---|---|
+| **Admin** | Tot: toate șantierele și toate pozele. Gestionează echipa și Google Drive. | Tot. |
+| **Responsabil** | Pozele lui + toate pozele de pe șantierele atribuite. Poate crea șantiere și atribui oameni. | Comentează / mută pozele de pe șantierele lui. **Șterge doar pozele lui.** |
+| **Muncitor** | Pozele lui + toate pozele de pe șantierele atribuite. Face poze doar pe acestea (sau „Fără șantier”). | **Doar pozele lui.** |
 
-Pozele „Fără șantier” le vede adminul în **Șantiere → Fără șantier** și le poate muta pe șantierul potrivit.
+Pozele „Fără șantier” ale altora le vede **doar adminul**, în **Șantiere → Fără șantier** și le poate muta pe șantierul potrivit.
 
 ## Instalare pe hosting cPanel (cel mai simplu)
 Ai nevoie doar de PHP 7.4 sau mai nou, cu SQLite. Aproape orice hosting cPanel le are.

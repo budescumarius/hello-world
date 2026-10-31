@@ -56,10 +56,15 @@ const assignedSiteIds = (userId) =>
   new Set(db.prepare('SELECT site_id FROM site_users WHERE user_id = ?').all(userId).map((r) => r.site_id));
 const canUseSite = (u, siteId) => isAdmin(u) || assignedSiteIds(u.id).has(Number(siteId));
 
+// Vede: adminul tot; ceilalți pozele proprii + toate pozele de pe șantierele atribuite.
 function canSeeEntry(u, e) {
   if (isAdmin(u) || e.user_id === u.id) return true;
-  return u.role === 'responsabil' && e.site_id != null && assignedSiteIds(u.id).has(e.site_id);
+  return e.site_id != null && assignedSiteIds(u.id).has(e.site_id);
 }
+// Comentariu / mutare: autorul, adminul și responsabilul șantierului.
+const canEditEntry = (u, e) => isAdmin(u) || e.user_id === u.id || (u.role === 'responsabil' && canSeeEntry(u, e));
+// Ștergere: doar autorul și adminul.
+const canDeleteEntry = (u, e) => isAdmin(u) || e.user_id === u.id;
 
 function setSiteUsers(siteId, userIds) {
   db.prepare('DELETE FROM site_users WHERE site_id = ?').run(siteId);
@@ -320,8 +325,8 @@ app.get('/api/entries', auth(), (req, res) => {
     p.site = Number(site);
     where.push('e.site_id = :site');
   }
-  if (u.role === 'muncitor' || req.query.mine) { where.push('e.user_id = :me'); p.me = u.id; }
-  else if (u.role === 'responsabil') {
+  if (req.query.mine) { where.push('e.user_id = :me'); p.me = u.id; }
+  else if (!isAdmin(u)) {
     where.push('(e.user_id = :me OR e.site_id IN (SELECT site_id FROM site_users WHERE user_id = :me))');
     p.me = u.id;
   }
@@ -340,6 +345,7 @@ app.get('/api/entries', auth(), (req, res) => {
 app.patch('/api/entries/:id', auth(), json, (req, res) => {
   const e = db.prepare('SELECT * FROM entries WHERE id = ?').get(Number(req.params.id));
   if (!e || !canSeeEntry(req.user, e)) return fail(res, 404, 'Nu există');
+  if (!canEditEntry(req.user, e)) return fail(res, 403, 'Poți modifica doar pozele făcute de tine');
   let siteId = e.site_id;
   if (req.body.siteId !== undefined) {
     siteId = req.body.siteId === null ? null : resolveSite(req.user, req.body.siteId);
@@ -355,6 +361,7 @@ app.patch('/api/entries/:id', auth(), json, (req, res) => {
 app.delete('/api/entries/:id', auth(), (req, res) => {
   const e = db.prepare('SELECT * FROM entries WHERE id = ?').get(Number(req.params.id));
   if (!e || !canSeeEntry(req.user, e)) return fail(res, 404, 'Nu există');
+  if (!canDeleteEntry(req.user, e)) return fail(res, 403, 'Poți șterge doar pozele făcute de tine');
   db.prepare('DELETE FROM entries WHERE id = ?').run(e.id);
   for (const f of [e.file, e.thumb]) if (f) fs.rm(path.join(PHOTO_DIR, f), { force: true }, () => {});
   drive.deleteFile(e.drive_file_id);
