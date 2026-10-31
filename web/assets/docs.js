@@ -214,7 +214,7 @@ async function totalsBlock(kind, it, t, paid) {
   const deds = (d.lines || []).filter((l) => l.kind === 'item' && !l.option && isDeduction(l));
   const gross = r2((d.lines || []).filter((l) => l.kind === 'item' && !l.option && !isDeduction(l)).reduce((a, l) => a + r2(num(l.qty) * num(l.price)), 0));
   const dedGroups = {};
-  for (const l of deds) { const k = l.deduction === 'acompteLibre' ? String(l.desc).replace(/\s*\(TVA [^)]*\)\s*$/, '') : l.deduction === 'acompte' || /acompte/i.test(l.desc) ? 'Déduction acompte' : String(l.desc).split(/[(–-]/)[0].trim() || 'Déduction'; dedGroups[k] = (dedGroups[k] || 0) + r2(num(l.qty) * num(l.price)); }
+  for (const l of deds) { const k = ['acompteLibre', 'remboursement'].includes(l.deduction) ? String(l.desc).replace(/\s*\(TVA [^)]*\)\s*$/, '') : l.deduction === 'acompte' || /acompte/i.test(l.desc) ? 'Déduction acompte' : String(l.desc).split(/[(–-]/)[0].trim() || 'Déduction'; dedGroups[k] = (dedGroups[k] || 0) + r2(num(l.qty) * num(l.price)); }
   const row = (label, val, cls = '') => `<div class="mb-tr ${cls}"><span>${label}</span><b>${typeof val === 'number' ? dmoney(val, t) : val}</b></div>`;
   const isCn = d.kind === 'avoir';
   let rows = row('Total HT', gross, tt.discount || deds.length ? '' : 'mb-sum');
@@ -312,14 +312,16 @@ function mentionsBlock(kind, d, t) {
 // Facture simplifiée : une ligne de travaux par taux de TVA (+ déductions d'acompte / déjà facturé), sans le détail des postes
 function simpleInvoiceData(d, it) {
   const work = {}; const keep = [];
-  for (const l of d.lines || []) { if (l.kind !== 'item') continue; if (isDeduction(l)) { keep.push(l); continue; } const k = num(l.vat); work[k] = r2((work[k] || 0) + r2(num(l.qty) * num(l.price))); }
+  for (const l of d.lines || []) { if (l.kind !== 'item') continue; if (isDeduction(l) || l.extra) { keep.push(l); continue; } const k = num(l.vat); work[k] = r2((work[k] || 0) + r2(num(l.qty) * num(l.price))); }
   const many = Object.keys(work).length > 1;
-  const label = d.kind === 'situation' ? `Avancement des travaux – état d'avancement ${d.ref || `EA${d.situationNo || ''}`}${d.title ? ` – ${d.title}` : ''}`
+  const label = d.kind === 'situation' ? `Avancement travaux ${d.ref || `EA${d.situationNo || ''}`}`
     : `${IKIND[d.kind] || 'Facture'}${d.title ? ` – ${d.title}` : ''}${it.number ? '' : ''}`;
   const lines = Object.entries(work).map(([rate, v]) => ({ id: 'w' + rate, kind: 'item', desc: `${label}${many ? ` (TVA ${fnum(+rate)} %)` : ''}`, unit: 'forfait', qty: 1, price: v, vat: +rate }));
   return { ...d, lines: [...lines, ...keep], discount: 0, progressRows: d.kind === 'situation' ? d.progressRows : undefined };
 }
 const docVariant = () => new URLSearchParams(location.hash.split('?')[1] || '').get('v') || '';
+// facture marquée « une seule ligne » (état d'avancement) : simplifiée sauf si on demande le détail (?v=detail)
+const docOneLine = (it, variant) => variant === 'simple' || (variant !== 'detail' && !!it.data.oneLine);
 async function printDoc(kind, id) {
   const r = await docHtml(kind, id, docVariant());
   const { it, d, c, project, title, html, typ, co } = r;
@@ -329,7 +331,7 @@ async function printDoc(kind, id) {
 async function docHtml(kind, id, variant = '') {
   const typ = { quote: 'quote', invoice: 'invoice', order: 'order' }[kind];
   const it = await db.get(typ, id);
-  const simple = kind === 'invoice' && variant === 'simple';
+  const simple = kind === 'invoice' && docOneLine(it, variant);
   const d = simple ? simpleInvoiceData(it.data, it) : it.data;
   const [contacts, project] = await Promise.all([db.list('contact'), it.project_id ? db.get('project', it.project_id).catch(() => null) : null]);
   const c = byId(contacts, kind === 'order' ? d.supplierId : d.clientId);
@@ -379,8 +381,8 @@ function printDocPage(kind, id, it, d, c, project, title, html, typ, co, fname) 
       recipients: [...(c ? [contactRcpt(c, kind === 'order' ? 'Fournisseur' : 'Client', true)] : []), ...S.users.filter((u) => u.active && u.id !== S.me.id).map((u) => userRcpt(u, 'Notre équipe', false))],
       ref: { type: typ, id: it.id }, projectId: it.project_id, pdfName: `${fname || fileTitle(title)}.pdf`,
       // facture simplifiée : l'état d'avancement détaillé en 2e pièce jointe (et inversement)
-      extra: kind === 'invoice' && (d.lines || []).length > 1 ? [docVariant() === 'simple'
-        ? { label: d.kind === 'situation' ? `Détail de l'état d'avancement ${d.ref || ''}` : 'Facture détaillée', name: `${docFileName(kind, it)}_detail.pdf`, checked: true, make: async () => makePdf((await docHtml(kind, id, '')).html, { light: true }) }
+      extra: kind === 'invoice' && (d.lines || []).length > 1 ? [docOneLine(it, docVariant())
+        ? { label: d.kind === 'situation' ? `Détail de l'état d'avancement ${d.ref || ''}` : 'Facture détaillée', name: `${docFileName(kind, it)}_detail.pdf`, checked: true, make: async () => makePdf((await docHtml(kind, id, 'detail')).html, { light: true }) }
         : { label: 'Facture simplifiée (sans détail des postes)', name: `${docFileName(kind, it, 'simple')}.pdf`, checked: false, make: async () => makePdf((await docHtml(kind, id, 'simple')).html, { light: true }) }] : [],
       onSent: (to) => {
         d.sent = [...(d.sent || []), { t: new Date().toISOString(), to, by: S.me.id }];
@@ -394,11 +396,11 @@ function printDocPage(kind, id, it, d, c, project, title, html, typ, co, fname) 
   printPage(title, html, (isSimple() && kind !== 'order' ? { quote: `#/s/doc/devis/${id}`, invoice: `#/s/doc/facture/${id}` } : { quote: `#/quote/${id}`, invoice: `#/invoice/${id}`, order: `#/order/${id}` })[kind], mailDoc, fname);
   // facture : version détaillée (tous les postes) ou simplifiée (une ligne + récapitulatif)
   if (kind === 'invoice' && (it.data.lines || []).length > 1) {
-    const v = docVariant() === 'simple' ? 'simple' : '';
-    $('.print-shell .top-actions').insertAdjacentHTML('afterbegin', `<div class="seg no-print"><a class="${v ? '' : 'on'}" href="#/print/invoice/${id}">Détaillée</a><a class="${v ? 'on' : ''}" href="#/print/invoice/${id}?v=simple">Simplifiée</a></div>`);
+    const v = docOneLine(it, docVariant()) ? 'simple' : '';
+    $('.print-shell .top-actions').insertAdjacentHTML('afterbegin', `<div class="seg no-print"><a class="${v ? '' : 'on'}" href="#/print/invoice/${id}?v=detail">Détaillée</a><a class="${v ? 'on' : ''}" href="#/print/invoice/${id}?v=simple">Simplifiée</a></div>`);
   }
   // état d'avancement : tous les postes, ou seulement ceux avancés dans cet état (enregistré sur le document : PDF et e-mail suivent)
-  if (!isField() && kind === 'invoice' && it.data.kind === 'situation' && (it.data.progressRows || []).length && docVariant() !== 'simple') {
+  if (!isField() && kind === 'invoice' && it.data.kind === 'situation' && (it.data.progressRows || []).length && !docOneLine(it, docVariant())) {
     const only = !!it.data.eaOnlyCurrent;
     $('.print-shell .top-actions').insertAdjacentHTML('afterbegin', `<div class="seg no-print" title="Postes affichés"><a href="#" class="${only ? '' : 'on'}" data-eaonly="">Tous les postes</a><a href="#" class="${only ? 'on' : ''}" data-eaonly="1">Seulement cet état</a></div>`);
     $$('[data-eaonly]').forEach((a) => { a.onclick = async (e) => {

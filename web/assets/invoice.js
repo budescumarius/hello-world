@@ -306,7 +306,9 @@ route('invoice', async (id, tab = 'informations') => {
       const ex = d.lines.filter((l) => l.extra);
       body.insertAdjacentHTML('beforeend', `<section class="card"><div class="card-h"><h3>Lignes supplémentaires</h3><small class="muted">en plus de l'avancement · gardées si vous modifiez l'avancement</small></div>
         ${ex.length ? `<div class="rows">${ex.map((l) => `<div class="row"><span class="grow"><b>${esc(l.desc)}</b><small class="muted">TVA ${fnum(num(l.vat))} %</small></span><b>${money(r2(num(l.qty) * num(l.price)))}</b>${locked ? '' : `<button class="icon-btn sm" data-exdel="${l.id}" title="Retirer">${I.trash}</button>`}</div>`).join('')}</div>` : '<p class="muted">Aucune.</p>'}
-        ${locked ? '' : `<div class="btns" style="margin-top:10px"><button class="btn" data-exfree>${I.plus} Ligne libre</button><button class="btn" data-exac>${I.coins} Déduire un acompte (même non lié au chantier)</button></div>`}</section>`);
+        ${locked ? '' : `<div class="btns" style="margin-top:10px"><button class="btn primary" data-exremb>${I.plus} Remboursement d'acompte</button><button class="btn" data-exfree>${I.plus} Ligne libre</button><button class="btn" data-exac>${I.coins} Déduire un acompte (calcul en %)</button></div>`}
+        <div class="field" style="margin-top:14px"><span>Sur la facture</span><div class="seg" data-oneline><a href="#" data-ol="1" class="${d.oneLine ? 'on' : ''}">Une seule ligne « Avancement travaux ${esc(d.ref || `EA${d.situationNo || ''}`)} »</a><a href="#" data-ol="0" class="${d.oneLine ? '' : 'on'}">Le détail des postes</a></div>
+          <small class="muted">${d.oneLine ? `La facture montre : « Avancement travaux ${esc(d.ref || '')} » avec son montant, puis vos lignes supplémentaires. Le détail reste disponible (PDF « Détaillée »).` : 'La facture montre le tableau de l\'avancement poste par poste.'}</small></div></section>`);
       const done = () => { foot(); changed(); render(); };
       $$('[data-exdel]', body).forEach((b) => { b.onclick = () => { d.lines = d.lines.filter((l) => l.id !== b.dataset.exdel); done(); }; });
       const fr = $('[data-exfree]', body); if (fr) fr.onclick = async () => {
@@ -315,6 +317,13 @@ route('invoice', async (id, tab = 'informations') => {
         d.lines.push({ id: lid(), kind: 'item', extra: true, desc: v.desc.trim(), unit: 'forfait', qty: 1, price: r2(num(v.amount)), vat: num(v.vat), type: 'divers' }); done();
       };
       const ac = $('[data-exac]', body); if (ac) ac.onclick = () => eaDeductAcompte(it, done);
+      // remboursement d'acompte : vous écrivez le texte et le montant (déduit de la facture)
+      const rb = $('[data-exremb]', body); if (rb) rb.onclick = async () => {
+        const v = await ask('Remboursement d\'acompte', [{ name: 'desc', label: 'Texte de la ligne', required: true, cls: 'full' }, { name: 'amount', label: 'Montant HT à déduire', type: 'money', required: true }, { name: 'vat', label: 'TVA', type: 'select', options: vatList().map((x) => [x, `${fnum(x)} %`]) }], { desc: 'Remboursement acompte 10 %', vat: num(d.defaultVat) || defVat() });
+        if (!v || !(num(v.amount) > 0)) return;
+        d.lines.push({ id: lid(), kind: 'item', extra: true, refund: true, desc: v.desc.trim(), unit: 'forfait', qty: 1, price: -r2(num(v.amount)), vat: num(v.vat), type: 'divers' }); done();
+      };
+      $$('[data-ol]', body).forEach((a) => { a.onclick = (e) => { e.preventDefault(); d.oneLine = a.dataset.ol === '1'; done(); }; });
     }
     foot();
     const pg = $('[data-prog]', body);
