@@ -651,7 +651,8 @@ async function driveCard(query) {
   card.append(h('div', { class: 'row' }, h('b', { class: 'grow' }, '☁️ Google Drive'),
     h('span', { class: 'badge ' + (d.connected ? 'responsabil' : 'off') }, d.connected ? 'Conectat' : 'Neconectat')));
   const redirect = h('p', { class: 'small' }, 'Adresa de redirecționare (pentru Google Cloud): ',
-    h('code', { style: 'word-break:break-all;user-select:all' }, d.redirectUri));
+    h('code', { style: 'word-break:break-all;user-select:all;-webkit-user-select:all' }, d.redirectUri),
+    ' ', h('button', { class: 'btn sm', onclick: () => navigator.clipboard?.writeText(d.redirectUri).then(() => toast('✓ Copiat')) }, '📋 Copiază'));
   if (!d.configured && d.editable) {
     const id = h('input', { placeholder: '….apps.googleusercontent.com', autocapitalize: 'none', spellcheck: 'false' });
     const sec = h('input', { placeholder: 'GOCSPX-…', autocapitalize: 'none', spellcheck: 'false' });
@@ -668,6 +669,8 @@ async function driveCard(query) {
     card.append(h('p', { class: 'muted small' }, 'Pozele se salvează pe server. Pentru copie automată în Google Drive, setează pe server GOOGLE_CLIENT_ID și GOOGLE_CLIENT_SECRET (vezi README).'), redirect);
   } else if (!d.connected) {
     card.append(h('p', { class: 'muted small' }, `Fiecare poză va fi copiată automat în Drive, în folderul „${d.folder}”, cu un subfolder pentru fiecare șantier.`),
+      redirect,
+      h('p', { class: 'muted small' }, 'Adresa de mai sus trebuie pusă exact la fel în Google Cloud → Clients → clientul tău → Authorized redirect URIs.'),
       h('a', { class: 'btn primary block', href: 'api/drive/connect' }, 'Conectează Google Drive'),
       d.editable ? h('button', { class: 'btn block', style: 'margin-top:8px', onclick: async () => {
         await api('api/drive/config', { method: 'POST', json: { clientId: '', clientSecret: '' } }); screenCont();
