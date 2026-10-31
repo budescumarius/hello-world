@@ -66,7 +66,8 @@ function longDate(d) {
   return new Date(d + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }).replace(/(^|\s)(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
 }
 const ibanFmt = (s) => String(s || '').replace(/\s/g, '').replace(/(.{4})/g, '$1 ').trim();
-const isDeduction = (l) => !!l.deduction || /^(Déduction|Deduction|Déjà facturé)/i.test(String(l.desc || ''));
+// une déduction ajoutée à la main sur un état (refund) reste une ligne visible de la facture
+const isDeduction = (l) => !l.refund && (!!l.deduction || /^(Déduction|Deduction|Déjà facturé)/i.test(String(l.desc || '')));
 function clientLabel(c) {
   if (!c) return '—';
   const d = c.data;

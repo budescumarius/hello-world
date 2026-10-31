@@ -798,7 +798,7 @@ async function progressInvoice(q, prev, base, existing) {
     });
     if (!lines.some((l) => l.kind === 'item')) return toast('Aucun avancement nouveau à facturer');
     // lignes ajoutées à la main sur l'état (Encodage → Lignes supplémentaires) : gardées
-    if (existing) lines.push(...(existing.data.lines || []).filter((l) => l.extra));
+    if (existing) { lines.push(...(existing.data.lines || []).filter((l) => l.extra).map((l) => ({ ...l }))); eaRefundUpdate(lines); }
     const ded = deduction();
     const dedLines = Object.entries(ded).filter(([, v]) => v > 0).map(([rate, v]) => ({ id: lid(), kind: 'item', deduction: 'acompte', desc: `Déduction acompte${Object.keys(ded).length > 1 ? ` (TVA ${fnum(+rate)} %)` : ''}`, unit: 'forfait', qty: 1, price: -v, vat: +rate, type: 'divers' }));
     lines.push(...dedLines);

@@ -137,6 +137,17 @@ async function proformaConvert(it) {
     },
   })));
 }
+// Travaux d'un état d'avancement par taux de TVA (lignes de l'avancement, sans les lignes ajoutées ni les déductions)
+function eaWorkByVat(lines) {
+  const w = {}; for (const l of lines || []) { if (l.kind !== 'item' || l.extra || l.deduction || l.option) continue; w[num(l.vat)] = r2((w[num(l.vat)] || 0) + r2(num(l.qty) * num(l.price))); }
+  return w;
+}
+// remboursement en % : recalculé sur les travaux de l'état (après une modification de l'avancement)
+function eaRefundUpdate(lines) {
+  const w = eaWorkByVat(lines);
+  for (const l of lines) if (l.extra && l.refundPct) l.price = -r2((w[num(l.vat)] || 0) * num(l.refundPct) / 100);
+  return lines;
+}
 // Déduire (rembourser) une partie d'un acompte qui n'est pas lié au devis : choix de l'acompte, % ou montant, réparti par taux de TVA
 async function eaDeductAcompte(it, done) {
   const d = it.data; const [all, contacts] = await Promise.all([db.list('invoice'), db.list('contact')]);
@@ -306,7 +317,7 @@ route('invoice', async (id, tab = 'informations') => {
       const ex = d.lines.filter((l) => l.extra);
       body.insertAdjacentHTML('beforeend', `<section class="card"><div class="card-h"><h3>Lignes supplémentaires</h3><small class="muted">en plus de l'avancement · gardées si vous modifiez l'avancement</small></div>
         ${ex.length ? `<div class="rows">${ex.map((l) => `<div class="row"><span class="grow"><b>${esc(l.desc)}</b><small class="muted">TVA ${fnum(num(l.vat))} %</small></span><b>${money(r2(num(l.qty) * num(l.price)))}</b>${locked ? '' : `<button class="icon-btn sm" data-exdel="${l.id}" title="Retirer">${I.trash}</button>`}</div>`).join('')}</div>` : '<p class="muted">Aucune.</p>'}
-        ${locked ? '' : `<div class="btns" style="margin-top:10px"><button class="btn primary" data-exremb>${I.plus} Remboursement d'acompte</button><button class="btn" data-exfree>${I.plus} Ligne libre</button><button class="btn" data-exac>${I.coins} Déduire un acompte (calcul en %)</button></div>`}
+        ${locked ? '' : `<div class="btns" style="margin-top:10px"><button class="btn primary" data-exremb>${I.plus} Déduction d'acompte (%)</button><button class="btn" data-exfree>${I.plus} Ligne libre</button><button class="btn" data-exac>${I.coins} Déduire un acompte (calcul en %)</button></div>`}
         <div class="field" style="margin-top:14px"><span>Sur la facture</span><div class="seg" data-oneline><a href="#" data-ol="1" class="${d.oneLine ? 'on' : ''}">Une seule ligne « Avancement travaux ${esc(d.ref || `EA${d.situationNo || ''}`)} »</a><a href="#" data-ol="0" class="${d.oneLine ? '' : 'on'}">Le détail des postes</a></div>
           <small class="muted">${d.oneLine ? `La facture montre : « Avancement travaux ${esc(d.ref || '')} » avec son montant, puis vos lignes supplémentaires. Le détail reste disponible (PDF « Détaillée »).` : 'La facture montre le tableau de l\'avancement poste par poste.'}</small></div></section>`);
       const done = () => { foot(); changed(); render(); };
@@ -317,12 +328,27 @@ route('invoice', async (id, tab = 'informations') => {
         d.lines.push({ id: lid(), kind: 'item', extra: true, desc: v.desc.trim(), unit: 'forfait', qty: 1, price: r2(num(v.amount)), vat: num(v.vat), type: 'divers' }); done();
       };
       const ac = $('[data-exac]', body); if (ac) ac.onclick = () => eaDeductAcompte(it, done);
-      // remboursement d'acompte : vous écrivez le texte et le montant (déduit de la facture)
+      // déduction d'acompte : un % des postes avancés dans cet état (ou un montant fixe), ligne visible sur la facture
       const rb = $('[data-exremb]', body); if (rb) rb.onclick = async () => {
-        const v = await ask('Remboursement d\'acompte', [{ name: 'desc', label: 'Texte de la ligne', required: true, cls: 'full' }, { name: 'amount', label: 'Montant HT à déduire', type: 'money', required: true }, { name: 'vat', label: 'TVA', type: 'select', options: vatList().map((x) => [x, `${fnum(x)} %`]) }], { desc: 'Remboursement acompte 10 %', vat: num(d.defaultVat) || defVat() });
-        if (!v || !(num(v.amount) > 0)) return;
-        d.lines.push({ id: lid(), kind: 'item', extra: true, refund: true, desc: v.desc.trim(), unit: 'forfait', qty: 1, price: -r2(num(v.amount)), vat: num(v.vat), type: 'divers' }); done();
+        const work = eaWorkByVat(d.lines); const base = Object.values(work).reduce((a, x) => a + x, 0);
+        const v = await ask('Déduction d\'acompte', [
+          { name: 'pct', label: `Pourcentage des travaux de cet état (${money(base)} HT)`, type: 'percent', hint: 'Le montant est calculé tout seul, et recalculé si vous modifiez l\'avancement' },
+          { name: 'amount', label: 'ou montant HT fixe (au lieu du %)', type: 'money' },
+          { name: 'desc', label: 'Texte de la ligne (facultatif)', cls: 'full', placeholder: 'Déduction acompte 30 % sur les postes avancés dans cet état' },
+        ], { pct: 30 });
+        if (!v) return;
+        const pct = num(v.pct); const fixed = num(v.amount);
+        if (!(fixed > 0) && !(pct > 0)) return toast('Indiquez le pourcentage', 3000);
+        const rates = Object.keys(work).filter((r) => work[r]); const many = rates.length > 1;
+        if (fixed > 0) {
+          d.lines.push({ id: lid(), kind: 'item', extra: true, refund: true, desc: (v.desc || '').trim() || 'Déduction acompte', unit: 'forfait', qty: 1, price: -r2(fixed), vat: num(rates[0] ?? d.defaultVat), type: 'divers' });
+        } else {
+          if (!rates.length) return toast('Aucun travail dans cet état : encodez d\'abord l\'avancement', 4000);
+          for (const r of rates) d.lines.push({ id: lid(), kind: 'item', extra: true, refund: true, refundPct: pct, desc: `${(v.desc || '').trim() || `Déduction acompte ${fnum(pct)} % sur les postes avancés dans cet état (${d.ref || `EA${d.situationNo || ''}`})`}${many ? ` (TVA ${fnum(+r)} %)` : ''}`, unit: 'forfait', qty: 1, price: -r2(work[r] * pct / 100), vat: +r, type: 'divers' });
+        }
+        done();
       };
+      if (rb && new URLSearchParams(location.hash.split('?')[1] || '').has('remb')) { history.replaceState(null, '', `#/invoice/${it.id}/encodage`); setTimeout(() => rb.click(), 150); }
       $$('[data-ol]', body).forEach((a) => { a.onclick = (e) => { e.preventDefault(); d.oneLine = a.dataset.ol === '1'; done(); }; });
     }
     foot();
@@ -426,7 +452,7 @@ function eaPanel(it, box, emit) {
       ${['brouillon', 'conteste'].includes(e.k) ? `<button class="btn primary" data-ea="send">${I.mail} Envoyer au client pour approbation</button>` : ''}
       ${e.k === 'envoye' ? `<button class="btn primary" data-ea="ok">${I.check} Le client a approuvé</button><button class="btn" data-ea="no">${I.x} Le client conteste</button><button class="btn" data-ea="resend">${I.mail} Renvoyer</button>` : ''}
       ${e.k === 'approuve' || e.late ? `<button class="btn primary" data-ea="bill">${I.coins} Facturer cet état</button>` : ''}
-      <a class="btn" href="#/print/invoice/${it.id}">${I.print} Voir l'état (PDF)</a></div></section>`;
+      <a class="btn" href="#/print/invoice/${it.id}">${I.print} Voir l'état (PDF)</a>${d.status !== 'emise' ? `<a class="btn" href="#/invoice/${it.id}/encodage?remb=1">${I.plus} Déduction d'acompte (%)</a>` : ''}</div></section>`;
   const save = async (patch) => { d.ea = { ...(d.ea || {}), ...patch }; await persist('invoice', it, { silent: true }); render(); };
   const send = async () => {
     const v = await ask('Envoyer l\'état d\'avancement au client', [{ name: 'days', label: 'Délai pour approuver (jours)', type: 'number', required: true, hint: 'Sans remarque du client dans ce délai, l\'état est considéré comme accepté.' }], { days: ui.eaDays || 7 });
