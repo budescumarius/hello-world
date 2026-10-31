@@ -1,0 +1,22 @@
+services:
+  foto:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+    environment:
+      PUBLIC_URL: https://foto.firma-ta.ro
+      # Opțional – copie automată în Google Drive (vezi README):
+      GOOGLE_CLIENT_ID: ""
+      GOOGLE_CLIENT_SECRET: ""
+      DRIVE_FOLDER_NAME: "Poze Șantier"
+  # HTTPS automat (necesar pentru instalarea pe telefon)
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    command: caddy reverse-proxy --from foto.firma-ta.ro --to foto:3000
+    volumes:
+      - caddy:/data
+volumes:
+  caddy:

@@ -1,0 +1,14 @@
+{
+  "name": "foto-santier",
+  "version": "1.0.0",
+  "description": "Poze de pe șantier pentru echipă – server + PWA",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

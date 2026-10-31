@@ -1,5 +1,7 @@
 # Șantier – aplicație pentru iPhone și iPad
 
+> 📷 **Nou: [Foto Șantier](foto/README.md)**: aplicație pentru toată echipa, cu poze salvate pe server sau în Google Drive și roluri admin / responsabil / muncitor. Se găsește în folderul `foto/`.
+
 Aplicație web instalabilă (PWA) pentru urmărirea șantierelor: planuri, puncte de observație/defecte, fotografii, firme, ședințe și rapoarte PDF. Funcționează **offline**, iar datele rămân pe dispozitiv.
 
 ## Funcții
