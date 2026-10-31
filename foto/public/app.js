@@ -203,6 +203,34 @@ async function toJpeg(src, max, q) {
   }
 }
 
+// Pozele HEIC de pe iPhone (chiar și cu numele .jpeg) nu se deschid în Chrome/Firefox:
+// le convertim în JPEG cu un convertor care se încarcă doar când e nevoie (≈1,3 MB, o singură dată).
+const isHeicFile = async (file) => {
+  const b = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+  const t = String.fromCharCode(...b.slice(4, 12));
+  return t.startsWith('ftyp') && /^(heic|heix|hevc|hevx|heim|heis|mif1|msf1)/.test(t.slice(4));
+};
+let heicLib = null;
+function loadHeic() {
+  return heicLib || (heicLib = new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = 'vendor/heic2any.min.js';
+    sc.onload = () => res(window.heic2any);
+    sc.onerror = () => { heicLib = null; rej(new Error('nu pot încărca convertorul HEIC')); };
+    document.head.append(sc);
+  }));
+}
+async function openImage(file) {
+  try {
+    return await decode(file);
+  } catch (e) {
+    if (!(await isHeicFile(file).catch(() => false))) throw e;
+    toast('Convertesc poza HEIC…');
+    const out = await (await loadHeic())({ blob: file, toType: 'image/jpeg', quality: 0.92 });
+    return decode(Array.isArray(out) ? out[0] : out);
+  }
+}
+
 const isJpegFile = async (file) => {
   const b = new Uint8Array(await file.slice(0, 3).arrayBuffer());
   return b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
@@ -216,7 +244,7 @@ async function addPhotos(files, fromCamera) {
     const takenAt = new Date(fromCamera ? Date.now() : file.lastModified || Date.now()).toISOString();
     let full, thumb;
     try {
-      const img = await decode(file);
+      const img = await openImage(file);
       try {
         full = await toJpeg(img, MAX_SIDE, 0.82);
         thumb = await toJpeg(img, THUMB_SIDE, 0.7);
@@ -226,7 +254,7 @@ async function addPhotos(files, fromCamera) {
       if (await isJpegFile(file).catch(() => false)) {
         full = file; thumb = null; // serverul folosește poza și ca miniatură
       } else {
-        toast(`Nu pot deschide ${file.name || 'poza'} (${e.message}). Încearcă: Setări → Cameră → Formate → „Cel mai compatibil”.`);
+        toast(`Nu pot deschide ${file.name || 'poza'} (${e.message || 'format necunoscut'}).`);
         continue;
       }
     }

@@ -1,0 +1,3 @@
+heic2any 0.0.4 – https://github.com/alexcorvi/heic2any
+MIT License – Copyright (c) 2020 Alex Corvi
+(include libheif, LGPL-3.0 – https://github.com/strukturag/libheif)
