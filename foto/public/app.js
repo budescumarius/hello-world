@@ -34,10 +34,12 @@ function toast(msg) {
 class HttpError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
 async function api(url, opts = {}) {
   const o = { credentials: 'same-origin', ...opts, headers: { ...(opts.headers || {}) } };
+  // Unele hostinguri blochează PATCH/DELETE: trimitem POST cu metoda în antet.
+  if (o.method && !['GET', 'POST'].includes(o.method)) { o.headers['X-HTTP-Method-Override'] = o.method; o.method = 'POST'; }
   if (o.json !== undefined) { o.body = JSON.stringify(o.json); o.headers['Content-Type'] = 'application/json'; delete o.json; }
   const r = await fetch(url, o);
   const data = await r.json().catch(() => ({}));
-  if (r.status === 401 && !url.startsWith('/api/login')) { state.user = null; route(); }
+  if (r.status === 401 && !url.startsWith('api/login')) { state.user = null; route(); }
   if (!r.ok) throw new HttpError(data.error || 'Eroare ' + r.status, r.status);
   return data;
 }
@@ -105,12 +107,12 @@ async function pump() {
       try {
         let saved;
         if (it.kind === 'note') {
-          saved = await api('/api/entries/note', { method: 'POST', json: { clientId: it.clientId, siteId: it.siteId, comment: it.comment, takenAt: it.takenAt } });
+          saved = await api('api/entries/note', { method: 'POST', json: { clientId: it.clientId, siteId: it.siteId, comment: it.comment, takenAt: it.takenAt } });
         } else {
           const head = new Uint8Array(4);
           new DataView(head.buffer).setUint32(0, it.thumb.size);
           const meta = encodeURIComponent(JSON.stringify({ clientId: it.clientId, siteId: it.siteId, comment: it.comment, takenAt: it.takenAt }));
-          saved = await api('/api/entries/photo', { method: 'POST', headers: { 'X-Meta': meta, 'Content-Type': 'application/octet-stream' }, body: new Blob([head, it.thumb, it.full]) });
+          saved = await api('api/entries/photo', { method: 'POST', headers: { 'X-Meta': meta, 'Content-Type': 'application/octet-stream' }, body: new Blob([head, it.thumb, it.full]) });
         }
         Q.offline = false; Q.error = null;
         if (it.siteId && saved.site_id == null) toast('Nu mai ai acces la șantierul ales – poza e la „Fără șantier”');
@@ -236,7 +238,7 @@ function openViewer(list, index, onChange) {
     const canSite = can.manage() || e.user_id === state.user.id;
     const imgBox = h('div', { class: 'img' },
       e.kind === 'photo'
-        ? h('img', { src: `/files/${e.id}/full`, alt: '' })
+        ? h('img', { src: `files/${e.id}/full`, alt: '' })
         : h('div', { class: 'note-big' }, e.comment));
     let x0 = null;
     imgBox.addEventListener('touchstart', (ev) => { x0 = ev.touches.length === 1 ? ev.touches[0].clientX : null; }, { passive: true });
@@ -260,13 +262,13 @@ function openViewer(list, index, onChange) {
         h('div', { class: 'btns' },
           h('button', { class: 'btn sm', onclick: () => editComment(e) }, '💬 Comentariu'),
           canSite ? h('button', { class: 'btn sm', onclick: () => moveSite(e) }, '🏗 Șantier') : null,
-          e.kind === 'photo' ? h('a', { class: 'btn sm', href: `/files/${e.id}/full?dl=1`, download: '' }, '⬇') : null,
+          e.kind === 'photo' ? h('a', { class: 'btn sm', href: `files/${e.id}/full?dl=1`, download: '' }, '⬇') : null,
           h('button', { class: 'btn sm danger', onclick: () => del(e) }, '🗑'))));
   }
 
   async function patch(e, body) {
     try {
-      const u = await api('/api/entries/' + e.id, { method: 'PATCH', json: body });
+      const u = await api('api/entries/' + e.id, { method: 'PATCH', json: body });
       Object.assign(e, u);
       render();
       onChange?.();
@@ -285,13 +287,13 @@ function openViewer(list, index, onChange) {
   }
   async function moveSite(e) {
     let sites = state.sites;
-    if (can.manage()) sites = (await api('/api/sites')).sites.filter((s) => !s.archived);
+    if (can.manage()) sites = (await api('api/sites')).sites.filter((s) => !s.archived);
     pickSite((sid) => patch(e, { siteId: sid }), e.site_id, { sites });
   }
   async function del(e) {
     if (!confirm(e.kind === 'photo' ? 'Ștergi poza definitiv?' : 'Ștergi nota?')) return;
     try {
-      await api('/api/entries/' + e.id, { method: 'DELETE' });
+      await api('api/entries/' + e.id, { method: 'DELETE' });
       list.splice(i, 1);
       onChange?.();
       if (!list.length) return close();
@@ -329,7 +331,7 @@ function gallery(entries, { onChange, pending = [] } = {}) {
     const open = () => openViewer(entries, idx, onChange);
     grid.append(e.kind === 'photo'
       ? h('button', { class: 'tile', onclick: open },
-          h('img', { src: `/files/${e.id}/thumb`, loading: 'lazy', alt: e.comment || '' }),
+          h('img', { src: `files/${e.id}/thumb`, loading: 'lazy', alt: e.comment || '' }),
           e.comment ? h('span', { class: 'c' }, '💬') : null)
       : h('button', { class: 'tile note', onclick: open }, h('b', {}, '📝'), h('span', {}, e.comment)));
   });
@@ -345,7 +347,7 @@ function feed(params, { title, onChange } = {}) {
     const last = items[items.length - 1];
     if (last) q.set('before', `${last.taken_at}|${last.id}`);
     try {
-      const rows = await api('/api/entries?' + q);
+      const rows = await api('api/entries?' + q);
       items.push(...rows);
       done = rows.length < 60;
       draw();
@@ -374,7 +376,8 @@ function screenLogin(setup) {
     e.preventDefault();
     btn.disabled = true; err.textContent = '';
     try {
-      await api(setup ? '/api/setup' : '/api/login', { method: 'POST', json: { name: name.value, username: user.value, password: pass.value } });
+      await api(setup ? 'api/setup' : 'api/login', { method: 'POST', json: { name: name.value, username: user.value, password: pass.value } });
+      history.replaceState(null, '', location.pathname); // după logare: direct la ecranul Foto
       await boot();
     } catch (x) { err.textContent = x.message; btn.disabled = false; }
   } },
@@ -457,7 +460,7 @@ async function screenPoze() {
   fill(view, h('h1', {}, mine ? 'Pozele mele' : 'Poze'), filters, content);
   const draw = () => fill(content, feed({ ...params }));
   if (!mine) {
-    const sites = (await api('/api/sites')).sites;
+    const sites = (await api('api/sites')).sites;
     const sel = h('select', { onchange: () => { if (sel.value) params.site = sel.value; else delete params.site; draw(); } },
       h('option', { value: '' }, 'Toate șantierele'),
       sites.map((s) => h('option', { value: s.id }, s.name + (s.archived ? ' (arhivat)' : ''))),
@@ -472,10 +475,10 @@ async function screenPoze() {
 async function screenSantiere() {
   fill(view, h('div', { class: 'top' }, h('h1', {}, 'Șantiere'),
     h('button', { class: 'btn primary sm', onclick: () => editSite(null) }, '+ Nou')), h('p', { class: 'muted' }, 'Se încarcă…'));
-  const { sites, unassigned } = await api('/api/sites');
+  const { sites, unassigned } = await api('api/sites');
   const active = sites.filter((s) => !s.archived), archived = sites.filter((s) => s.archived);
   const card = (s) => h('button', { class: 'item', onclick: () => { location.hash = 'santier/' + s.id; } },
-    h('div', { class: 'cover', style: s.cover_id ? `background-image:url(/files/${s.cover_id}/thumb)` : '' }, s.cover_id ? '' : '🏗'),
+    h('div', { class: 'cover', style: s.cover_id ? `background-image:url(files/${s.cover_id}/thumb)` : '' }, s.cover_id ? '' : '🏗'),
     h('div', { class: 'txt' },
       h('div', { class: 't' }, s.name),
       h('div', { class: 's' }, [s.address, `${s.count} ${s.count === 1 ? 'poză' : 'poze'}`, s.last_at ? 'ultima ' + fmtShort(s.last_at) : null].filter(Boolean).join(' · ')),
@@ -496,7 +499,7 @@ async function screenSantier(id) {
       h('p', { class: 'muted small' }, 'Deschide o poză și apasă „🏗 Șantier” ca s-o muți.'), feed({ site: 'none' }));
     return;
   }
-  const { sites } = await api('/api/sites');
+  const { sites } = await api('api/sites');
   const s = sites.find((x) => x.id === Number(id));
   if (!s) { location.hash = 'santiere'; return; }
   fill(view, 
@@ -511,7 +514,7 @@ async function screenSantier(id) {
 }
 
 async function editSite(s) {
-  const users = await api('/api/users');
+  const users = await api('api/users');
   const sel = new Set((s?.users || []).map((u) => u.id));
   sheet((box, close) => {
     const name = h('input', { value: s?.name || '', placeholder: 'Ex: Vila Popescu, Str. Lalelelor 4' });
@@ -525,9 +528,9 @@ async function editSite(s) {
       err.textContent = '';
       try {
         const body = { name: name.value, address: addr.value, userIds: [...sel] };
-        if (s) await api('/api/sites/' + s.id, { method: 'PATCH', json: body });
+        if (s) await api('api/sites/' + s.id, { method: 'PATCH', json: body });
         else {
-          const r = await api('/api/sites', { method: 'POST', json: body });
+          const r = await api('api/sites', { method: 'POST', json: body });
           location.hash = 'santier/' + r.id;
         }
         close();
@@ -544,12 +547,12 @@ async function editSite(s) {
       h('button', { class: 'btn primary block', onclick: save }, 'Salvează'),
       s ? h('div', { class: 'row', style: 'margin-top:10px' },
         h('button', { class: 'btn grow', onclick: async () => {
-          await api('/api/sites/' + s.id, { method: 'PATCH', json: { archived: !s.archived } });
+          await api('api/sites/' + s.id, { method: 'PATCH', json: { archived: !s.archived } });
           close(); await refreshMe(); location.hash = 'santiere'; toast(s.archived ? 'Șantier reactivat' : 'Șantier arhivat');
         } }, s.archived ? '♻️ Reactivează' : '📦 Arhivează'),
         can.admin() ? h('button', { class: 'btn danger grow', onclick: async () => {
           if (!confirm(`Ștergi șantierul „${s.name}”? Pozele rămân, la „Fără șantier”.`)) return;
-          await api('/api/sites/' + s.id, { method: 'DELETE' });
+          await api('api/sites/' + s.id, { method: 'DELETE' });
           close(); await refreshMe(); location.hash = 'santiere';
         } }, '🗑 Șterge') : null) : null);
     if (!s) setTimeout(() => name.focus(), 50);
@@ -559,7 +562,7 @@ async function editSite(s) {
 async function screenEchipa() {
   fill(view, h('div', { class: 'top' }, h('h1', {}, 'Echipa'),
     h('button', { class: 'btn primary sm', onclick: () => editUser(null) }, '+ Persoană')), h('p', { class: 'muted' }, 'Se încarcă…'));
-  const [users, { sites }] = await Promise.all([api('/api/users'), api('/api/sites')]);
+  const [users, { sites }] = await Promise.all([api('api/users'), api('api/sites')]);
   view.lastChild.replaceWith(h('div', { class: 'list' }, users.map((u) => h('button', { class: 'item', onclick: () => editUser(u, sites) },
     h('div', { class: 'cover', style: 'border-radius:50%;background:#e0e7ff;font-weight:800;font-size:20px;color:#1f4fd8' }, u.name.slice(0, 1).toUpperCase()),
     h('div', { class: 'txt' },
@@ -569,7 +572,7 @@ async function screenEchipa() {
 }
 
 async function editUser(u, sites) {
-  sites = sites || (await api('/api/sites')).sites;
+  sites = sites || (await api('api/sites')).sites;
   const sel = new Set(u?.siteIds || []);
   let role = u?.role || 'muncitor';
   sheet((box, close) => {
@@ -598,8 +601,8 @@ async function editUser(u, sites) {
       try {
         const body = { name: name.value, username: user.value, role, siteIds: [...sel] };
         if (pass.value) body.password = pass.value;
-        if (u) await api('/api/users/' + u.id, { method: 'PATCH', json: body });
-        else await api('/api/users', { method: 'POST', json: { ...body, password: pass.value } });
+        if (u) await api('api/users/' + u.id, { method: 'PATCH', json: body });
+        else await api('api/users', { method: 'POST', json: { ...body, password: pass.value } });
         close();
         if (u?.id === state.user.id || sel.size) await refreshMe();
         screenEchipa();
@@ -614,7 +617,7 @@ async function editUser(u, sites) {
       siteBox, err,
       h('button', { class: 'btn primary block', onclick: save }, 'Salvează'),
       u && u.id !== state.user.id ? h('button', { class: 'btn block ' + (u.active ? 'danger' : ''), style: 'margin-top:10px', onclick: async () => {
-        await api('/api/users/' + u.id, { method: 'PATCH', json: { active: !u.active } });
+        await api('api/users/' + u.id, { method: 'PATCH', json: { active: !u.active } });
         close(); screenEchipa(); toast(u.active ? 'Cont dezactivat' : 'Cont reactivat');
       } }, u.active ? '🚫 Dezactivează contul' : '✅ Reactivează contul') : null);
     if (!u) setTimeout(() => name.focus(), 50);
@@ -634,33 +637,49 @@ async function screenCont(query) {
       h('button', { class: 'btn grow', onclick: changePassword }, '🔑 Schimbă parola'),
       h('button', { class: 'btn grow danger', onclick: async () => {
         if (Q.items.length && !confirm(`Mai ai ${Q.items.length} poze netrimise. Ieși oricum? (rămân în telefon)`)) return;
-        await api('/api/logout', { method: 'POST' }); state.user = null; route();
+        await api('api/logout', { method: 'POST' }); state.user = null; route();
       } }, 'Ieșire')));
   fill(view, box);
   if (can.admin()) box.append(await driveCard(query));
 }
 
 async function driveCard(query) {
-  const d = await api('/api/drive');
+  const d = await api('api/drive');
   const res = new URLSearchParams(query).get('drive');
   if (res) { toast(res === 'ok' ? '✓ Google Drive conectat' : 'Google Drive: ' + res); history.replaceState(null, '', '#cont'); }
   const card = h('div', { class: 'card' });
   card.append(h('div', { class: 'row' }, h('b', { class: 'grow' }, '☁️ Google Drive'),
     h('span', { class: 'badge ' + (d.connected ? 'responsabil' : 'off') }, d.connected ? 'Conectat' : 'Neconectat')));
-  if (!d.configured) {
-    card.append(h('p', { class: 'muted small' }, 'Pozele se salvează pe server. Pentru copie automată în Google Drive, setează pe server GOOGLE_CLIENT_ID și GOOGLE_CLIENT_SECRET (vezi README). Adresa de redirecționare de pus în Google Cloud:'),
-      h('code', { class: 'small', style: 'word-break:break-all' }, d.redirectUri));
+  const redirect = h('p', { class: 'small' }, 'Adresa de redirecționare (pentru Google Cloud): ',
+    h('code', { style: 'word-break:break-all;user-select:all' }, d.redirectUri));
+  if (!d.configured && d.editable) {
+    const id = h('input', { placeholder: '….apps.googleusercontent.com', autocapitalize: 'none', spellcheck: 'false' });
+    const sec = h('input', { placeholder: 'GOCSPX-…', autocapitalize: 'none', spellcheck: 'false' });
+    const err = h('div', { class: 'error' });
+    card.append(h('p', { class: 'muted small' }, 'Pozele se salvează pe server. Pentru copie automată în Google Drive, creează un „OAuth client” în Google Cloud (pașii sunt în README) și pune datele aici.'),
+      redirect,
+      h('label', { class: 'f' }, h('span', {}, 'Client ID'), id),
+      h('label', { class: 'f' }, h('span', {}, 'Client secret'), sec), err,
+      h('button', { class: 'btn primary block', onclick: async () => {
+        try { await api('api/drive/config', { method: 'POST', json: { clientId: id.value, clientSecret: sec.value } }); screenCont(); }
+        catch (e) { err.textContent = e.message; }
+      } }, 'Salvează'));
+  } else if (!d.configured) {
+    card.append(h('p', { class: 'muted small' }, 'Pozele se salvează pe server. Pentru copie automată în Google Drive, setează pe server GOOGLE_CLIENT_ID și GOOGLE_CLIENT_SECRET (vezi README).'), redirect);
   } else if (!d.connected) {
     card.append(h('p', { class: 'muted small' }, `Fiecare poză va fi copiată automat în Drive, în folderul „${d.folder}”, cu un subfolder pentru fiecare șantier.`),
-      h('a', { class: 'btn primary block', href: '/api/drive/connect' }, 'Conectează Google Drive'));
+      h('a', { class: 'btn primary block', href: 'api/drive/connect' }, 'Conectează Google Drive'),
+      d.editable ? h('button', { class: 'btn block', style: 'margin-top:8px', onclick: async () => {
+        await api('api/drive/config', { method: 'POST', json: { clientId: '', clientSecret: '' } }); screenCont();
+      } }, 'Schimbă Client ID / secret') : null);
   } else {
     card.append(h('p', { class: 'small' }, `Folder: „${d.folder}” / <șantier>. `, d.pending ? `⏳ ${d.pending} poze de copiat.` : '✓ Toate pozele sunt copiate.'),
       d.lastError ? h('p', { class: 'error small' }, 'Ultima eroare: ' + d.lastError) : null,
       h('div', { class: 'row' },
-        h('button', { class: 'btn grow', onclick: async () => { await api('/api/drive/sync', { method: 'POST' }); toast('Sincronizare pornită'); } }, '🔄 Sincronizează'),
+        h('button', { class: 'btn grow', onclick: async () => { await api('api/drive/sync', { method: 'POST' }); toast('Sincronizare pornită'); } }, '🔄 Sincronizează'),
         h('button', { class: 'btn grow danger', onclick: async () => {
           if (!confirm('Deconectezi Google Drive? Pozele rămân pe server și în Drive.')) return;
-          await api('/api/drive/disconnect', { method: 'POST' }); screenCont();
+          await api('api/drive/disconnect', { method: 'POST' }); screenCont();
         } }, 'Deconectează')));
   }
   return h('div', {}, h('h2', {}, 'Stocare'), card);
@@ -675,7 +694,7 @@ function changePassword() {
       h('label', { class: 'f' }, h('span', {}, 'Parola actuală'), old),
       h('label', { class: 'f' }, h('span', {}, 'Parola nouă'), nw), err,
       h('button', { class: 'btn primary block', onclick: async () => {
-        try { await api('/api/password', { method: 'POST', json: { old: old.value, password: nw.value } }); close(); toast('✓ Parola a fost schimbată'); }
+        try { await api('api/password', { method: 'POST', json: { old: old.value, password: nw.value } }); close(); toast('✓ Parola a fost schimbată'); }
         catch (e) { err.textContent = e.message; }
       } }, 'Salvează'));
   });
@@ -697,9 +716,10 @@ function tabs() {
 
 async function route() {
   if (!state.user) {
-    const s = await api('/api/state').catch(() => ({}));
+    const s = await api('api/state').catch(() => ({}));
     return screenLogin(s.needsSetup);
   }
+  document.querySelectorAll('.viewer, .overlay').forEach((el) => el.remove());
   tabs();
   const [path, query] = location.hash.slice(1).split('?');
   const [page, arg] = path.split('/');
@@ -718,7 +738,7 @@ async function route() {
 window.addEventListener('hashchange', route);
 
 async function refreshMe() {
-  const me = await api('/api/me');
+  const me = await api('api/me');
   state.user = me.user;
   state.sites = me.sites;
   localStorage.setItem('me', JSON.stringify(me));

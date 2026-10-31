@@ -13,6 +13,11 @@ const ROLES = ['admin', 'responsabil', 'muncitor'];
 const app = express();
 app.set('trust proxy', true);
 app.disable('x-powered-by');
+app.use((req, res, next) => { // aplicația trimite PATCH/DELETE ca POST + antet
+  const m = req.get('X-HTTP-Method-Override');
+  if (req.method === 'POST' && ['PATCH', 'DELETE'].includes(m)) req.method = m;
+  next();
+});
 
 // ---------- utilitare ----------
 const fail = (res, code, msg) => res.status(code).json({ error: msg });

@@ -22,7 +22,34 @@ O aplicație simplă pentru telefon. Echipa face poze pe șantier, iar pozele aj
 
 Pozele „Fără șantier” le vede adminul în **Șantiere → Fără șantier** și le poate muta pe șantierul potrivit.
 
-## Instalare pe server
+## Instalare pe hosting cPanel (cel mai simplu)
+Ai nevoie doar de PHP 7.4 sau mai nou, cu SQLite. Aproape orice hosting cPanel le are.
+
+1. **Ia arhiva** `foto-santier-cpanel.zip`. Dacă ai codul, o creezi cu `./build-cpanel.sh`, iar ea apare în `dist/`.
+2. **Alege adresa.** Recomandat: un subdomeniu, de exemplu `foto.firma-ta.ro`.
+   cPanel → **Domains** (sau **Subdomains**) → creează `foto`. cPanel îți arată folderul lui, de exemplu `public_html/foto`.
+   Merge și într-un subfolder al site-ului existent, de exemplu `firma-ta.ro/foto`.
+3. **Urcă fișierele.** cPanel → **File Manager** → intră în acel folder → **Upload** → alegi zip-ul → click dreapta pe el → **Extract**. Apoi poți șterge zip-ul.
+   ⚠️ Fișierul `.htaccess` e ascuns. Ca să-l vezi: **Settings → Show Hidden Files**.
+4. **Activează HTTPS.** cPanel → **SSL/TLS Status** → **Run AutoSSL**. Fără HTTPS, aplicația nu se poate instala pe telefon.
+5. **Prima pornire.** Deschide `https://foto.firma-ta.ro` și creează contul de **admin**. Gata!
+
+Aplicația își creează singură folderul `data/`, cu baza de date și pozele. Accesul la el din browser este blocat.
+**Backup:** descarcă folderul `data/` din File Manager (click dreapta → Compress → Download).
+
+**Dacă ceva nu merge:**
+- *Eroare „Nu pot crea folderul de date”*: dă folderului aplicației permisiuni `755` (click dreapta → Change Permissions).
+- *Pagina se deschide, dar logarea dă eroare 404*: verifică dacă fișierul `.htaccess` a fost urcat (vezi pasul 3).
+- *Eroare legată de SQLite*: cPanel → **Select PHP Version** → bifează extensiile `pdo_sqlite` și `sqlite3`. Alege PHP 8.x.
+
+**Google Drive pe cPanel:** Client ID și Client secret se pun direct în aplicație, la **Cont → Stocare**. Nu trebuie editat niciun fișier.
+Pozele se copiază în Drive imediat după ce sunt făcute. Pentru siguranță, poți adăuga în cPanel → **Cron Jobs** (la 5 minute):
+```
+php /home/UTILIZATOR/public_html/foto/api.php drive-sync
+```
+Calea exactă o vezi în File Manager.
+
+## Instalare pe server propriu (VPS)
 
 ### Varianta A – Docker (recomandat, cu HTTPS automat)
 Ai nevoie de un server mic (VPS de ~5 €/lună) și de un domeniu, de exemplu `foto.firma-ta.ro`, îndreptat spre server.
@@ -54,9 +81,9 @@ Dacă muți o poză pe alt șantier sau o ștergi, se actualizează și în Driv
 2. **APIs & Services → Library**: activează **Google Drive API**.
 3. **OAuth consent screen**: alege tipul *External*, completează numele aplicației, apoi apasă **Publish app** („In production”). Dacă rămâne în „Testing”, Google deconectează aplicația după 7 zile.
 4. **Credentials → Create credentials → OAuth client ID → Web application**.
-   La *Authorized redirect URIs* pune: `https://foto.firma-ta.ro/api/drive/callback`.
+   La *Authorized redirect URIs* pune: `https://foto.firma-ta.ro/api/drive/callback`. Dacă aplicația e într-un subfolder: `https://firma-ta.ro/foto/api/drive/callback`.
    Adresa exactă o vezi în aplicație, la **Cont → Stocare**.
-5. Pune `GOOGLE_CLIENT_ID` și `GOOGLE_CLIENT_SECRET` în `docker-compose.yml` (sau ca variabile de mediu) și repornește serverul.
+5. Pe cPanel: pune Client ID și Client secret în aplicație, la **Cont → Stocare**. Pe VPS/Docker: pune `GOOGLE_CLIENT_ID` și `GOOGLE_CLIENT_SECRET` în `docker-compose.yml` și repornește serverul.
 6. În aplicație, ca admin: **Cont → Conectează Google Drive** și alege contul Google în care vrei pozele.
 
 Aplicația cere doar acces la fișierele create de ea (`drive.file`). Nu vede restul fișierelor din Drive.
