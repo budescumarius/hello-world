@@ -19,7 +19,7 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '25'; // la fel ca APP_VERSION din app.js
+const VERSION = '26'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
@@ -500,17 +500,19 @@ function shortcut(string $route): void {
     }
     // cerere prea mare pentru hosting: PHP aruncă tot conținutul (și câmpul dest, și poza)
     $len = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
-    if ($len > 0 && !$_POST && !$_FILES) {
+    $isForm = preg_match('#multipart/|urlencoded#i', (string) ($_SERVER['CONTENT_TYPE'] ?? ''));
+    if ($len > 0 && $isForm && !$_POST && !$_FILES) {
         sc_reply($u, 'Poza e prea mare pentru hosting (' . round($len / 1048576, 1) . ' MB, limita e ' . ini_get('post_max_size') . '). '
             . 'Adaugă în scurtătură, înainte de trimitere, acțiunea „Redimensionner l’image” cu lățimea 2048.', 413);
         return;
     }
-    $label = trim((string) ($_POST['dest'] ?? ''));
+    $label = trim((string) ($_POST['dest'] ?? $_GET['dest'] ?? '')); // dest: câmp de formular sau în adresă (…&dest=)
     if ($label === '') { sc_reply($u, 'Lipsește câmpul „dest” (șantierul ales). În ultima acțiune „Obtenir le contenu de l’URL” adaugă un câmp Texte „dest” = Élément choisi.', 400); return; }
     if (!isset($dest[$label])) { sc_reply($u, "Nu găsesc „{$label}” printre șantierele tale.", 400); return; }
     [$sid, $fid] = $dest[$label];
-    // toate fișierele trimise, oricum ar fi numit câmpul (photo, photo[], file…)
-    $files = []; $tooBig = 0;
+    // Poza poate sosi în mai multe feluri, după cum e făcută scurtătura:
+    //  1) câmp Fichier în formular (oricum s-ar numi)   2) corpul cererii = imaginea   3) câmp text cu imaginea în base64
+    $files = []; $tooBig = 0; $tmpMade = [];
     foreach ($_FILES as $f) {
         foreach ((array) $f['tmp_name'] as $i => $t) {
             $err = is_array($f['error']) ? $f['error'][$i] : $f['error'];
@@ -518,8 +520,36 @@ function shortcut(string $route): void {
             elseif (in_array($err, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)) $tooBig++;
         }
     }
+    $asFile = function (string $data) use (&$files, &$tmpMade) {
+        $t = tempnam(sys_get_temp_dir(), 'fs'); file_put_contents($t, $data); $files[] = $t; $tmpMade[] = $t;
+    };
+    $looksImage = function (string $d): bool {
+        return strncmp($d, "\xFF\xD8\xFF", 3) === 0 || substr($d, 4, 4) === 'ftyp' || strncmp($d, "\x89PNG", 4) === 0;
+    };
+    if (!$files && !$tooBig) {
+        $ct = strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? ''));
+        if (strpos($ct, 'multipart/') === false && strpos($ct, 'urlencoded') === false) {
+            $body = (string) file_get_contents('php://input');
+            if ($looksImage($body)) $asFile($body);
+        }
+        foreach ($_POST as $k => $v) { // imagine trimisă ca text (base64)
+            if ($k === 'dest' || $k === 'key' || !is_string($v) || strlen($v) < 1000) continue;
+            $d = base64_decode(preg_replace('#^data:[^,]*,#', '', $v), true);
+            if ($d !== false && $looksImage($d)) $asFile($d);
+        }
+    }
     if (!$files && $tooBig) { sc_reply($u, 'Poza e prea mare pentru hosting (limita e ' . ini_get('upload_max_filesize') . '). Adaugă în scurtătură „Redimensionner l’image” cu lățimea 2048.', 413); return; }
-    if (!$files) { sc_reply($u, 'Nu a sosit nicio poză. În ultima acțiune adaugă un câmp Fichier „photo” = Image redimensionnée (sau Image convertie).', 400); return; }
+    if (!$files) {
+        // spunem exact ce a sosit, ca să se vadă ce lipsește din scurtătură
+        $got = [];
+        foreach ($_POST as $k => $v) $got[] = "„{$k}” (Texte" . (is_string($v) && $k !== 'dest' && $k !== 'key' ? ': „' . mb_substr($v, 0, 30) . (mb_strlen($v) > 30 ? '…' : '') . '”' : '') . ')';
+        $ct = (string) ($_SERVER['CONTENT_TYPE'] ?? '');
+        $hint = isset($_POST['photo'])
+            ? 'Câmpul „photo” a sosit ca Texte, nu ca Fichier. Șterge-l (glisează spre stânga) și adaugă din nou: Ajouter un champ → Fichier → cheie photo → valoare: variabila Image redimensionnée.'
+            : 'Câmpul „photo” nu a sosit. În ultima acțiune: Ajouter un champ → Fichier → cheie photo → valoare: variabila Image redimensionnée.';
+        sc_reply($u, "Nu a sosit nicio poză. $hint\nAu sosit: " . ($got ? implode(', ', $got) : 'nimic') . ($ct ? " · tip: " . strtok($ct, ';') : ''), 400);
+        return;
+    }
     $n = 0; $dups = 0; $errors = [];
     foreach ($files as $tmp) {
         $raw = (string) file_get_contents($tmp);
@@ -537,6 +567,7 @@ function shortcut(string $route): void {
     if ($dups) $msg .= ' (' . $dups . ($dups === 1 ? ' era deja trimisă – păstrată o singură dată)' : ' erau deja trimise – păstrate o singură dată)');
     $n += $dups;
     if ($errors) $msg .= "\n" . implode("\n", array_unique($errors));
+    foreach ($tmpMade as $t) @unlink($t);
     if ($n - $dups > 0) $msg .= "\nLe găsești în aplicație: 🖼 Poze sau Șantiere → $label.";
     sc_reply($u, $msg, $n ? 200 : 400, $n > 0);
     if ($n && sync_active()) sync_work(25);
