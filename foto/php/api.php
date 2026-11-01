@@ -19,7 +19,7 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '26'; // la fel ca APP_VERSION din app.js
+const VERSION = '27'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
@@ -508,7 +508,22 @@ function shortcut(string $route): void {
     }
     $label = trim((string) ($_POST['dest'] ?? $_GET['dest'] ?? '')); // dest: câmp de formular sau în adresă (…&dest=)
     if ($label === '') { sc_reply($u, 'Lipsește câmpul „dest” (șantierul ales). În ultima acțiune „Obtenir le contenu de l’URL” adaugă un câmp Texte „dest” = Élément choisi.', 400); return; }
-    if (!isset($dest[$label])) { sc_reply($u, "Nu găsesc „{$label}” printre șantierele tale.", 400); return; }
+    if ($label[0] === '[' || $label[0] === '{') { // s-a pus lista întreagă (Contenu de l’URL) în loc de șantierul ales
+        sc_reply($u, 'La „dest” a sosit lista întreagă de șantiere, nu șantierul ales. În scurtătură, la dest (în formular sau după &dest= în adresă) pune variabila „Élément choisi”, nu „Contenu de l’URL”.', 400);
+        return;
+    }
+    if (!isset($dest[$label])) {
+        // iPhone-ul poate tăia textul din adresă la primul spațiu: căutăm șantierul după început (dacă e unic)
+        $norm = function (string $t): string { return function_exists('mb_strtolower') ? mb_strtolower(trim($t), 'UTF-8') : strtolower(trim($t)); };
+        $want = $norm($label);
+        $hits = array_values(array_filter(array_keys($dest), function ($k) use ($norm, $want) { return $norm($k) === $want; }));
+        if (!$hits) $hits = array_values(array_filter(array_keys($dest), function ($k) use ($norm, $want) { return strpos($norm($k), $want) === 0; }));
+        if (count($hits) !== 1) {
+            sc_reply($u, "Nu găsesc „{$label}” printre șantierele tale" . (count($hits) > 1 ? ' (se potrivesc mai multe: ' . implode(', ', array_slice($hits, 0, 4)) . ')' : '') . '. Pune la dest variabila „Élément choisi”.', 400);
+            return;
+        }
+        $label = $hits[0];
+    }
     [$sid, $fid] = $dest[$label];
     // Poza poate sosi în mai multe feluri, după cum e făcută scurtătura:
     //  1) câmp Fichier în formular (oricum s-ar numi)   2) corpul cererii = imaginea   3) câmp text cu imaginea în base64
