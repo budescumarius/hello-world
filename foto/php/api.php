@@ -16,7 +16,7 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '11'; // la fel ca APP_VERSION din app.js
+const VERSION = '12'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
@@ -61,6 +61,13 @@ CREATE INDEX IF NOT EXISTS idx_entries_drive ON entries(drive_status);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS login_fail (k TEXT NOT NULL, at INTEGER NOT NULL);
 ");
+    // coloane adăugate în versiuni noi (NAS)
+    $has = function (string $table, string $col) use ($db): bool {
+        return in_array($col, array_column($db->query("PRAGMA table_info($table)")->fetchAll(), 'name'), true);
+    };
+    if (!$has('entries', 'nas_status')) $db->exec("ALTER TABLE entries ADD COLUMN nas_status TEXT NOT NULL DEFAULT 'pending'");
+    if (!$has('entries', 'nas_path')) $db->exec('ALTER TABLE entries ADD COLUMN nas_path TEXT');
+    if (!$has('sites', 'nas_folder')) $db->exec('ALTER TABLE sites ADD COLUMN nas_folder TEXT');
     return $db;
 }
 
@@ -205,6 +212,7 @@ function is_jpeg(string $b): bool { return strlen($b) > 3 && substr($b, 0, 3) ==
 function drive_client(): array { return [setting('drive_client_id') ?: '', setting('drive_client_secret') ?: '']; }
 function drive_configured(): bool { [$id, $s] = drive_client(); return $id !== '' && $s !== ''; }
 function drive_connected(): bool { return drive_configured() && (bool) setting('drive_refresh_token'); }
+function drive_active(): bool { return drive_connected() && setting('drive_enabled') !== '0'; }
 
 function http_req(string $method, string $url, array $headers = [], $body = null): array {
     $ch = curl_init($url);
@@ -286,7 +294,7 @@ function drive_upload(array $e): string {
 }
 function drive_update(int $entryId): void {
     $e = one('SELECT * FROM entries WHERE id = ?', [$entryId]);
-    if (!drive_connected() || !$e || !$e['drive_file_id']) return;
+    if (!drive_active() || !$e || !$e['drive_file_id']) return;
     try {
         $cur = gapi('GET', "https://www.googleapis.com/drive/v3/files/{$e['drive_file_id']}?fields=parents");
         $qs = http_build_query(['addParents' => site_folder($e['site_id']), 'removeParents' => implode(',', $cur['parents'] ?? [])]);
@@ -294,14 +302,14 @@ function drive_update(int $entryId): void {
     } catch (Throwable $err) { error_log('Drive update: ' . $err->getMessage()); }
 }
 function drive_delete($fileId): void {
-    if (!drive_connected() || !$fileId) return;
+    if (!drive_active() || !$fileId) return;
     try { gapi('DELETE', "https://www.googleapis.com/drive/v3/files/$fileId"); }
     catch (Throwable $e) { if ($e->getCode() !== 404) error_log('Drive delete: ' . $e->getMessage()); }
 }
 // Trimite pozele care așteaptă, cel mult $seconds secunde. Un singur proces o dată.
 function drive_work(int $seconds = 25): void {
     global $DATA;
-    if (!drive_connected()) return;
+    if (!drive_active()) return;
     $lock = fopen($DATA . '/drive.lock', 'c');
     if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) return;
     @set_time_limit($seconds + 60);
@@ -326,6 +334,144 @@ function drive_work(int $seconds = 25): void {
     }
 }
 
+// ---------------------------------------------------------------- NAS (WebDAV: Synology, QNAP, Nextcloud…)
+// Structura: <URL>/<Poze Șantier>/<șantier>/<data_ora_nume_id>.jpg (+ .txt cu comentariul)
+function nas_configured(): bool { return (bool) setting('nas_url'); }
+function nas_active(): bool { return nas_configured() && setting('nas_enabled') !== '0'; }
+class NasError extends RuntimeException {}
+function nas_url(string $rel = ''): string {
+    $segs = array_filter(explode('/', $rel), 'strlen');
+    return rtrim((string) setting('nas_url'), '/') . ($segs ? '/' . implode('/', array_map('rawurlencode', $segs)) : '/');
+}
+function nas_req(string $method, string $rel, array $headers = [], $body = null, ?array $cfg = null): int {
+    $cfg = $cfg ?: ['url' => setting('nas_url'), 'user' => setting('nas_user'), 'pass' => setting('nas_pass'), 'insecure' => setting('nas_insecure') === '1'];
+    $segs = array_filter(explode('/', $rel), 'strlen');
+    $url = rtrim($cfg['url'], '/') . ($segs ? '/' . implode('/', array_map('rawurlencode', $segs)) : '/');
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $headers,
+        CURLOPT_TIMEOUT => 120, CURLOPT_CONNECTTIMEOUT => 15, CURLOPT_HTTPAUTH => CURLAUTH_ANY,
+        CURLOPT_USERPWD => $cfg['user'] . ':' . $cfg['pass']]);
+    if (!empty($cfg['insecure'])) { curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0); }
+    if ($body !== null) curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+    if (curl_exec($ch) === false) {
+        $err = curl_error($ch); curl_close($ch);
+        throw new NasError('NAS-ul nu răspunde: ' . $err);
+    }
+    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($code === 401 || $code === 403) throw new NasError('NAS: utilizator/parolă greșite sau fără drept de scriere', $code);
+    return $code;
+}
+function nas_clean_name(string $s): string {
+    $s = trim((string) preg_replace('#[\\\\/:*?"<>|\x00-\x1f]+#u', '-', $s), " .-");
+    return $s === '' ? 'Șantier' : (function_exists('mb_substr') ? mb_substr($s, 0, 100) : substr($s, 0, 100));
+}
+function nas_root(): string { global $CONFIG; return nas_clean_name($CONFIG['drive_folder_name']); }
+function nas_mkdir(string $rel): void {
+    $c = nas_req('MKCOL', $rel);
+    if (!in_array($c, [201, 405, 301, 200], true)) throw new NasError("NAS: nu pot crea folderul „{$rel}” (HTTP $c)", $c);
+}
+function nas_site_folder($siteId): string {
+    $root = nas_root();
+    nas_mkdir($root);
+    $site = $siteId ? one('SELECT id, name, nas_folder FROM sites WHERE id = ?', [(int) $siteId]) : null;
+    if (!$site) { nas_mkdir("$root/Fără șantier"); return "$root/Fără șantier"; }
+    $name = $site['nas_folder'] ?: nas_clean_name($site['name']);
+    nas_mkdir("$root/$name");
+    if ($site['nas_folder'] !== $name) q('UPDATE sites SET nas_folder = ? WHERE id = ?', [$name, $site['id']]);
+    return "$root/$name";
+}
+function nas_file_name(array $e): string {
+    $d = str_replace(['T', ':'], ['_', '-'], substr($e['taken_at'], 0, 19));
+    $who = trim((string) preg_replace('/[^\p{L}\p{N}]+/u', '_', $e['user_name'] ?: 'necunoscut'), '_');
+    return "{$d}_{$who}_{$e['id']}.jpg";
+}
+function nas_txt(string $path): string { return preg_replace('/\.jpg$/', '.txt', $path); }
+function nas_put_comment(string $path, string $comment): void {
+    if ($comment !== '') nas_req('PUT', nas_txt($path), ['Content-Type: text/plain; charset=utf-8'], "\xEF\xBB\xBF" . $comment);
+    else nas_req('DELETE', nas_txt($path));
+}
+function nas_upload(array $e): string {
+    global $PHOTOS;
+    $path = nas_site_folder($e['site_id']) . '/' . nas_file_name($e);
+    $c = nas_req('PUT', $path, ['Content-Type: image/jpeg'], file_get_contents($PHOTOS . '/' . $e['file']));
+    if ($c < 200 || $c >= 300) throw new NasError("NAS: nu pot salva poza (HTTP $c)", $c);
+    if ($e['comment'] !== '') nas_put_comment($path, $e['comment']);
+    return $path;
+}
+function nas_move(string $from, string $to): int {
+    return nas_req('MOVE', $from, ['Destination: ' . nas_url($to), 'Overwrite: F']);
+}
+function nas_update(int $entryId): void {
+    $e = one('SELECT * FROM entries WHERE id = ?', [$entryId]);
+    if (!nas_active() || !$e || !$e['nas_path']) return;
+    try {
+        $path = $e['nas_path'];
+        $folder = nas_site_folder($e['site_id']);
+        if (dirname($path) !== $folder) {
+            $to = $folder . '/' . basename($path);
+            $c = nas_move($path, $to);
+            if ($c === 404) { q("UPDATE entries SET nas_status='pending', nas_path=NULL WHERE id=?", [$entryId]); return; } // dispărută: o retrimitem
+            nas_move(nas_txt($path), nas_txt($to));
+            q('UPDATE entries SET nas_path = ? WHERE id = ?', [$to, $entryId]);
+            $path = $to;
+        }
+        nas_put_comment($path, $e['comment']);
+    } catch (Throwable $err) { error_log('NAS update: ' . $err->getMessage()); }
+}
+function nas_delete($path): void {
+    if (!nas_active() || !$path) return;
+    try { nas_req('DELETE', $path); nas_req('DELETE', nas_txt($path)); }
+    catch (Throwable $e) { error_log('NAS delete: ' . $e->getMessage()); }
+}
+function nas_rename_site(array $site, string $newName): void {
+    if (!nas_active() || !$site['nas_folder']) return;
+    $new = nas_clean_name($newName);
+    if ($new === $site['nas_folder']) return;
+    try {
+        $root = nas_root();
+        $c = nas_move("$root/{$site['nas_folder']}", "$root/$new");
+        if ($c >= 200 && $c < 300) {
+            q('UPDATE sites SET nas_folder = ? WHERE id = ?', [$new, $site['id']]);
+            foreach (all('SELECT id, nas_path FROM entries WHERE site_id = ? AND nas_path IS NOT NULL', [$site['id']]) as $r) {
+                q('UPDATE entries SET nas_path = ? WHERE id = ?', ["$root/$new/" . basename($r['nas_path']), $r['id']]);
+            }
+        }
+    } catch (Throwable $e) { error_log('NAS rename: ' . $e->getMessage()); }
+}
+function nas_work(int $seconds = 25): void {
+    global $DATA;
+    if (!nas_active()) return;
+    $lock = fopen($DATA . '/nas.lock', 'c');
+    if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) return;
+    @set_time_limit($seconds + 60);
+    $end = time() + $seconds;
+    try {
+        while (time() < $end) {
+            $e = one("SELECT e.*, u.name AS user_name FROM entries e LEFT JOIN users u ON u.id = e.user_id
+                WHERE e.kind='photo' AND e.nas_status='pending' ORDER BY e.id LIMIT 1");
+            if (!$e) break;
+            $path = nas_upload($e);
+            q("UPDATE entries SET nas_status='done', nas_path=? WHERE id=?", [$path, $e['id']]);
+            $now = one('SELECT site_id, comment FROM entries WHERE id = ?', [$e['id']]);
+            if ($now && ($now['site_id'] !== $e['site_id'] || $now['comment'] !== $e['comment'])) nas_update((int) $e['id']);
+        }
+        set_setting('nas_last_error', null);
+    } catch (Throwable $err) {
+        set_setting('nas_last_error', $err->getMessage());
+        error_log('NAS: ' . $err->getMessage());
+    } finally {
+        flock($lock, LOCK_UN);
+        fclose($lock);
+    }
+}
+function sync_active(): bool { return drive_active() || nas_active(); }
+function sync_work(int $seconds = 25): void {
+    $half = nas_active() && drive_active() ? intdiv($seconds, 2) : $seconds;
+    drive_work($half);
+    nas_work($half);
+}
+
 // ================================================================ pornire
 try {
     $db = init_storage();
@@ -335,8 +481,8 @@ try {
 }
 
 if (PHP_SAPI === 'cli') {
-    if (($argv[1] ?? '') === 'drive-sync') { drive_work(280); echo "ok\n"; }
-    else echo "Folosire: php api.php drive-sync\n";
+    if (in_array($argv[1] ?? '', ['sync', 'drive-sync'], true)) { sync_work(280); echo "ok\n"; }
+    else echo "Folosire: php api.php sync\n";
     exit;
 }
 
@@ -480,10 +626,13 @@ function route(string $route, string $path, string $method): void {
             }
         });
         out(['ok' => true]);
-        if ($name !== $site['name'] && $site['drive_folder_id'] && drive_connected()) {
+        if ($name !== $site['name'] && ($site['drive_folder_id'] || $site['nas_folder'])) {
             finish_request();
-            try { gapi('PATCH', "https://www.googleapis.com/drive/v3/files/{$site['drive_folder_id']}", json_encode(['name' => $name], JSON_UNESCAPED_UNICODE)); }
-            catch (Throwable $e) { error_log('Drive rename: ' . $e->getMessage()); }
+            if ($site['drive_folder_id'] && drive_active()) {
+                try { gapi('PATCH', "https://www.googleapis.com/drive/v3/files/{$site['drive_folder_id']}", json_encode(['name' => $name], JSON_UNESCAPED_UNICODE)); }
+                catch (Throwable $e) { error_log('Drive rename: ' . $e->getMessage()); }
+            }
+            nas_rename_site($site, $name);
         }
         return;
     }
@@ -578,7 +727,7 @@ function route(string $route, string $path, string $method): void {
         q("INSERT INTO entries(id, client_id, kind, site_id, user_id, comment, file, thumb, size, taken_at) VALUES (?, ?, 'photo', ?, ?, ?, ?, ?, ?, ?)",
             [$newId, $cid, resolve_site($u, $meta['siteId'] ?? null), $u['id'], clean($meta['comment'] ?? '', 2000), "$base.jpg", "{$base}_t.jpg", strlen($full), $taken]);
         out(get_entry($newId));
-        if (drive_connected()) { finish_request(); drive_work(25); }
+        if (sync_active()) { finish_request(); sync_work(25); }
         return;
     }
     if ($route === 'POST api/entries/note') {
@@ -627,7 +776,7 @@ function route(string $route, string $path, string $method): void {
             q('DELETE FROM entries WHERE id = ?', [$eid]);
             foreach ([$e['file'], $e['thumb']] as $f) if ($f) @unlink("$PHOTOS/$f");
             out(['ok' => true]);
-            if ($e['drive_file_id']) { finish_request(); drive_delete($e['drive_file_id']); }
+            if ($e['drive_file_id'] || $e['nas_path']) { finish_request(); drive_delete($e['drive_file_id']); nas_delete($e['nas_path']); }
             return;
         }
         if (!can_edit_entry($u, $e)) fail(403, 'Poți modifica doar pozele făcute de tine');
@@ -642,7 +791,11 @@ function route(string $route, string $path, string $method): void {
         q('UPDATE entries SET site_id = ?, comment = ? WHERE id = ?', [$siteId, $comment, $eid]);
         out(get_entry($eid));
         $oldSite = $e['site_id'] === null ? null : (int) $e['site_id'];
-        if ($e['drive_file_id'] && ($siteId !== $oldSite || $comment !== $e['comment'])) { finish_request(); drive_update($eid); }
+        if (($e['drive_file_id'] || $e['nas_path']) && ($siteId !== $oldSite || $comment !== $e['comment'])) {
+            finish_request();
+            if ($e['drive_file_id']) drive_update($eid);
+            if ($e['nas_path']) nas_update($eid);
+        }
         return;
     }
     if (preg_match('#^GET files/(\d+)/(full|thumb)$#', $route, $m)) {
@@ -665,6 +818,11 @@ function route(string $route, string $path, string $method): void {
         global $CONFIG;
         need('admin');
         out(['configured' => drive_configured(), 'connected' => drive_connected(), 'editable' => true,
+            'enabled' => setting('drive_enabled') !== '0',
+            'nas' => ['configured' => nas_configured(), 'enabled' => setting('nas_enabled') !== '0',
+                'url' => setting('nas_url') ?: '', 'user' => setting('nas_user') ?: '', 'insecure' => setting('nas_insecure') === '1',
+                'folder' => nas_root(), 'lastError' => setting('nas_last_error'),
+                'pending' => nas_configured() ? (int) val("SELECT COUNT(*) FROM entries WHERE kind='photo' AND nas_status='pending'") : 0],
             'pending' => (int) val("SELECT COUNT(*) FROM entries WHERE kind='photo' AND drive_status='pending'"),
             'lastError' => setting('drive_last_error'), 'folder' => $CONFIG['drive_folder_name'],
             'redirectUri' => base_url() . '/api/drive/callback']);
@@ -728,7 +886,53 @@ function route(string $route, string $path, string $method): void {
         need('admin');
         out(['ok' => true]);
         finish_request();
-        drive_work(50);
+        sync_work(50);
+        return;
+    }
+    if ($route === 'POST api/drive/enabled') {
+        need('admin');
+        set_setting('drive_enabled', !empty(body()['enabled']) ? '1' : '0');
+        out(['ok' => true]);
+        return;
+    }
+    if ($route === 'POST api/nas/config') {
+        need('admin');
+        $b = body();
+        $url = rtrim(clean($b['url'] ?? '', 500), '/');
+        $user = clean($b['user'] ?? '', 200);
+        $pass = (string) ($b['password'] ?? '');
+        if ($pass === '' && $url === setting('nas_url') && $user === setting('nas_user')) $pass = (string) setting('nas_pass'); // parola rămâne
+        if (!preg_match('#^https?://#i', $url)) fail(400, 'Adresa trebuie să înceapă cu https:// (de ex. https://numele-tau.synology.me:5006/photo)');
+        $cfg = ['url' => $url, 'user' => $user, 'pass' => $pass, 'insecure' => !empty($b['insecure'])];
+        try {
+            $c = nas_req('PROPFIND', '', ['Depth: 0'], null, $cfg);
+            if ($c === 404) throw new NasError('NAS: folderul din adresă nu există');
+            if ($c >= 400) throw new NasError("NAS: răspuns neașteptat (HTTP $c). Verifică dacă WebDAV e pornit.");
+            $c = nas_req('MKCOL', nas_root(), [], null, $cfg);
+            if (!in_array($c, [201, 405, 301, 200], true)) throw new NasError("NAS: nu pot crea folderul „" . nas_root() . "” (HTTP $c). Verifică dreptul de scriere.");
+        } catch (NasError $e) { fail(400, $e->getMessage()); }
+        $changed = $url !== setting('nas_url');
+        set_setting('nas_url', $url); set_setting('nas_user', $user); set_setting('nas_pass', $pass);
+        set_setting('nas_insecure', $cfg['insecure'] ? '1' : '0'); set_setting('nas_enabled', '1'); set_setting('nas_last_error', null);
+        if ($changed) { // NAS nou: copiem toate pozele de la început
+            q("UPDATE entries SET nas_status='pending', nas_path=NULL WHERE kind='photo'");
+            q('UPDATE sites SET nas_folder = NULL');
+        }
+        out(['ok' => true]);
+        finish_request();
+        nas_work(50);
+        return;
+    }
+    if ($route === 'POST api/nas/enabled') {
+        need('admin');
+        set_setting('nas_enabled', !empty(body()['enabled']) ? '1' : '0');
+        out(['ok' => true]);
+        return;
+    }
+    if ($route === 'POST api/nas/remove') {
+        need('admin');
+        foreach (['nas_url', 'nas_user', 'nas_pass', 'nas_insecure', 'nas_last_error'] as $k) set_setting($k, null);
+        out(['ok' => true]);
         return;
     }
 

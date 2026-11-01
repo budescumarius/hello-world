@@ -9,7 +9,7 @@ const drive = require('./drive');
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '11'; // la fel ca APP_VERSION din app.js
+const VERSION = '12'; // la fel ca APP_VERSION din app.js
 
 const app = express();
 app.set('trust proxy', true);

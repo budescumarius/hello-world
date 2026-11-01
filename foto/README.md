@@ -43,11 +43,36 @@ Aplicația își creează singură folderul `data/`, cu baza de date și pozele.
 - *Eroare legată de SQLite*: cPanel → **Select PHP Version** → bifează extensiile `pdo_sqlite` și `sqlite3`. Alege PHP 8.x.
 
 **Google Drive pe cPanel:** Client ID și Client secret se pun direct în aplicație, la **Cont → Stocare**. Nu trebuie editat niciun fișier.
-Pozele se copiază în Drive imediat după ce sunt făcute. Pentru siguranță, poți adăuga în cPanel → **Cron Jobs** (la 5 minute):
+Pozele se copiază în Drive / pe NAS imediat după ce sunt făcute. Pentru siguranță, poți adăuga în cPanel → **Cron Jobs** (la 5 minute):
 ```
-php /home/UTILIZATOR/public_html/foto/api.php drive-sync
+php /home/UTILIZATOR/public_html/foto/api.php sync
 ```
 Calea exactă o vezi în File Manager.
+
+## NAS (Synology, QNAP, Nextcloud) – opțional
+Pe lângă server, pozele se pot copia automat și pe NAS-ul tău: în locul Google Drive sau împreună cu el.
+Pe NAS se creează `Poze Șantier / <șantier> / 2026-11-01_09-30_Ion_Popescu_12.jpg`, iar comentariul stă lângă poză, într-un fișier `.txt` cu același nume.
+Dacă muți o poză pe alt șantier, o ștergi sau redenumești șantierul, modificarea se face și pe NAS. Tot pe server, aplicația se conectează la NAS prin **WebDAV**.
+
+**Pe Synology (DSM):**
+1. **Panou de control → Folder partajat**: alege sau creează un folder, de ex. `photo`.
+2. **Panou de control → Utilizator**: creează un utilizator doar pentru aplicație, de ex. `fotoapp`, cu drept de **citire/scriere doar pe acel folder**.
+3. **Centru de pachete → WebDAV Server** → instalează → bifează **Activare HTTPS** (port **5006**).
+4. NAS-ul trebuie să fie accesibil de pe internet, pentru că serverul de hosting se conectează la el:
+   - **Panou de control → Acces extern → DDNS**: adaugă o adresă gratuită, de ex. `numele-tau.synology.me`;
+   - **Securitate → Certificat**: adaugă un certificat **Let's Encrypt** pentru acea adresă;
+   - în **router**: redirecționează portul **5006** (TCP) către NAS.
+     Dacă hostingul blochează porturile neobișnuite, redirecționează portul extern **443** → 5006 pe NAS și folosește adresa fără `:5006`.
+5. În aplicație, ca admin: **Cont → Stocare → NAS**:
+   - Adresa: `https://numele-tau.synology.me:5006/photo`
+   - Utilizator / parolă: cele de la pasul 2
+   - apasă **Testează și salvează**. Pozele existente se copiază automat.
+
+Fiecare destinație (Drive / NAS) are comutatorul **„Copiază automat”**, ca s-o poți pune pe pauză. Când o repornești, se trimit pozele rămase.
+
+> **Fără porturi deschise:** dacă nu vrei să expui NAS-ul pe internet, lasă doar Google Drive activ și instalează pe Synology pachetul **Cloud Sync**. El sincronizează folderul „Poze Șantier” din Drive pe NAS.
+
+> NAS-ul este disponibil în versiunea pentru hosting (PHP). Versiunea Node/Docker are doar Google Drive.
 
 ## Instalare pe server propriu (VPS)
 

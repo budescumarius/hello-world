@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '11'; // la fel ca VERSION din api.php / server.js
+const APP_VERSION = '12'; // la fel ca VERSION din api.php / server.js
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -799,7 +799,9 @@ async function driveCard(query) {
         await api('api/drive/config', { method: 'POST', json: { clientId: '', clientSecret: '' } }); screenCont();
       } }, 'Schimbă Client ID / secret') : null);
   } else {
-    card.append(h('p', { class: 'small' }, `Folder: „${d.folder}” / <șantier>. `, d.pending ? `⏳ ${d.pending} poze de copiat.` : '✓ Toate pozele sunt copiate.'),
+    card.append(
+      d.enabled !== undefined ? toggleRow('Copiază automat pozele în Google Drive', d.enabled, 'api/drive/enabled') : null,
+      h('p', { class: 'small' }, `Folder: „${d.folder}” / <șantier>. `, d.enabled === false ? '⏸ În pauză.' : d.pending ? `⏳ ${d.pending} poze de copiat.` : '✓ Toate pozele sunt copiate.'),
       d.lastError ? h('p', { class: 'error small' }, 'Ultima eroare: ' + d.lastError) : null,
       h('div', { class: 'row' },
         h('button', { class: 'btn grow', onclick: async () => { await api('api/drive/sync', { method: 'POST' }); toast('Sincronizare pornită'); } }, '🔄 Sincronizează'),
@@ -808,7 +810,59 @@ async function driveCard(query) {
           await api('api/drive/disconnect', { method: 'POST' }); screenCont();
         } }, 'Deconectează')));
   }
-  return h('div', {}, h('h2', {}, 'Stocare'), card);
+  return h('div', {}, h('h2', {}, 'Stocare'),
+    h('p', { class: 'muted small' }, 'Pozele se salvează mereu pe server. Alege unde să fie copiate automat: Google Drive, NAS sau ambele.'),
+    card, d.nas ? nasCard(d.nas) : null);
+}
+
+function toggleRow(label, on, url) {
+  const cb = h('input', { type: 'checkbox', checked: on, onchange: async () => {
+    try { await api(url, { method: 'POST', json: { enabled: cb.checked } }); toast(cb.checked ? '✓ Pornit' : '⏸ Pus pe pauză'); screenCont(); }
+    catch (e) { cb.checked = !cb.checked; toast(e.message); }
+  } });
+  return h('label', { class: 'check', style: 'margin:10px 0' }, cb, h('span', { style: 'flex:1;font-weight:600' }, label));
+}
+
+function nasCard(n, editing = false) {
+  const card = h('div', { class: 'card', style: 'margin-top:12px' });
+  card.append(h('div', { class: 'row' }, h('b', { class: 'grow' }, '🗄 NAS (Synology, QNAP…)'),
+    h('span', { class: 'badge ' + (n.configured ? (n.enabled ? 'responsabil' : 'off') : 'off') }, n.configured ? (n.enabled ? 'Activ' : 'Pauză') : 'Neconfigurat')));
+  if (n.configured && !editing) {
+    card.append(
+      toggleRow('Copiază automat pozele pe NAS', n.enabled, 'api/nas/enabled'),
+      h('p', { class: 'small', style: 'word-break:break-all' }, `${n.url} / ${n.folder} / <șantier>`, h('br'), `Utilizator: ${n.user}. `,
+        !n.enabled ? '⏸ În pauză.' : n.pending ? `⏳ ${n.pending} poze de copiat.` : '✓ Toate pozele sunt copiate.'),
+      n.lastError ? h('p', { class: 'error small' }, 'Ultima eroare: ' + n.lastError) : null,
+      h('div', { class: 'row' },
+        h('button', { class: 'btn grow', onclick: async () => { await api('api/drive/sync', { method: 'POST' }); toast('Sincronizare pornită'); setTimeout(screenCont, 1500); } }, '🔄 Sincronizează'),
+        h('button', { class: 'btn grow', onclick: () => card.replaceWith(nasCard(n, true)) }, '✏️ Modifică'),
+        h('button', { class: 'btn grow danger', onclick: async () => {
+          if (!confirm('Elimini NAS-ul din aplicație? Pozele rămân pe server și pe NAS.')) return;
+          await api('api/nas/remove', { method: 'POST' }); screenCont();
+        } }, 'Elimină')));
+    return card;
+  }
+  const url = h('input', { value: n.url, placeholder: 'https://numele-tau.synology.me:5006/photo', autocapitalize: 'none', spellcheck: 'false', inputmode: 'url' });
+  const user = h('input', { value: n.user, autocapitalize: 'none', spellcheck: 'false', autocomplete: 'off' });
+  const pass = h('input', { type: 'password', autocomplete: 'new-password', placeholder: n.configured ? 'Lasă gol ca să rămână aceeași' : '' });
+  const insecure = h('input', { type: 'checkbox', checked: n.insecure });
+  const err = h('div', { class: 'error' });
+  const btn = h('button', { class: 'btn primary block', onclick: async () => {
+    err.textContent = ''; btn.disabled = true; btn.textContent = 'Se testează conexiunea…';
+    try {
+      await api('api/nas/config', { method: 'POST', json: { url: url.value, user: user.value, password: pass.value, insecure: insecure.checked } });
+      toast('✓ NAS conectat. Pozele se copiază.'); screenCont();
+    } catch (e) { err.textContent = e.message; btn.disabled = false; btn.textContent = 'Testează și salvează'; }
+  } }, 'Testează și salvează');
+  card.append(
+    h('p', { class: 'muted small' }, 'Pe NAS pornește WebDAV (Synology: Centru de pachete → WebDAV Server, port HTTPS 5006). Adresa e a unui folder partajat. Pașii sunt în README.'),
+    h('label', { class: 'f' }, h('span', {}, 'Adresa WebDAV (cu folderul)'), url),
+    h('label', { class: 'f' }, h('span', {}, 'Utilizator NAS'), user),
+    h('label', { class: 'f' }, h('span', {}, 'Parolă NAS'), pass),
+    h('label', { class: 'check', style: 'margin-bottom:12px' }, insecure, h('span', { class: 'small' }, 'NAS-ul are certificat propriu (self-signed). Bifează doar dacă testul dă eroare de certificat.')),
+    err, btn,
+    editing ? h('button', { class: 'btn block', style: 'margin-top:8px', onclick: () => card.replaceWith(nasCard(n)) }, 'Renunță') : null);
+  return card;
 }
 
 function changePassword() {
