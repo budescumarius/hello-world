@@ -25,11 +25,11 @@ const I = {
 };
 
 // ---------------------------------------------------------------- IndexedDB
-const STORES = ['projects', 'plans', 'points', 'companies', 'meetings', 'blobs', 'clients', 'catalog', 'quotes', 'invoices', 'costs', 'tasks', 'meta'];
+const STORES = ['projects', 'plans', 'points', 'companies', 'meetings', 'blobs', 'clients', 'catalog', 'quotes', 'invoices', 'costs', 'tasks', 'stock', 'stockMoves', 'meta'];
 let _db;
 function openDB() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open('santier', 2);
+    const r = indexedDB.open('santier', 3);
     r.onupgradeneeded = () => {
       STORES.forEach((s) => { if (!r.result.objectStoreNames.contains(s)) r.result.createObjectStore(s, { keyPath: 'id' }); });
     };
@@ -321,6 +321,7 @@ async function deleteProject(pid) {
   for (const m of await db.where('meetings', pid)) await db.del('meetings', m.id);
   for (const s of ['quotes', 'invoices', 'tasks']) for (const o of await db.where(s, pid)) await db.del(s, o.id);
   for (const c of await db.where('costs', pid)) { await delBlob(c.photoId); await db.del('costs', c.id); }
+  for (const m of await db.where('stockMoves', pid)) { m.projectId = ''; await db.put('stockMoves', m); }
   await db.del('projects', pid);
 }
 
@@ -385,7 +386,7 @@ async function importBackup() {
 }
 
 // ---------------------------------------------------------------- Proiect (taburi)
-const TABS = [['plans', 'Planuri'], ['points', 'Puncte'], ['planning', 'Planning'], ['quotes', 'Devize'], ['invoices', 'Facturi'], ['costs', 'Costuri'], ['companies', 'Firme'], ['meetings', 'Ședințe'], ['reports', 'Rapoarte']];
+const TABS = [['plans', 'Planuri'], ['points', 'Puncte'], ['planning', 'Planning'], ['quotes', 'Devize'], ['invoices', 'Facturi'], ['costs', 'Costuri'], ['stock', 'Stoc'], ['companies', 'Firme'], ['meetings', 'Ședințe'], ['reports', 'Rapoarte']];
 
 async function viewProject(pr, tab) {
   if (!TABS.some(([k]) => k === tab)) tab = 'plans';
@@ -396,7 +397,7 @@ async function viewProject(pr, tab) {
   const el = $('#tab');
   await ({
     plans: tabPlans, points: tabPoints, companies: tabCompanies, meetings: tabMeetings, reports: tabReports,
-    planning: tabPlanning, quotes: tabQuotes, invoices: tabInvoices, costs: tabCosts,
+    planning: tabPlanning, quotes: tabQuotes, invoices: tabInvoices, costs: tabCosts, stock: tabStock,
   })[tab](pr, el);
 }
 
