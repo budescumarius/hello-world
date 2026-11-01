@@ -40,4 +40,6 @@ foreach (q('SELECT id, name FROM companies WHERE active = 1')->fetchAll() as $c)
 if (setting('saas_daily', '', 1) !== date('Y-m-d')) { set_setting('saas_daily', date('Y-m-d'), 1); try { saas_daily(); } catch (Throwable $e) { echo date('c') . ' abonnements : ' . $e->getMessage() . "\n"; } }
 // sauvegarde quotidienne de la base (toutes les firmes) + copie hebdomadaire par e-mail
 try { $b = backup_auto(); if ($b) echo date('c') . ' sauvegarde : ' . basename($b) . "\n"; } catch (Throwable $e) { echo date('c') . ' sauvegarde : ' . $e->getMessage() . "\n"; }
+// PILOTAGE : analyse quotidienne (alertes, prévisions, rapport « MADIBU – DAILY FINANCIAL REPORT »), une fois par jour et par firme
+try { require_once __DIR__ . '/pilotage/director.php'; foreach (pil_cron() as $f => $m) echo date('c') . " pilotage firme $f : $m\n"; } catch (Throwable $e) { echo date('c') . ' pilotage : ' . $e->getMessage() . "\n"; }
 push_flush();

@@ -31,4 +31,14 @@ T::test('totals() : documents (remise par taux, autoliquidation, note de crédit
 T::test('totals() : TTC des factures de test', function () use ($golden, $sc) {
     foreach ($sc['invoices'] as $k => $inv) near($golden['invState'][$k]['total'], pil_doc_totals($inv['data'])['total'], $k);
 });
+T::test('invState() : états et restes identiques au JavaScript (brouillon, en retard, partielle, avoir…)', function () use ($golden, $sc) {
+    foreach ($sc['invoices'] as $k => $inv) { $s = pil_inv_state($inv, $golden['today']); near($golden['invState'][$k], ['s' => $s['s'], 'paid' => $s['paid'], 'rest' => $s['rest'], 'total' => $s['t']['total']], "invState $k"); }
+});
+T::test('purchTtc / purchPaid / purchState : achats identiques au JavaScript', function () use ($golden, $sc) {
+    foreach ($sc['purchases'] as $k => $e) { $d = $e['data']; $t = pil_purch_total($d); $pd = pil_purch_paid($d);
+        near($golden['purchases'][$k], ['ttc' => $t, 'paid' => $pd, 'rest' => pil_r2($t - $pd), 'state' => pil_purch_state($e, $golden['today'])], "achat $k"); }
+});
+T::test('projectFinance() : budget, coûts prévus et réels, engagé, facturé, encaissé, marge identiques au JavaScript', function () use ($golden, $sc) {
+    near($golden['projectFinance'], pil_project_finance($sc['project']['p'], $sc['project']['all'], $golden['today']), 'projectFinance');
+});
 exit(T::done());

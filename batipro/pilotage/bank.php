@@ -664,6 +664,9 @@ function pil_route(string $method, array $seg): void {
             }
             break;
         case 'dashboard': if ($method === 'GET') out(pil_dashboard()); break;
+        case 'projects': case 'alerts': case 'reports': case 'decisions': case 'compare': case 'review': case 'runs': case 'ask': case 'convs': case 'pinned':
+            require_once __DIR__ . '/director.php';
+            pil_director_route($method, $seg, $me);
         case 'forecast': case 'receivables': case 'hypotheses': case 'flags': case 'commitments':
             require_once __DIR__ . '/treasury.php';
             pil_treasury_route($method, $seg, $me);

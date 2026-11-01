@@ -4,8 +4,8 @@
    Les montants arrivent du serveur en CENTIMES entiers. */
 
 const pilOn = () => isAdmin() && !!(S.settings.pilotage && S.settings.pilotage.enabled);
-SPACES.push({ k: 'pilot', l: 'Pilotage', i: 'chart', h: '#/pilotage', show: pilOn,
-  sec: [['Trésorerie', '#/pilotage/tresorerie'], ['Engagements', '#/pilotage/engagements'], ['Factures et échéances', '#/pilotage/echeances'], ['Contrôle bancaire', '#/pilotage'], ['Mouvements', '#/pilotage/mouvements'], ['Historique 24 mois', '#/pilotage/historique'], ['Importer un extrait', '#/pilotage/import'], ['Journal des imports', '#/pilotage/imports'], ['Comptes', '#/pilotage/comptes']] });
+SPACES.push({ k: 'pilot', l: 'Pilotage', i: 'chart', h: '#/pilotage/directeur', show: pilOn,
+  sec: [['Directeur', '#/pilotage/directeur'], ['Assistant', '#/pilotage/assistant'], ['Chantiers', '#/pilotage/chantiers'], ['Trésorerie', '#/pilotage/tresorerie'], ['Engagements', '#/pilotage/engagements'], ['Factures et échéances', '#/pilotage/echeances'], ['Contrôle bancaire', '#/pilotage'], ['Mouvements', '#/pilotage/mouvements'], ['Historique 24 mois', '#/pilotage/historique'], ['Importer un extrait', '#/pilotage/import'], ['Journal des imports', '#/pilotage/imports'], ['Comptes', '#/pilotage/comptes']] });
 
 const pilMoney = (c) => (c == null ? '—' : money(c / 100));
 const PIL_ST = { a_verifier: ['À vérifier', '#f08c00'], valide: ['Validé', '#2f9e44'] };
@@ -50,7 +50,7 @@ async function pilReadFile(f) {
 route('pilotage', async (sub, arg) => {
   if (!isAdmin()) { layout({ icon: 'chart', title: 'Pilotage' }).innerHTML = empty('Réservé aux administrateurs', 'Le pilotage financier est accessible aux administrateurs de l\'entreprise.'); return; }
   if (!pilOn()) return pilEnablePage();
-  const pages = { tresorerie: pilTreasuryPage, engagements: pilCommitmentsPage, echeances: pilDuePage, mouvements: pilTxPage, historique: pilHistPage, import: pilImportPage, imports: pilImportsPage, comptes: pilAccountsPage };
+  const pages = { directeur: pilDirectorPage, assistant: pilAssistantPage, chantiers: pilProjectsPage, tresorerie: pilTreasuryPage, engagements: pilCommitmentsPage, echeances: pilDuePage, mouvements: pilTxPage, historique: pilHistPage, import: pilImportPage, imports: pilImportsPage, comptes: pilAccountsPage };
   return (pages[sub] || pilDashPage)(arg);
 });
 
@@ -543,5 +543,156 @@ async function pilDuePage(tab) {
     if (i.flag === 'conteste') { await api('PUT', `pilot/flags/${i.id}`, { flag: '' }); render(); return; }
     const v = await ask('Facture contestée', [{ name: 'note', label: 'Motif (facultatif)' }]);
     if (v) { await api('PUT', `pilot/flags/${i.id}`, { flag: 'conteste', note: v.note }); toast('Facture marquée contestée : exclue des prévisions'); render(); }
+  });
+}
+
+// ================================================================ Étape 4 : AI Director, rapport quotidien, assistant, chantiers
+const PIL_SEVL = { critique: ['Critique', '#c92a2a'], elevee: ['Élevée', '#e5484d'], moyenne: ['Moyenne', '#f08c00'], faible: ['Faible', '#868e96'] };
+const PIL_ASTL = { nouvelle: ['Nouvelle', '#3b5bdb'], en_cours: ['En cours', '#7048e8'], resolue: ['Résolue', '#2f9e44'], ignoree: ['Ignorée', '#adb5bd'] };
+const PIL_CATL = { tresorerie: 'Trésorerie', encaissements: 'Encaissements', decaissements: 'Décaissements', chantiers: 'Chantiers', fournisseurs: 'Fournisseurs', depenses: 'Dépenses', structure: 'Structure', conformite: 'Conformité', donnees: 'Données' };
+const PIL_OUT = { fournisseurs: 'Fournisseurs', sous_traitants: 'Sous-traitants', salaires: 'Salaires', onss: 'ONSS / précompte', tva: 'TVA', credits: 'Crédits', leasing: 'Leasing', autres: 'Autres obligations' };
+const pilVerif = (c) => (!c ? '' : c.ok ? '<small class="good">✓ montants vérifiés dans les données de BâtiPro</small>' : c.error ? `<small class="late">${esc(c.error)}</small>` : `<small class="late">⚠ montant(s) introuvable(s) dans les données : ${esc(c.unverified.join(', '))} – à ne pas utiliser</small>`);
+
+async function pilDirectorPage() {
+  const list = await api('GET', 'pilot/reports');
+  const date = ui.pilRep && list.some((r) => r.rdate === ui.pilRep) ? ui.pilRep : (list[0] || {}).rdate;
+  const [rep, alerts] = await Promise.all([date ? api('GET', `pilot/reports/${date}`) : null, api('GET', 'pilot/alerts&all=1')]);
+  const page = layout({ icon: 'chart', title: 'Directeur', sub: 'MADIBU – DAILY FINANCIAL REPORT · analyses calculées par BâtiPro, commentaire par l\'IA',
+    actions: `${list.length ? `<select data-rep>${list.map((r) => `<option value="${r.rdate}" ${r.rdate === date ? 'selected' : ''}>Rapport du ${fmtDate(r.rdate)}</option>`).join('')}</select>` : ''}<button class="btn primary" data-gen>Actualiser le rapport du jour</button>` });
+  const sel = $('[data-rep]'); if (sel) sel.onchange = () => { ui.pilRep = sel.value; saveUi(); render(); };
+  $('[data-gen]').onclick = async (e) => { e.target.disabled = true; e.target.textContent = 'Analyse en cours…'; try { const r = await api('POST', 'pilot/reports', {}); ui.pilRep = null; toast(r.message, 5000); render(); } catch (err) { toast('Erreur : ' + err.message, 6000); e.target.disabled = false; } };
+  if (!rep) { page.innerHTML = empty('Aucun rapport', 'Le rapport est créé chaque matin par la tâche planifiée, ou maintenant avec « Actualiser le rapport du jour ».'); return; }
+  const d = rep.data; const A = d.A; const B = d.B; const C = d.C; const D = d.D;
+  const open = alerts.filter((a) => ['nouvelle', 'en_cours'].includes(a.status));
+  const ast = ui.pilAst = ui.pilAst || 'ouvertes';
+  const shown = alerts.filter((a) => (ast === 'ouvertes' ? ['nouvelle', 'en_cours'].includes(a.status) : ast === 'toutes' ? true : a.status === ast));
+  const fc = (s, h) => A.forecast[s][h];
+  page.innerHTML = `
+    <div class="card pil-report-h"><div class="card-h"><h3>${esc(d.title)} – ${fmtDate(d.date)}</h3><span class="muted">version ${rep.version} · ${rep.source === 'cron' ? 'automatique' : 'manuel'} · ${fmtDT(rep.updated_at)}</span></div>
+      ${rep.ai_comment ? `<div class="pil-ai"><b>Commentaire de l'IA</b> <small class="muted">(explication des chiffres ci-dessous, aucune décision prise)</small><p>${esc(rep.ai_comment).replace(/\n/g, '<br>')}</p>${pilVerif(rep.ai_check)}</div>` : `<p class="muted">${rep.ai_check && rep.ai_check.error ? esc(rep.ai_check.error) : 'Commentaire IA non disponible (clé API non configurée) : les chiffres et priorités ci-dessous sont calculés par BâtiPro.'}</p>`}</div>
+    <div class="card"><div class="card-h"><h3>E. Les 5 priorités</h3></div><div class="pil-prio">${d.E.map((p, i) => `<div class="pil-prio-i"><span class="pil-n">${i + 1}</span><div class="grow"><b>${esc(p.action)}</b> ${badge(PIL_SEVL[p.severity][0], PIL_SEVL[p.severity][1])}
+        <div class="pil-kv"><span>Pourquoi</span><span>${esc(p.title)} – ${esc(p.why)}</span><span>Impact</span><span>${esc(p.impact)}</span><span>Montant</span><span>${p.amount != null ? `<b>${pilMoney(p.amount)}</b>` : '—'}</span><span>Qui</span><span>${esc(p.who)}</span><span>Pour le</span><span>${fmtDate(p.when)}</span></div></div>
+        <button class="btn sm" data-dec="${p.alert_id}">Décision…</button></div>`).join('') || '<div class="empty">Aucune action prioritaire</div>'}</div></div>
+    <div class="cols-2">
+      <div class="card"><div class="card-h"><h3>A. Trésorerie</h3><span class="muted">fiabilité ${A.reliability}/100 (${esc(A.reliability_level)})</span></div><div class="rows">
+        ${A.accounts.map((a) => `<div class="row static"><span class="grow">${esc(a.bank)}${a.label ? ' – ' + esc(a.label) : ''}<br><small class="muted">${a.date ? `extrait du ${fmtDate(a.date)}${a.age_days > 7 ? ` · <span class="late">il y a ${a.age_days} j</span>` : ''}` : 'aucun extrait'}</small></span><b>${pilMoney(a.balance)}</b></div>`).join('')}
+        <div class="row static"><span class="grow"><b>Trésorerie bancaire consolidée</b></span><b>${pilMoney(A.total)}</b></div>
+        <div class="row static"><span class="grow">Mouvements du ${fmtDate(A.recent.from)} au ${fmtDate(A.recent.to)} (hors transferts internes)</span><span class="good">${pilMoney(A.recent.in)}</span>&nbsp;<span>${pilMoney(A.recent.out)}</span></div></div>
+        <table class="dt"><thead><tr><th>Prévision</th><th class="r">7 j</th><th class="r">30 j</th><th class="r">90 j</th></tr></thead><tbody>${Object.entries(PIL_SC).map(([k, [l]]) => `<tr><td>${l}</td>${[7, 30, 90].map((h) => `<td class="r ${fc(k, h).end < 0 ? 'late' : ''}">${pilMoney(fc(k, h).end)}${fc(k, h).negative_date ? `<br><small class="late">négatif le ${fmtDate(fc(k, h).negative_date)}</small>` : ''}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      <div class="card"><div class="card-h"><h3>B. Encaissements</h3></div><div class="kpis">${kpi('Factures en attente', pilMoney(B.pending_amount), { sub: `${B.pending_count} facture(s)` })}${kpi('Échues', pilMoney(B.overdue_amount), { cls: B.overdue_count ? 'late' : '', sub: `${B.overdue_count} facture(s)` })}${kpi('Attendus à 30 j (réaliste)', pilMoney(B.expected_30d), { sub: 'estimé' })}</div>
+        <div class="rows">${B.to_chase.map((c) => `<div class="row static"><span class="grow"><b>${esc(c.client)}</b><br><small class="muted">${c.invoices} facture(s), jusqu'à ${c.max_late} j de retard</small></span><b>${pilMoney(c.amount)}</b></div>`).join('') || '<div class="empty">Aucun client à relancer</div>'}</div></div>
+      <div class="card"><div class="card-h"><h3>C. Décaissements (30 prochains jours)</h3><b>${pilMoney(C.total_30d)}</b></div>${hbars(Object.entries(PIL_OUT).map(([k, l]) => ({ l, v: -(C.next_30d[k] || 0), c: '#e5484d' })).filter((x) => x.v))}
+        <details><summary class="muted">Fournisseurs à payer (${C.to_pay.length})</summary><div class="rows">${C.to_pay.map((e) => `<a class="row" href="#/purchase/${e.id}"><span class="grow">${esc(e.supplier)} <small class="muted">${esc(e.ref || '')}</small></span><span>${fmtDate(e.due) || '—'}</span><b>${pilMoney(e.rest)}</b></a>`).join('')}</div></details></div>
+      <div class="card"><div class="card-h"><h3>D. Chantiers</h3><a href="#/pilotage/chantiers">Analyse complète</a></div><div class="rows">
+        ${D.at_risk.map((a) => `<div class="row static"><span class="grow">${badge(PIL_SEVL[a.severity][0], PIL_SEVL[a.severity][1])} ${esc(a.title)}</span>${a.amount != null ? `<b>${pilMoney(a.amount)}</b>` : ''}</div>`).join('') || '<div class="empty">Aucun chantier à risque</div>'}
+        ${D.to_invoice.map((x) => `<div class="row static"><span class="grow">À facturer : ${esc(x.name)}</span><b>${pilMoney(x.amount)}</b></div>`).join('')}
+        ${D.avenants_pending.map((v) => `<div class="row static"><span class="grow">Avenant en attente : ${esc(v.project)} ${v.age != null ? `<small class="muted">(${v.age} j)</small>` : ''}</span><b>${pilMoney(v.amount)}</b></div>`).join('')}
+        ${D.abnormal.map((x) => `<div class="row static"><span class="grow">${esc(x.title)}</span><b>${pilMoney(x.amount)}</b></div>`).join('')}</div></div>
+    </div>
+    ${(d.not_verifiable || []).length ? `<div class="alert info">Non vérifiable avec les données actuelles : ${d.not_verifiable.map(esc).join(' ')}</div>` : ''}
+    <div class="card"><div class="card-h"><h3>Décisions et actions du ${fmtDate(rep.date)}</h3><button class="btn sm" data-dec="">Ajouter</button></div><div class="rows">${rep.decisions.map((x) => `<div class="row static"><span class="grow">${esc(x.text)}<br><small class="muted">${esc(userName(x.created_by))} · ${fmtDT(x.created_at)}</small></span>
+      <select data-dst="${x.id}">${[['decidee', 'Décidée'], ['realisee', 'Réalisée'], ['abandonnee', 'Abandonnée']].map(([k, l]) => `<option value="${k}" ${x.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`).join('') || '<div class="empty">Aucune décision notée</div>'}</div></div>
+    <div class="card"><div class="card-h"><h3>Alertes (${open.length} ouvertes)</h3><div class="chips">${[['ouvertes', 'Ouvertes'], ['resolue', 'Résolues'], ['ignoree', 'Ignorées'], ['toutes', 'Toutes']].map(([k, l]) => `<button class="chip ${ast === k ? 'on' : ''}" data-ast="${k}">${l}</button>`).join('')}</div></div>
+      <div class="rows">${shown.map((a) => `<div class="row static pil-alert" data-al="${a.id}"><span class="grow">${badge(PIL_SEVL[a.severity][0], PIL_SEVL[a.severity][1])} <small class="muted">${esc(PIL_CATL[a.category] || a.category)}</small> <b>${esc(a.title)}</b><br><small>${esc(a.description || '')}</small>
+        <br><small class="muted">Responsable : ${esc(a.owner || '—')} · pour le ${fmtDate(a.due)} · détectée le ${fmtDate(a.first_seen)}${a.occurrences > 1 ? ` · vue ${a.occurrences} jours` : ''}</small></span>${a.amount != null ? `<b>${pilMoney(a.amount)}</b>` : ''}${st(PIL_ASTL, a.status)}</div>`).join('') || '<div class="empty">Aucune alerte</div>'}</div></div>
+    <div class="cols-2">
+      <div class="card"><div class="card-h"><h3>Comparer deux mois</h3></div><div class="grid-form"><label class="field"><span>Mois 1</span><input type="month" data-m1></label><label class="field"><span>Mois 2</span><input type="month" data-m2></label></div><button class="btn" data-cmp>Comparer</button><div data-cmpout></div></div>
+      <div class="card"><div class="card-h"><h3>Prévision passée vs réalité</h3></div><div class="grid-form"><label class="field"><span>Rapport du</span><select data-rvd>${list.map((r) => `<option>${r.rdate}</option>`).join('')}</select></label><label class="field"><span>Horizon (jours)</span><input data-rvh inputmode="numeric" value="30"></label></div><button class="btn" data-rv>Expliquer l'écart</button><div data-rvout></div></div>
+    </div>`;
+  $$('[data-ast]', page).forEach((b) => { b.onclick = () => { ui.pilAst = b.dataset.ast; saveUi(); render(); }; });
+  $$('[data-al]', page).forEach((r) => { r.onclick = () => pilAlertModal(alerts.find((a) => a.id === +r.dataset.al)); });
+  $$('[data-dec]', page).forEach((b) => { b.onclick = async () => { const v = await ask('Décision ou action', [{ name: 'text', label: 'Décision prise / action à réaliser', type: 'textarea', required: true }]); if (v) { await api('POST', 'pilot/decisions', { text: v.text, alert_id: b.dataset.dec ? +b.dataset.dec : null, kind: 'decision' }); toast('Décision enregistrée'); render(); } }; });
+  $$('[data-dst]', page).forEach((s2) => { s2.onchange = async () => { await api('PUT', `pilot/decisions/${s2.dataset.dst}`, { status: s2.value }); toast('Enregistré'); }; });
+  const m1 = new Date(); m1.setMonth(m1.getMonth() - 2); const m2 = new Date(); m2.setMonth(m2.getMonth() - 1);
+  $('[data-m1]', page).value = m1.toISOString().slice(0, 7); $('[data-m2]', page).value = m2.toISOString().slice(0, 7);
+  $('[data-cmp]', page).onclick = async () => {
+    const r = await api('GET', `pilot/compare&m1=${$('[data-m1]', page).value}&m2=${$('[data-m2]', page).value}`);
+    const row = (l, a, b, dd) => `<tr><td>${l}</td><td class="r">${a == null ? '—' : pilMoney(a)}</td><td class="r">${b == null ? '—' : pilMoney(b)}</td><td class="r ${dd < 0 ? 'late' : 'good'}">${dd == null ? '—' : pilMoney(dd)}</td></tr>`;
+    $('[data-cmpout]', page).innerHTML = `<table class="dt"><thead><tr><th></th><th class="r">${r.m1.month}</th><th class="r">${r.m2.month}</th><th class="r">Écart</th></tr></thead><tbody>
+      ${row('Entrées bancaires', r.m1.bank && r.m1.bank.in, r.m2.bank && r.m2.bank.in, r.diff.bank_in)}${row('Sorties bancaires', r.m1.bank && r.m1.bank.out, r.m2.bank && r.m2.bank.out, r.diff.bank_out)}${row('Solde fin de mois', r.m1.bank && r.m1.bank.closing, r.m2.bank && r.m2.bank.closing, r.diff.closing)}
+      ${row('Facturé HT', r.m1.invoiced_ht, r.m2.invoiced_ht, r.diff.invoiced_ht)}${row('Achats HT', r.m1.purchases_ht, r.m2.purchases_ht, r.diff.purchases_ht)}
+      ${row('Créances (rapport de fin de mois)', r.m1.report && r.m1.report.receivables, r.m2.report && r.m2.report.receivables, null)}</tbody></table><small class="muted">${esc(r.sources)}</small>`;
+  };
+  $('[data-rv]', page).onclick = async () => {
+    const r = await api('GET', `pilot/review&date=${$('[data-rvd]', page).value}&days=${num($('[data-rvh]', page).value) || 30}`);
+    if (!r.available) { $('[data-rvout]', page).innerHTML = `<div class="alert info">${esc(r.reason)}</div>`; return; }
+    const e = r.explained;
+    $('[data-rvout]', page).innerHTML = `<div class="pil-kv"><span>Prévu le ${fmtDate(r.target)}</span><b>${pilMoney(r.predicted)}</b><span>Réel (extraits)</span><b>${pilMoney(r.actual)}</b><span>Écart</span><b class="${r.gap < 0 ? 'late' : 'good'}">${pilMoney(r.gap)}</b>
+      <span>Encaissements prévus non reçus</span><span>${pilMoney(e.encaissements_prevus_non_recus)}</span><span>Sorties prévues non réalisées</span><span>${pilMoney(e.sorties_prevues_non_realisees)}</span><span>Entrées imprévues</span><span>${pilMoney(e.entrees_imprevues)}</span><span>Sorties imprévues</span><span>${pilMoney(e.sorties_imprevues)}</span><span>Non expliqué</span><span>${pilMoney(e.reste_non_explique)}</span></div>
+      <details><summary class="muted">Détail (${r.not_realized.length} prévus non réalisés, ${r.unforeseen.length} imprévus)</summary><div class="rows">${r.not_realized.map((x) => `<div class="row static"><span>${fmtDate(x.date)}</span><span class="grow">${esc(x.label)}</span><b>${pilMoney(x.amount)}</b></div>`).join('')}${r.unforeseen.map((x) => `<div class="row static"><span>${fmtDate(x.date)}</span><span class="grow">Imprévu : ${esc(x.label || x.category)}</span><b>${pilMoney(x.amount)}</b></div>`).join('')}</div></details><small class="muted">${esc(r.method)}</small>`;
+  };
+}
+
+function pilAlertModal(a) {
+  const m = modal(`${mhead(a.title)}<div class="m-body"><p>${badge(PIL_SEVL[a.severity][0], PIL_SEVL[a.severity][1])} ${st(PIL_ASTL, a.status)} <small class="muted">${esc(PIL_CATL[a.category] || a.category)} · ${esc(a.entity_label || '')}</small></p>
+    <p>${esc(a.description || '')}</p>${a.amount != null ? `<p>Montant concerné : <b>${pilMoney(a.amount)}</b></p>` : ''}
+    <div class="info">${Object.entries(a.data || {}).map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}</div>
+    <p><small class="muted">Calcul : ${esc(a.calc || '')}</small></p><p><b>Action recommandée :</b> ${esc(a.action || '')}</p>
+    <div class="grid-form"><label class="field"><span>Statut</span><select name="status">${Object.entries(PIL_ASTL).map(([k, [l]]) => `<option value="${k}" ${a.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label class="field"><span>Responsable</span><input name="owner" value="${esc(a.owner || '')}"></label><label class="field"><span>Date limite</span><input type="date" name="due" value="${esc(a.due || '')}"></label>
+      <label class="field full"><span>Décision / action réalisée (conservée dans l'historique)</span><input name="note"></label></div>
+    <details><summary class="muted">Historique (${a.history.length})</summary><div class="rows">${a.history.map((h) => `<div class="row static"><small>${fmtDT(h.at)} · ${h.by ? esc(userName(h.by)) : 'analyse automatique'} · ${esc(h.event)}${h.note ? ' – ' + esc(h.note) : ''}</small></div>`).join('')}</div></details>
+    ${a.entity_type === 'project' ? `<a href="#/project/${a.entity_id}">Ouvrir le chantier</a>` : a.entity_type === 'invoice' ? `<a href="#/invoice/${a.entity_id}">Ouvrir la facture</a>` : a.entity_type === 'expense' ? `<a href="#/purchase/${a.entity_id}">Ouvrir l'achat</a>` : ''}
+  </div><div class="m-foot"><span class="grow"></span><button class="btn" data-close>Fermer</button><button class="btn primary" data-save>Enregistrer</button></div>`, { wide: true });
+  const F = (n) => $(`[name="${n}"]`, m.el);
+  $('[data-save]', m.el).onclick = async () => { await api('PUT', `pilot/alerts/${a.id}`, { status: F('status').value, owner: F('owner').value, due: F('due').value || null, note: F('note').value }); m.close(); toast('Alerte mise à jour'); render(); };
+}
+
+async function pilAssistantPage(convId) {
+  const convs = await api('GET', 'pilot/convs');
+  const conv = convId ? await api('GET', `pilot/convs/${convId}`).catch(() => null) : null;
+  const page = layout({ icon: 'spark', title: 'Assistant de direction', sub: 'Réponses fondées uniquement sur les données de BâtiPro et des extraits – sources, périodes et hypothèses indiquées', actions: '<a class="btn" href="#/pilotage/assistant">Nouvelle conversation</a>' });
+  const EX = ['Combien d\'argent avons-nous réellement disponible ?', 'Quels sont les paiements obligatoires avant la fin du mois ?', 'Quel chantier nous coûte le plus cher actuellement ?', 'Combien avons-nous payé aux sous-traitants depuis janvier ?', 'Quels clients ont le plus de retard ?', 'Quel sera notre solde bancaire dans 30 jours ?', 'Quels sont les trois risques financiers les plus importants ?'];
+  const turn = (t, i) => `<div class="pil-q">${esc(t.q)}</div><div class="pil-a">${esc(t.a).replace(/\n/g, '<br>')}<div class="pil-a-f">${pilVerif(t.check)}${t.tools && t.tools.length ? `<small class="muted">Données consultées : ${t.tools.map((x) => esc(x.outil)).join(', ')}</small>` : ''}
+    ${conv ? `<button class="btn sm ghost" data-pin="${i}">${t.pinned ? '★ Réponse conservée' : '☆ Conserver cette réponse'}</button>` : ''}</div></div>`;
+  page.innerHTML = `<div class="pil-chat-wrap"><aside class="card pil-convs"><b>Conversations</b>${convs.map((c) => `<a href="#/pilotage/assistant/${c.id}" class="${conv && conv.id === c.id ? 'on' : ''}">${esc(c.title)}<small class="muted">${fmtDT(c.updated_at)}</small></a>`).join('') || '<small class="muted">Aucune</small>'}</aside>
+    <section class="card pil-chat"><div class="pil-turns" data-turns>${conv ? conv.turns.map(turn).join('') : `<div class="chips">${EX.map((q) => `<button class="chip" data-ex>${esc(q)}</button>`).join('')}</div>`}</div>
+      <form class="pil-ask" data-nosubmit><textarea name="q" rows="2" placeholder="Posez votre question (français ou roumain)…"></textarea><button class="btn primary">Envoyer</button></form>
+      <small class="muted">L'assistant ne peut ni payer ni modifier quoi que ce soit. Il ne fait pas de calcul lui-même : les montants viennent des calculs de BâtiPro, et chaque montant cité est contrôlé.</small></section></div>`;
+  const form = $('.pil-ask', page);
+  const send = async (q) => {
+    if (!q.trim()) return;
+    const box = $('[data-turns]', page); if (!conv) box.innerHTML = '';
+    box.insertAdjacentHTML('beforeend', `<div class="pil-q">${esc(q)}</div><div class="pil-a muted" data-wait>Analyse des données…</div>`);
+    form.q.value = ''; form.querySelector('button').disabled = true;
+    try {
+      const r = await api('POST', 'pilot/ask', { question: q, conv_id: conv ? conv.id : null });
+      if (!conv) { location.hash = `#/pilotage/assistant/${r.conv_id}`; return; }
+      render();
+    } catch (e) { $('[data-wait]', page).outerHTML = `<div class="alert">${esc(e.message)}</div>`; form.querySelector('button').disabled = false; }
+  };
+  form.addEventListener('submit', (e) => { e.preventDefault(); send(form.q.value); });
+  $$('[data-ex]', page).forEach((b) => { b.onclick = () => send(b.textContent); });
+  $$('[data-pin]', page).forEach((b) => { b.onclick = async () => { const i = +b.dataset.pin; await api('PUT', `pilot/convs/${conv.id}`, { index: i, pinned: !conv.turns[i].pinned }); render(); }; });
+}
+
+async function pilProjectsPage() {
+  const rows = await api('GET', 'pilot/projects');
+  const page = layout({ icon: 'crane', title: 'Analyse des chantiers', sub: 'Marché, facturation, encaissements, coûts facturés / engagés / payés / restants et marges – calculés par BâtiPro' });
+  const pct = (v) => (v == null ? '—' : `${String(v).replace('.', ',')} %`);
+  page.innerHTML = `<div class="kpis">${kpi('Marché total', pilMoney(rows.reduce((a, p) => a + p.contract, 0)))}${kpi('Facturé', pilMoney(rows.reduce((a, p) => a + p.invoiced, 0)))}${kpi('Encaissé', pilMoney(rows.reduce((a, p) => a + p.cashed, 0)), { cls: 'good' })}
+    ${kpi('Chantiers déficitaires', String(rows.filter((p) => p.contract > 0 && p.margin_final < 0).length), { cls: rows.some((p) => p.contract > 0 && p.margin_final < 0) ? 'late' : '' })}</div><div id="tbl"></div>`;
+  dataTable($('#tbl'), {
+    rows, state: { sort: 9 }, search: (p) => [p.number, p.name, p.client].join(' '),
+    filters: { def: '', options: [['', 'Tous'], ['risque', 'Marge insuffisante ou négative', '#e5484d'], ['retard', 'En retard', '#f08c00'], ['afacturer', 'À facturer', '#0c8599']], match: (p, k) => (k === 'risque' ? p.contract > 0 && p.margin_final_pct != null && p.margin_final_pct < p.margin_min_pct : k === 'retard' ? p.late_days > 0 : p.ea_to_bill > 0 || (['reception', 'termine'].includes(p.status) && p.contract - p.invoiced > 100)) },
+    columns: [{ l: 'Chantier', v: (p) => `<a href="#/project/${p.id}">${esc(p.number || '')}</a> ${esc(p.name)}<br><small class="muted">${esc(p.client)}${p.manager ? ' · ' + esc(p.manager) : ''}</small>` },
+      { l: 'Marché HT', cls: 'r', v: (p) => `${pilMoney(p.contract)}${p.avenants_accepted ? `<br><small class="muted">dont avenants ${pilMoney(p.avenants_accepted)}</small>` : ''}`, sort: (p) => p.contract },
+      { l: 'Facturé', cls: 'r', v: (p) => `${pilMoney(p.invoiced)}<br><small class="muted">${pct(p.progress_billing)}</small>`, sort: (p) => p.invoiced },
+      { l: 'Encaissé', cls: 'r', v: (p) => pilMoney(p.cashed), sort: (p) => p.cashed },
+      { l: 'Coûts prévus', cls: 'r', v: (p) => pilMoney(p.cost_estimated), sort: (p) => p.cost_estimated },
+      { l: 'Coûts engagés', cls: 'r', v: (p) => `${pilMoney(p.cost_engaged)}<br><small class="muted">${pct(p.progress_cost)} du prévu</small>`, sort: (p) => p.cost_engaged },
+      { l: 'Payés', cls: 'r', v: (p) => pilMoney(p.cost_paid), sort: (p) => p.cost_paid },
+      { l: 'Restant estimé', cls: 'r', v: (p) => (p.cost_remaining == null ? '<small class="muted">non estimable</small>' : pilMoney(p.cost_remaining)) },
+      { l: 'Marge finale', cls: 'r', v: (p) => `<b class="${p.margin_final < 0 ? 'late' : p.margin_final_pct != null && p.margin_final_pct < p.margin_min_pct ? 'late' : 'good'}">${pilMoney(p.margin_final)}</b><br><small class="muted">${pct(p.margin_final_pct)}</small>`, sort: (p) => p.margin_final_pct ?? 0 },
+      { l: 'Alertes', v: (p) => [p.late_days ? `retard ${p.late_days} j` : '', p.avenants_pending.length ? `${p.avenants_pending.length} avenant(s) en attente` : '', p.ea_to_bill ? 'à facturer' : ''].filter(Boolean).map((x) => `<small class="late">${esc(x)}</small>`).join('<br>') }],
+    onRow: (p) => modal(`${mhead(p.name)}<div class="m-body"><div class="pil-kv">
+      <span>Devis accepté (HT)</span><b>${pilMoney(p.quote_main)}</b><span>Avenants approuvés</span><b>${pilMoney(p.avenants_accepted)}</b><span>Montant contractuel</span><b>${pilMoney(p.contract)}</b>${p.contract_from_quotes ? '' : '<span></span><small class="muted">budget de la fiche chantier (aucun devis accepté)</small>'}
+      <span>Facturé HT</span><span>${pilMoney(p.invoiced)}</span><span>Encaissé</span><span>${pilMoney(p.cashed)}</span><span>Reste dû par le client</span><span>${pilMoney(p.due)}</span>
+      <span>Achats</span><span>${pilMoney(p.cost_purchases)}</span><span>Sous-traitance</span><span>${pilMoney(p.cost_subcontracting)}</span><span>Main-d'œuvre</span><span>${pilMoney(p.cost_labour)} <small class="muted">(${fnum(p.hours)} h)</small></span><span>Autres dépenses</span><span>${pilMoney(p.cost_other)}</span>
+      <span>Coût facturé (fournisseurs)</span><span>${pilMoney(p.cost_invoiced)}</span><span>Coût engagé (+ main-d'œuvre + commandes)</span><span>${pilMoney(p.cost_engaged)}</span><span>Coût payé</span><span>${pilMoney(p.cost_paid)}</span><span>Coût estimé restant</span><span>${p.cost_remaining == null ? 'non estimable (devis sans déboursé)' : pilMoney(p.cost_remaining)}</span>
+      <span>Marge prévue (devis)</span><span>${p.margin_planned == null ? '—' : pilMoney(p.margin_planned)}</span><span>Marge à date (facturé − coûts réels)</span><span>${pilMoney(p.margin_to_date)}</span><span>Rentabilité finale prévue</span><b>${pilMoney(p.margin_final)} (${pct(p.margin_final_pct)})</b></div>
+      <p><small class="muted">Facturation ≠ encaissement ≠ rentabilité : le facturé est ce qui a été demandé au client, l'encaissé ce qui a été reçu, la rentabilité compare le marché aux coûts (prévus, réels et engagés). Coût payé : part payée de chaque facture fournisseur ; la main-d'œuvre est comptée au coût horaire saisi.</small></p>
+      ${p.avenants_pending.length ? `<h4>Avenants en attente</h4><div class="rows">${p.avenants_pending.map((v) => `<a class="row" href="#/quote/${v.id}"><span class="grow">Avenant ${esc(v.number || '#' + v.id)} – ${v.status === 'envoye' ? 'envoyé' : 'à envoyer'}${v.age != null ? ` depuis ${v.age} j` : ''}</span><b>${pilMoney(v.amount)}</b></a>`).join('')}</div>` : ''}</div>`, { wide: true }),
+    empty: 'Aucun chantier en cours',
   });
 }
