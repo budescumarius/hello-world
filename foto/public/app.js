@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '15'; // la fel ca VERSION din api.php / server.js
+const APP_VERSION = '16'; // la fel ca VERSION din api.php
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============

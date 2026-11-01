@@ -8,15 +8,18 @@ declare(strict_types=1);
 error_reporting(E_ALL);
 ini_set('display_errors', '0');
 
+// Setări: implicit merg pe cPanel fără nimic de configurat. În Docker / VPS se pot da prin variabile de mediu
+// (DATA_DIR, PUBLIC_URL, DRIVE_FOLDER_NAME, TRUST_PROXY) sau printr-un fișier config.php lângă api.php.
 $CONFIG = [
-    'data_dir' => __DIR__ . '/data',
-    'drive_folder_name' => 'Poze Șantier',
-    'public_url' => '',
+    'data_dir' => getenv('DATA_DIR') ?: __DIR__ . '/data',
+    'drive_folder_name' => getenv('DRIVE_FOLDER_NAME') ?: 'Poze Șantier',
+    'public_url' => getenv('PUBLIC_URL') ?: '',
+    'trust_proxy' => getenv('TRUST_PROXY') === '1', // în spatele unui proxy (Caddy în Docker): IP-ul real vine din X-Forwarded-For
 ];
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '15'; // la fel ca APP_VERSION din app.js
+const VERSION = '16'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
@@ -201,7 +204,11 @@ function base_url(): string {
     if ($CONFIG['public_url']) return rtrim($CONFIG['public_url'], '/');
     return (is_https() ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'] . base_path();
 }
-function client_ip(): string { return $_SERVER['REMOTE_ADDR'] ?? ''; }
+function client_ip(): string {
+    global $CONFIG;
+    if ($CONFIG['trust_proxy'] && !empty($_SERVER['HTTP_X_FORWARDED_FOR'])) return trim(explode(',', $_SERVER['HTTP_X_FORWARDED_FOR'])[0]);
+    return $_SERVER['REMOTE_ADDR'] ?? '';
+}
 function uuid(): string {
     $b = random_bytes(16);
     $b[6] = chr((ord($b[6]) & 0x0f) | 0x40);

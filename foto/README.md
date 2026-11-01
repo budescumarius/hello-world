@@ -92,12 +92,11 @@ Fiecare destinație (Drive / NAS) are comutatorul **„Copiază automat”**, ca
 
 > **Fără porturi deschise:** dacă nu vrei să expui NAS-ul pe internet, lasă doar Google Drive activ și instalează pe Synology pachetul **Cloud Sync**. El sincronizează folderul „Poze Șantier” din Drive pe NAS.
 
-> NAS-ul este disponibil în versiunea pentru hosting (PHP). Versiunea Node/Docker are doar Google Drive.
-
 ## Instalare pe server propriu (VPS)
+Aplicația are **un singur server** (`php/api.php`), același pe hosting și pe VPS: toate funcțiile (Drive, NAS) și optimizările pentru volum mare sunt peste tot.
 
 ### Varianta A – Docker (recomandat, cu HTTPS automat)
-Ai nevoie de un server mic (VPS de ~5 €/lună) și de un domeniu, de exemplu `foto.firma-ta.ro`, îndreptat spre server.
+Ai nevoie de un VPS (de la ~5 €/lună) cu Docker și de un domeniu, de exemplu `foto.firma-ta.ro`, îndreptat spre server.
 ```bash
 cd foto
 # în docker-compose.yml înlocuiește foto.firma-ta.ro cu domeniul tău (în 2 locuri)
@@ -105,15 +104,15 @@ docker compose up -d
 ```
 Deschide `https://foto.firma-ta.ro`. La prima pornire creezi contul de **admin**.
 
-### Varianta B – direct cu Node.js (versiunea 22.13 sau mai nouă)
-```bash
-cd foto
-npm install
-npm start          # pornește pe http://localhost:3000
-```
-Variabile de configurare: `PORT`, `DATA_DIR` (implicit `./data`), `PUBLIC_URL`.
+Ce pornește: `foto` (PHP 8.3 + Apache, cu opcache), `sync` (copierea în Drive / pe NAS la 5 minute, în locul unui cron) și `caddy` (HTTPS automat cu Let's Encrypt).
+Datele (baza de date + pozele) stau în volumul Docker `foto-data`, în afara folderului web.
 
-Toate datele sunt în folderul `data/`: baza de date `santier.db` și pozele în `photos/AAAA-LL/`. **Backup = copiezi folderul `data/`.**
+- **Actualizare:** copiezi fișierele noi, apoi `docker compose up -d --build`.
+- **Backup:** `docker compose exec foto tar czf - /data > backup-$(date +%F).tgz`
+- **Setări** (opționale, în `docker-compose.yml`): `PUBLIC_URL`, `DRIVE_FOLDER_NAME`, `DATA_DIR`.
+
+### Varianta B – orice server cu PHP și Apache
+Exact ca pe cPanel: pui conținutul arhivei `foto-santier-cpanel.zip` într-un folder servit de Apache (cu `AllowOverride All` și `mod_rewrite`), iar pentru Drive / NAS adaugi în cron `php /cale/api.php sync` la 5 minute.
 
 > Pentru instalare pe telefon (Safari → Partajează → „Adaugă pe ecranul principal”, sau Chrome → „Instalează aplicația”) e nevoie de **HTTPS**.
 
@@ -128,7 +127,7 @@ Dacă muți o poză pe alt șantier sau o ștergi, se actualizează și în Driv
 4. **Credentials → Create credentials → OAuth client ID → Web application**.
    La *Authorized redirect URIs* pune: `https://foto.firma-ta.ro/api/drive/callback`. Dacă aplicația e într-un subfolder: `https://firma-ta.ro/foto/api/drive/callback`.
    Adresa exactă o vezi în aplicație, la **Cont → Stocare**.
-5. Pe cPanel: pune Client ID și Client secret în aplicație, la **Cont → Stocare**. Pe VPS/Docker: pune `GOOGLE_CLIENT_ID` și `GOOGLE_CLIENT_SECRET` în `docker-compose.yml` și repornește serverul.
+5. Pune Client ID și Client secret în aplicație, la **Cont → Stocare** (la fel pe hosting și pe VPS).
 6. În aplicație, ca admin: **Cont → Conectează Google Drive** și alege contul Google în care vrei pozele.
 
 Aplicația cere doar acces la fișierele create de ea (`drive.file`). Nu vede restul fișierelor din Drive.

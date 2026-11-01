@@ -1,22 +1,36 @@
+# Pe un VPS: înlocuiește foto.firma-ta.ro cu domeniul tău (în 2 locuri), apoi: docker compose up -d
 services:
   foto:
     build: .
+    image: foto-santier
     restart: unless-stopped
     volumes:
-      - ./data:/data
+      - foto-data:/data
     environment:
       PUBLIC_URL: https://foto.firma-ta.ro
-      # Opțional – copie automată în Google Drive (vezi README):
-      GOOGLE_CLIENT_ID: ""
-      GOOGLE_CLIENT_SECRET: ""
       DRIVE_FOLDER_NAME: "Poze Șantier"
+
+  # Copierea în Google Drive / pe NAS la fiecare 5 minute (în locul unui cron)
+  sync:
+    image: foto-santier
+    depends_on: [foto]
+    restart: unless-stopped
+    user: www-data
+    volumes:
+      - foto-data:/data
+    environment:
+      DRIVE_FOLDER_NAME: "Poze Șantier"
+    command: sh -c 'while :; do php /var/www/html/api.php sync; sleep 300; done'
+
   # HTTPS automat (necesar pentru instalarea pe telefon)
   caddy:
     image: caddy:2
     restart: unless-stopped
     ports: ["80:80", "443:443"]
-    command: caddy reverse-proxy --from foto.firma-ta.ro --to foto:3000
+    command: caddy reverse-proxy --from foto.firma-ta.ro --to foto:80
     volumes:
-      - caddy:/data
+      - caddy-data:/data
+
 volumes:
-  caddy:
+  foto-data:
+  caddy-data:
