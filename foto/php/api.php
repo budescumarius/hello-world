@@ -19,12 +19,12 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '20'; // la fel ca APP_VERSION din app.js
+const VERSION = '21'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
 // ---------------------------------------------------------------- baza de date
-const SCHEMA = 7; // crește când se schimbă structura bazei
+const SCHEMA = 8; // crește când se schimbă structura bazei
 function open_db(string $file): PDO {
     $db = new PDO('sqlite:' . $file, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
     $db->exec('PRAGMA busy_timeout = 10000; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY;');
@@ -154,6 +154,11 @@ CREATE TABLE IF NOT EXISTS login_fail (k TEXT NOT NULL, at INTEGER NOT NULL);
         $db->exec('CREATE INDEX IF NOT EXISTS idx_users_key ON users(key_hash)');
         // v7 – responsabilul își vede muncitorii creați de el, chiar înainte să-i pună pe un șantier
         if (!$has('users', 'created_by')) $db->exec('ALTER TABLE users ADD COLUMN created_by INTEGER');
+        // v8 – dubluri: amprenta fișierului original (hash) și a pozei salvate (file_hash)
+        if (!$has('entries', 'hash')) $db->exec('ALTER TABLE entries ADD COLUMN hash TEXT');
+        if (!$has('entries', 'file_hash')) $db->exec('ALTER TABLE entries ADD COLUMN file_hash TEXT');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_e_hash ON entries(hash) WHERE hash IS NOT NULL');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_e_file_hash ON entries(file_hash) WHERE file_hash IS NOT NULL');
         $db->exec('PRAGMA user_version = ' . SCHEMA);
         $db->exec('COMMIT');
     } catch (Throwable $e) { $db->exec('ROLLBACK'); throw $e; }
@@ -360,16 +365,46 @@ function insert_entry(string $sql, array $params): int {
 }
 function is_jpeg(string $b): bool { return strlen($b) > 3 && substr($b, 0, 3) === "\xFF\xD8\xFF"; }
 
-function store_photo(array $u, string $cid, $sid, $fid, string $comment, string $full, string $thumb, string $taken): int {
-    global $PHOTOS;
+// Aceeași poză (același conținut) există deja? $hash = amprenta fișierului original, $fileHash = a pozei salvate.
+function find_duplicate(?string $hash, string $fileHash) {
+    $id = $hash ? val("SELECT id FROM entries WHERE hash = ? AND kind = 'photo' ORDER BY id LIMIT 1", [$hash]) : null;
+    if (!$id) $id = val("SELECT id FROM entries WHERE file_hash = ? AND kind = 'photo' ORDER BY id LIMIT 1", [$fileHash]);
+    return $id ? (int) $id : null;
+}
+// Salvează poza; dacă exact aceeași poză e deja pe server, o păstrează doar pe cea veche. Întoarce [id, eDublură].
+function store_photo(array $u, string $cid, $sid, $fid, string $comment, string $full, string $thumb, string $taken, ?string $hash = null): array {
+    global $PHOTOS, $db;
+    $hash = ($hash && preg_match('/^[0-9a-f]{64}$/', $hash)) ? $hash : null;
+    $fileHash = hash('sha256', $full);
+    if ($dup = find_duplicate($hash, $fileHash)) return [$dup, true];
     $dir = substr($taken, 0, 7);
     if (!is_dir("$PHOTOS/$dir")) mkdir("$PHOTOS/$dir", 0755, true);
     $base = $dir . '/' . uuid();
     if (file_put_contents("$PHOTOS/$base.jpg", $full) === false || file_put_contents("$PHOTOS/{$base}_t.jpg", $thumb) === false) {
         fail(500, 'Nu pot salva poza (spațiu pe disc?)');
     }
-    return insert_entry("INSERT INTO entries(id, client_id, kind, site_id, folder_id, user_id, comment, file, thumb, size, taken_at) VALUES (?, ?, 'photo', ?, ?, ?, ?, ?, ?, ?, ?)",
-        [$cid, $sid, $fid, $u['id'], $comment, "$base.jpg", "{$base}_t.jpg", strlen($full), $taken]);
+    // verificare + salvare sub blocare: două trimiteri simultane ale aceleiași poze nu pot intra amândouă
+    $db->exec('BEGIN IMMEDIATE');
+    try {
+        if ($dup = find_duplicate($hash, $fileHash)) {
+            $db->exec('COMMIT');
+            @unlink("$PHOTOS/$base.jpg"); @unlink("$PHOTOS/{$base}_t.jpg");
+            return [$dup, true];
+        }
+        $id = next_entry_id();
+        q("INSERT INTO entries(id, client_id, kind, site_id, folder_id, user_id, comment, file, thumb, size, taken_at, hash, file_hash) VALUES (?, ?, 'photo', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [$id, $cid, $sid, $fid, $u['id'], $comment, "$base.jpg", "{$base}_t.jpg", strlen($full), $taken, $hash, $fileHash]);
+        $db->exec('COMMIT');
+        return [$id, false];
+    } catch (Throwable $e) { $db->exec('ROLLBACK'); throw $e; }
+}
+
+// Șterge o intrare cu fișierele ei; întoarce ce trebuie șters și din Drive / NAS.
+function delete_entry_row(array $e): array {
+    global $PHOTOS;
+    q('DELETE FROM entries WHERE id = ?', [(int) $e['id']]);
+    foreach ([$e['file'], $e['thumb']] as $f) if ($f) @unlink("$PHOTOS/$f");
+    return [$e['drive_file_id'], $e['nas_path']];
 }
 
 // ---------------------------------------------------------------- scurtătura iPhone („Foto Șantier” din Partajează)
@@ -441,7 +476,7 @@ function shortcut(string $route): void {
         elseif (!$f['error']) $files[] = $f['tmp_name'];
     }
     if (!$files) { text_out('Nu a sosit nicio poză. Verifică în scurtătură câmpul „photo” (tip: Fișier).', 400); return; }
-    $n = 0; $errors = [];
+    $n = 0; $dups = 0; $errors = [];
     foreach ($files as $tmp) {
         $raw = (string) file_get_contents($tmp);
         $exif = function_exists('exif_read_data') ? (@exif_read_data($tmp) ?: []) : [];
@@ -450,11 +485,13 @@ function shortcut(string $route): void {
         if ($im) { $full = gd_jpeg($im, 2048, 82); $thumb = gd_jpeg($im, 300, 62); }
         elseif (is_jpeg($raw)) { $full = $raw; $thumb = $raw; }
         else { $errors[] = 'o poză nu e JPEG: adaugă în scurtătură acțiunea „Convertește imaginea” (JPEG)'; continue; }
-        $cid = 'sc-' . substr(sha1($u['id'] . '|' . sha1($raw)), 0, 40); // aceeași poză trimisă de două ori nu se dublează
-        if (!val('SELECT 1 FROM entries WHERE client_id = ?', [$cid])) store_photo($u, $cid, $sid, $fid, '', $full, $thumb, $taken);
-        $n++;
+        $cid = 'sc-' . substr(sha1($u['id'] . '|' . sha1($raw) . '|' . microtime()), 0, 40);
+        [, $dup] = store_photo($u, $cid, $sid, $fid, '', $full, $thumb, $taken, hash('sha256', $raw));
+        $dup ? $dups++ : $n++;
     }
-    $msg = $n ? "✓ $n " . ($n === 1 ? 'poză trimisă' : 'poze trimise') . " în $label" : 'Nicio poză trimisă';
+    $msg = $n ? "✓ $n " . ($n === 1 ? 'poză trimisă' : 'poze trimise') . " în $label" : ($dups ? '✓ Nicio poză nouă' : 'Nicio poză trimisă');
+    if ($dups) $msg .= ' (' . $dups . ($dups === 1 ? ' era deja trimisă – păstrată o singură dată)' : ' erau deja trimise – păstrate o singură dată)');
+    $n += $dups;
     if ($errors) $msg .= "\n" . implode("\n", array_unique($errors));
     text_out($msg, $n ? 200 : 400, $n > 0);
     if ($n && sync_active()) sync_work(25);
@@ -1041,8 +1078,13 @@ function route(string $route, string $path, string $method): void {
         $thumb = $tlen > 0 ? substr($raw, 4, $tlen) : $full; // fără miniatură: folosim poza
         if (!is_jpeg($thumb) || !is_jpeg($full)) fail(400, 'Format invalid (doar JPEG)');
         $sid = resolve_site($u, $meta['siteId'] ?? null);
-        $newId = store_photo($u, $cid, $sid, resolve_folder($sid, $meta['folderId'] ?? null), clean($meta['comment'] ?? '', 2000),
-            $full, $thumb, norm_date($meta['takenAt'] ?? null));
+        [$newId, $dup] = store_photo($u, $cid, $sid, resolve_folder($sid, $meta['folderId'] ?? null), clean($meta['comment'] ?? '', 2000),
+            $full, $thumb, norm_date($meta['takenAt'] ?? null), is_string($meta['hash'] ?? null) ? $meta['hash'] : null);
+        if ($dup) { // poza era deja trimisă: se păstrează doar cea veche
+            $e = one('SELECT * FROM entries WHERE id = ?', [$newId]);
+            out($e && can_see_entry($u, $e) ? get_entry($newId) + ['duplicate' => true] : ['duplicate' => true, 'id' => $newId]);
+            return;
+        }
         out(get_entry($newId)); // copierea în Drive/NAS o pornește telefonul separat (api/sync/kick) + cron
         return;
     }
@@ -1137,8 +1179,7 @@ function route(string $route, string $path, string $method): void {
         $eid = (int) $e['id'];
         if ($m[1] === 'DELETE') {
             if (!can_delete_entry($u, $e)) fail(403, 'Poți șterge doar pozele făcute de tine');
-            q('DELETE FROM entries WHERE id = ?', [$eid]);
-            foreach ([$e['file'], $e['thumb']] as $f) if ($f) @unlink("$PHOTOS/$f");
+            delete_entry_row($e);
             if ($e['drive_file_id'] || $e['nas_path']) { respond_then(['ok' => true]); drive_delete($e['drive_file_id']); nas_delete($e['nas_path']); }
             else out(['ok' => true]);
             return;
@@ -1180,6 +1221,39 @@ function route(string $route, string $path, string $method): void {
         header('Cache-Control: private, max-age=31536000, immutable');
         if (!empty($_GET['dl'])) header('Content-Disposition: attachment; filename="poza_' . substr($e['taken_at'], 0, 10) . '_' . $e['id'] . '.jpg"');
         readfile($file);
+        return;
+    }
+
+    // ---------- dubluri existente: păstrează cea mai veche poză din fiecare grup identic (admin)
+    if ($route === 'POST api/dedupe') {
+        need('admin');
+        @set_time_limit(120);
+        $end = microtime(true) + 15;
+        $checked = 0;
+        // 1) amprenta pozelor vechi (în bucăți, ca să nu depășească timpul serverului)
+        while (microtime(true) < $end) {
+            $rows = all("SELECT id, file FROM entries WHERE kind = 'photo' AND file_hash IS NULL AND file IS NOT NULL LIMIT 200");
+            if (!$rows) break;
+            foreach ($rows as $r) {
+                $path = $PHOTOS . '/' . $r['file'];
+                q('UPDATE entries SET file_hash = ? WHERE id = ?', [is_file($path) ? hash_file('sha256', $path) : 'lipsă-' . $r['id'], $r['id']]);
+                $checked++;
+            }
+        }
+        $remaining = (int) val("SELECT COUNT(*) FROM entries WHERE kind = 'photo' AND file_hash IS NULL AND file IS NOT NULL");
+        if ($remaining) { out(['checked' => $checked, 'remaining' => $remaining, 'removed' => 0]); return; }
+        // 2) grupuri identice: rămâne prima poză (cea mai veche), restul se șterg
+        $remote = []; $removed = 0;
+        foreach (['file_hash', 'hash'] as $col) {
+            foreach (all("SELECT $col AS h, MIN(id) AS keep FROM entries WHERE kind = 'photo' AND $col IS NOT NULL AND $col NOT LIKE 'lipsă-%' GROUP BY $col HAVING COUNT(*) > 1") as $g) {
+                foreach (all("SELECT * FROM entries WHERE $col = ? AND id != ? AND kind = 'photo'", [$g['h'], $g['keep']]) as $e) {
+                    $remote[] = delete_entry_row($e); $removed++;
+                }
+            }
+        }
+        if (!$remote) { out(['checked' => $checked, 'remaining' => 0, 'removed' => 0]); return; }
+        respond_then(['checked' => $checked, 'remaining' => 0, 'removed' => $removed]);
+        foreach ($remote as [$driveId, $nasPath]) { drive_delete($driveId); nas_delete($nasPath); }
         return;
     }
 

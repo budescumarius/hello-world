@@ -27,6 +27,11 @@ Fiecare șantier poate avea foldere, de ex. **État des lieux**, **Réception**,
   În aplicație: **Cont → Trimite din galerie → Generează cheia**. Apar cele 2 adrese și pașii. Apoi: Poze → selectezi → Partajează → **Foto Șantier** → alegi șantierul / folderul.
   Cheia e personală: pozele apar pe numele omului și respectă drepturile lui. Din Cont se poate opri oricând.
 
+## Poze în dublu
+- O poză **identică** cu una deja trimisă (aceeași poză aleasă de două ori din galerie, trimisă de doi oameni, sau de două ori din scurtătura iPhone) **nu se mai salvează a doua oară**: telefonul spune „era deja trimisă – păstrată o singură dată”.
+- Recunoașterea e după conținutul exact al fișierului, nu „după aspect”, ca să nu se piardă niciodată două poze diferite care seamănă (ex. același perete fotografiat de două ori).
+- Pentru pozele trimise înainte de această versiune, adminul are în **Cont → 🧹 Poze în dublu** butonul **Caută și șterge dublurile**: din fiecare grup identic rămâne prima poză, iar copiile se șterg și din Drive / NAS.
+
 ## Roluri
 | Rol | Ce vede | Ce poate modifica / șterge |
 |---|---|---|

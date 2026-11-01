@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '20'; // la fel ca VERSION din api.php
+const APP_VERSION = '21'; // la fel ca VERSION din api.php
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -137,7 +137,7 @@ async function pump() {
   try {
     Q.items = [...(await Q.all().catch(() => [])), ...Q.mem].sort((a, b) => a.takenAt.localeCompare(b.takenAt));
     onQueueChange();
-    var sent = 0;
+    var sent = 0, dups = 0;
     while (Q.items.length) {
       const it = Q.items[0];
       try {
@@ -147,16 +147,19 @@ async function pump() {
         } else {
           const head = new Uint8Array(4);
           new DataView(head.buffer).setUint32(0, it.thumb ? it.thumb.size : 0);
-          const meta = encodeURIComponent(JSON.stringify({ clientId: it.clientId, siteId: it.siteId, folderId: it.folderId ?? null, comment: it.comment, takenAt: it.takenAt }));
+          const meta = encodeURIComponent(JSON.stringify({ clientId: it.clientId, siteId: it.siteId, folderId: it.folderId ?? null, comment: it.comment, takenAt: it.takenAt, hash: it.hash || null }));
           saved = await api('api/entries/photo', { method: 'POST', headers: { 'X-Meta': meta, 'Content-Type': 'application/octet-stream' }, body: new Blob(it.thumb ? [head, it.thumb, it.full] : [head, it.full]) });
         }
         Q.offline = false; Q.error = null;
         if (it.siteId && saved.site_id == null) toast('Nu mai ai acces la șantierul ales – poza e la „Fără șantier”');
         await Q.del(it.clientId).catch(() => {}); Q.mem = Q.mem.filter((x) => x !== it);
         Q.items.shift();
-        recent.unshift(saved);
-        if (recent.length > 24) recent.length = 24;
-        if (it.kind === 'photo') { cachePut(fileUrl(saved, 'thumb'), it.thumb || it.full); cachePut(fileUrl(saved, 'full'), it.full); }
+        if (saved.duplicate) dups++; // era deja pe server: nu s-a mai salvat o dată
+        if (saved.taken_at && !recent.some((x) => x.id === saved.id)) {
+          recent.unshift(saved);
+          if (recent.length > 24) recent.length = 24;
+          if (it.kind === 'photo' && !saved.duplicate) { cachePut(fileUrl(saved, 'thumb'), it.thumb || it.full); cachePut(fileUrl(saved, 'full'), it.full); }
+        }
         sent++;
         const u = thumbUrls.get(it.clientId);
         if (u) setTimeout(() => URL.revokeObjectURL(u), 60_000), thumbUrls.delete(it.clientId);
@@ -181,6 +184,7 @@ async function pump() {
     Q.busy = false;
     // copierea în Drive / NAS pornește separat, ca trimiterea pozelor să nu aștepte după ea
     if (sent) fetch('api/sync/kick', { method: 'POST', credentials: 'same-origin', keepalive: true }).catch(() => {});
+    if (dups) toast(dups === 1 ? 'O poză era deja trimisă – păstrată o singură dată' : `${dups} poze erau deja trimise – păstrate o singură dată`, 5000);
   }
 }
 window.addEventListener('online', pump);
@@ -318,12 +322,25 @@ const isJpegFile = async (file) => {
   return b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
 };
 
+// Amprenta fișierului original (SHA-256): aceeași poză trimisă de două ori se păstrează o singură dată.
+async function fileHash(file) {
+  try {
+    if (!crypto.subtle || file.size > 60e6) return null;
+    const d = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  } catch { return null; }
+}
+
 async function addPhotos(files, fromCamera) {
   const comment = ($('#comment')?.value || '').trim();
   const siteId = state.siteId, folderId = currentFolder();
-  let n = 0;
+  let n = 0, same = 0;
+  const seen = new Set(Q.items.map((it) => it.hash).filter(Boolean)); // deja în așteptare pe telefon
   for (const file of files) {
     const takenAt = new Date(fromCamera ? Date.now() : file.lastModified || Date.now()).toISOString();
+    const hash = fromCamera ? null : await fileHash(file); // pozele noi din cameră sunt mereu unice
+    if (hash && seen.has(hash)) { same++; continue; }
+    if (hash) seen.add(hash);
     let full, thumb;
     try {
       const img = await openImage(file);
@@ -341,7 +358,7 @@ async function addPhotos(files, fromCamera) {
       }
     }
     try {
-      await enqueue({ clientId: uid(), kind: 'photo', siteId, folderId, comment, takenAt, full, thumb });
+      await enqueue({ clientId: uid(), kind: 'photo', siteId, folderId, comment, takenAt, full, thumb, hash });
       n++;
     } catch (e) {
       toast('Nu am putut salva poza: ' + e.message);
@@ -349,8 +366,8 @@ async function addPhotos(files, fromCamera) {
   }
   if (n) {
     if ($('#comment')) $('#comment').value = '';
-    toast(n === 1 ? '✓ Poză salvată' : `✓ ${n} poze salvate`);
-  }
+    toast((n === 1 ? '✓ Poză salvată' : `✓ ${n} poze salvate`) + (same ? ` (${same} aleasă de două ori – trimisă o singură dată)` : ''));
+  } else if (same) toast('Aceste poze sunt deja în curs de trimitere');
 }
 
 $('#cam').addEventListener('change', (e) => { const f = [...e.target.files]; e.target.value = ''; addPhotos(f, true); });
@@ -1039,7 +1056,7 @@ async function screenCont(query) {
       } }, 'Ieșire')));
   fill(view, box);
   box.append(shortcutCard());
-  if (can.admin()) box.append(await driveCard(query));
+  if (can.admin()) box.append(await driveCard(query), dedupeCard());
 }
 
 async function driveCard(query) {
@@ -1183,6 +1200,26 @@ function shortcutCard() {
   }).catch(() => {});
   card.append(h('div', { class: 'row' }, h('b', { class: 'grow' }, '📲 Scurtătură iPhone'), h('span', { class: 'badge off' }, 'Partajează')), body);
   return h('div', {}, h('h2', {}, 'Trimite din galerie'), card);
+}
+
+function dedupeCard() {
+  const out = h('p', { class: 'small muted' }, 'Caută pozele identice trimise de mai multe ori și păstrează doar prima (cea mai veche). Se șterg și din Google Drive / NAS.');
+  const btn = h('button', { class: 'btn block', onclick: async () => {
+    if (!confirm('Caut pozele identice și păstrez câte una singură? Celelalte copii se șterg definitiv.')) return;
+    btn.disabled = true;
+    try {
+      let r, checked = 0;
+      do { // serverul lucrează în bucăți, ca să nu depășească timpul permis de hosting
+        r = await api('api/dedupe', { method: 'POST' });
+        checked += r.checked;
+        btn.textContent = r.remaining ? `Verific… mai sunt ${r.remaining} poze` : 'Gata';
+      } while (r.remaining);
+      out.textContent = r.removed ? `✓ Am șters ${r.removed} ${r.removed === 1 ? 'dublură' : 'dubluri'}. Din fiecare poză a rămas un singur exemplar.` : '✓ Nu există dubluri.';
+      feedMem.clear(); localStorage.removeItem(FEEDS_KEY);
+    } catch (e) { out.textContent = e.message; }
+    btn.disabled = false; btn.textContent = '🔍 Caută și șterge dublurile';
+  } }, '🔍 Caută și șterge dublurile');
+  return h('div', { class: 'card', style: 'margin-top:12px' }, h('b', {}, '🧹 Poze în dublu'), out, btn);
 }
 
 function changePassword() {
