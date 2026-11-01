@@ -9,7 +9,7 @@ const drive = require('./drive');
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '12'; // la fel ca APP_VERSION din app.js
+const VERSION = '13'; // la fel ca APP_VERSION din app.js
 
 const app = express();
 app.set('trust proxy', true);
@@ -414,6 +414,7 @@ app.get('/api/drive/callback', auth('admin'), async (req, res) => {
 
 app.post('/api/drive/disconnect', auth('admin'), (req, res) => { drive.disconnect(); res.json({ ok: true }); });
 app.post('/api/drive/sync', auth('admin'), (req, res) => { drive.kick(); res.json({ ok: true }); });
+app.post('/api/sync/kick', auth(), (req, res) => { drive.kick(); res.json({ ok: true }); });
 
 // ---------- aplicația web ----------
 app.use(express.static(path.join(__dirname, 'public'), {

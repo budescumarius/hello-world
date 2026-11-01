@@ -16,13 +16,21 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '12'; // la fel ca APP_VERSION din app.js
+const VERSION = '13'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
 // ---------------------------------------------------------------- baza de date
+const SCHEMA = 3; // crește când se schimbă structura bazei
 function init_storage(): PDO {
     global $DATA, $PHOTOS;
+    $dbFile = $DATA . '/santier.db';
+    if (is_file($dbFile)) { // drum rapid: baza există, doar o deschidem
+        $db = new PDO('sqlite:' . $dbFile, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+        $db->exec('PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL;');
+        if ((int) $db->query('PRAGMA user_version')->fetchColumn() >= SCHEMA) return $db;
+        $db = null;
+    }
     if (!is_dir($PHOTOS) && !@mkdir($PHOTOS, 0755, true)) {
         fail(500, 'Nu pot crea folderul de date. Verifică permisiunile pentru: ' . $GLOBALS['DATA']);
     }
@@ -68,6 +76,10 @@ CREATE TABLE IF NOT EXISTS login_fail (k TEXT NOT NULL, at INTEGER NOT NULL);
     if (!$has('entries', 'nas_status')) $db->exec("ALTER TABLE entries ADD COLUMN nas_status TEXT NOT NULL DEFAULT 'pending'");
     if (!$has('entries', 'nas_path')) $db->exec('ALTER TABLE entries ADD COLUMN nas_path TEXT');
     if (!$has('sites', 'nas_folder')) $db->exec('ALTER TABLE sites ADD COLUMN nas_folder TEXT');
+    $db->exec('CREATE INDEX IF NOT EXISTS idx_entries_nas ON entries(nas_status)');
+    $db->exec('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
+    $db->exec('CREATE INDEX IF NOT EXISTS idx_site_users_user ON site_users(user_id)');
+    $db->exec('PRAGMA user_version = ' . SCHEMA);
     return $db;
 }
 
@@ -96,7 +108,17 @@ function out($data, int $code = 200): void {
     http_response_code($code);
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
-    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE);
+    header('Content-Length: ' . strlen($json));
+    echo $json;
+}
+// Trimite răspunsul imediat, apoi continuă în fundal (Drive / NAS), fără ca telefonul să aștepte.
+function respond_then($data): void {
+    ignore_user_abort(true);
+    @set_time_limit(120);
+    if (!headers_sent()) header('Connection: close');
+    out($data);
+    finish_request();
 }
 function fail(int $code, string $msg): void { out(['error' => $msg], $code); exit; }
 function body(): array {
@@ -129,7 +151,8 @@ function uuid(): string {
 function finish_request(): void {
     if (function_exists('fastcgi_finish_request')) { fastcgi_finish_request(); return; }
     if (function_exists('litespeed_finish_request')) { litespeed_finish_request(); return; }
-    @ob_end_flush(); @flush();
+    while (ob_get_level() > 0) @ob_end_flush();
+    @flush();
 }
 
 // ---------------------------------------------------------------- autentificare
@@ -625,9 +648,9 @@ function route(string $route, string $path, string $method): void {
                 set_site_users($id, $ids);
             }
         });
-        out(['ok' => true]);
-        if ($name !== $site['name'] && ($site['drive_folder_id'] || $site['nas_folder'])) {
-            finish_request();
+        if (!($name !== $site['name'] && ($site['drive_folder_id'] || $site['nas_folder']))) { out(['ok' => true]); return; }
+        {
+            respond_then(['ok' => true]);
             if ($site['drive_folder_id'] && drive_active()) {
                 try { gapi('PATCH', "https://www.googleapis.com/drive/v3/files/{$site['drive_folder_id']}", json_encode(['name' => $name], JSON_UNESCAPED_UNICODE)); }
                 catch (Throwable $e) { error_log('Drive rename: ' . $e->getMessage()); }
@@ -726,8 +749,7 @@ function route(string $route, string $path, string $method): void {
         $newId = next_entry_id();
         q("INSERT INTO entries(id, client_id, kind, site_id, user_id, comment, file, thumb, size, taken_at) VALUES (?, ?, 'photo', ?, ?, ?, ?, ?, ?, ?)",
             [$newId, $cid, resolve_site($u, $meta['siteId'] ?? null), $u['id'], clean($meta['comment'] ?? '', 2000), "$base.jpg", "{$base}_t.jpg", strlen($full), $taken]);
-        out(get_entry($newId));
-        if (sync_active()) { finish_request(); sync_work(25); }
+        out(get_entry($newId)); // copierea în Drive/NAS o pornește telefonul separat (api/sync/kick) + cron
         return;
     }
     if ($route === 'POST api/entries/note') {
@@ -775,8 +797,8 @@ function route(string $route, string $path, string $method): void {
             if (!can_delete_entry($u, $e)) fail(403, 'Poți șterge doar pozele făcute de tine');
             q('DELETE FROM entries WHERE id = ?', [$eid]);
             foreach ([$e['file'], $e['thumb']] as $f) if ($f) @unlink("$PHOTOS/$f");
-            out(['ok' => true]);
-            if ($e['drive_file_id'] || $e['nas_path']) { finish_request(); drive_delete($e['drive_file_id']); nas_delete($e['nas_path']); }
+            if ($e['drive_file_id'] || $e['nas_path']) { respond_then(['ok' => true]); drive_delete($e['drive_file_id']); nas_delete($e['nas_path']); }
+            else out(['ok' => true]);
             return;
         }
         if (!can_edit_entry($u, $e)) fail(403, 'Poți modifica doar pozele făcute de tine');
@@ -789,10 +811,10 @@ function route(string $route, string $path, string $method): void {
         $comment = array_key_exists('comment', $b) ? clean($b['comment'], 2000) : $e['comment'];
         if ($e['kind'] === 'note' && $comment === '') fail(400, 'Nota nu poate fi goală');
         q('UPDATE entries SET site_id = ?, comment = ? WHERE id = ?', [$siteId, $comment, $eid]);
-        out(get_entry($eid));
         $oldSite = $e['site_id'] === null ? null : (int) $e['site_id'];
-        if (($e['drive_file_id'] || $e['nas_path']) && ($siteId !== $oldSite || $comment !== $e['comment'])) {
-            finish_request();
+        if (!(($e['drive_file_id'] || $e['nas_path']) && ($siteId !== $oldSite || $comment !== $e['comment']))) { out(get_entry($eid)); return; }
+        {
+            respond_then(get_entry($eid));
             if ($e['drive_file_id']) drive_update($eid);
             if ($e['nas_path']) nas_update($eid);
         }
@@ -882,10 +904,15 @@ function route(string $route, string $path, string $method): void {
         out(['ok' => true]);
         return;
     }
+    if ($route === 'POST api/sync/kick') { // după ce telefonul a terminat de trimis pozele
+        need();
+        respond_then(['ok' => true]);
+        if (sync_active()) sync_work(50);
+        return;
+    }
     if ($route === 'POST api/drive/sync') {
         need('admin');
-        out(['ok' => true]);
-        finish_request();
+        respond_then(['ok' => true]);
         sync_work(50);
         return;
     }
@@ -918,8 +945,7 @@ function route(string $route, string $path, string $method): void {
             q("UPDATE entries SET nas_status='pending', nas_path=NULL WHERE kind='photo'");
             q('UPDATE sites SET nas_folder = NULL');
         }
-        out(['ok' => true]);
-        finish_request();
+        respond_then(['ok' => true]);
         nas_work(50);
         return;
     }

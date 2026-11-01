@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '12'; // la fel ca VERSION din api.php / server.js
+const APP_VERSION = '13'; // la fel ca VERSION din api.php / server.js
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -47,7 +47,7 @@ async function api(url, opts = {}) {
   if (o.json !== undefined) { o.body = JSON.stringify(o.json); o.headers['Content-Type'] = 'application/json'; delete o.json; }
   const r = await fetch(url, o);
   const data = await r.json().catch(() => ({}));
-  if (r.status === 401 && !url.startsWith('api/login')) { state.user = null; route(); }
+  if (r.status === 401 && !url.startsWith('api/login')) { state.user = null; localStorage.removeItem('me'); route(); }
   if (!r.ok) throw new HttpError(data.error || 'Eroare ' + r.status, r.status);
   return data;
 }
@@ -95,6 +95,19 @@ const Q = {
   error: null,
 };
 
+// Pozele (miniaturi + mari) sunt ținute în telefon: o poză văzută o dată se deschide instant
+// data viitoare. Adresele au codul unic al încărcării (?v=), deci nu se pot încurca.
+const IMG_CACHE = 'foto-img';
+async function cachePut(url, blob) {
+  try {
+    const c = await caches.open(IMG_CACHE);
+    await c.put(new URL(url, location.href), new Response(blob, { headers: { 'Content-Type': 'image/jpeg' } }));
+  } catch {}
+}
+async function cacheDrop(...urls) {
+  try { const c = await caches.open(IMG_CACHE); await Promise.all(urls.map((u) => c.delete(new URL(u, location.href)))); } catch {}
+}
+
 const thumbUrls = new Map();
 function localThumb(it) {
   const src = it.thumb || it.full;
@@ -116,6 +129,7 @@ async function pump() {
   try {
     Q.items = [...(await Q.all().catch(() => [])), ...Q.mem].sort((a, b) => a.takenAt.localeCompare(b.takenAt));
     onQueueChange();
+    var sent = 0;
     while (Q.items.length) {
       const it = Q.items[0];
       try {
@@ -134,6 +148,8 @@ async function pump() {
         Q.items.shift();
         recent.unshift(saved);
         if (recent.length > 24) recent.length = 24;
+        if (it.kind === 'photo') { cachePut(fileUrl(saved, 'thumb'), it.thumb || it.full); cachePut(fileUrl(saved, 'full'), it.full); }
+        sent++;
         const u = thumbUrls.get(it.clientId);
         if (u) setTimeout(() => URL.revokeObjectURL(u), 60_000), thumbUrls.delete(it.clientId);
         onQueueChange();
@@ -155,6 +171,8 @@ async function pump() {
     }
   } finally {
     Q.busy = false;
+    // copierea în Drive / NAS pornește separat, ca trimiterea pozelor să nu aștepte după ea
+    if (sent) fetch('api/sync/kick', { method: 'POST', credentials: 'same-origin', keepalive: true }).catch(() => {});
   }
 }
 window.addEventListener('online', pump);
@@ -163,7 +181,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) pump
 let onQueueChange = () => {};
 
 // ============ procesarea pozelor (micșorare în telefon = trimitere rapidă) ============
-const MAX_SIDE = 2048, THUMB_SIDE = 360;
+const MAX_SIDE = 2048, THUMB_SIDE = 300;
 // Deschide poza. Pe iPhone/iPad încercăm mai multe metode, pentru că Safari
 // refuză uneori pozele mari (24–48 MP) cu una sau alta dintre ele.
 async function decode(file) {
@@ -251,7 +269,7 @@ async function addPhotos(files, fromCamera) {
       const img = await openImage(file);
       try {
         full = await toJpeg(img, MAX_SIDE, 0.82);
-        thumb = await toJpeg(img, THUMB_SIDE, 0.7);
+        thumb = await toJpeg(img, THUMB_SIDE, 0.62);
       } finally { img.close?.(); }
     } catch (e) {
       // Ultima variantă: trimitem poza originală, ca să nu se piardă.
@@ -335,6 +353,14 @@ function quickNewSite(onPick) {
   });
 }
 
+function progressiveImg(e) {
+  const img = h('img', { src: fileUrl(e, 'thumb'), alt: '', class: 'loading' });
+  const full = new Image();
+  full.onload = () => { img.src = full.src; img.classList.remove('loading'); };
+  full.src = fileUrl(e, 'full');
+  return img;
+}
+
 // ============ vizualizare poză ============
 function openViewer(list, index, onChange) {
   let i = index;
@@ -352,9 +378,8 @@ function openViewer(list, index, onChange) {
     const canEdit = mine || can.manage();
     const canDelete = mine || can.admin();
     const imgBox = h('div', { class: 'img' },
-      e.kind === 'photo'
-        ? h('img', { src: fileUrl(e, 'full'), alt: '' })
-        : h('div', { class: 'note-big' }, e.comment));
+      e.kind === 'photo' ? progressiveImg(e) : h('div', { class: 'note-big' }, e.comment));
+    for (const n of [list[i + 1], list[i - 1]]) if (n && n.kind === 'photo') new Image().src = fileUrl(n, 'full');
     let x0 = null;
     imgBox.addEventListener('touchstart', (ev) => { x0 = ev.touches.length === 1 ? ev.touches[0].clientX : null; }, { passive: true });
     imgBox.addEventListener('touchend', (ev) => {
@@ -410,6 +435,7 @@ function openViewer(list, index, onChange) {
     try {
       await api('api/entries/' + e.id, { method: 'DELETE' });
       list.splice(i, 1);
+      cacheDrop(fileUrl(e, 'thumb'), fileUrl(e, 'full'));
       const r = recent.findIndex((x) => x.id === e.id); // scoate-o și din „Ultimele”
       if (r >= 0) recent.splice(r, 1);
       onChange?.();
@@ -424,6 +450,15 @@ function openViewer(list, index, onChange) {
 }
 
 // ============ galerie ============
+// Miniaturile se descarcă doar când ajung aproape de ecran: cele vizibile primesc toată viteza.
+const lazyIO = 'IntersectionObserver' in window ? new IntersectionObserver((list) => {
+  for (const en of list) if (en.isIntersecting) { en.target.src = en.target.dataset.src; lazyIO.unobserve(en.target); }
+}, { rootMargin: '400px 0px' }) : null;
+function lazyImg(src, alt) {
+  const img = h('img', { alt: alt || '', decoding: 'async' });
+  if (lazyIO) { img.dataset.src = src; lazyIO.observe(img); } else img.src = src;
+  return img;
+}
 function gallery(entries, { onChange, pending = [] } = {}) {
   const wrap = h('div');
   if (!entries.length && !pending.length) {
@@ -448,7 +483,7 @@ function gallery(entries, { onChange, pending = [] } = {}) {
     const open = () => openViewer(entries, idx, onChange);
     grid.append(e.kind === 'photo'
       ? h('button', { class: 'tile', onclick: open },
-          h('img', { src: fileUrl(e, 'thumb'), loading: 'lazy', alt: e.comment || '' }),
+          lazyImg(fileUrl(e, 'thumb'), e.comment),
           e.comment ? h('span', { class: 'c' }, '💬') : null)
       : h('button', { class: 'tile note', onclick: open }, h('b', {}, '📝'), h('span', {}, e.comment)));
   });
@@ -456,25 +491,46 @@ function gallery(entries, { onChange, pending = [] } = {}) {
 }
 
 // listă paginată de la server
-function feed(params, { title, onChange } = {}) {
-  const box = h('div', {}, h('p', { class: 'muted' }, 'Se încarcă…'));
-  let items = [], done = false;
-  async function more() {
+// Ultima listă văzută pentru fiecare filtru: galeria apare instant, apoi se actualizează în fundal.
+const FEEDS_KEY = 'feeds';
+const feedMem = new Map(Object.entries(JSON.parse(localStorage.getItem(FEEDS_KEY) || '{}')));
+function feedSave(key, rows) {
+  feedMem.delete(key);
+  feedMem.set(key, rows);
+  while (feedMem.size > 8) feedMem.delete(feedMem.keys().next().value); // păstrăm doar ultimele 8 filtre
+  try { localStorage.setItem(FEEDS_KEY, JSON.stringify(Object.fromEntries(feedMem))); } catch {}
+}
+
+function feed(params, { onChange } = {}) {
+  const key = (state.user?.id || 0) + ':' + new URLSearchParams(params);
+  const cached = feedMem.get(key);
+  const box = h('div', {}, cached ? '' : h('p', { class: 'muted' }, 'Se încarcă…'));
+  let items = cached ? [...cached] : [], done = !cached;
+  async function load(first) {
     const q = new URLSearchParams(params);
     const last = items[items.length - 1];
-    if (last) q.set('before', `${last.taken_at}|${last.id}`);
+    if (!first && last) q.set('before', `${last.taken_at}|${last.id}`);
     try {
       const rows = await api('api/entries?' + q);
-      items.push(...rows);
-      done = rows.length < 60;
-      draw();
-    } catch (e) { fill(box, h('p', { class: 'error' }, e.message)); }
+      if (first) {
+        feedSave(key, rows);
+        const same = items.length === rows.length && JSON.stringify(items) === JSON.stringify(rows);
+        items = rows;
+        done = rows.length < 60;
+        if (!same || !cached) draw(); // redesenăm doar dacă s-a schimbat ceva
+      } else {
+        items.push(...rows);
+        done = rows.length < 60;
+        draw();
+      }
+    } catch (e) { if (!cached) fill(box, h('p', { class: 'error' }, e.message)); }
   }
   function draw() {
     fill(box, gallery(items, { onChange: () => { draw(); onChange?.(); } }));
-    if (!done) box.append(h('button', { class: 'btn block', style: 'margin-top:16px', onclick: more }, 'Mai multe'));
+    if (!done) box.append(h('button', { class: 'btn block', style: 'margin-top:16px', onclick: () => load(false) }, 'Mai multe'));
   }
-  more();
+  if (cached) { done = cached.length < 60; draw(); }
+  load(true);
   return box;
 }
 
@@ -575,9 +631,10 @@ async function screenPoze() {
   const filters = h('div', { class: 'filters' });
   fill(view, h('h1', {}, 'Poze'), filters, content);
   const draw = () => fill(content, feed({ ...params }));
+  draw(); // pozele încep să se încarce imediat
   {
     // muncitorul vede doar șantierele lui (din /api/me); adminul/responsabilul și pe cele arhivate
-    const sites = can.manage() ? (await api('api/sites')).sites : state.sites;
+    const sites = can.manage() ? (await api('api/sites').catch(() => ({ sites: state.sites }))).sites : state.sites;
     const sel = h('select', { onchange: () => { if (sel.value) params.site = sel.value; else delete params.site; draw(); } },
       h('option', { value: '' }, 'Toate șantierele'),
       sites.map((s) => h('option', { value: s.id }, s.name + (s.archived ? ' (arhivat)' : ''))),
@@ -586,7 +643,6 @@ async function screenPoze() {
       h('option', { value: '' }, 'Toată echipa'), h('option', { value: '1' }, 'Doar ale mele'));
     filters.append(sel, me);
   }
-  draw();
 }
 
 async function screenSantiere() {
@@ -760,7 +816,7 @@ async function screenCont(query) {
       h('button', { class: 'btn grow', onclick: changePassword }, '🔑 Schimbă parola'),
       h('button', { class: 'btn grow danger', onclick: async () => {
         if (Q.items.length && !confirm(`Mai ai ${Q.items.length} poze netrimise. Ieși oricum? (rămân în telefon)`)) return;
-        await api('api/logout', { method: 'POST' }); state.user = null; route();
+        await api('api/logout', { method: 'POST' }); caches.delete(IMG_CACHE).catch(() => {}); localStorage.removeItem('me'); localStorage.removeItem(FEEDS_KEY); feedMem.clear(); state.user = null; route();
       } }, 'Ieșire')));
   fill(view, box);
   if (can.admin()) box.append(await driveCard(query));
@@ -928,6 +984,21 @@ async function refreshMe() {
 async function boot() {
   const saved = localStorage.getItem('siteId');
   state.siteId = saved ? Number(saved) : null;
+  const cached = JSON.parse(localStorage.getItem('me') || 'null');
+  if (cached?.user) {
+    // Pornire instantanee cu ultimele date știute; le verificăm cu serverul în fundal.
+    state.user = cached.user; state.sites = cached.sites;
+    if (state.siteId != null && !state.sites.some((x) => x.id === state.siteId)) state.siteId = null;
+    await route();
+    pump();
+    const before = JSON.stringify(cached);
+    refreshMe().then(() => {
+      if (JSON.stringify({ user: state.user, sites: state.sites }) === before) return; // nimic nou
+      const c = $('#comment')?.value;
+      route().then(() => { if (c && $('#comment')) $('#comment').value = c; });
+    }).catch(() => {});
+    return;
+  }
   try {
     await refreshMe();
   } catch (e) {
