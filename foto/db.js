@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS entries (
 CREATE INDEX IF NOT EXISTS idx_entries_site ON entries(site_id, taken_at DESC);
 CREATE INDEX IF NOT EXISTS idx_entries_user ON entries(user_id, taken_at DESC);
 CREATE INDEX IF NOT EXISTS idx_entries_drive ON entries(drive_status);
+CREATE INDEX IF NOT EXISTS idx_entries_time ON entries(taken_at DESC, id DESC);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 `);
 

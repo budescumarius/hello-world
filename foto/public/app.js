@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '13'; // la fel ca VERSION din api.php / server.js
+const APP_VERSION = '14'; // la fel ca VERSION din api.php / server.js
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -453,7 +453,7 @@ function openViewer(list, index, onChange) {
 // Miniaturile se descarcă doar când ajung aproape de ecran: cele vizibile primesc toată viteza.
 const lazyIO = 'IntersectionObserver' in window ? new IntersectionObserver((list) => {
   for (const en of list) if (en.isIntersecting) { en.target.src = en.target.dataset.src; lazyIO.unobserve(en.target); }
-}, { rootMargin: '400px 0px' }) : null;
+}, { rootMargin: '300px 0px' }) : null;
 function lazyImg(src, alt) {
   const img = h('img', { alt: alt || '', decoding: 'async' });
   if (lazyIO) { img.dataset.src = src; lazyIO.observe(img); } else img.src = src;
@@ -461,6 +461,7 @@ function lazyImg(src, alt) {
 }
 function gallery(entries, { onChange, pending = [] } = {}) {
   const wrap = h('div');
+  wrap.addMore = () => {};
   if (!entries.length && !pending.length) {
     wrap.append(h('div', { class: 'empty' }, h('div', { class: 'big' }, '📷'), 'Nicio poză încă'));
     return wrap;
@@ -472,21 +473,27 @@ function gallery(entries, { onChange, pending = [] } = {}) {
         h('span', { class: 'q' }, '⏳')))));
   }
   let day = null, grid;
-  entries.forEach((e, idx) => {
-    const d = new Date(e.taken_at).toDateString();
-    if (d !== day) {
-      day = d;
-      wrap.append(h('div', { class: 'day' }, fmtDate(e.taken_at)));
-      grid = h('div', { class: 'grid' });
-      wrap.append(grid);
+  // Adaugă doar pozele noi (de la poziția „from”), fără să redeseneze ce e deja pe ecran.
+  function addTiles(from) {
+    for (let idx = from; idx < entries.length; idx++) {
+      const e = entries[idx];
+      const d = new Date(e.taken_at).toDateString();
+      if (d !== day) {
+        day = d;
+        wrap.append(h('div', { class: 'day' }, fmtDate(e.taken_at)));
+        grid = h('div', { class: 'grid' });
+        wrap.append(grid);
+      }
+      const open = () => openViewer(entries, Math.max(0, entries.indexOf(e)), onChange);
+      grid.append(e.kind === 'photo'
+        ? h('button', { class: 'tile', onclick: open },
+            lazyImg(fileUrl(e, 'thumb'), e.comment),
+            e.comment ? h('span', { class: 'c' }, '💬') : null)
+        : h('button', { class: 'tile note', onclick: open }, h('b', {}, '📝'), h('span', {}, e.comment)));
     }
-    const open = () => openViewer(entries, idx, onChange);
-    grid.append(e.kind === 'photo'
-      ? h('button', { class: 'tile', onclick: open },
-          lazyImg(fileUrl(e, 'thumb'), e.comment),
-          e.comment ? h('span', { class: 'c' }, '💬') : null)
-      : h('button', { class: 'tile note', onclick: open }, h('b', {}, '📝'), h('span', {}, e.comment)));
-  });
+  }
+  addTiles(0);
+  wrap.addMore = addTiles;
   return wrap;
 }
 
@@ -501,12 +508,24 @@ function feedSave(key, rows) {
   try { localStorage.setItem(FEEDS_KEY, JSON.stringify(Object.fromEntries(feedMem))); } catch {}
 }
 
+const PAGE = 60;
 function feed(params, { onChange } = {}) {
   const key = (state.user?.id || 0) + ':' + new URLSearchParams(params);
   const cached = feedMem.get(key);
   const box = h('div', {}, cached ? '' : h('p', { class: 'muted' }, 'Se încarcă…'));
-  let items = cached ? [...cached] : [], done = !cached;
+  let items = cached ? [...cached] : [], done = !cached, loading = false, g = null;
+  // Derulare automată: când capătul listei se apropie de ecran, vine pagina următoare.
+  const moreBtn = h('button', { class: 'btn block', style: 'margin-top:16px', onclick: () => load(false) }, 'Mai multe');
+  const io = 'IntersectionObserver' in window ? new IntersectionObserver((es) => {
+    if (!box.isConnected) return io.disconnect();
+    if (es.some((x) => x.isIntersecting)) load(false);
+  }, { rootMargin: '800px 0px' }) : null;
+  io?.observe(moreBtn);
+
   async function load(first) {
+    if (loading || (!first && done)) return;
+    loading = true;
+    moreBtn.textContent = 'Se încarcă…';
     const q = new URLSearchParams(params);
     const last = items[items.length - 1];
     if (!first && last) q.set('before', `${last.taken_at}|${last.id}`);
@@ -515,21 +534,28 @@ function feed(params, { onChange } = {}) {
       if (first) {
         feedSave(key, rows);
         const same = items.length === rows.length && JSON.stringify(items) === JSON.stringify(rows);
-        items = rows;
-        done = rows.length < 60;
-        if (!same || !cached) draw(); // redesenăm doar dacă s-a schimbat ceva
+        if (!same || !cached) { items = rows; done = rows.length < PAGE; draw(); } // redesenăm doar dacă s-a schimbat ceva
       } else {
+        const from = items.length;
         items.push(...rows);
-        done = rows.length < 60;
-        draw();
+        done = rows.length < PAGE;
+        g.addMore(from);
+        if (done) { moreBtn.remove(); io?.disconnect(); }
       }
-    } catch (e) { if (!cached) fill(box, h('p', { class: 'error' }, e.message)); }
+    } catch (e) { if (first && !cached) fill(box, h('p', { class: 'error' }, e.message)); }
+    finally {
+      loading = false;
+      moreBtn.textContent = 'Mai multe';
+      // dacă ecranul e încă gol jos (telefon înalt / poze puține), mai cerem o pagină
+      if (!done && io && box.isConnected && moreBtn.getBoundingClientRect().top < innerHeight + 800) setTimeout(() => load(false), 0);
+    }
   }
   function draw() {
-    fill(box, gallery(items, { onChange: () => { draw(); onChange?.(); } }));
-    if (!done) box.append(h('button', { class: 'btn block', style: 'margin-top:16px', onclick: () => load(false) }, 'Mai multe'));
+    g = gallery(items, { onChange: () => { draw(); onChange?.(); } });
+    fill(box, g);
+    if (!done) box.append(moreBtn);
   }
-  if (cached) { done = cached.length < 60; draw(); }
+  if (cached) { done = cached.length < PAGE; draw(); }
   load(true);
   return box;
 }
@@ -956,6 +982,11 @@ async function route() {
     return screenLogin(s.needsSetup);
   }
   document.querySelectorAll('.viewer, .overlay').forEach((el) => el.remove());
+  // oprește descărcările neterminate ale ecranului vechi, ca să nu încetinească ecranul nou
+  for (const img of view.querySelectorAll('img')) {
+    if (img.dataset.src) lazyIO?.unobserve(img);
+    if (!img.complete) img.removeAttribute('src');
+  }
   tabs();
   const [path, query] = location.hash.slice(1).split('?');
   const [page, arg] = path.split('/');

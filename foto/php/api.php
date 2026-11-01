@@ -16,12 +16,12 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '13'; // la fel ca APP_VERSION din app.js
+const VERSION = '14'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
 // ---------------------------------------------------------------- baza de date
-const SCHEMA = 3; // crește când se schimbă structura bazei
+const SCHEMA = 4; // crește când se schimbă structura bazei
 function init_storage(): PDO {
     global $DATA, $PHOTOS;
     $dbFile = $DATA . '/santier.db';
@@ -79,6 +79,8 @@ CREATE TABLE IF NOT EXISTS login_fail (k TEXT NOT NULL, at INTEGER NOT NULL);
     $db->exec('CREATE INDEX IF NOT EXISTS idx_entries_nas ON entries(nas_status)');
     $db->exec('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
     $db->exec('CREATE INDEX IF NOT EXISTS idx_site_users_user ON site_users(user_id)');
+    $db->exec('CREATE INDEX IF NOT EXISTS idx_entries_time ON entries(taken_at DESC, id DESC)'); // galeria: cele mai noi primele, fără sortare
+    $db->exec('ANALYZE');
     $db->exec('PRAGMA user_version = ' . SCHEMA);
     return $db;
 }
@@ -228,6 +230,18 @@ function next_entry_id(): int {
     $n = max((int) val('SELECT COALESCE(MAX(id), 0) FROM entries'), (int) setting('entry_seq')) + 1;
     set_setting('entry_seq', $n);
     return $n;
+}
+// Alocarea numărului și salvarea se fac sub blocare (BEGIN IMMEDIATE): doi oameni care trimit
+// poze în aceeași clipă nu pot primi același număr. Primul parametru din $sql este id-ul.
+function insert_entry(string $sql, array $params): int {
+    global $db;
+    $db->exec('BEGIN IMMEDIATE');
+    try {
+        $id = next_entry_id();
+        q($sql, array_merge([$id], $params));
+        $db->exec('COMMIT');
+        return $id;
+    } catch (Throwable $e) { $db->exec('ROLLBACK'); throw $e; }
 }
 function is_jpeg(string $b): bool { return strlen($b) > 3 && substr($b, 0, 3) === "\xFF\xD8\xFF"; }
 
@@ -746,9 +760,8 @@ function route(string $route, string $path, string $method): void {
         if (file_put_contents("$PHOTOS/$base.jpg", $full) === false || file_put_contents("$PHOTOS/{$base}_t.jpg", $thumb) === false) {
             fail(500, 'Nu pot salva poza (spațiu pe disc?)');
         }
-        $newId = next_entry_id();
-        q("INSERT INTO entries(id, client_id, kind, site_id, user_id, comment, file, thumb, size, taken_at) VALUES (?, ?, 'photo', ?, ?, ?, ?, ?, ?, ?)",
-            [$newId, $cid, resolve_site($u, $meta['siteId'] ?? null), $u['id'], clean($meta['comment'] ?? '', 2000), "$base.jpg", "{$base}_t.jpg", strlen($full), $taken]);
+        $newId = insert_entry("INSERT INTO entries(id, client_id, kind, site_id, user_id, comment, file, thumb, size, taken_at) VALUES (?, ?, 'photo', ?, ?, ?, ?, ?, ?, ?)",
+            [$cid, resolve_site($u, $meta['siteId'] ?? null), $u['id'], clean($meta['comment'] ?? '', 2000), "$base.jpg", "{$base}_t.jpg", strlen($full), $taken]);
         out(get_entry($newId)); // copierea în Drive/NAS o pornește telefonul separat (api/sync/kick) + cron
         return;
     }
@@ -760,9 +773,8 @@ function route(string $route, string $path, string $method): void {
         if ($comment === '') fail(400, 'Scrie ceva în notă');
         $ex = one('SELECT id, user_id FROM entries WHERE client_id = ?', [$cid]);
         if ($ex) { if ((int) $ex['user_id'] !== $u['id']) fail(409, 'Conflict'); out(get_entry((int) $ex['id'])); return; }
-        $newId = next_entry_id();
-        q("INSERT INTO entries(id, client_id, kind, site_id, user_id, comment, taken_at, drive_status) VALUES (?, ?, 'note', ?, ?, ?, ?, 'none')",
-            [$newId, $cid, resolve_site($u, $b['siteId'] ?? null), $u['id'], $comment, norm_date($b['takenAt'] ?? null)]);
+        $newId = insert_entry("INSERT INTO entries(id, client_id, kind, site_id, user_id, comment, taken_at, drive_status) VALUES (?, ?, 'note', ?, ?, ?, ?, 'none')",
+            [$cid, resolve_site($u, $b['siteId'] ?? null), $u['id'], $comment, norm_date($b['takenAt'] ?? null)]);
         out(get_entry($newId));
         return;
     }
