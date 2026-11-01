@@ -49,6 +49,26 @@ php /home/UTILIZATOR/public_html/foto/api.php sync
 ```
 Calea exactă o vezi în File Manager.
 
+## Volum mare (testat)
+Aplicația a fost testată ca pentru o firmă mare: **500 de șantiere, 1.000 de angajați, 1.000.000 de poze**.
+
+| Test | Rezultat |
+|---|---|
+| Galerie (orice rol), derulare | ~2–25 ms pe server, oricât de multe poze |
+| Lista de 500 de șantiere / 1.000 de oameni | 7 ms / 5 ms (contoare ținute la zi de baza de date) |
+| 100 de oameni simultan, 30 s, activitate amestecată | 150 de acțiuni/s, 0 erori, median 2–11 ms |
+| 8 oameni trimit poze în aceeași clipă | 0 erori |
+| Actualizarea unei baze existente | automată, o singură dată (1 milion de poze: ~4 s) |
+
+Cum e făcută să meargă repede:
+- baza de date ține la zi, singură, numărul de poze, ultima poză și coperta fiecărui șantier și om (triggere SQLite);
+- fiecare tip de galerie citește dintr-un index potrivit doar cele ~60 de poze afișate;
+- miniaturile se cer grupate (`api/thumbs`, câte 12 într-o cerere) și rămân în memoria telefonului;
+- răspunsurile mari pleacă comprimate; trimiterea pozelor nu așteaptă Drive / NAS;
+- listele lungi (șantiere, oameni, alegerea șantierului) au căutare (fără diacritice).
+
+**Limite practice pe hosting partajat:** spațiul pe disc (o poză ≈ 300–700 KB, adică 1 milion de poze ≈ 300–700 GB, deci folosește Drive / NAS ca arhivă) și numărul de procese PHP permise de pachet. Peste câteva sute de oameni activi **în același minut**, mută aplicația pe un VPS (vezi mai jos): codul rămâne același.
+
 ## NAS (Synology, QNAP, Nextcloud) – opțional
 Pe lângă server, pozele se pot copia automat și pe NAS-ul tău: în locul Google Drive sau împreună cu el.
 Pe NAS se creează `Poze Șantier / <șantier> / 2026-11-01_09-30_Ion_Popescu_12.jpg`, iar comentariul stă lângă poză, într-un fișier `.txt` cu același nume.

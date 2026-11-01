@@ -16,18 +16,22 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '14'; // la fel ca APP_VERSION din app.js
+const VERSION = '15'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
 // ---------------------------------------------------------------- baza de date
-const SCHEMA = 4; // crește când se schimbă structura bazei
+const SCHEMA = 5; // crește când se schimbă structura bazei
+function open_db(string $file): PDO {
+    $db = new PDO('sqlite:' . $file, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    $db->exec('PRAGMA busy_timeout = 10000; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY;');
+    return $db;
+}
 function init_storage(): PDO {
     global $DATA, $PHOTOS;
     $dbFile = $DATA . '/santier.db';
     if (is_file($dbFile)) { // drum rapid: baza există, doar o deschidem
-        $db = new PDO('sqlite:' . $dbFile, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
-        $db->exec('PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL;');
+        $db = open_db($dbFile);
         if ((int) $db->query('PRAGMA user_version')->fetchColumn() >= SCHEMA) return $db;
         $db = null;
     }
@@ -38,11 +42,22 @@ function init_storage(): PDO {
         @file_put_contents($DATA . '/.htaccess', "<IfModule mod_authz_core.c>\n  Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n  Deny from all\n</IfModule>\n");
     }
     if (!is_file($DATA . '/index.html')) @file_put_contents($DATA . '/index.html', '');
-    $db = new PDO('sqlite:' . $DATA . '/santier.db', null, null, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ]);
-    $db->exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;');
+    // O singură actualizare a structurii o dată; ceilalți așteaptă și apoi folosesc baza gata actualizată.
+    $lock = fopen($DATA . '/migrate.lock', 'c');
+    if ($lock) flock($lock, LOCK_EX);
+    try {
+        $db = open_db($dbFile);
+        if ((int) $db->query('PRAGMA user_version')->fetchColumn() >= SCHEMA) return $db;
+        @set_time_limit(900);
+        migrate($db);
+        return $db;
+    } finally {
+        if ($lock) { flock($lock, LOCK_UN); fclose($lock); }
+    }
+}
+
+function migrate(PDO $db): void {
+    $db->exec('PRAGMA journal_mode = WAL');
     $db->exec("
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -80,9 +95,46 @@ CREATE TABLE IF NOT EXISTS login_fail (k TEXT NOT NULL, at INTEGER NOT NULL);
     $db->exec('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
     $db->exec('CREATE INDEX IF NOT EXISTS idx_site_users_user ON site_users(user_id)');
     $db->exec('CREATE INDEX IF NOT EXISTS idx_entries_time ON entries(taken_at DESC, id DESC)'); // galeria: cele mai noi primele, fără sortare
+
+    // v5 – volum mare: indexuri complete pe șantier / autor + contoare ținute la zi de baza de date (triggere)
+    $db->exec('BEGIN IMMEDIATE');
+    try {
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_e_site ON entries(site_id, taken_at DESC, id DESC)');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_e_user ON entries(user_id, taken_at DESC, id DESC)');
+        $db->exec('DROP INDEX IF EXISTS idx_entries_site');
+        $db->exec('DROP INDEX IF EXISTS idx_entries_user');
+        foreach (['photo_count INTEGER NOT NULL DEFAULT 0', 'last_at TEXT', 'cover_id INTEGER', 'cover_v TEXT', 'cover_at TEXT'] as $col) {
+            if (!$has('sites', strtok($col, ' '))) $db->exec("ALTER TABLE sites ADD COLUMN $col");
+        }
+        if (!$has('users', 'photo_count')) $db->exec('ALTER TABLE users ADD COLUMN photo_count INTEGER NOT NULL DEFAULT 0');
+        $db->exec("CREATE TABLE IF NOT EXISTS stats (k TEXT PRIMARY KEY, v INTEGER NOT NULL DEFAULT 0); INSERT OR IGNORE INTO stats(k, v) VALUES ('unassigned', 0);");
+        $add = "UPDATE sites SET photo_count = photo_count + 1,
+                  last_at = CASE WHEN last_at IS NULL OR NEW.taken_at > last_at THEN NEW.taken_at ELSE last_at END WHERE id = NEW.site_id;
+                UPDATE sites SET cover_id = NEW.id, cover_v = NEW.client_id, cover_at = NEW.taken_at
+                  WHERE id = NEW.site_id AND NEW.kind = 'photo' AND (cover_at IS NULL OR NEW.taken_at >= cover_at);
+                UPDATE stats SET v = v + 1 WHERE k = 'unassigned' AND NEW.site_id IS NULL;";
+        $remove = "UPDATE sites SET photo_count = photo_count - 1,
+                  last_at = (SELECT MAX(taken_at) FROM entries WHERE site_id = OLD.site_id) WHERE id = OLD.site_id;
+                UPDATE sites SET cover_id = (SELECT id FROM entries WHERE site_id = OLD.site_id AND kind = 'photo' ORDER BY taken_at DESC, id DESC LIMIT 1)
+                  WHERE id = OLD.site_id AND cover_id = OLD.id;
+                UPDATE sites SET cover_v = (SELECT client_id FROM entries WHERE id = sites.cover_id), cover_at = (SELECT taken_at FROM entries WHERE id = sites.cover_id)
+                  WHERE id = OLD.site_id AND (cover_id IS NULL OR cover_v IS NOT (SELECT client_id FROM entries WHERE id = sites.cover_id));
+                UPDATE stats SET v = v - 1 WHERE k = 'unassigned' AND OLD.site_id IS NULL;";
+        $db->exec('DROP TRIGGER IF EXISTS trg_e_ins; DROP TRIGGER IF EXISTS trg_e_del; DROP TRIGGER IF EXISTS trg_e_move;');
+        $db->exec("CREATE TRIGGER trg_e_ins AFTER INSERT ON entries BEGIN $add UPDATE users SET photo_count = photo_count + 1 WHERE id = NEW.user_id; END;");
+        $db->exec("CREATE TRIGGER trg_e_del AFTER DELETE ON entries BEGIN $remove UPDATE users SET photo_count = photo_count - 1 WHERE id = OLD.user_id; END;");
+        $db->exec("CREATE TRIGGER trg_e_move AFTER UPDATE OF site_id ON entries WHEN OLD.site_id IS NOT NEW.site_id BEGIN $remove $add END;");
+        // contoarele pentru datele existente (o singură dată)
+        $db->exec("UPDATE sites SET photo_count = (SELECT COUNT(*) FROM entries e WHERE e.site_id = sites.id),
+                     last_at = (SELECT MAX(taken_at) FROM entries e WHERE e.site_id = sites.id),
+                     cover_id = (SELECT id FROM entries e WHERE e.site_id = sites.id AND e.kind = 'photo' ORDER BY taken_at DESC, id DESC LIMIT 1)");
+        $db->exec('UPDATE sites SET cover_v = (SELECT client_id FROM entries WHERE id = sites.cover_id), cover_at = (SELECT taken_at FROM entries WHERE id = sites.cover_id)');
+        $db->exec('UPDATE users SET photo_count = (SELECT COUNT(*) FROM entries e WHERE e.user_id = users.id)');
+        $db->exec("UPDATE stats SET v = (SELECT COUNT(*) FROM entries WHERE site_id IS NULL) WHERE k = 'unassigned'");
+        $db->exec('PRAGMA user_version = ' . SCHEMA);
+        $db->exec('COMMIT');
+    } catch (Throwable $e) { $db->exec('ROLLBACK'); throw $e; }
     $db->exec('ANALYZE');
-    $db->exec('PRAGMA user_version = ' . SCHEMA);
-    return $db;
 }
 
 function q(string $sql, array $p = []): PDOStatement {
@@ -111,6 +163,13 @@ function out($data, int $code = 200): void {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
     $json = json_encode($data, JSON_UNESCAPED_UNICODE);
+    // Răspunsurile mari pleacă comprimate (de ~5–9 ori mai mici), indiferent de setările hostingului.
+    if (strlen($json) > 1400 && function_exists('gzencode') && !ini_get('zlib.output_compression')
+        && strpos($_SERVER['HTTP_ACCEPT_ENCODING'] ?? '', 'gzip') !== false) {
+        $json = gzencode($json, 5);
+        header('Content-Encoding: gzip');
+        header('Vary: Accept-Encoding');
+    }
     header('Content-Length: ' . strlen($json));
     echo $json;
 }
@@ -161,6 +220,7 @@ function finish_request(): void {
 function set_session(int $userId): void {
     $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
     q('INSERT INTO sessions(token, user_id) VALUES (?, ?)', [$token, $userId]);
+    if (random_int(1, 50) === 1) q("DELETE FROM sessions WHERE created_at < datetime('now', '-400 days')");
     setcookie('sid', $token, ['expires' => time() + 31536000, 'path' => base_path() . '/', 'httponly' => true, 'samesite' => 'Lax', 'secure' => is_https()]);
 }
 function current_user() {
@@ -287,8 +347,14 @@ function gapi(string $method, string $url, $body = null, string $ctype = 'applic
     return $j;
 }
 function folder_ok($id): bool {
+    static $known = [];
     if (!$id) return false;
-    try { $f = gapi('GET', "https://www.googleapis.com/drive/v3/files/$id?fields=id,trashed"); return empty($f['trashed']); }
+    if (isset($known[$id])) return true;
+    try {
+        $f = gapi('GET', "https://www.googleapis.com/drive/v3/files/$id?fields=id,trashed");
+        if (!empty($f['trashed'])) return false;
+        return $known[$id] = true;
+    }
     catch (DriveError $e) { if ($e->getCode() === 404) return false; throw $e; }
 }
 function create_folder(string $name, $parent = null): string {
@@ -405,8 +471,11 @@ function nas_clean_name(string $s): string {
 }
 function nas_root(): string { global $CONFIG; return nas_clean_name($CONFIG['drive_folder_name']); }
 function nas_mkdir(string $rel): void {
+    static $done = [];
+    if (isset($done[$rel])) return;
     $c = nas_req('MKCOL', $rel);
     if (!in_array($c, [201, 405, 301, 200], true)) throw new NasError("NAS: nu pot crea folderul „{$rel}” (HTTP $c)", $c);
+    $done[$rel] = true;
 }
 function nas_site_folder($siteId): string {
     $root = nas_root();
@@ -603,21 +672,35 @@ function route(string $route, string $path, string $method): void {
     if ($route === 'GET api/sites') {
         $u = need('admin', 'responsabil');
         $where = is_admin($u) ? '' : 'WHERE s.id IN (SELECT site_id FROM site_users WHERE user_id = :uid)';
-        $sites = all("SELECT s.id, s.name, s.address, s.archived, s.created_at,
-            (SELECT COUNT(*) FROM entries e WHERE e.site_id = s.id) AS count,
-            (SELECT MAX(taken_at) FROM entries e WHERE e.site_id = s.id) AS last_at,
-            (SELECT id FROM entries e WHERE e.site_id = s.id AND e.kind='photo' ORDER BY taken_at DESC LIMIT 1) AS cover_id,
-            (SELECT client_id FROM entries e WHERE e.site_id = s.id AND e.kind='photo' ORDER BY taken_at DESC LIMIT 1) AS cover_v
-            FROM sites s $where ORDER BY s.archived, s.name COLLATE NOCASE", is_admin($u) ? [] : ['uid' => $u['id']]);
-        $members = all('SELECT su.site_id, u.id, u.name, u.role FROM site_users su JOIN users u ON u.id = su.user_id ORDER BY u.name');
+        if (!empty($_GET['lite'])) { // doar ce trebuie pentru liste de alegere
+            $sites = all("SELECT s.id, s.name, s.address, s.archived FROM sites s $where ORDER BY s.archived, s.name COLLATE NOCASE", is_admin($u) ? [] : ['uid' => $u['id']]);
+            foreach ($sites as &$s) { $s['id'] = (int) $s['id']; $s['archived'] = (int) $s['archived']; }
+            out(['sites' => $sites]);
+            return;
+        }
+        // contoarele (poze, ultima poză, copertă) sunt ținute la zi de baza de date: nimic de numărat aici
+        $params = is_admin($u) ? [] : ['uid' => $u['id']];
+        if (!empty($_GET['id'])) { // un singur șantier (pagina șantierului)
+            $where .= ($where ? ' AND' : 'WHERE') . ' s.id = :sid';
+            $params['sid'] = (int) $_GET['id'];
+        }
+        $sites = all("SELECT s.id, s.name, s.address, s.archived, s.created_at, s.photo_count AS count, s.last_at, s.cover_id, s.cover_v
+            FROM sites s $where ORDER BY s.archived, s.name COLLATE NOCASE", $params);
+        $members = !$sites ? [] : (!empty($_GET['id'])
+            ? all('SELECT su.site_id, u.id, u.name, u.role FROM site_users su JOIN users u ON u.id = su.user_id WHERE su.site_id = ? ORDER BY u.name', [(int) $_GET['id']])
+            : (is_admin($u)
+            ? all('SELECT su.site_id, u.id, u.name, u.role FROM site_users su JOIN users u ON u.id = su.user_id ORDER BY u.name')
+            : all('SELECT su.site_id, u.id, u.name, u.role FROM site_users su JOIN users u ON u.id = su.user_id
+                   WHERE su.site_id IN (SELECT site_id FROM site_users WHERE user_id = ?) ORDER BY u.name', [$u['id']])));
+        $bySite = [];
+        foreach ($members as $mm) $bySite[(int) $mm['site_id']][] = ['id' => (int) $mm['id'], 'name' => $mm['name'], 'role' => $mm['role']];
         foreach ($sites as &$s) {
             foreach (['id', 'archived', 'count'] as $k) $s[$k] = (int) $s[$k];
             $s['cover_id'] = $s['cover_id'] === null ? null : (int) $s['cover_id'];
-            $s['users'] = [];
-            foreach ($members as $mm) if ((int) $mm['site_id'] === $s['id']) $s['users'][] = ['id' => (int) $mm['id'], 'name' => $mm['name'], 'role' => $mm['role']];
+            $s['users'] = $bySite[$s['id']] ?? [];
         }
         unset($s);
-        $un = is_admin($u) ? (int) val('SELECT COUNT(*) FROM entries WHERE site_id IS NULL') : null;
+        $un = is_admin($u) ? (int) val("SELECT v FROM stats WHERE k = 'unassigned'") : null;
         out(['sites' => $sites, 'unassigned' => $un]);
         return;
     }
@@ -683,13 +766,13 @@ function route(string $route, string $path, string $method): void {
             out($rows);
             return;
         }
-        $users = all('SELECT u.id, u.name, u.username, u.role, u.active, (SELECT COUNT(*) FROM entries e WHERE e.user_id = u.id) AS count
+        $users = all('SELECT u.id, u.name, u.username, u.role, u.active, u.photo_count AS count
             FROM users u ORDER BY u.active DESC, u.name COLLATE NOCASE');
-        $links = all('SELECT user_id, site_id FROM site_users');
+        $byUser = [];
+        foreach (all('SELECT user_id, site_id FROM site_users') as $l) $byUser[(int) $l['user_id']][] = (int) $l['site_id'];
         foreach ($users as &$x) {
             foreach (['id', 'active', 'count'] as $k) $x[$k] = (int) $x[$k];
-            $x['siteIds'] = [];
-            foreach ($links as $l) if ((int) $l['user_id'] === $x['id']) $x['siteIds'][] = (int) $l['site_id'];
+            $x['siteIds'] = $byUser[$x['id']] ?? [];
         }
         out($users);
         return;
@@ -780,24 +863,67 @@ function route(string $route, string $path, string $method): void {
     }
     if ($route === 'GET api/entries') {
         $u = need();
-        $w = []; $p = [];
-        $site = $_GET['site'] ?? '';
-        if ($site === 'none') $w[] = 'e.site_id IS NULL';
-        elseif ($site !== '') { $w[] = 'e.site_id = :site'; $p['site'] = (int) $site; }
-        if (!empty($_GET['mine'])) { $w[] = 'e.user_id = :me'; $p['me'] = $u['id']; }
-        elseif (!is_admin($u)) {
-            $w[] = '(e.user_id = :me1 OR e.site_id IN (SELECT site_id FROM site_users WHERE user_id = :me2))';
-            $p['me1'] = $u['id']; $p['me2'] = $u['id'];
-        }
-        if (!empty($_GET['user'])) { $w[] = 'e.user_id = :uid'; $p['uid'] = (int) $_GET['user']; }
+        $limit = min(max((int) ($_GET['limit'] ?? 60), 1), 200);
+        // Derulare: rândurile de după ultimul văzut, în ordinea (dată, număr) descrescătoare.
+        // Forma „taken_at <= ? AND (...)” lasă baza să sară direct la locul potrivit din index.
+        $cur = ''; $cp = [];
         if (!empty($_GET['before'])) {
             $parts = explode('|', (string) $_GET['before']);
-            $w[] = '(e.taken_at < :bt1 OR (e.taken_at = :bt2 AND e.id < :bid))';
-            $p['bt1'] = $parts[0]; $p['bt2'] = $parts[0]; $p['bid'] = (int) ($parts[1] ?? 0);
+            $cur = ' AND e.taken_at <= ? AND (e.taken_at < ? OR e.id < ?)';
+            $cp = [$parts[0], $parts[0], (int) ($parts[1] ?? 0)];
         }
-        $limit = min(max((int) ($_GET['limit'] ?? 60), 1), 200);
-        $rows = all(ENTRY_SELECT . ($w ? ' WHERE ' . implode(' AND ', $w) : '') . " ORDER BY e.taken_at DESC, e.id DESC LIMIT $limit", $p);
-        out(array_map('fix_entry', $rows));
+        $order = " ORDER BY e.taken_at DESC, e.id DESC LIMIT $limit";
+        $site = (string) ($_GET['site'] ?? '');
+        $mine = !empty($_GET['mine']);
+        $admin = is_admin($u);
+        // Fiecare caz folosește un index: baza citește ~60 de rânduri, oricât de multe poze ar exista.
+        if ($site === 'none' || $site !== '' || $mine || $admin) {
+            $w = []; $p = [];
+            if ($site === 'none') $w[] = 'e.site_id IS NULL';
+            elseif ($site !== '') { $w[] = 'e.site_id = ?'; $p[] = (int) $site; }
+            $ownOnly = $mine || (!$admin && ($site === 'none' || ($site !== '' && !in_array((int) $site, assigned($u['id']), true))));
+            if ($ownOnly) { $w[] = 'e.user_id = ?'; $p[] = $u['id']; }
+            $sql = ENTRY_SELECT . ' WHERE ' . ($w ? implode(' AND ', $w) : '1') . $cur . $order;
+            $p = array_merge($p, $cp);
+        } else {
+            // Muncitor / responsabil, toate pozele lui: cele mai noi de pe fiecare șantier al lui + ale lui, apoi primele din total.
+            $sites = assigned($u['id']);
+            if (count($sites) <= 300) {
+                $arms = []; $p = [];
+                foreach ($sites as $sid) {
+                    $arms[] = "SELECT id FROM (SELECT e.id FROM entries e WHERE e.site_id = ?$cur ORDER BY e.taken_at DESC, e.id DESC LIMIT $limit)";
+                    $p = array_merge($p, [$sid], $cp);
+                }
+                $arms[] = "SELECT id FROM (SELECT e.id FROM entries e WHERE e.user_id = ?$cur ORDER BY e.taken_at DESC, e.id DESC LIMIT $limit)";
+                $p = array_merge($p, [$u['id']], $cp);
+                $sql = ENTRY_SELECT . ' WHERE e.id IN (' . implode(' UNION ', $arms) . ')' . $order;
+            } else { // foarte multe șantiere: varianta generală
+                $sql = ENTRY_SELECT . ' WHERE (e.user_id = ? OR e.site_id IN (SELECT site_id FROM site_users WHERE user_id = ?))' . $cur . $order;
+                $p = array_merge([$u['id'], $u['id']], $cp);
+            }
+        }
+        out(array_map('fix_entry', all($sql, $p)));
+        return;
+    }
+    // Mai multe miniaturi într-o singură cerere (galeria): [id 4 octeți][lungime 4 octeți][JPEG]...
+    if ($route === 'GET api/thumbs') {
+        $u = need();
+        $ids = array_slice(array_values(array_unique(array_filter(array_map('intval', explode(',', (string) ($_GET['ids'] ?? '')))))), 0, 100);
+        if (!$ids) fail(400, 'Lipsesc pozele');
+        $mySites = is_admin($u) ? [] : array_flip(assigned($u['id']));
+        $buf = '';
+        foreach (all('SELECT id, user_id, site_id, kind, thumb FROM entries WHERE id IN (' . implode(',', $ids) . ')') as $e) {
+            if ($e['kind'] !== 'photo' || !$e['thumb']) continue;
+            $ok = is_admin($u) || (int) $e['user_id'] === $u['id'] || ($e['site_id'] !== null && isset($mySites[(int) $e['site_id']]));
+            if (!$ok) continue;
+            $data = @file_get_contents($PHOTOS . '/' . $e['thumb']);
+            if ($data === false) continue;
+            $buf .= pack('NN', (int) $e['id'], strlen($data)) . $data;
+        }
+        header('Content-Type: application/octet-stream');
+        header('Cache-Control: private, no-store');
+        header('Content-Length: ' . strlen($buf));
+        echo $buf;
         return;
     }
     if (preg_match('#^(PATCH|DELETE) api/entries/(\d+)$#', $route, $m)) {

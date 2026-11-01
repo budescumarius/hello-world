@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '14'; // la fel ca VERSION din api.php / server.js
+const APP_VERSION = '15'; // la fel ca VERSION din api.php / server.js
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -296,6 +296,20 @@ async function addPhotos(files, fromCamera) {
 $('#cam').addEventListener('change', (e) => { const f = [...e.target.files]; e.target.value = ''; addPhotos(f, true); });
 $('#gal').addEventListener('change', (e) => { const f = [...e.target.files]; e.target.value = ''; addPhotos(f, false); });
 
+// ============ căutare în liste lungi ============
+const norm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+// rows: [{ el, text }] – ascunde rândurile care nu conțin toate cuvintele căutate. Apare doar la liste lungi.
+function searchBox(rows, placeholder, min = 8) {
+  if (rows.length < min) return null;
+  const idx = rows.map((r) => [r.el, norm(r.text)]);
+  const inp = h('input', { type: 'search', class: 'search', placeholder: '🔍 ' + placeholder, autocomplete: 'off', enterkeyhint: 'search',
+    oninput: () => {
+      const words = norm(inp.value).split(/\s+/).filter(Boolean);
+      for (const [el, t] of idx) el.hidden = words.length > 0 && !words.every((w) => t.includes(w));
+    } });
+  return inp;
+}
+
 // ============ foi (sheet) ============
 function sheet(build) {
   const close = () => { ov.remove(); };
@@ -310,10 +324,14 @@ function pickSite(onPick, current, { allowNone = true, sites = state.sites } = {
   sheet((box, close) => {
     box.append(h('h2', {}, 'Alege șantierul'));
     const list = h('div', { class: 'pick-list' });
+    const rows = [];
     for (const s of sites) {
-      list.append(h('button', { class: s.id === current ? 'on' : '', onclick: () => { close(); onPick(s.id); } },
-        s.name, s.address ? h('small', {}, s.address) : null));
+      const el = h('button', { class: s.id === current ? 'on' : '', onclick: () => { close(); onPick(s.id); } },
+        s.name, s.address ? h('small', {}, s.address) : null);
+      rows.push({ el, text: s.name + ' ' + (s.address || '') });
+      list.append(el);
     }
+    box.append(searchBox(rows, 'Caută șantierul…'));
     if (allowNone) list.append(h('button', { class: current == null ? 'on' : '', onclick: () => { close(); onPick(null); } },
       'Fără șantier', h('small', {}, 'Poza se salvează, se poate atribui mai târziu')));
     if (can.manage()) {
@@ -427,7 +445,7 @@ function openViewer(list, index, onChange) {
   }
   async function moveSite(e) {
     let sites = state.sites;
-    if (can.manage()) sites = (await api('api/sites')).sites.filter((s) => !s.archived);
+    if (can.manage()) sites = (await api('api/sites?lite=1')).sites.filter((s) => !s.archived);
     pickSite((sid) => patch(e, { siteId: sid }), e.site_id, { sites });
   }
   async function del(e) {
@@ -660,7 +678,7 @@ async function screenPoze() {
   draw(); // pozele încep să se încarce imediat
   {
     // muncitorul vede doar șantierele lui (din /api/me); adminul/responsabilul și pe cele arhivate
-    const sites = can.manage() ? (await api('api/sites').catch(() => ({ sites: state.sites }))).sites : state.sites;
+    const sites = can.manage() ? (await api('api/sites?lite=1').catch(() => ({ sites: state.sites }))).sites : state.sites;
     const sel = h('select', { onchange: () => { if (sel.value) params.site = sel.value; else delete params.site; draw(); } },
       h('option', { value: '' }, 'Toate șantierele'),
       sites.map((s) => h('option', { value: s.id }, s.name + (s.archived ? ' (arhivat)' : ''))),
@@ -676,20 +694,25 @@ async function screenSantiere() {
     h('button', { class: 'btn primary sm', onclick: () => editSite(null) }, '+ Nou')), h('p', { class: 'muted' }, 'Se încarcă…'));
   const { sites, unassigned } = await api('api/sites');
   const active = sites.filter((s) => !s.archived), archived = sites.filter((s) => s.archived);
-  const card = (s) => h('button', { class: 'item', onclick: () => { location.hash = 'santier/' + s.id; } },
-    h('div', { class: 'cover', style: s.cover_id ? `background-image:url(files/${s.cover_id}/thumb?v=${encodeURIComponent(s.cover_v || '')})` : '' }, s.cover_id ? '' : '🏗'),
+  const rows = [];
+  const card = (s) => { const el = h('button', { class: 'item', onclick: () => { location.hash = 'santier/' + s.id; } },
+    h('div', { class: 'cover' }, s.cover_id ? lazyImg(fileUrl({ id: s.cover_id, client_id: s.cover_v }, 'thumb')) : '🏗'),
     h('div', { class: 'txt' },
       h('div', { class: 't' }, s.name),
       h('div', { class: 's' }, [s.address, `${s.count} ${s.count === 1 ? 'poză' : 'poze'}`, s.last_at ? 'ultima ' + fmtShort(s.last_at) : null].filter(Boolean).join(' · ')),
       h('div', { class: 's' }, s.users.length ? '👷 ' + s.users.map((u) => u.name.split(' ')[0]).join(', ') : 'Nimeni atribuit')),
     h('span', { class: 'chev muted' }, '›'));
+    rows.push({ el, text: [s.name, s.address, ...s.users.map((u) => u.name)].join(' ') });
+    return el; };
+  const activeCards = active.map(card), archivedCards = archived.map(card);
   view.lastChild.replaceWith(h('div', {},
+    searchBox(rows, 'Caută șantier, adresă sau persoană…'),
     !sites.length ? h('div', { class: 'empty' }, h('div', { class: 'big' }, '🏗'), 'Niciun șantier. Apasă „+ Nou”.') : null,
-    h('div', { class: 'list' }, active.map(card),
+    h('div', { class: 'list' }, activeCards,
       unassigned ? h('button', { class: 'item', onclick: () => { location.hash = 'santier/none'; } },
         h('div', { class: 'cover' }, '❓'), h('div', { class: 'txt' }, h('div', { class: 't' }, 'Fără șantier'),
           h('div', { class: 's' }, `${unassigned} de atribuit`))) : null),
-    archived.length ? [h('h2', {}, 'Arhivate'), h('div', { class: 'list' }, archived.map(card))] : null));
+    archived.length ? [h('h2', {}, 'Arhivate'), h('div', { class: 'list' }, archivedCards)] : null));
 }
 
 async function screenSantier(id) {
@@ -698,7 +721,7 @@ async function screenSantier(id) {
       h('p', { class: 'muted small' }, 'Deschide o poză și apasă „🏗 Șantier” ca s-o muți.'), feed({ site: 'none' }));
     return;
   }
-  const { sites } = await api('api/sites');
+  const { sites } = await api('api/sites?id=' + Number(id));
   const s = sites.find((x) => x.id === Number(id));
   if (!s) { location.hash = 'santiere'; return; }
   fill(view, 
@@ -719,10 +742,13 @@ async function editSite(s) {
     const name = h('input', { value: s?.name || '', placeholder: 'Ex: Vila Popescu, Str. Lalelelor 4' });
     const addr = h('input', { value: s?.address || '', placeholder: 'Opțional' });
     const err = h('div', { class: 'error' });
-    const checks = h('div', { class: 'checks' }, users.filter((u) => u.id !== state.user.id || can.admin()).filter((u) => u.active !== 0).map((u) =>
-      h('label', { class: 'check' },
+    const peopleRows = [];
+    const checks = h('div', { class: 'checks' }, users.filter((u) => u.id !== state.user.id || can.admin()).filter((u) => u.active !== 0)
+      .sort((a, b) => sel.has(b.id) - sel.has(a.id)) // cei deja atribuiți primii
+      .map((u) => { const el = h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: sel.has(u.id), onchange: (e) => (e.target.checked ? sel.add(u.id) : sel.delete(u.id)) }),
-        h('span', { style: 'flex:1' }, u.name), h('span', { class: 'badge ' + u.role }, ROLE_LABEL[u.role]))));
+        h('span', { style: 'flex:1' }, u.name), h('span', { class: 'badge ' + u.role }, ROLE_LABEL[u.role]));
+        peopleRows.push({ el, text: u.name + ' ' + ROLE_LABEL[u.role] }); return el; }));
     const save = async () => {
       err.textContent = '';
       try {
@@ -741,7 +767,7 @@ async function editSite(s) {
     box.append(h('h2', {}, s ? 'Editează șantierul' : 'Șantier nou'),
       h('label', { class: 'f' }, h('span', {}, 'Nume'), name),
       h('label', { class: 'f' }, h('span', {}, 'Adresă'), addr),
-      h('label', { class: 'f' }, h('span', {}, 'Cine lucrează aici'), checks),
+      h('div', { class: 'f' }, h('span', {}, 'Cine lucrează aici'), searchBox(peopleRows, 'Caută persoana…'), checks),
       err,
       h('button', { class: 'btn primary block', onclick: save }, 'Salvează'),
       s ? h('div', { class: 'row', style: 'margin-top:10px' },
@@ -761,17 +787,21 @@ async function editSite(s) {
 async function screenEchipa() {
   fill(view, h('div', { class: 'top' }, h('h1', {}, 'Echipa'),
     h('button', { class: 'btn primary sm', onclick: () => editUser(null) }, '+ Persoană')), h('p', { class: 'muted' }, 'Se încarcă…'));
-  const [users, { sites }] = await Promise.all([api('api/users'), api('api/sites')]);
-  view.lastChild.replaceWith(h('div', { class: 'list' }, users.map((u) => h('button', { class: 'item', onclick: () => editUser(u, sites) },
+  const [users, { sites }] = await Promise.all([api('api/users'), api('api/sites?lite=1')]);
+  const rows = [];
+  const list = h('div', { class: 'list' }, users.map((u) => { const el = h('button', { class: 'item', onclick: () => editUser(u, sites) },
     h('div', { class: 'cover', style: 'border-radius:50%;background:#e0e7ff;font-weight:800;font-size:20px;color:#1f4fd8' }, u.name.slice(0, 1).toUpperCase()),
     h('div', { class: 'txt' },
       h('div', { class: 't' }, u.name),
       h('div', { class: 's' }, `@${u.username} · ${u.count} poze · ${u.role === 'admin' ? 'toate șantierele' : u.siteIds.length + ' șantiere'}`)),
-    h('span', { class: 'badge ' + (u.active ? u.role : 'off') }, u.active ? ROLE_LABEL[u.role] : 'Dezactivat')))));
+    h('span', { class: 'badge ' + (u.active ? u.role : 'off') }, u.active ? ROLE_LABEL[u.role] : 'Dezactivat'));
+    rows.push({ el, text: [u.name, u.username, ROLE_LABEL[u.role]].join(' ') });
+    return el; }));
+  view.lastChild.replaceWith(h('div', {}, searchBox(rows, 'Caută după nume, utilizator sau rol…'), list));
 }
 
 async function editUser(u, sites) {
-  sites = sites || (await api('api/sites')).sites;
+  sites = sites || (await api('api/sites?lite=1')).sites;
   const sel = new Set(u?.siteIds || []);
   let role = u?.role || 'muncitor';
   sheet((box, close) => {
@@ -780,10 +810,14 @@ async function editUser(u, sites) {
     const pass = h('input', { type: 'text', autocomplete: 'off', placeholder: u ? 'Lasă gol ca să nu schimbi' : 'Minim 4 caractere' });
     const err = h('div', { class: 'error' });
     const seg = h('div', { class: 'seg' });
-    const siteBox = h('label', { class: 'f' }, h('span', {}, 'Șantiere atribuite'),
-      h('div', { class: 'checks' }, sites.filter((s) => !s.archived).map((s) => h('label', { class: 'check' },
+    const siteRows = [];
+    const siteChecks = h('div', { class: 'checks' }, sites.filter((s) => !s.archived)
+      .sort((a, b) => sel.has(b.id) - sel.has(a.id)) // cele deja atribuite primele
+      .map((s) => { const el = h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: sel.has(s.id), onchange: (e) => (e.target.checked ? sel.add(s.id) : sel.delete(s.id)) }),
-        h('span', {}, s.name)))));
+        h('span', {}, s.name));
+        siteRows.push({ el, text: s.name + ' ' + (s.address || '') }); return el; }));
+    const siteBox = h('div', { class: 'f' }, h('span', {}, 'Șantiere atribuite'), searchBox(siteRows, 'Caută șantierul…'), siteChecks);
     const help = h('p', { class: 'muted small' });
     const drawSeg = () => {
       seg.replaceChildren(...['muncitor', 'responsabil', 'admin'].map((r) => h('button', { type: 'button', class: role === r ? 'on' : '', onclick: () => { role = r; drawSeg(); } }, ROLE_LABEL[r])));
