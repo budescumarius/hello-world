@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '19'; // la fel ca VERSION din api.php
+const APP_VERSION = '20'; // la fel ca VERSION din api.php
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -891,7 +891,7 @@ function renameFolder(f, after) {
 }
 
 async function editSite(s) {
-  const users = await api('api/users');
+  const users = await api('api/users?pick=1');
   const sel = new Set((s?.users || []).map((u) => u.id));
   sheet((box, close) => {
     const name = h('input', { value: s?.name || '', placeholder: 'Ex: Vila Popescu, Str. Lalelelor 4' });
@@ -941,18 +941,21 @@ async function editSite(s) {
 
 async function screenEchipa() {
   fill(view, h('div', { class: 'top' }, h('h1', {}, 'Echipa'),
-    h('button', { class: 'btn primary sm', onclick: () => editUser(null) }, '+ Persoană')), h('p', { class: 'muted' }, 'Se încarcă…'));
+    h('button', { class: 'btn primary sm', onclick: () => editUser(null) }, can.admin() ? '+ Persoană' : '+ Muncitor')), h('p', { class: 'muted' }, 'Se încarcă…'));
   const [users, { sites }] = await Promise.all([api('api/users'), api('api/sites?lite=1')]);
   const rows = [];
   const list = h('div', { class: 'list' }, users.map((u) => { const el = h('button', { class: 'item', onclick: () => editUser(u, sites) },
     h('div', { class: 'cover', style: 'border-radius:50%;background:#e0e7ff;font-weight:800;font-size:20px;color:#1f4fd8' }, u.name.slice(0, 1).toUpperCase()),
     h('div', { class: 'txt' },
       h('div', { class: 't' }, u.name),
-      h('div', { class: 's' }, `@${u.username} · ${u.count} poze · ${u.role === 'admin' ? 'toate șantierele' : u.siteIds.length + ' șantiere'}`)),
+      h('div', { class: 's' }, `@${u.username} · ${u.count} poze · ${u.role === 'admin' ? 'toate șantierele' : u.siteIds.length + ' șantiere'}${u.otherSites ? ` (+${u.otherSites} ale altora)` : ''}`)),
     h('span', { class: 'badge ' + (u.active ? u.role : 'off') }, u.active ? ROLE_LABEL[u.role] : 'Dezactivat'));
     rows.push({ el, text: [u.name, u.username, ROLE_LABEL[u.role]].join(' ') });
     return el; }));
-  view.lastChild.replaceWith(h('div', {}, searchBox(rows, 'Caută după nume, utilizator sau rol…'), list));
+  view.lastChild.replaceWith(h('div', {},
+    !can.admin() ? h('p', { class: 'muted small' }, 'Muncitorii de pe șantierele tale. Poți crea conturi noi de muncitor și le poți da acces la șantierele tale.') : null,
+    !users.length ? h('div', { class: 'empty' }, h('div', { class: 'big' }, '👷'), 'Niciun muncitor încă. Apasă „+ Muncitor”.') : null,
+    searchBox(rows, 'Caută după nume, utilizator sau rol…'), list));
 }
 
 async function editUser(u, sites) {
@@ -997,11 +1000,12 @@ async function editUser(u, sites) {
         toast(u ? '✓ Salvat' : `✓ Cont creat. Dă-i lui ${name.value.split(' ')[0]} utilizatorul și parola.`);
       } catch (e) { err.textContent = e.message; }
     };
-    box.append(h('h2', {}, u ? 'Editează persoana' : 'Persoană nouă'),
+    box.append(h('h2', {}, u ? 'Editează persoana' : can.admin() ? 'Persoană nouă' : 'Muncitor nou'),
       h('label', { class: 'f' }, h('span', {}, 'Nume'), name),
       h('label', { class: 'f' }, h('span', {}, 'Utilizator (pentru logare)'), user),
       h('label', { class: 'f' }, h('span', {}, u ? 'Parolă nouă' : 'Parolă'), pass),
-      h('div', { class: 'f' }, h('span', {}, 'Rol'), seg), help,
+      can.admin() ? h('div', { class: 'f' }, h('span', {}, 'Rol'), seg) : h('div', { class: 'f' }, h('span', {}, 'Rol'), h('span', { class: 'badge muncitor' }, 'Muncitor')), help,
+      u?.otherSites ? h('p', { class: 'muted small' }, (u.otherSites === 1 ? 'Mai lucrează pe 1 șantier al altui responsabil: acela rămâne neschimbat.' : `Mai lucrează pe ${u.otherSites} șantiere ale altor responsabili: acelea rămân neschimbate.`)) : null,
       siteBox, err,
       h('button', { class: 'btn primary block', onclick: save }, 'Salvează'),
       u && u.id !== state.user.id ? h('button', { class: 'btn block ' + (u.active ? 'danger' : ''), style: 'margin-top:10px', onclick: async () => {
@@ -1227,7 +1231,7 @@ async function screenShare() {
 function tabs() {
   const t = [['', '📷', 'Foto'], ['poze', '🖼', 'Poze']];
   if (can.manage()) t.push(['santiere', '🏗', 'Șantiere']);
-  if (can.admin()) t.push(['echipa', '👷', 'Echipa']);
+  if (can.manage()) t.push(['echipa', '👷', 'Echipa']); // responsabilul: muncitorii lui
   t.push(['cont', '⚙️', 'Cont']);
   const cur = location.hash.slice(1).split(/[/?]/)[0];
   const active = cur === 'santier' ? 'santiere' : cur;
@@ -1256,7 +1260,7 @@ async function route() {
     if (page === 'poze') await screenPoze();
     else if (page === 'santiere' && can.manage()) await screenSantiere();
     else if (page === 'santier' && can.manage()) await screenSantier(arg);
-    else if (page === 'echipa' && can.admin()) await screenEchipa();
+    else if (page === 'echipa' && can.manage()) await screenEchipa();
     else if (page === 'cont' || page === 'setari') await screenCont(query);
     else if (page === 'share') await screenShare();
     else screenFoto();

@@ -31,7 +31,7 @@ Fiecare șantier poate avea foldere, de ex. **État des lieux**, **Réception**,
 | Rol | Ce vede | Ce poate modifica / șterge |
 |---|---|---|
 | **Admin** | Tot: toate șantierele și toate pozele. Gestionează echipa și Google Drive. | Tot. |
-| **Responsabil** | Pozele lui + toate pozele de pe șantierele atribuite. Poate crea șantiere și atribui oameni. | Comentează / mută pozele de pe șantierele lui. **Șterge doar pozele lui.** |
+| **Responsabil** | Pozele lui + toate pozele de pe șantierele atribuite. Poate crea șantiere și atribui oameni. **Creează și gestionează conturi de muncitor** (doar pe șantierele lui). | Comentează / mută pozele de pe șantierele lui. **Șterge doar pozele lui.** |
 | **Muncitor** | Pozele lui + toate pozele de pe șantierele atribuite. Face poze doar pe acestea (sau „Fără șantier”). | **Doar pozele lui.** |
 
 Pozele „Fără șantier” ale altora le vede **doar adminul**, în **Șantiere → Fără șantier** și le poate muta pe șantierul potrivit.

@@ -19,12 +19,12 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '19'; // la fel ca APP_VERSION din app.js
+const VERSION = '20'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
 // ---------------------------------------------------------------- baza de date
-const SCHEMA = 6; // crește când se schimbă structura bazei
+const SCHEMA = 7; // crește când se schimbă structura bazei
 function open_db(string $file): PDO {
     $db = new PDO('sqlite:' . $file, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
     $db->exec('PRAGMA busy_timeout = 10000; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY;');
@@ -152,6 +152,8 @@ CREATE TABLE IF NOT EXISTS login_fail (k TEXT NOT NULL, at INTEGER NOT NULL);
         $db->exec('CREATE INDEX IF NOT EXISTS idx_e_folder ON entries(folder_id, taken_at DESC, id DESC)');
         if (!$has('users', 'key_hash')) $db->exec('ALTER TABLE users ADD COLUMN key_hash TEXT');
         $db->exec('CREATE INDEX IF NOT EXISTS idx_users_key ON users(key_hash)');
+        // v7 – responsabilul își vede muncitorii creați de el, chiar înainte să-i pună pe un șantier
+        if (!$has('users', 'created_by')) $db->exec('ALTER TABLE users ADD COLUMN created_by INTEGER');
         $db->exec('PRAGMA user_version = ' . SCHEMA);
         $db->exec('COMMIT');
     } catch (Throwable $e) { $db->exec('ROLLBACK'); throw $e; }
@@ -284,6 +286,13 @@ function set_site_users(int $siteId, array $ids): void {
     foreach (array_unique(array_map('intval', $ids)) as $uid) {
         q('INSERT OR IGNORE INTO site_users(site_id, user_id) SELECT ?, id FROM users WHERE id = ?', [$siteId, $uid]);
     }
+}
+// Responsabilul gestionează muncitorii de pe șantierele lui (sau creați de el).
+function manages(array $me, array $target): bool {
+    if (is_admin($me)) return true;
+    if ($me['role'] !== 'responsabil' || $target['role'] !== 'muncitor') return false;
+    if ((int) ($target['created_by'] ?? 0) === $me['id']) return true;
+    return (bool) array_intersect(assigned((int) $target['id']), assigned($me['id']));
 }
 function set_user_sites(int $userId, array $ids): void {
     q('DELETE FROM site_users WHERE user_id = ?', [$userId]);
@@ -929,63 +938,89 @@ function route(string $route, string $path, string $method): void {
     // ---------- utilizatori
     if ($route === 'GET api/users') {
         $u = need('admin', 'responsabil');
-        if (!is_admin($u)) {
+        // ?pick=1: listă scurtă pentru „Cine lucrează aici” (toți oamenii activi)
+        if (!empty($_GET['pick'])) {
             $rows = all('SELECT id, name, role FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE');
             foreach ($rows as &$r) $r['id'] = (int) $r['id'];
             out($rows);
             return;
         }
-        $users = all('SELECT u.id, u.name, u.username, u.role, u.active, u.photo_count AS count
-            FROM users u ORDER BY u.active DESC, u.name COLLATE NOCASE');
+        $mine = is_admin($u) ? null : assigned($u['id']);
+        $users = is_admin($u)
+            ? all('SELECT u.id, u.name, u.username, u.role, u.active, u.photo_count AS count FROM users u ORDER BY u.active DESC, u.name COLLATE NOCASE')
+            : all("SELECT u.id, u.name, u.username, u.role, u.active, u.photo_count AS count FROM users u
+                   WHERE u.role = 'muncitor' AND (u.created_by = :me OR u.id IN (SELECT user_id FROM site_users WHERE site_id IN (SELECT site_id FROM site_users WHERE user_id = :me2)))
+                   ORDER BY u.active DESC, u.name COLLATE NOCASE", ['me' => $u['id'], 'me2' => $u['id']]);
         $byUser = [];
         foreach (all('SELECT user_id, site_id FROM site_users') as $l) $byUser[(int) $l['user_id']][] = (int) $l['site_id'];
         foreach ($users as &$x) {
             foreach (['id', 'active', 'count'] as $k) $x[$k] = (int) $x[$k];
-            $x['siteIds'] = $byUser[$x['id']] ?? [];
+            $all = $byUser[$x['id']] ?? [];
+            // responsabilul vede doar șantierele lui; restul doar ca număr
+            $x['siteIds'] = $mine === null ? $all : array_values(array_intersect($all, $mine));
+            if ($mine !== null) $x['otherSites'] = count($all) - count($x['siteIds']);
         }
         out($users);
         return;
     }
     if ($route === 'POST api/users') {
-        need('admin');
+        $me = need('admin', 'responsabil');
         $b = body();
         $name = clean($b['name'] ?? '', 80); $user = clean($b['username'] ?? '', 40); $pw = (string) ($b['password'] ?? '');
         $role = in_array($b['role'] ?? '', ROLES, true) ? $b['role'] : 'muncitor';
+        $sites = is_array($b['siteIds'] ?? null) ? array_map('intval', $b['siteIds']) : [];
+        if (!is_admin($me)) { // responsabilul creează doar muncitori, pe șantierele lui
+            $role = 'muncitor';
+            $sites = array_values(array_intersect($sites, assigned($me['id'])));
+        }
         if (!$name || !$user) fail(400, 'Completează numele și utilizatorul');
         if (strlen($pw) < 4) fail(400, 'Parola trebuie să aibă minim 4 caractere');
         if (val('SELECT 1 FROM users WHERE username = ?', [$user])) fail(400, 'Utilizatorul există deja');
-        $id = tx(function () use ($name, $user, $pw, $role, $b, $db) {
-            q('INSERT INTO users(name, username, pass_hash, role) VALUES (?, ?, ?, ?)', [$name, $user, password_hash($pw, PASSWORD_DEFAULT), $role]);
+        $id = tx(function () use ($name, $user, $pw, $role, $sites, $me, $db) {
+            q('INSERT INTO users(name, username, pass_hash, role, created_by) VALUES (?, ?, ?, ?, ?)', [$name, $user, password_hash($pw, PASSWORD_DEFAULT), $role, $me['id']]);
             $id = (int) $db->lastInsertId();
-            set_user_sites($id, is_array($b['siteIds'] ?? null) ? $b['siteIds'] : []);
+            set_user_sites($id, $sites);
             return $id;
         });
         out(['id' => $id]);
         return;
     }
     if (preg_match('#^PATCH api/users/(\d+)$#', $route, $m)) {
-        $me = need('admin');
+        $me = need('admin', 'responsabil');
         $id = (int) $m[1];
         $u = one('SELECT * FROM users WHERE id = ?', [$id]);
         if (!$u) fail(404, 'Utilizator inexistent');
+        $u['id'] = (int) $u['id'];
+        if (!manages($me, $u)) fail(403, 'Poți modifica doar muncitorii de pe șantierele tale');
         $b = body();
-        $role = in_array($b['role'] ?? '', ROLES, true) ? $b['role'] : $u['role'];
+        $admin = is_admin($me);
+        $role = $admin && in_array($b['role'] ?? '', ROLES, true) ? $b['role'] : $u['role']; // responsabilul nu schimbă rolul
         $active = array_key_exists('active', $b) ? ($b['active'] ? 1 : 0) : (int) $u['active'];
         if ($id === $me['id'] && ($role !== 'admin' || !$active)) fail(400, 'Nu îți poți scoate singur drepturile de admin');
+        $mySites = $admin ? [] : assigned($me['id']);
+        $theirs = assigned($id);
+        if (!$admin && $active !== (int) $u['active'] && array_diff($theirs, $mySites))
+            fail(403, 'Muncitorul lucrează și pe alte șantiere: doar adminul îl poate dezactiva');
         $username = array_key_exists('username', $b) ? clean($b['username'], 40) : $u['username'];
         if (!$username) fail(400, 'Utilizator gol');
         if (val('SELECT 1 FROM users WHERE username = ? AND id != ?', [$username, $id])) fail(400, 'Utilizatorul există deja');
         $pw = (string) ($b['password'] ?? '');
         if ($pw !== '' && strlen($pw) < 4) fail(400, 'Parola trebuie să aibă minim 4 caractere');
         $name = array_key_exists('name', $b) ? (clean($b['name'], 80) ?: $u['name']) : $u['name'];
-        tx(function () use ($id, $name, $username, $role, $active, $pw, $b, $me) {
+        $sites = null;
+        if (is_array($b['siteIds'] ?? null)) {
+            $want = array_map('intval', $b['siteIds']);
+            // responsabilul schimbă doar șantierele lui; celelalte rămân cum sunt
+            $sites = $admin ? $want : array_values(array_unique(array_merge(array_diff($theirs, $mySites), array_intersect($want, $mySites))));
+        }
+        tx(function () use ($id, $name, $username, $role, $active, $pw, $sites, $me) {
             q('UPDATE users SET name = ?, username = ?, role = ?, active = ? WHERE id = ?', [$name, $username, $role, $active, $id]);
             if ($pw !== '') {
                 q('UPDATE users SET pass_hash = ? WHERE id = ?', [password_hash($pw, PASSWORD_DEFAULT), $id]);
                 if ($id !== $me['id']) q('DELETE FROM sessions WHERE user_id = ?', [$id]);
             }
             if (!$active) q('DELETE FROM sessions WHERE user_id = ?', [$id]);
-            if (is_array($b['siteIds'] ?? null)) set_user_sites($id, $b['siteIds']);
+            if ($sites !== null) set_user_sites($id, $sites);
         });
         out(['ok' => true]);
         return;
