@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '17'; // la fel ca VERSION din api.php
+const APP_VERSION = '18'; // la fel ca VERSION din api.php
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -898,7 +898,7 @@ async function editUser(u, sites) {
       h('label', { class: 'f' }, h('span', {}, 'Nume'), name),
       h('label', { class: 'f' }, h('span', {}, 'Utilizator (pentru logare)'), user),
       h('label', { class: 'f' }, h('span', {}, u ? 'Parolă nouă' : 'Parolă'), pass),
-      h('label', { class: 'f' }, h('span', {}, 'Rol'), seg), help,
+      h('div', { class: 'f' }, h('span', {}, 'Rol'), seg), help,
       siteBox, err,
       h('button', { class: 'btn primary block', onclick: save }, 'Salvează'),
       u && u.id !== state.user.id ? h('button', { class: 'btn block ' + (u.active ? 'danger' : ''), style: 'margin-top:10px', onclick: async () => {
