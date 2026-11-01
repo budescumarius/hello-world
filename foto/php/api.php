@@ -19,7 +19,7 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '28'; // la fel ca APP_VERSION din app.js
+const VERSION = '29'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
@@ -766,7 +766,24 @@ function nas_clean_name(string $s): string {
     $s = trim((string) preg_replace('#[\\\\/:*?"<>|\x00-\x1f]+#u', '-', $s), " .-");
     return $s === '' ? 'Șantier' : (function_exists('mb_substr') ? mb_substr($s, 0, 100) : substr($s, 0, 100));
 }
-function nas_root(): string { global $CONFIG; return nas_clean_name($CONFIG['drive_folder_name']); }
+// Dacă adresa duce deja într-un folder „Poze Șantier” (ex. folderul partajat), nu mai creăm încă unul în el.
+function nas_root(?string $url = null): string {
+    global $CONFIG;
+    $plain = function (string $t): string {
+        $t = function_exists('iconv') ? (string) @iconv('UTF-8', 'ASCII//TRANSLIT', $t) : $t;
+        return strtolower(preg_replace('/[^a-z0-9]+/i', '', $t));
+    };
+    $last = rawurldecode(basename((string) parse_url((string) ($url ?? setting('nas_url')), PHP_URL_PATH)));
+    if ($last !== '' && $plain($last) === $plain($CONFIG['drive_folder_name'])) return '';
+    return nas_clean_name($CONFIG['drive_folder_name']);
+}
+// Adresa NAS scrisă de om (cu spații, diacritice) → adresă corectă (fiecare bucată din cale codificată o singură dată)
+function nas_norm_url(string $url): string {
+    $p = parse_url($url);
+    if (!$p || empty($p['host'])) return $url;
+    $path = implode('/', array_map(function ($seg) { return rawurlencode(rawurldecode($seg)); }, explode('/', $p['path'] ?? '')));
+    return ($p['scheme'] ?? 'https') . '://' . $p['host'] . (isset($p['port']) ? ':' . $p['port'] : '') . rtrim($path, '/');
+}
 function nas_mkdir(string $rel): void {
     static $done = [];
     if (isset($done[$rel])) return;
@@ -776,13 +793,14 @@ function nas_mkdir(string $rel): void {
 }
 function nas_site_folder($siteId): string {
     $root = nas_root();
-    nas_mkdir($root);
+    if ($root !== '') nas_mkdir($root);
     $site = $siteId ? one('SELECT id, name, nas_folder FROM sites WHERE id = ?', [(int) $siteId]) : null;
-    if (!$site) { nas_mkdir("$root/Fără șantier"); return "$root/Fără șantier"; }
+    $pre = $root === '' ? '' : "$root/";
+    if (!$site) { nas_mkdir("{$pre}Fără șantier"); return "{$pre}Fără șantier"; }
     $name = $site['nas_folder'] ?: nas_clean_name($site['name']);
-    nas_mkdir("$root/$name");
+    nas_mkdir($pre . $name);
     if ($site['nas_folder'] !== $name) q('UPDATE sites SET nas_folder = ? WHERE id = ?', [$name, $site['id']]);
-    return "$root/$name";
+    return $pre . $name;
 }
 function nas_entry_folder(array $e): string {
     $site = nas_site_folder($e['site_id']);
@@ -843,11 +861,12 @@ function nas_rename_site(array $site, string $newName): void {
     if ($new === $site['nas_folder']) return;
     try {
         $root = nas_root();
-        $c = nas_move("$root/{$site['nas_folder']}", "$root/$new");
+        $pre = $root === '' ? '' : "$root/";
+        $c = nas_move($pre . $site['nas_folder'], $pre . $new);
         if ($c >= 200 && $c < 300) {
             q('UPDATE sites SET nas_folder = ? WHERE id = ?', [$new, $site['id']]);
             foreach (all('SELECT id, nas_path FROM entries WHERE site_id = ? AND nas_path IS NOT NULL', [$site['id']]) as $r) {
-                q('UPDATE entries SET nas_path = ? WHERE id = ?', ["$root/$new/" . basename($r['nas_path']), $r['id']]);
+                q('UPDATE entries SET nas_path = ? WHERE id = ?', [$pre . $new . '/' . basename($r['nas_path']), $r['id']]);
             }
         }
     } catch (Throwable $e) { error_log('NAS rename: ' . $e->getMessage()); }
@@ -1532,7 +1551,7 @@ function route(string $route, string $path, string $method): void {
     if ($route === 'POST api/nas/config') {
         need('admin');
         $b = body();
-        $url = rtrim(clean($b['url'] ?? '', 500), '/');
+        $url = nas_norm_url(rtrim(clean($b['url'] ?? '', 500), '/'));
         $user = clean($b['user'] ?? '', 200);
         $pass = (string) ($b['password'] ?? '');
         if ($pass === '' && $url === setting('nas_url') && $user === setting('nas_user')) $pass = (string) setting('nas_pass'); // parola rămâne
@@ -1542,8 +1561,12 @@ function route(string $route, string $path, string $method): void {
             $c = nas_req('PROPFIND', '', ['Depth: 0'], null, $cfg);
             if ($c === 404) throw new NasError('NAS: folderul din adresă nu există');
             if ($c >= 400) throw new NasError("NAS: răspuns neașteptat (HTTP $c). Verifică dacă WebDAV e pornit.");
-            $c = nas_req('MKCOL', nas_root(), [], null, $cfg);
-            if (!in_array($c, [201, 405, 301, 200], true)) throw new NasError("NAS: nu pot crea folderul „" . nas_root() . "” (HTTP $c). Verifică dreptul de scriere.");
+            // test de scriere: un folder mic, creat și șters
+            $probe = (nas_root($url) === '' ? '' : nas_root($url) . '/') . '.test-foto-santier';
+            if (nas_root($url) !== '') nas_req('MKCOL', nas_root($url), [], null, $cfg);
+            $c = nas_req('MKCOL', $probe, [], null, $cfg);
+            if (!in_array($c, [201, 405, 301, 200], true)) throw new NasError("NAS: nu pot scrie în folder (HTTP $c). Verifică dreptul de scriere al utilizatorului.");
+            nas_req('DELETE', $probe . '/', [], null, $cfg);
         } catch (NasError $e) { fail(400, $e->getMessage()); }
         $changed = $url !== setting('nas_url');
         set_setting('nas_url', $url); set_setting('nas_user', $user); set_setting('nas_pass', $pass);
