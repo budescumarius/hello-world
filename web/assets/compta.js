@@ -99,6 +99,7 @@ route('export', async () => {
     ...invoices.filter((i) => okInv(i) && ((i.data.kind === 'avoir' ? W.has('avoirs') && inP(i.data.date) : (W.has('emises') && inP(i.data.date)) || (W.has('encaissees') && paidIn(i.data.payments))))).map((i) => invRow(i, contacts)),
     ...expenses.filter((e) => okExp(e) && ((W.has('achats') && inP(e.data.date)) || (W.has('achpayes') && (paidIn(e.data.payments) || (e.data.paid && inP(e.data.paidDate)))))).map((e) => purchRow(e, contacts)),
   ].filter((r) => { const k = `${r.typ}${r.id}`; if (seen.has(k)) return false; seen.add(k); return true; }).sort((a, b) => a.typ.localeCompare(b.typ) || (a.date || '').localeCompare(b.date || '') || String(a.n).localeCompare(String(b.n)));
+  const done = rows.filter((r) => r.it.data.acct);
   const TYP = { vente: ['Facture émise', '#3b5bdb'], avoir: ['Note de crédit', '#7048e8'], achat: ['Facture d\'achat', '#e8590c'] };
   const page = layout({ title: 'Envoyer au comptable', icon: 'mail', back: isSimple() ? '#/dashboard' : null, sub: `Du ${fmtDate(from)} au ${fmtDate(to)}`, actions: `<button class="btn" data-zip2>${I.download} ZIP</button><button class="btn primary" data-send2>${I.mail} Envoyer au comptable</button>` });
   const years = [y, y - 1, y - 2];
@@ -108,9 +109,11 @@ route('export', async () => {
       <div class="exp-what"><b>Exporter :</b> ${[['emises', 'Factures émises (date de facture)'], ['encaissees', 'Factures encaissées (payées sur la période)'], ['avoirs', 'Notes de crédit'], ['achats', 'Factures d\'achat (date de facture)'], ['achpayes', 'Achats payés sur la période']].map(([k, l]) => `<label class="chip ${W.has(k) ? 'on' : ''}"><input type="checkbox" data-w="${k}" ${W.has(k) ? 'checked' : ''} hidden>${W.has(k) ? '✓ ' : ''}${l}</label>`).join('')}</div>
       ${P.q === 'x' ? `<div class="grid-form">${fieldHTML({ name: 'from', label: 'Du', type: 'date' }, from)}${fieldHTML({ name: 'to', label: 'Au', type: 'date' }, to)}</div>` : ''}
       <p class="muted">Choisissez la période et ce qu'il faut exporter. Le ZIP contient les fichiers PDF tels qu'ils ont été envoyés (vos factures) ou reçus (PDF du fournisseur, PDF joint aux factures Peppol ; photos converties en PDF), rangés par dossier, et les journaux CSV. Tout est coché : décochez ce que vous ne voulez pas envoyer.</p></div>
+    ${done.length ? `<div class="hint-box" style="margin-bottom:12px"><b>${done.length} document(s) déjà transmis au comptable</b> sur cette période : ils sont décochés pour éviter les doublons (filtre « Déjà exportés » pour les voir ou les renvoyer).</div>` : ''}
     <div class="kpis" data-k></div><div id="tbl"></div>
     <div class="exp-go"><button class="btn" data-onepdf>${I.file} Un seul PDF</button><button class="btn primary" data-zip>${I.download} Télécharger le ZIP (PDF)</button><button class="btn primary" data-send>${I.mail} Envoyer au comptable</button></div>`;
-  const st = { sel: null };
+  // déjà transmis au comptable : visibles mais décochés (pas de doublon) ; on peut les recocher
+  const st = { sel: new Set(rows.filter((r) => !r.it.data.acct).map((r) => r.id)) };
   const sum = () => {
     const sel = rows.filter((r) => st.sel.has(r.id)); const by = (t) => sel.filter((r) => r.typ === t);
     $('[data-k]', page).innerHTML = kpi('Factures émises', String(by('vente').length), { sub: `${money(by('vente').reduce((a, r) => a + r.ttc, 0))} TVAC` })
@@ -120,11 +123,12 @@ route('export', async () => {
   };
   dataTable($('#tbl', page), {
     rows, state: st, search: (r) => [r.n, r.who, r.piece].join(' '),
-    filters: { def: '', options: [['', 'Tout'], ...Object.entries(TYP).map(([k, [l, c]]) => [k, l, c])], match: (r, f) => r.typ === f },
-    select: { all: true, onChange: sum, actions: (picked) => [{ label: 'Envoyer au comptable', icon: 'mail', primary: true, run: () => sendToAccountant(picked, perLabel) }, { label: 'Télécharger le ZIP', icon: 'download', run: () => exportZip(picked, from, to) }] },
+    filters: { def: '', options: [['', 'Tout'], ['new', 'Pas encore exportés', '#2f9e44'], ['done', 'Déjà exportés', '#868e96'], ...Object.entries(TYP).map(([k, [l, c]]) => [k, l, c])], match: (r, f) => (f === 'new' ? !r.it.data.acct : f === 'done' ? !!r.it.data.acct : r.typ === f) },
+    select: { all: false, onChange: sum, actions: (picked) => [{ label: 'Retirer « déjà exporté »', icon: 'x', run: () => unmarkExported(picked) }, { label: 'Envoyer au comptable', icon: 'mail', primary: true, run: () => sendToAccountant(picked, perLabel) }, { label: 'Télécharger le ZIP', icon: 'download', run: () => exportZip(picked, from, to) }] },
     columns: [
       { l: 'Type', v: (r) => badge(...TYP[r.typ]) }, { l: 'N° / réf.', v: (r) => `<b>${esc(r.n || '—')}</b>` }, { l: 'Date', v: (r) => fmtDate(r.date), sort: (r) => r.date },
       { l: 'Client / fournisseur', v: (r) => esc(r.who) }, { l: 'HT', cls: 'r', v: (r) => money(r.ht), sort: (r) => r.ht }, { l: 'TVA', cls: 'r', v: (r) => money(r.tva) }, { l: 'TVAC', cls: 'r', v: (r) => `<b>${money(r.ttc)}</b>`, sort: (r) => r.ttc },
+      { l: 'Déjà exporté', v: (r) => (r.it.data.acct ? `${badge(`✓ ${fmtDate(r.it.data.acct.at)}`, '#868e96')}<br><small class="muted">${esc(EXP_VIA[r.it.data.acct.via] || '')}</small>` : badge('nouveau', '#2f9e44')) },
       { l: 'Pièce', v: (r) => (r.piece ? `<small class="muted">${esc(r.piece)}</small>` : badge('sans pièce', '#e5484d')) },
     ],
     onRow: (r) => go(r.typ === 'achat' ? `#/purchase/${r.id}` : `#/invoice/${r.id}`), empty: 'Aucune facture sur cette période',
@@ -239,7 +243,21 @@ async function exportOnePdf(picked, from, to, label) {
     }
     downloadBlob(pdf.output('blob'), `${fileTitle(co.name || 'export')}-comptabilite-${from}-${to}.pdf`);
     toast(`PDF prêt : ${docs.length} facture(s) émise(s), ${achats.length} reçue(s) ✓`, 4000);
+    await markExported(picked, 'pdf'); if (location.hash.startsWith('#/export')) render();
   } catch (e) { console.error(e); toast('PDF impossible : ' + e.message, 6000); } finally { if (btn) btn.disabled = false; }
+}
+// Documents transmis au comptable : marqués (date, comment) pour ne pas les renvoyer deux fois
+const EXP_VIA = { zip: 'ZIP', mail: 'e-mail', pdf: 'PDF' };
+async function markExported(picked, via) {
+  const at = today();
+  for (const r of picked) {
+    const type = r.typ === 'achat' ? 'expense' : 'invoice';
+    try { r.it.data.acct = { at, via, by: S.me.id }; await persist(type, r.it, { silent: true }); } catch (e) { console.warn('marquage export', e); }
+  }
+}
+async function unmarkExported(picked) {
+  for (const r of picked) { const type = r.typ === 'achat' ? 'expense' : 'invoice'; try { delete r.it.data.acct; await persist(type, r.it, { silent: true }); } catch (e) { /* */ } }
+  toast('Marquage « déjà exporté » retiré', 3000); render();
 }
 async function exportZip(picked, from, to) {
   if (!picked.length) return;
@@ -248,6 +266,7 @@ async function exportZip(picked, from, to) {
     const files = await exportFiles(picked, false); // qualité normale : comme les factures envoyées
     downloadBlob(makeZip(files), `${fileTitle(company().name || 'export')}-comptabilite-${from}-${to}.zip`);
     toast(`ZIP prêt : ${files.length} fichiers ✓`, 3500);
+    await markExported(picked, 'zip'); if (location.hash.startsWith('#/export')) render();
   } catch (e) { console.error(e); toast('Export impossible : ' + e.message, 5000); } finally { if (btn) btn.disabled = false; }
 }
 
@@ -287,5 +306,6 @@ async function sendAccountantMail(picked, m) {
       await api('POST', 'mail', fd);
     }
     toast(`Envoyé au comptable ✓ (${files.length} fichiers${packs.length > 1 ? `, ${packs.length} e-mails` : ''})`, 5000);
+    await markExported(picked, 'mail'); if (location.hash.startsWith('#/export')) render();
   } catch (e) { console.error(e); toast('Envoi impossible : ' + e.message, 6000); }
 }
