@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Jetons de design (style shadcn/ui) : barre latérale anthracite, espace de travail clair */
+:root {
+  --radius: 0.6rem;
+  --background: oklch(0.985 0.002 250);
+  --foreground: oklch(0.2 0.01 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.01 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.01 260);
+  --primary: oklch(0.32 0.03 255);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.96 0.004 250);
+  --secondary-foreground: oklch(0.25 0.01 260);
+  --muted: oklch(0.96 0.004 250);
+  --muted-foreground: oklch(0.5 0.01 260);
+  --accent: oklch(0.95 0.006 250);
+  --accent-foreground: oklch(0.25 0.01 260);
+  --destructive: oklch(0.55 0.2 27);
+  --border: oklch(0.91 0.005 250);
+  --input: oklch(0.89 0.005 250);
+  --ring: oklch(0.55 0.08 255);
+  --sidebar: oklch(0.24 0.008 260);
+  --sidebar-foreground: oklch(0.9 0.005 260);
+  --sidebar-muted: oklch(0.68 0.01 260);
+  --sidebar-accent: oklch(0.31 0.01 260);
+  /* statuts (toujours accompagnés d'un libellé) */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+  /* séries graphiques */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-good: var(--status-good);
+  --color-warning: var(--status-warning);
+  --color-serious: var(--status-serious);
+  --color-critical: var(--status-critical);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  body { @apply bg-background text-foreground antialiased; font-feature-settings: "tnum" 0; }
+
+}
+
+/* Rendu Markdown des rapports */
+.prose-report h1 { @apply text-xl font-semibold mb-3; }
+.prose-report h2 { @apply text-base font-semibold mt-6 mb-2; }
+.prose-report h3 { @apply text-sm font-semibold mt-4 mb-1; }
+.prose-report p { @apply text-sm my-2; }
+.prose-report ul { @apply list-disc pl-5 text-sm space-y-1 my-2; }
+.prose-report ol { @apply list-decimal pl-5 text-sm space-y-1 my-2; }
+.prose-report table { @apply w-full text-xs my-3 border-collapse; }
+.prose-report th { @apply text-left font-medium text-muted-foreground border-b px-2 py-1.5; }
+.prose-report td { @apply border-b px-2 py-1.5; font-variant-numeric: tabular-nums; }
+.prose-report em { @apply text-muted-foreground; }
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}

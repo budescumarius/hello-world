@@ -1,3 +1,7 @@
+> **Nouveau : [MADIBU AI](madibu-ai/README.md)** – plateforme de gestion (chantiers, contrôle financier, agents IA,
+> approbations) pour MADIBU GROUP, dans le dossier `madibu-ai/` (Next.js + Supabase). L'application PWA « Șantier »
+> ci-dessous reste inchangée.
+
 # Șantier – aplicație pentru iPhone și iPad
 
 Aplicație web instalabilă (PWA) pentru urmărirea șantierelor: planuri, puncte de observație/defecte, fotografii, firme, ședințe și rapoarte PDF. Funcționează **offline**, iar datele rămân pe dispozitiv.
