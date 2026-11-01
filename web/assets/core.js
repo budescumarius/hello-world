@@ -29,6 +29,8 @@ function money(x) {
   }
   return _fmt.format(r2(x) || 0);
 }
+// numéro de version (celui des fichiers chargés : ?v=… dans index.html)
+const appVersion = () => { const sc = document.querySelector('script[src*="assets/core.js"]'); const m = sc && sc.src.match(/[?&]v=(\d+)/); return m ? m[1] : '?'; };
 const isAdmin = () => S.me && (S.me.role === 'admin' || !!S.me.super);
 const userName = (id) => (S.users.find((u) => u.id === id) || {}).name || '—';
 const initials = (n) => String(n || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
@@ -334,6 +336,7 @@ function accountMenu() {
   if (S.me.super) items.push({ label: 'Plateforme (firmes)', icon: 'people', run: () => go('#/platform') });
   if (S.firm && S.firm.own === false) items.push({ label: 'Revenir à ma firme', icon: 'back', run: () => switchFirm(0) });
   items.push({ label: 'Conditions et confidentialité', icon: 'file', run: () => window.open('legal.php', '_blank') });
+  items.push({ label: `Version de l'application : ${appVersion()}`, icon: 'check', run: () => toast(`BâtiPro version ${appVersion()} – si ce n'est pas la dernière, fermez et rouvrez l'application`, 5000) });
   items.push({ sep: true }, { label: 'Se déconnecter', icon: 'logout', danger: true, run: async () => { await api('POST', 'auth/logout').catch(() => {}); S.ready = false; showLogin(); } });
   menuSheet(S.me.name || 'Mon compte', items);
 }
