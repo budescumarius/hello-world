@@ -36,6 +36,7 @@ const byId = (list, id) => list.find((x) => x.id === +id);
 // ---------------------------------------------------------------- Calculs
 // lignes : { kind:'title'|'item'|'text', desc, unit, qty, cost, price, vat, type, costBy? }
 function totals(doc) {
+  if (doc._lite && doc._sum) return doc._sum;
   const d = num(doc.discount) / 100;
   const by = {}; const costBy = {};
   let net = 0; let cost = 0;
@@ -147,7 +148,8 @@ const pUnit = (u) => String(u || '').toLowerCase().replace(/^m2$/, 'm²').replac
 let pMemo = null; let pMemoAt = 0;
 async function priceMemory() {
   if (pMemo && Date.now() - pMemoAt < 60000) return pMemo;
-  const [qs, arts] = await Promise.all([db.list('quote'), db.list('article')]);
+  // les 200 derniers devis suffisent (grosses firmes : pas des milliers de devis complets à charger)
+  const [qs, arts] = await Promise.all([db.list('quote', { last: 200 }), db.list('article')]);
   const out = [];
   for (const q of qs) for (const l of q.data.lines || []) if (l.kind === 'item' && !l.option && num(l.price) > 0 && l.desc) out.push({ id: l.id, w: pWords(l.desc), unit: pUnit(l.unit), price: num(l.price), cost: num(l.cost), date: q.data.date || '', no: q.number || 'brouillon', ok: q.data.status === 'accepte', qid: q.id, line: l });
   for (const a of arts) out.push({ lib: a, w: pWords(a.data.name), unit: pUnit(a.data.unit), price: articlePrice(a, arts), cost: articleCost(a, arts).cost, date: a.data.buy ? a.data.buy.d : (a.data.quoteDate || ''), name: a.data.name, arts });
@@ -222,9 +224,12 @@ function linesEditor(el, doc, opts) {
   };
   const changed = () => opts.onChange && opts.onChange();
   const autoGrow = (t) => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; };
+  // toutes les zones de texte d'un coup : d'abord toutes les écritures, puis toutes les lectures (une seule mise en page,
+  // au lieu d'une par ligne : un devis de 400 lignes s'ouvrait en plusieurs secondes)
+  const growAll = () => { const ts = $$('textarea.in', el); ts.forEach((t) => { t.style.height = 'auto'; }); const hs = ts.map((t) => t.scrollHeight); ts.forEach((t, i) => { t.style.height = hs[i] + 'px'; }); };
   function bind() {
-    $$('textarea.in', el).forEach(autoGrow);
-    requestAnimationFrame(() => $$('textarea.in', el).forEach(autoGrow)); // après la mise en page (cartes sur téléphone)
+    growAll();
+    requestAnimationFrame(growAll); // après la mise en page (cartes sur téléphone)
     $$('tr[data-i]', el).forEach((tr) => {
       const l = doc.lines[+tr.dataset.i];
       $$('[data-k]', tr).forEach((inp) => {

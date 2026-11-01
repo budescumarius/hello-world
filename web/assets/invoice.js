@@ -59,7 +59,7 @@ const invChangeValidated = (it) => validatedInvoiceChange(it, null, { edit: `#/i
 
 // ---------------------------------------------------------------- Liste
 route('invoices', async () => {
-  const [invoices, contacts, projects] = await Promise.all([db.list('invoice', { proforma: true }), db.list('contact'), db.list('project')]);
+  const [invoices, contacts, projects] = await Promise.all([db.list('invoice', { proforma: true, lite: true }), db.list('contact'), db.list('project')]);
   const rows = invoices.map((i) => ({ ...i, st: invState(i) }));
   const real = rows.filter((r) => r.data.kind !== 'proforma'); // les pro forma ne comptent dans aucun total
   const y = String(new Date().getFullYear());

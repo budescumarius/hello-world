@@ -88,7 +88,7 @@ async function purgeEmptyBuys(list) {
   return list.filter((x) => !junk.includes(x));
 }
 async function homeSimple() {
-  const all = await db.many(['quote', 'invoice', 'project', 'expense']);
+  const all = await db.many(['quote', 'invoice', 'project', 'expense'], null, { lite: true });
   all.expense = await purgeEmptyBuys(all.expense);
   all.invoice = await purgeEmpty(all.invoice, 'invoice'); all.quote = await purgeEmpty(all.quote, 'quote');
   const page = sPage('Accueil');

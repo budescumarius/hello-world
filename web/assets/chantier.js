@@ -49,7 +49,7 @@ async function editProject(p, preset = {}) {
 }
 
 route('projects', async () => {
-  const [projects, contacts, quotes] = await Promise.all([db.list('project'), db.list('contact'), db.list('quote')]);
+  const [projects, contacts, quotes] = await Promise.all([db.list('project'), db.list('contact'), db.list('quote', { lite: true })]);
   const budget = (p) => { const acc = quotes.filter((q) => q.project_id === p.id && q.data.status === 'accepte'); return acc.length ? acc.reduce((a, q) => a + totals(q.data).base, 0) : num(p.data.budget); };
   const view = ui.projView || 'cards';
   const page = layout({ active: 'projects', icon: 'crane', title: 'Chantiers',

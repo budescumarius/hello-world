@@ -27,6 +27,12 @@ function db(): PDO {
             PDO::ATTR_EMULATE_PREPARES => false,
         ]);
         // colonnes de la validation en deux étapes (ajoutées une seule fois sur les installations existantes)
+        // index pour les grosses firmes (une fois) : éléments d'un chantier, fichiers, tentatives de connexion
+        $fi = __DIR__ . '/uploads/.db-idx2';
+        if (!is_file($fi)) {
+            foreach (['ALTER TABLE items ADD lite MEDIUMTEXT NULL', 'ALTER TABLE items ADD KEY company_project (company_id, project_id)', 'ALTER TABLE files ADD KEY company_project (company_id, project_id)', 'ALTER TABLE notifs ADD KEY uc (user_id, company_id, id)'] as $sql) { try { $pdo->exec($sql); } catch (Throwable $e) { /* déjà là */ } }
+            @file_put_contents($fi, '1');
+        }
         $flag = __DIR__ . '/uploads/.db-2fa';
         if (!is_file($flag)) {
             try { $pdo->exec('ALTER TABLE users ADD COLUMN totp VARCHAR(64) NULL, ADD COLUMN totp_step BIGINT NOT NULL DEFAULT 0'); } catch (Throwable $e) { /* déjà là */ }
@@ -76,7 +82,59 @@ function out($data, int $code = 200): void {
     http_response_code($code);
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
-    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE);
+    if (strlen((string)$json) > 2048) gzip_start();
+    echo $json;
+    exit;
+}
+// Réponse compressée (gzip) si le navigateur l'accepte et que l'hébergement ne compresse pas déjà : les listes JSON passent ~8× plus vite
+function gzip_start(): void {
+    static $on = false;
+    if ($on || headers_sent() || !extension_loaded('zlib') || ini_get('zlib.output_compression')) return;
+    if (!str_contains((string)($_SERVER['HTTP_ACCEPT_ENCODING'] ?? ''), 'gzip')) return;
+    $on = true; ob_start('ob_gzhandler', 65536);
+}
+// Une ligne de la table items en JSON, sans décoder ni réencoder les données (déjà du JSON écrit par l'application)
+function row_json(array $r): string {
+    $d = (string)$r['data']; if ($d === '' || $d === '[]' || $d === 'null') $d = '{}';
+    return '{"id":' . (int)$r['id'] . ',"type":' . json_encode($r['type']) . ',"project_id":' . ($r['project_id'] !== null ? (int)$r['project_id'] : 'null')
+        . ',"parent_id":' . ($r['parent_id'] !== null ? (int)$r['parent_id'] : 'null') . ',"number":' . json_encode($r['number'], JSON_UNESCAPED_UNICODE)
+        . ',"version":' . (int)$r['version'] . ',"created_by":' . ($r['created_by'] !== null ? (int)$r['created_by'] : 'null') . ',"updated_by":' . ($r['updated_by'] !== null ? (int)$r['updated_by'] : 'null')
+        . ',"created_at":' . json_encode($r['created_at']) . ',"updated_at":' . json_encode($r['updated_at']) . ',"data":' . $d . '}';
+}
+// Liste d'éléments envoyée au fil de la lecture (mémoire constante, même pour une firme de dizaines de milliers de documents).
+// $group : réponse { type: [...] } (requête multi-types, lignes triées par type) ; $see / $view : filtre et vue (terrain, responsable)
+// Liste « lite » : devis / factures / commandes sans leurs lignes, avec leur résumé des totaux (_sum, écrit par l'application)
+const LITE_TYPES = ['quote', 'invoice', 'order'];
+function lite_data(array $d): array { unset($d['lines'], $d['progressRows']); $d['_lite'] = true; return $d; }
+// version « lite » enregistrée avec le document (colonne items.lite) : les listes la lisent sans rien recalculer
+function lite_json(string $type, $data): ?string { return in_array($type, LITE_TYPES, true) && is_array($data) && isset($data['_sum']) ? json_encode(lite_data($data), JSON_UNESCAPED_UNICODE) : null; }
+function stream_items(string $sql, array $args, ?array $group = null, ?callable $see = null, ?callable $view = null, bool $lite = false): void {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    gzip_start();
+    $pdo = db();
+    $pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+    $st = $pdo->prepare($sql); $st->execute($args);
+    $buf = ''; $cur = null; $first = true;
+    echo $group !== null ? '{' : '[';
+    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+        if ($see && !$see($r)) continue;
+        $isLite = $lite && in_array($r['type'], LITE_TYPES, true) && (($r['lite'] ?? null) !== null || str_contains((string)$r['data'], '"_sum"'));
+        if ($isLite && ($r['lite'] ?? null) !== null) { $r['data'] = $r['lite']; $isLite = false; }
+        if ($view) { $v = $view($r); if ($isLite && is_array($v['data'])) $v['data'] = lite_data($v['data']); $j = json_encode($v, JSON_UNESCAPED_UNICODE); }
+        elseif ($isLite) { $r['data'] = json_encode(lite_data(json_decode((string)$r['data'], true) ?: []), JSON_UNESCAPED_UNICODE); $j = row_json($r); }
+        else $j = row_json($r);
+        if ($group !== null && $r['type'] !== $cur) {
+            $buf .= ($cur === null ? '' : '],') . json_encode($r['type']) . ':['; $cur = $r['type']; unset($group[$cur]); $first = true;
+        }
+        $buf .= ($first ? '' : ',') . $j; $first = false;
+        if (strlen($buf) > 65536) { echo $buf; $buf = ''; }
+    }
+    $st->closeCursor(); $pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
+    if ($group !== null) { if ($cur !== null) $buf .= ']'; foreach (array_keys($group) as $t) $buf .= ($cur === null && $t === array_key_first($group) ? '' : ',') . json_encode($t) . ':[]'; $buf .= '}'; }
+    else $buf .= ']';
+    echo $buf;
     exit;
 }
 
@@ -767,6 +825,10 @@ function notif_tables(): void {
     static $done = false;
     if ($done) return;
     $done = true;
+    // une seule fois (pas un CREATE TABLE à chaque requête)
+    $flag = __DIR__ . '/uploads/.db-notif';
+    if (is_file($flag)) return;
+    register_shutdown_function(fn() => @file_put_contents($flag, '1'));
     db()->exec("CREATE TABLE IF NOT EXISTS notifs (id INT AUTO_INCREMENT PRIMARY KEY, company_id INT NOT NULL, user_id INT NOT NULL, kind VARCHAR(30) NOT NULL, title VARCHAR(190) NOT NULL, body VARCHAR(500) NOT NULL DEFAULT '', href VARCHAR(190) NOT NULL DEFAULT '', created_at DATETIME NOT NULL, read_at DATETIME NULL, KEY u (user_id, read_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     db()->exec('CREATE TABLE IF NOT EXISTS push_subs (id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, endpoint VARCHAR(700) NOT NULL, created_at DATETIME NOT NULL, KEY u (user_id), UNIQUE KEY ep (endpoint(250))) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 }
@@ -987,19 +1049,23 @@ function backup_dir(): string {
 }
 // Copie complète de la base de données (toutes les firmes) en SQL compressé, restaurable dans phpMyAdmin
 function backup_db(string $file): void {
-    $gz = gzopen($file, 'wb6');
+    @set_time_limit(0); ignore_user_abort(true);
+    $gz = gzopen($file, 'wb4');
     if (!$gz) throw new RuntimeException('Impossible d\'écrire la sauvegarde.');
     gzwrite($gz, "-- Sauvegarde BatiPro du " . date('Y-m-d H:i:s') . "\nSET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS = 0;\n");
     foreach (db()->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN) as $t) {
         $create = db()->query("SHOW CREATE TABLE `$t`")->fetch(PDO::FETCH_NUM)[1];
         gzwrite($gz, "\nDROP TABLE IF EXISTS `$t`;\n$create;\n");
-        $st = db()->query("SELECT * FROM `$t`", PDO::FETCH_NUM);
+        // lecture ligne par ligne (sans tout charger en mémoire : une grosse base dépasserait la limite de PHP et la sauvegarde serait vide)
+        $pdo = db(); $pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+        $st = $pdo->query("SELECT * FROM `$t`", PDO::FETCH_NUM);
         $rows = [];
         $flush = function () use (&$rows, $gz, $t) { if ($rows) gzwrite($gz, "INSERT INTO `$t` VALUES\n" . implode(",\n", $rows) . ";\n"); $rows = []; };
         while ($r = $st->fetch(PDO::FETCH_NUM)) {
-            $rows[] = '(' . implode(',', array_map(fn($v) => $v === null ? 'NULL' : db()->quote((string)$v), $r)) . ')';
+            $rows[] = '(' . implode(',', array_map(fn($v) => $v === null ? 'NULL' : $pdo->quote((string)$v), $r)) . ')';
             if (count($rows) >= 200) $flush();
         }
+        $st->closeCursor(); $pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
         $flush();
     }
     gzwrite($gz, "\nSET FOREIGN_KEY_CHECKS = 1;\n");

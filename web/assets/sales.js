@@ -273,7 +273,7 @@ async function newQuote(preset = {}) {
 }
 
 route('quotes', async () => {
-  const [all, contacts, projects] = await Promise.all([db.list('quote', { estimate: true }), db.list('contact'), db.list('project')]);
+  const [all, contacts, projects] = await Promise.all([db.list('quote', { estimate: true, lite: true }), db.list('contact'), db.list('project')]);
   const quotes = all.filter((q) => !q.data.estimate); const ests = all.filter((q) => q.data.estimate);
   const sum = (s) => quotes.filter((q) => q.data.status === s).reduce((a, q) => a + totals(q.data).base, 0);
   const page = layout({ active: 'quotes', icon: 'calc', title: isChef() ? 'Estimatifs' : 'Devis', sub: isChef() ? 'Vous chiffrez, le bureau vérifie et en fait un devis pour le client' : '',
@@ -349,7 +349,8 @@ route('quote', async (id) => {
   const q = await db.get('quote', +id);
   // responsable : les vrais devis en lecture (PDF), ses estimatifs en modification
   if (isChef() && !q.data.estimate) { location.replace(`#/print/quote/${q.id}`); return; }
-  const [contacts, projects, invoices, quotes] = await Promise.all([db.list('contact'), db.list('project'), db.list('invoice'), db.list('quote')]);
+  // résumés seulement (grosses firmes : pas toutes les factures et tous les devis complets pour ouvrir un devis)
+  const [contacts, projects, invoices, quotes] = await Promise.all([db.list('contact'), db.list('project'), db.list('invoice', { lite: true }), db.list('quote', { lite: true })]);
   const d = q.data;
   const parent = d.avenantOf ? quotes.find((x) => x.id === +d.avenantOf) : null; const avs = d.avenantOf ? [] : avenantsOf(q, quotes);
   const c = byId(contacts, d.clientId);
@@ -378,7 +379,7 @@ route('quote', async (id) => {
   drawTot();
   $('[data-act=head]').onclick = (e) => { if (!e.target.closest('a')) quoteHead(q, contacts, projects, render); };
   const nav = $('[data-newav]'); if (nav) nav.onclick = async () => { await save.flush(); createAvenant(q); };
-  const gea = $('[data-goea]'); if (gea) gea.onclick = async () => { await save.flush(); const prev = invoices.filter((i) => +i.data.quoteId === parent.id); progressInvoice(parent, prev, { project_id: parent.project_id, data: { quoteId: parent.id, clientId: parent.data.clientId, reverse: !!parent.data.reverse, title: parent.data.title } }); };
+  const gea = $('[data-goea]'); if (gea) gea.onclick = async () => { await save.flush(); const prev = (await db.list('invoice')).filter((i) => +i.data.quoteId === parent.id); progressInvoice(parent, prev, { project_id: parent.project_id, data: { quoteId: parent.id, clientId: parent.data.clientId, reverse: !!parent.data.reverse, title: parent.data.title } }); };
   $$('[data-st]').forEach((b) => {
     b.onclick = async () => {
       await save.flush();
@@ -651,9 +652,10 @@ async function marketLines(q, { separatelyBilled = true } = {}) {
   const d = q.data; const out = [];
   d.lines.forEach((l) => { if (l.kind === 'title' || (l.kind === 'item' && !l.option)) out.push({ ...l, _disc: num(d.discount) / 100 }); });
   if (d.avenantOf) return out;
-  const [quotes, invoices] = await Promise.all([db.list('quote'), separatelyBilled ? [] : db.list('invoice')]);
-  for (const av of avenantsOf(q, quotes).filter((x) => x.data.status === 'accepte')) {
-    if (!separatelyBilled && invoices.some((i) => +i.data.quoteId === av.id)) continue; // avenant déjà facturé à part
+  const [quotes, invoices] = await Promise.all([db.list('quote', { lite: true }), separatelyBilled ? [] : db.list('invoice', { lite: true })]);
+  for (const avLite of avenantsOf(q, quotes).filter((x) => x.data.status === 'accepte')) {
+    if (!separatelyBilled && invoices.some((i) => +i.data.quoteId === avLite.id)) continue; // avenant déjà facturé à part
+    const av = await db.get('quote', avLite.id); // ses lignes
     out.push({ id: `av${av.id}`, kind: 'title', desc: `Avenant n° ${av.data.avenantNo} – ${av.data.title || av.number}`, avenant: av.id });
     av.data.lines.forEach((l) => { if (l.kind === 'title') out.push({ ...l, level: 2, avenant: av.id }); else if (l.kind === 'item' && !l.option) out.push({ ...l, _disc: num(av.data.discount) / 100, avenant: av.id }); });
   }
@@ -817,7 +819,7 @@ async function progressInvoice(q, prev, base, existing) {
 }
 
 route('payments', async () => {
-  const [invoices, contacts] = await Promise.all([db.list('invoice'), db.list('contact')]);
+  const [invoices, contacts] = await Promise.all([db.list('invoice', { lite: true }), db.list('contact')]);
   const rows = [];
   for (const i of invoices) for (const p of i.data.payments || []) rows.push({ i, p });
   const page = layout({ active: 'finances', icon: 'coins', title: 'Paiements reçus' });

@@ -93,7 +93,7 @@ route('contacts', async (kind = 'client') => {
 
 route('contact', async (id) => {
   const c = await db.get('contact', +id);
-  const all = await db.many(['opportunity', 'quote', 'project', 'invoice', 'order', 'installation', 'intervention']);
+  const all = await db.many(['opportunity', 'quote', 'project', 'invoice', 'order', 'installation', 'intervention'], null, { lite: true });
   const mine = (t, key = 'clientId') => all[t].filter((x) => +x.data[key] === c.id);
   const opps = mine('opportunity'); const quotes = mine('quote'); const projects = mine('project'); const invoices = mine('invoice');
   const orders = mine('order', 'supplierId'); const inst = mine('installation'); const inter = mine('intervention');

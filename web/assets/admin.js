@@ -97,7 +97,7 @@ async function hrAbsences() {
 // chaque ligne avec son action (relancer, payer, facturer, c'est fait) ; à côté, l'argent et les chantiers en cours.
 route('dashboard', async () => {
   if (isSimple()) return homeSimple();
-  const all = await db.many(['opportunity', 'quote', 'invoice', 'project', 'task', 'point', 'intervention', 'expense', 'contact', 'report', 'timesheet', 'billreq']);
+  const all = await db.many(['opportunity', 'quote', 'invoice', 'project', 'task', 'point', 'intervention', 'expense', 'contact', 'report', 'timesheet', 'billreq'], null, { lite: true });
   const team = !!ui.dashAll;
   const page = layout({ active: 'dashboard', icon: 'sun', title: 'Aujourd\'hui', sub: esc(longDate(today())),
     actions: `<div class="tseg" role="group" aria-label="Afficher"><button type="button" data-team="0" class="${team ? '' : 'on'}">Moi</button><button type="button" data-team="1" class="${team ? 'on' : ''}">Toute l'équipe</button></div>` });
@@ -111,7 +111,7 @@ route('dashboard', async () => {
   const add = (rank, o) => items.push({ rank, ...o });
   // demandes de facture des responsables d'équipe : à faire en premier (le travail est fait)
   const breq = all.billreq.filter((b) => b.data.status === 'demandee');
-  const ests = (await db.list('quote', { estimate: true })).filter((q) => q.data.estimate && q.data.estStatus === 'soumis');
+  const ests = (await db.list('quote', { estimate: true, lite: true })).filter((q) => q.data.estimate && q.data.estStatus === 'soumis');
   if (ests.length) add(0, { tone: 'todo', icon: 'calc', title: ests.length > 1 ? `${ests.length} estimatifs à vérifier` : `Estimatif à vérifier : ${ests[0].data.title || ests[0].number}`, sub: ests.map((q) => `${userName(q.created_by)} · ${q.data.title || q.number}`).slice(0, 3).join(' – '), amount: ests.reduce((a, q) => a + totals(q.data).base, 0), href: ests.length > 1 ? '#/quotes' : `#/quote/${ests[0].id}`, act: ['Vérifier', ests.length > 1 ? '#/quotes' : `#/quote/${ests[0].id}`] });
   if (breq.length) add(0, { tone: 'todo', icon: 'coins', title: breq.length > 1 ? `${breq.length} factures demandées par les responsables` : `Facture demandée : ${(byId(all.project, breq[0].project_id) || { data: { name: '' } }).data.name}`, sub: breq.map((b) => `${userName(b.created_by)} · ${(byId(all.project, b.project_id) || { data: { name: '' } }).data.name}`).slice(0, 3).join(' – '), amount: breq.reduce((a, b) => a + num(b.data.amount), 0), href: '#/resp/demandes', act: ['Facturer', '#/resp/demandes'] });
   // trop d'éléments du même genre : une seule ligne qui renvoie à la liste
@@ -198,7 +198,7 @@ route('dashboard', async () => {
 
 // Tableau de bord de l'édition simplifiée : devis, factures, achats, chantiers
 async function dashboardSimple() {
-  const all = await db.many(['quote', 'invoice', 'project', 'expense']);
+  const all = await db.many(['quote', 'invoice', 'project', 'expense'], null, { lite: true });
   const page = layout({ active: 'dashboard', icon: 'dash', title: 'Tableau de bord' });
   const sum = (l, f) => l.reduce((a, x) => a + f(x), 0);
   const month = today().slice(0, 7);
@@ -237,7 +237,7 @@ function barChart(series, { h = 200, color = '#3b5bdb', fmt = money } = {}) {
   return `<div class="bars" style="height:${h}px">${series.map((s) => `<div class="bar-c" title="${esc(s.l)} : ${esc(fmt(s.v))}"><div class="bar-v"><i style="height:${(Math.abs(s.v) / max) * 100}%;background:${s.c || color}"></i></div><small>${esc(s.l)}</small></div>`).join('')}</div>`;
 }
 route('stats', async () => {
-  const all = await db.many(['invoice', 'quote', 'opportunity', 'project', 'expense', 'timesheet', 'order']);
+  const all = await db.many(['invoice', 'quote', 'opportunity', 'project', 'expense', 'timesheet', 'order'], null, { lite: true });
   const year = +(ui.statYear || new Date().getFullYear());
   const page = layout({ active: 'stats', icon: 'chart', title: 'Statistiques', actions: `<select data-y>${[0, 1, 2, 3].map((k) => new Date().getFullYear() - k).map((y) => `<option ${y === year ? 'selected' : ''}>${y}</option>`).join('')}</select>` });
   $('[data-y]').onchange = (e) => { ui.statYear = e.target.value; saveUi(); render(); };
@@ -494,7 +494,7 @@ function quickAddMenu() {
 // ---------------------------------------------------------------- Recherche rapide (⌘K)
 async function quickSearch() {
   const m = modal(`<div class="qs"><label class="search big">${I.search}<input placeholder="Rechercher un chantier, contact, devis, facture… ou une action" autofocus></label><div class="qs-res"></div></div>`, { wide: true });
-  const all = await db.many(['project', 'contact', 'quote', 'invoice', 'opportunity', 'order', 'intervention']);
+  const all = await db.many(['project', 'contact', 'quote', 'invoice', 'opportunity', 'order', 'intervention'], null, { lite: true });
   const actions = isSimple() ? quickActionsSimple().map(([l, , run]) => [l, run]) : quickActions();
   const items = [
     ...actions.map(([l, run]) => ({ l, s: 'Action', run })),

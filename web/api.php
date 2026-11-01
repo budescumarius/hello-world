@@ -280,6 +280,8 @@ switch ($seg[0] ?? '') {
         $type = $seg[1] ?? '';
         $id = isset($seg[2]) ? (int)$seg[2] : 0;
         $field = is_field($me); $chef = is_chef($me);
+        // portée calculée avant la lecture en flux (pas d'autre requête pendant qu'elle tourne)
+        if ($field) field_scope($me); if ($chef) chef_scope($me);
         $see = fn(array $r) => $field ? field_can_read($me, $r) : (!$chef || chef_can_read($me, $r));
         $view = fn(array $r) => row_out($field ? field_view($r) : ($chef ? chef_view($me, $r) : $r));
 
@@ -287,12 +289,12 @@ switch ($seg[0] ?? '') {
             // plusieurs types en une requête : ?types=a,b&project=ID
             $types = array_values(array_filter(explode(',', (string)($_GET['types'] ?? '')), fn($t) => preg_match($TYPE_RE, $t)));
             if (!$types) out([]);
+            $types = array_values(array_unique($types));
             $sql = 'SELECT * FROM items WHERE company_id = ? AND type IN (' . implode(',', array_fill(0, count($types), '?')) . ')';
             $args = array_merge([cid()], $types);
             if (isset($_GET['project'])) { $sql .= ' AND project_id = ?'; $args[] = (int)$_GET['project']; }
-            $res = array_fill_keys($types, []);
-            foreach (q($sql . ' ORDER BY id', $args)->fetchAll() as $r) if ($see($r)) $res[$r['type']][] = $view($r);
-            out($res);
+            $plain = !$field && !$chef;
+            stream_items($sql . ' ORDER BY type, id', $args, array_fill_keys($types, true), $plain ? null : $see, $plain ? null : $view, !empty($_GET['lite']));
         }
         if (!preg_match($TYPE_RE, $type)) fail(400, 'Type invalide');
         if ($method !== 'GET' && is_chef($me) && in_array($type, CHEF_READONLY, true)) fail(403, 'La facturation est gérée par le bureau : utilisez « Demander une facture ».');
@@ -301,7 +303,10 @@ switch ($seg[0] ?? '') {
             $sql = 'SELECT * FROM items WHERE company_id = ? AND type = ?'; $args = [cid(), $type];
             if (isset($_GET['project'])) { $sql .= ' AND project_id = ?'; $args[] = (int)$_GET['project']; }
             if (isset($_GET['parent'])) { $sql .= ' AND parent_id = ?'; $args[] = (int)$_GET['parent']; }
-            out(array_map($view, array_values(array_filter(q($sql . ' ORDER BY id', $args)->fetchAll(), $see))));
+            $plain = !$field && !$chef;
+            $last = max(0, min(1000, (int)($_GET['last'] ?? 0)));
+            if ($last) $sql = "SELECT * FROM ($sql ORDER BY id DESC LIMIT $last) x";
+            stream_items($sql . ' ORDER BY id', $args, null, $plain ? null : $see, $plain ? null : $view, !empty($_GET['lite']));
         }
         if ($method === 'GET') {
             $r = q('SELECT * FROM items WHERE id = ? AND type = ? AND company_id = ?', [$id, $type, cid()])->fetch();
@@ -333,8 +338,8 @@ switch ($seg[0] ?? '') {
             $number = null;
             if (isset(NUMBERED[$type])) $number = make_number($type === 'quote' && is_array($data) && !empty($data['estimate']) ? 'estimate' : $type);
             if ($type === 'point' && $pid) $number = (string)next_counter("point-$pid");
-            q('INSERT INTO items (company_id, type, project_id, parent_id, number, data, version, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,1,?,?,?,?)',
-              [cid(), $type, $pid, $parent, $number, json_encode($data, JSON_UNESCAPED_UNICODE), $me['id'], $me['id'], now(), now()]);
+            q('INSERT INTO items (company_id, type, project_id, parent_id, number, data, lite, version, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,1,?,?,?,?)',
+              [cid(), $type, $pid, $parent, $number, json_encode($data, JSON_UNESCAPED_UNICODE), lite_json($type, $data), $me['id'], $me['id'], now(), now()]);
             $nid = (int)db()->lastInsertId();
             db()->commit();
             log_activity($me['id'], 'create', $type, $nid, $pid ?? ($type === 'project' ? $nid : null), $data['name'] ?? $data['title'] ?? $number);
@@ -374,14 +379,16 @@ switch ($seg[0] ?? '') {
                 if (empty($was['estimate']) || (array_key_exists('data', $b) && empty($b['data']['estimate']))) fail(403, 'Les devis sont gérés par le bureau : vous pouvez préparer des estimatifs.');
                 unset($b['number']);
             }
+            // jamais enregistrer un document reçu sans ses lignes (liste « lite ») : ce serait les effacer
+            if (is_array($b['data'] ?? null) && !empty($b['data']['_lite'])) fail(400, 'Document incomplet : rechargez la page puis réessayez.');
             if (isset($b['version']) && (int)$b['version'] !== (int)$cur['version'] && empty($b['force'])) {
                 out(['error' => 'Cet élément a été modifié par un autre utilisateur entre-temps.', 'conflict' => $view($cur)], 409);
             }
             $data = array_key_exists('data', $b) ? json_encode($b['data'], JSON_UNESCAPED_UNICODE) : $cur['data'];
             $pid = array_key_exists('project_id', $b) ? ($b['project_id'] === null || $b['project_id'] === '' ? null : (int)$b['project_id']) : $cur['project_id'];
             $number = array_key_exists('number', $b) ? $b['number'] : $cur['number'];
-            q('UPDATE items SET data = ?, project_id = ?, number = ?, version = version + 1, updated_by = ?, updated_at = ? WHERE id = ?',
-              [$data, $pid, $number, $me['id'], now(), $id]);
+            q('UPDATE items SET data = ?, lite = ?, project_id = ?, number = ?, version = version + 1, updated_by = ?, updated_at = ? WHERE id = ?',
+              [$data, lite_json($type, json_decode($data, true)), $pid, $number, $me['id'], now(), $id]);
             $d = json_decode($data, true) ?: [];
             if (empty($b['silent'])) log_activity($me['id'], 'update', $type, $id, $pid !== null ? (int)$pid : ($type === 'project' ? $id : null), $d['name'] ?? $d['title'] ?? $number);
             $row = q('SELECT * FROM items WHERE id = ?', [$id])->fetch();

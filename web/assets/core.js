@@ -86,21 +86,32 @@ const noProforma = (l) => l.filter((x) => !x.data || x.data.kind !== 'proforma')
 // estimatifs des responsables (devis pas encore vérifiés par le bureau) : hors des chiffres, sauf demande explicite
 const noEstimate = (l) => l.filter((x) => !x.data || !x.data.estimate);
 // plusieurs types en une requête ; sans chantier, chaque liste rejoint la mémoire (et en sort si elle y est déjà)
-async function dbMany(types, project) {
-  if (project != null) return dbcGet(`M:${types.join(',')}:${project}`, `items&types=${types.join(',')}&project=${project}`);
-  const miss = types.filter((t) => !dbcFresh(`T:${t}`));
+const LITE_TYPES = ['quote', 'invoice', 'order'];
+async function dbMany(types, project, lite) {
+  const L = lite ? '&lite=1' : ''; const key = (t) => `T:${t}${lite && LITE_TYPES.includes(t) ? '&lite=1' : ''}`;
+  if (project != null) return dbcGet(`M:${types.join(',')}:${project}${L}`, `items&types=${types.join(',')}&project=${project}${L}`);
+  const miss = types.filter((t) => !dbcFresh(key(t)));
   if (miss.length) {
-    const at = Date.now(); const p = api('GET', `items&types=${miss.join(',')}`);
-    miss.forEach((t) => { const e = { at, p: p.then((r) => r[t] || []) }; DBC.set(`T:${t}`, e); e.p.catch(() => { if (DBC.get(`T:${t}`) === e) DBC.delete(`T:${t}`); }); });
+    const at = Date.now(); const p = api('GET', `items&types=${miss.join(',')}${L}`);
+    miss.forEach((t) => { const e = { at, p: p.then((r) => r[t] || []) }; DBC.set(key(t), e); e.p.catch(() => { if (DBC.get(key(t)) === e) DBC.delete(key(t)); }); });
   }
-  const lists = await Promise.all(types.map((t) => dbcGet(`T:${t}`, `items/${t}`)));
+  const lists = await Promise.all(types.map((t) => dbcGet(key(t), `items/${t}${lite && LITE_TYPES.includes(t) ? '&lite=1' : ''}`)));
   return Object.fromEntries(types.map((t, i) => [t, lists[i]]));
 }
 const db = {
-  list: (type, opt = {}) => (opt.project == null && opt.parent == null ? dbcGet(`T:${type}`, `items/${type}`) : dbcGet(`L:${type}:${opt.project}:${opt.parent}`, `items/${type}${opt.project != null ? `&project=${opt.project}` : ''}${opt.parent != null ? `&parent=${opt.parent}` : ''}`)).then((r) => (type === 'invoice' && !opt.proforma && Array.isArray(r) ? noProforma(r) : type === 'quote' && !opt.estimate && Array.isArray(r) ? noEstimate(r) : r)),
-  many: (types, project) => dbMany(types, project).then((r) => { if (r && Array.isArray(r.invoice)) r.invoice = noProforma(r.invoice); if (r && Array.isArray(r.quote)) r.quote = noEstimate(r.quote); return r; }),
+  // opt.lite : devis / factures / commandes sans leurs lignes (résumé des totaux) – pour les listes ; jamais pour modifier un document
+  list: (type, opt = {}) => { const L = (opt.lite && LITE_TYPES.includes(type) ? '&lite=1' : '') + (opt.last ? `&last=${+opt.last}` : ''); return (opt.project == null && opt.parent == null ? dbcGet(`T:${type}${L}`, `items/${type}${L}`) : dbcGet(`L:${type}:${opt.project}:${opt.parent}${L}`, `items/${type}${opt.project != null ? `&project=${opt.project}` : ''}${opt.parent != null ? `&parent=${opt.parent}` : ''}${L}`)).then((r) => (type === 'invoice' && !opt.proforma && Array.isArray(r) ? noProforma(r) : type === 'quote' && !opt.estimate && Array.isArray(r) ? noEstimate(r) : r)); },
+  many: (types, project, opt = {}) => dbMany(types, project, !!opt.lite).then((r) => { if (r && Array.isArray(r.invoice)) r.invoice = noProforma(r.invoice); if (r && Array.isArray(r.quote)) r.quote = noEstimate(r.quote); return r; }),
   get: (type, id) => api('GET', `items/${type}/${id}`),
   async save(type, it, opt = {}) {
+    // élément venu d'une liste « lite » (sans ses lignes) : on repart du document complet et on y reporte les champs modifiés
+    if (it.id && it.data && it.data._lite) {
+      const full = await api('GET', `items/${type}/${it.id}`);
+      const { _lite, ...changed } = it.data; delete changed.lines; delete changed.progressRows;
+      it.data = Object.assign(full.data || {}, changed);
+    }
+    // résumé des totaux gardé avec le document : les listes l'affichent sans charger toutes les lignes
+    if (LITE_TYPES.includes(type) && it.data && Array.isArray(it.data.lines)) { const { _sum, ...d0 } = it.data; it.data._sum = totals(d0); }
     try {
       if (it.id) return await api('PUT', `items/${type}/${it.id}`, { data: it.data, version: it.version, project_id: it.project_id ?? null, number: it.number, silent: opt.silent, force: opt.force });
       return await api('POST', `items/${type}`, { data: it.data, project_id: it.project_id ?? null, parent_id: it.parent_id ?? null });
@@ -591,6 +602,8 @@ function dataTable(el, { columns, rows, onRow, empty: emptyMsg = 'Aucun élémen
     if (footer) { const f0 = footer; footer = (l) => f0(l).replace(/<tr([^>]*)>/g, '<tr$1><td class="sel"></td>'); }
   }
   let shownList = [];
+  // longue liste (grosses firmes) : affichée par pages de 50, sinon des milliers de lignes ralentissent la page
+  if (!pageSize && rows.length > 150) pageSize = 50;
   st.q = st.q || ''; st.f = st.f ?? (filters ? filters.def ?? '' : ''); st.pg = st.pg || 1; if (pageSize) st.ps = st.ps || pageSize;
   const draw = () => {
     const q = st.q.toLowerCase();
@@ -676,7 +689,7 @@ async function render() {
   clearTimeout(slow); if (seq === renderSeq) document.body.classList.remove('loading');
   if (seq === renderSeq) window.scrollTo(0, 0);
   // première page affichée : les listes les plus utilisées se chargent en arrière-plan (les autres pages s'ouvrent ensuite tout de suite)
-  if (!render.warm && !isField()) { render.warm = true; const go2 = () => db.many(isChef() ? ['project', 'employee', 'timesheet', 'quote'] : ['project', 'contact', 'invoice', 'quote', 'expense']).catch(() => {}); (window.requestIdleCallback || ((f) => setTimeout(f, 800)))(go2); }
+  if (!render.warm && !isField()) { render.warm = true; const go2 = () => (isChef() ? db.many(['project', 'employee', 'timesheet', 'quote']) : db.many(['project', 'contact', 'invoice', 'quote', 'expense'], null, { lite: true })).catch(() => {}); (window.requestIdleCallback || ((f) => setTimeout(f, 800)))(go2); }
 }
 window.addEventListener('hashchange', render);
 // « Remonter » : bouton flottant dès qu'on a fait défiler une longue page

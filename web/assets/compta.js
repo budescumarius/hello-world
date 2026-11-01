@@ -79,7 +79,7 @@ async function deleteMany(kind, picked) {
 const invRow = (i, contacts) => { const t = invState(i).t; return { id: i.id, it: i, typ: i.data.kind === 'avoir' ? 'avoir' : 'vente', n: i.number, date: i.data.date, who: contactName(byId(contacts, i.data.clientId)), ht: t.base, tva: t.vat, ttc: t.total, piece: 'PDF généré' }; };
 const purchRow = (e, contacts) => { const d = e.data; const ttc = purchTtc(d); return { id: e.id, it: e, typ: 'achat', n: d.ref || '', date: d.date, who: contactName(byId(contacts, d.supplierId)), ht: num(d.amount), tva: r2(ttc - num(d.amount)), ttc, piece: d.fileId ? (d.fileName || 'pièce jointe') : '' }; };
 route('export', async () => {
-  const [invoices, expenses, contacts] = await Promise.all([db.list('invoice'), db.list('expense'), db.list('contact')]);
+  const [invoices, expenses, contacts] = await Promise.all([db.list('invoice', { lite: true }), db.list('expense'), db.list('contact')]);
   const now = new Date(); const y = now.getFullYear(); const qNow = Math.floor(now.getMonth() / 3) + 1;
   // par défaut : le trimestre qui vient de se terminer si on est dans le 1er mois d'un trimestre, sinon le trimestre en cours
   const def = now.getMonth() % 3 === 0 ? (qNow === 1 ? { y: y - 1, q: 4 } : { y, q: qNow - 1 }) : { y, q: qNow };
