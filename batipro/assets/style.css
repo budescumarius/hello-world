@@ -2010,3 +2010,13 @@ body.loading::before { content: ''; position: fixed; top: 0; left: 0; right: 0; 
   .print-shell .top-title h1 { white-space: normal; }
 }
 .exp-what { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 10px 0; } .exp-what label.chip { cursor: pointer; }
+
+/* ---------- Pilotage (extraits bancaires) */
+.pil-cov { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; margin: 10px 0 4px; }
+.pil-cov i { height: 12px; border-radius: 3px; background: var(--border); }
+.pil-cov i.part { background: #f08c00; }
+.pil-cov i.full { background: #2f9e44; }
+.pil-tx-wrap { overflow-x: auto; margin: 10px 0; }
+.pil-dup td { opacity: .55; text-decoration: line-through; }
+.pil-dup td:nth-last-child(2) { text-decoration: none; }
+.pil-raw { white-space: pre-wrap; word-break: break-word; }

@@ -1,0 +1,46 @@
+{
+  "ACC": {
+    "europabank": "BE05671000010175",
+    "belfius": "BE57068000020235",
+    "bnp": "BE56001000030388"
+  },
+  "CP": {
+    "client": "BE30063111111111",
+    "soustraitant": "BE12737222222292",
+    "fournisseur": "BE94310333333314",
+    "salarie": "BE80001444444477"
+  },
+  "COMM": {
+    "invoice": "+++000/0012/02695+++",
+    "expense": "+++000/0099/99989+++"
+  },
+  "europabank": {
+    "jan": {
+      "opening": 100000,
+      "closing": 430266,
+      "n": 5
+    },
+    "feb": {
+      "opening": 430266,
+      "closing": 369066,
+      "n": 2
+    },
+    "mar": {
+      "opening": 369066,
+      "closing": 368366,
+      "n": 1
+    }
+  },
+  "belfius": {
+    "number": 12,
+    "opening": 1000000,
+    "closing": 940000,
+    "n": 5
+  },
+  "bnp": {
+    "number": 3,
+    "opening": 15532,
+    "closing": 918277,
+    "n": 6
+  }
+}

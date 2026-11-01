@@ -292,7 +292,7 @@ const SPACES_CHEF = () => { const n = typeof rz === 'function' ? rz('nav') : ['A
   { k: 'crew', l: n[2], i: 'helmet', h: '#/resp/echipa', sec: [[n[5], '#/resp/echipa', '#/crew/', '#/hr/'], [n[6], '#/planning/team', '#/planning/projects']] },
   { k: 'more', l: n[3], i: 'send', h: '#/resp/trimise', sec: [] },
 ]; };
-const spaces = () => (isField() ? SPACES_FIELD() : isSimple() ? SPACES_SIMPLE : isChef() ? SPACES_CHEF() : SPACES);
+const spaces = () => (isField() ? SPACES_FIELD() : isSimple() ? SPACES_SIMPLE : isChef() ? SPACES_CHEF() : SPACES.filter((sp) => !sp.show || sp.show())); // show : espace optionnel (ex. Pilotage)
 const ui = (() => { try { return JSON.parse(localStorage.getItem('bp-ui') || '{}'); } catch (e) { return {}; } })();
 // les sélections (Set) ne sont pas enregistrées : elles repartent vides à la prochaine visite
 const saveUi = () => { try { localStorage.setItem('bp-ui', JSON.stringify(ui, (k, v) => (v instanceof Set ? undefined : v))); } catch (e) { /* stockage indisponible */ } };

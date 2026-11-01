@@ -1039,6 +1039,12 @@ switch ($seg[0] ?? '') {
         fail(404, 'Route inconnue');
 
     // ------------------------------------------------------------ Historique des actions
+    // ------------------------------------------------------------ PILOTAGE MADIBU (extraits bancaires, contrôle de trésorerie) – administrateurs
+    case 'pilot':
+        require_once __DIR__ . '/pilotage/bank.php';
+        pil_route($method, $seg);
+        break;
+
     case 'activity':
         $me = require_staff();
         $args = [cid()]; $sql = 'SELECT a.*, u.name AS user_name FROM activity a LEFT JOIN users u ON u.id = a.user_id WHERE a.company_id = ?';
