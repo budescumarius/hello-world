@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '16'; // la fel ca VERSION din api.php
+const APP_VERSION = '17'; // la fel ca VERSION din api.php
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -31,12 +31,12 @@ function h(tag, attrs, ...kids) {
 const fill = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter((k) => k != null && k !== false));
 
 let toastT;
-function toast(msg) {
+function toast(msg, ms = 2600) {
   const t = $('#toast');
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastT);
-  toastT = setTimeout(() => t.classList.remove('show'), 2600);
+  toastT = setTimeout(() => t.classList.remove('show'), ms);
 }
 
 class HttpError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
@@ -227,29 +227,81 @@ async function toJpeg(src, max, q) {
 
 // Pozele HEIC de pe iPhone (chiar și cu numele .jpeg) nu se deschid în Chrome/Firefox:
 // le convertim în JPEG cu un convertor care se încarcă doar când e nevoie (≈1,3 MB, o singură dată).
-const isHeicFile = async (file) => {
-  const b = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+// Ce fel de fișier e de fapt (după primii octeți, nu după nume): pentru conversie și pentru mesaje clare.
+async function sniff(file) {
+  const b = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  const hex = [...b.slice(0, 12)].map((x) => x.toString(16).padStart(2, '0')).join(' ');
   const t = String.fromCharCode(...b.slice(4, 12));
-  return t.startsWith('ftyp') && /^(heic|heix|hevc|hevx|heim|heis|mif1|msf1)/.test(t.slice(4));
-};
+  let kind = 'necunoscut';
+  if (!file.size || !b.length) kind = 'gol';
+  else if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) kind = 'jpeg';
+  else if (t.startsWith('ftyp')) kind = 'heif:' + t.slice(4).trim(); // HEIC / HEIF / AVIF – orice variantă
+  else if ((b[0] === 0x49 && b[1] === 0x49 && b[2] === 0x2a) || (b[0] === 0x4d && b[1] === 0x4d && b[3] === 0x2a)) kind = 'tiff';
+  else if (b[0] === 0x89 && b[1] === 0x50) kind = 'png';
+  return { kind, hex, kb: Math.round(file.size / 1024) };
+}
+class PhotoError extends Error {}
+// Convertorul HEIC (libheif, WebAssembly) se încarcă doar la prima poză HEIC, apoi rămâne în memorie.
+// Deschide și pozele HEIC pe 10 biți (HDR) ale iPhone-urilor noi.
 let heicLib = null;
 function loadHeic() {
-  return heicLib || (heicLib = new Promise((res, rej) => {
-    const sc = document.createElement('script');
-    sc.src = 'vendor/heic2any.min.js';
-    sc.onload = () => res(window.heic2any);
-    sc.onerror = () => { heicLib = null; rej(new Error('nu pot încărca convertorul HEIC')); };
-    document.head.append(sc);
-  }));
+  return heicLib || (heicLib = (async () => {
+    try {
+      // scriptul și modulul WebAssembly se descarcă în paralel; modulul îi este dat gata încărcat
+      const script = new Promise((res, rej) => {
+        const sc = document.createElement('script');
+        sc.src = 'vendor/libheif.js';
+        sc.onload = res;
+        sc.onerror = () => rej(new Error('nu pot încărca convertorul HEIC'));
+        document.head.append(sc);
+      });
+      const wasm = fetch('vendor/libheif.wasm').then((r) => { if (!r.ok) throw new Error('nu pot încărca convertorul HEIC (' + r.status + ')'); return r.arrayBuffer(); });
+      const [, wasmBinary] = await Promise.all([script, wasm]);
+      const mod = window.libheif({ wasmBinary });
+      if (!mod?.HeifDecoder) throw new Error('convertorul HEIC nu a pornit');
+      return mod;
+    } catch (e) {
+      heicLib = null; // la următoarea poză se încearcă din nou
+      throw e instanceof Error ? e : new Error('convertorul HEIC nu a pornit: ' + e);
+    }
+  })());
 }
+const withTimeout = (p, ms, msg) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
+async function heicDecode(file) {
+  const lib = await withTimeout(loadHeic(), 60000, 'convertorul HEIC nu s-a încărcat (internet lent?)');
+  const dec = new lib.HeifDecoder();
+  const img = dec.decode(new Uint8Array(await file.arrayBuffer()))[0];
+  if (!img) throw new Error('fișierul HEIC nu conține nicio imagine');
+  try {
+    const w = img.get_width(), h = img.get_height();
+    const data = await withTimeout(new Promise((res, rej) =>
+      img.display(new ImageData(w, h), (d) => (d ? res(d) : rej(new Error('decodare eșuată'))))), 60000, 'conversia a durat prea mult');
+    if (window.createImageBitmap) { try { return await createImageBitmap(data); } catch {} }
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').putImageData(data, 0, 0);
+    return c;
+  } finally { img.free?.(); dec.free?.(); }
+}
+
 async function openImage(file) {
   try {
     return await decode(file);
   } catch (e) {
-    if (!(await isHeicFile(file).catch(() => false))) throw e;
-    toast('Convertesc poza HEIC…');
-    const out = await (await loadHeic())({ blob: file, toType: 'image/jpeg', quality: 0.92 });
-    return decode(Array.isArray(out) ? out[0] : out);
+    const f = await sniff(file).catch(() => ({ kind: 'necunoscut', hex: '?', kb: 0 }));
+    const name = file.name || 'poza';
+    if (f.kind.startsWith('heif')) {
+      toast('Convertesc poza HEIC…');
+      try {
+        return await heicDecode(file);
+      } catch (err) {
+        throw new PhotoError(`${name} e o poză HEIC (${f.kind.slice(5)}), dar conversia nu a mers (${err?.message || err?.code || err}). ` +
+          'Deschide-o din Safari sau setează pe iPhone: Setări → Cameră → Formate → „Cel mai compatibil”.');
+      }
+    }
+    if (f.kind === 'gol') throw new PhotoError(`${name} e gol (0 KB): probabil poza e încă în iCloud. Deschide-o o dată în aplicația Poze, ca să se descarce, apoi încearcă din nou.`);
+    if (f.kind === 'tiff') throw new PhotoError(`${name} e o poză RAW / ProRAW (${f.kb} KB), pe care browserul nu o poate deschide. Exportă-o ca JPEG (Poze → Fișier → Exportă) sau fă poza direct cu butonul 📷.`);
+    if (f.kind === 'jpeg') throw e; // JPEG pe care browserul nu-l poate desena: mai jos se trimite originalul
+    throw new PhotoError(`Nu pot deschide ${name}: format ${f.kind} (${f.kb} KB, început: ${f.hex}). Trimite-mi acest mesaj și îl rezolv.`);
   }
 }
 
@@ -273,10 +325,10 @@ async function addPhotos(files, fromCamera) {
       } finally { img.close?.(); }
     } catch (e) {
       // Ultima variantă: trimitem poza originală, ca să nu se piardă.
-      if (await isJpegFile(file).catch(() => false)) {
+      if (!(e instanceof PhotoError) && await isJpegFile(file).catch(() => false)) {
         full = file; thumb = null; // serverul folosește poza și ca miniatură
       } else {
-        toast(`Nu pot deschide ${file.name || 'poza'} (${e.message || 'format necunoscut'}).`);
+        toast(e instanceof PhotoError ? e.message : `Nu pot deschide ${file.name || 'poza'} (${e.message || 'format necunoscut'}).`, 12000);
         continue;
       }
     }

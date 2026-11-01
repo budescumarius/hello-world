@@ -19,7 +19,7 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '16'; // la fel ca APP_VERSION din app.js
+const VERSION = '17'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
