@@ -8,5 +8,6 @@ cd tests && npm run golden   # régénère la référence dorée APRÈS une modi
 ```
 
 Prérequis : Docker, Node.js ≥ 20, PHP ≥ 8.1 en ligne de commande avec curl et pdo_mysql.
+Facultatif : Playwright (`npm i -g playwright && npx playwright install chromium`) pour le test dans un vrai navigateur (`tests/e2e/`).
 Données : uniquement fictives. Ne jamais ajouter de vrais extraits bancaires ou de vraies données clients ici.
-Détails : `docs/PILOTAGE-ETAPE-0.md`.
+Détails : `docs/PILOTAGE-ETAPE-0.md`, `docs/PILOTAGE-ETAPE-1.md`.

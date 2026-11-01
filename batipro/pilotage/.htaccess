@@ -1,0 +1,8 @@
+# Code serveur du module PILOTAGE : jamais appelé directement depuis le web (inclus par api.php)
+<IfModule mod_authz_core.c>
+  Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+  Order deny,allow
+  Deny from all
+</IfModule>

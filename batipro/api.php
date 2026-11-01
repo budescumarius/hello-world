@@ -5,6 +5,7 @@ require __DIR__ . '/lib.php';
 require __DIR__ . '/peppol_ap.php';
 require __DIR__ . '/ai.php';
 require __DIR__ . '/saas.php';
+require __DIR__ . '/pilotage/guard.php'; // PILOTAGE étape 1 : protection de l'historique financier
 
 set_exception_handler(function (Throwable $e) {
     error_log('[batipro] ' . $e);
@@ -385,6 +386,7 @@ switch ($seg[0] ?? '') {
             if (isset($b['version']) && (int)$b['version'] !== (int)$cur['version'] && empty($b['force'])) {
                 out(['error' => 'Cet élément a été modifié par un autre utilisateur entre-temps.', 'conflict' => $view($cur)], 409);
             }
+            pil_guard_update($me, $type, $cur, $b); // facture validée : contenu fiscal figé, réouverture contrôlée
             $data = array_key_exists('data', $b) ? json_encode($b['data'], JSON_UNESCAPED_UNICODE) : $cur['data'];
             $pid = array_key_exists('project_id', $b) ? ($b['project_id'] === null || $b['project_id'] === '' ? null : (int)$b['project_id']) : $cur['project_id'];
             $number = array_key_exists('number', $b) ? $b['number'] : $cur['number'];
@@ -405,6 +407,7 @@ switch ($seg[0] ?? '') {
             if (is_chef($me) && in_array($type, CHEF_READONLY, true)) fail(403, 'La facturation est gérée par le bureau.');
             $d = json_decode($cur['data'], true) ?: [];
             if ($field && $type === 'timesheet' && !field_month_open($d['date'] ?? '')) fail(403, 'Ce mois est clôturé : demandez au bureau de corriger ces heures.');
+            pil_guard_delete($me, $type, $cur); // facture validée ou chantier facturé : suppression contrôlée
             db()->beginTransaction();
             if ($type === 'project') {
                 // un chantier supprimé emporte tout son contenu et ses fichiers
