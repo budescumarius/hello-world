@@ -19,7 +19,7 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '21'; // la fel ca APP_VERSION din app.js
+const VERSION = '22'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
@@ -465,7 +465,11 @@ function shortcut(string $route): void {
     $u = key_user();
     if (!$u) { text_out('Cheie greșită sau dezactivată. Generează una nouă în aplicație: Cont → Scurtătură iPhone.', 401); return; }
     $dest = destinations($u);
-    if ($route === 'GET api/shortcut/destinations') { text_out(implode("\n", array_keys($dest))); return; }
+    if ($route === 'GET api/shortcut/destinations') {
+        if (!empty($_GET['json'])) { out(array_keys($dest)); return; } // listă gata de ales în Raccourcis (fără „Séparer le texte”)
+        text_out(implode("\n", array_keys($dest)));
+        return;
+    }
     $label = trim((string) ($_POST['dest'] ?? ''));
     if (!isset($dest[$label])) { text_out("Nu găsesc „{$label}” printre șantierele tale.", 400); return; }
     [$sid, $fid] = $dest[$label];

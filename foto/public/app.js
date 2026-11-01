@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '21'; // la fel ca VERSION din api.php
+const APP_VERSION = '22'; // la fel ca VERSION din api.php
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -1158,47 +1158,72 @@ function nasCard(n, editing = false) {
   return card;
 }
 
-// Scurtătura iPhone: pozele se trimit din Poze → Partajează → „Foto Șantier”
+// Scurtătura iPhone: pozele se trimit din Poze → Partager → „Foto Șantier”. Ghid pas cu pas, cu denumirile din iPhone (franceză).
 function shortcutCard() {
   const card = h('div', { class: 'card' });
   const base = new URL('api/shortcut/', location.href).href;
-  const copyRow = (label, text) => h('div', { style: 'margin:8px 0' }, h('div', { class: 'small muted' }, label),
-    h('div', { class: 'row' }, h('code', { class: 'small grow', style: 'word-break:break-all;user-select:all;-webkit-user-select:all' }, text),
-      h('button', { class: 'btn sm', onclick: () => navigator.clipboard?.writeText(text).then(() => toast('✓ Copiat')) }, '📋')));
-  const steps = (key) => h('div', {},
-    h('p', { class: 'small' }, '⚠️ Cheia e ca o parolă: nu o da altcuiva. Dacă generezi alta, cea veche nu mai merge.'),
-    copyRow('1. Adresa listei de șantiere', base + 'destinations?key=' + key),
-    copyRow('2. Adresa de trimitere', base + 'upload?key=' + key),
-    h('ol', { class: 'small steps' },
-      h('li', {}, 'Deschide aplicația ', h('b', {}, 'Raccourcis'), ' (Scurtături) → ', h('b', {}, '+'), ' → numele ', h('b', {}, 'Foto Șantier'), '.'),
-      h('li', {}, 'Apasă ', h('b', {}, 'ⓘ'), ' → activează ', h('b', {}, '„Afficher dans la feuille de partage”'), ' și lasă doar ', h('b', {}, 'Images'), '.'),
-      h('li', {}, 'Acțiunea ', h('b', {}, '„Obtenir le contenu de l’URL”'), ' cu adresa 1.'),
-      h('li', {}, 'Acțiunea ', h('b', {}, '„Séparer le texte”'), ' → ', h('b', {}, 'Nouvelles lignes'), '.'),
-      h('li', {}, 'Acțiunea ', h('b', {}, '„Choisir dans la liste”'), '.'),
-      h('li', {}, 'Acțiunea ', h('b', {}, '„Répéter avec chaque élément”'), ' pentru ', h('b', {}, 'Entrée du raccourci'), ', iar înăuntru:',
+  const copyBtn = (text, label) => h('button', { class: 'btn primary block', style: 'margin:8px 0', onclick: () =>
+    navigator.clipboard?.writeText(text).then(() => toast('✓ ' + label + ' copiată – acum lipește-o în Raccourcis')) }, '📋 Copiază ' + label);
+  const step = (n, title, ...body) => h('div', { class: 'step' }, h('div', { class: 'num' }, n), h('div', { class: 'sb' }, h('div', { class: 'st' }, title), ...body));
+  const k = (t) => h('b', { class: 'ios' }, t); // un buton / o denumire exact cum apare pe iPhone
+  const guide = (key) => {
+    const a1 = base + 'destinations?json=1&key=' + key, a2 = base + 'upload?key=' + key;
+    return h('div', { class: 'guide' },
+      h('p', { class: 'small' }, '⚠️ Cheia de mai jos e ca o parolă. Se face o singură dată, pe fiecare telefon (~5 minute). Ține aplicația asta deschisă alături.'),
+      step(1, 'Deschide aplicația „Raccourcis”',
+        h('p', {}, 'E o aplicație Apple, cu iconiță ', k('albastru-roz, cu două pătrate'), '. Ca s-o găsești: pe ecranul principal trage cu degetul ', k('în jos'), ' și scrie ', k('Raccourcis'), '.'),
+        h('p', { class: 'muted small' }, 'Nu e în Réglages. Dacă ai șters-o: App Store → caută „Raccourcis” (Apple, gratuită).')),
+      step(2, 'Creează scurtătura',
+        h('p', {}, 'Jos alege ', k('Raccourcis'), ', apoi sus în dreapta ', k('+'), '.'),
+        h('p', {}, 'Sus apasă pe numele ', k('Nouveau raccourci'), ' → ', k('Renommer'), ' → scrie ', k('Foto Șantier'), '.')),
+      step(3, 'Lista de șantiere',
+        h('p', {}, 'Apasă în câmpul de căutare de jos (', k('Rechercher des actions'), '), scrie ', k('URL'), ' și alege ', k('Obtenir le contenu de l’URL'), '.'),
+        copyBtn(a1, 'adresa 1'),
+        h('p', {}, 'În acțiune apasă pe cuvântul albastru ', k('URL'), ', șterge ce e scris și ', k('lipește'), '.')),
+      step(4, 'Alegerea șantierului',
+        h('p', {}, 'Caută ', k('liste'), ' și alege ', k('Choisir dans la liste'), '. Nu trebuie schimbat nimic.')),
+      step(5, 'Pentru fiecare poză',
+        h('p', {}, 'Caută ', k('Répéter'), ' și alege ', k('Répéter avec chaque élément'), '.'),
+        h('p', {}, 'Apasă pe cuvântul albastru din ea și alege ', k('Entrée du raccourci'), '.'),
+        h('p', { class: 'muted small' }, 'Următoarele 3 acțiuni trebuie să stea ÎNTRE „Répéter avec chaque élément” și „Fin de la répétition”. Dacă una ajunge dedesubt, ține-o apăsat și trage-o mai sus.')),
+      step(6, 'Poza în format JPEG',
+        h('p', {}, 'Caută ', k('Convertir'), ' și alege ', k('Convertir l’image'), '. Dacă scrie alt format, apasă pe el și alege ', k('JPEG'), '.')),
+      step(7, 'Poza mai mică (se trimite repede)',
+        h('p', {}, 'Caută ', k('Redimensionner'), ' și alege ', k('Redimensionner l’image'), '. La lățime scrie ', k('2048'), '.')),
+      step(8, 'Trimiterea',
+        h('p', {}, 'Caută din nou ', k('URL'), ' și alege ', k('Obtenir le contenu de l’URL'), '.'),
+        copyBtn(a2, 'adresa 2'),
+        h('p', {}, 'Apasă pe ', k('URL'), ' și lipește. Apoi apasă săgeata ', k('›'), ' (sau ', k('Afficher plus'), ') din acțiune:'),
         h('ul', {},
-          h('li', {}, h('b', {}, '„Convertir l’image”'), ' → ', h('b', {}, 'JPEG'), ';'),
-          h('li', {}, h('b', {}, '„Redimensionner l’image”'), ' → lățime ', h('b', {}, '2048'), ';'),
-          h('li', {}, h('b', {}, '„Obtenir le contenu de l’URL”'), ' cu adresa 2, ', h('b', {}, 'Méthode: POST'), ', ', h('b', {}, 'Corps: Formulaire'), ' cu două câmpuri: ',
-            h('b', {}, 'dest'), ' (Texte) = ', h('i', {}, 'Élément choisi'), ' și ', h('b', {}, 'photo'), ' (Fichier) = ', h('i', {}, 'Image redimensionnée'), '.'))),
-      h('li', {}, 'La final, acțiunea ', h('b', {}, '„Afficher la notification”'), ' cu ', h('i', {}, 'Contenu de l’URL'), ' (vezi „✓ 3 poze trimise…”).')),
-    h('p', { class: 'small muted' }, 'Apoi: Poze → selectezi pozele → Partager → Foto Șantier → alegi șantierul (și folderul). Gata.'));
+          h('li', {}, k('Méthode'), ' → ', k('POST')),
+          h('li', {}, k('Corps de la requête'), ' → ', k('Formulaire')),
+          h('li', {}, k('Ajouter un champ'), ' → ', k('Texte'), ': la cheie scrie ', k('dest'), '; la valoare apasă și alege variabila ', k('Élément choisi'), '.'),
+          h('li', {}, k('Ajouter un champ'), ' → ', k('Fichier'), ': la cheie scrie ', k('photo'), '; la valoare alege variabila ', k('Image redimensionnée'), '.'))),
+      step(9, 'Să apară la „Partager”',
+        h('p', {}, 'Sus, apasă pe numele ', k('Foto Șantier'), ' (sau pe ', k('ⓘ'), ' / ', k('Détails'), ' de jos) și activează ', k('Afficher dans la feuille de partage'), '.'),
+        h('p', {}, 'Dacă te întreabă ce primește, lasă doar ', k('Images'), '. Apoi ', k('OK'), ' / ', k('✓'), ' sus.')),
+      step('✓', 'Folosire',
+        h('p', {}, 'În ', k('Photos'), ': ', k('Sélectionner'), ' → alegi pozele → butonul ', k('Partager'), ' (pătratul cu săgeată) → derulează lista → ', k('Foto Șantier'), ' → alegi șantierul / folderul. Gata.'),
+        h('p', { class: 'muted small' }, 'Prima dată iPhone-ul întreabă dacă scurtătura are voie să trimită la batiphoto: apasă ', k('Autoriser'), '.')));
+  };
   const body = h('div');
   const gen = async () => {
-    if (body.dataset.has && !confirm('Generezi o cheie nouă? Scurtătura cu cheia veche nu va mai merge.')) return;
+    if (body.dataset.has && !confirm('Generezi o cheie nouă? Scurtătura făcută cu cheia veche nu va mai merge.')) return;
     const { key } = await api('api/key', { method: 'POST' });
-    fill(body, steps(key)); body.dataset.has = '1';
+    fill(body, guide(key)); body.dataset.has = '1';
   };
   api('api/key').then((r) => {
     if (r.has) body.dataset.has = '1';
-    fill(body, h('p', { class: 'muted small' }, 'Trimite poze direct din galeria iPhone (Partajează → „Foto Șantier”), cu alegerea șantierului și a folderului. Se face o singură dată pe fiecare telefon.'),
+    fill(body,
+      h('p', { class: 'small' }, 'Trimite poze direct din aplicația Photos: ', h('b', {}, 'Partager → Foto Șantier'), ' → alegi șantierul.'),
+      h('p', { class: 'muted small' }, 'Varianta cea mai simplă, fără nicio configurare: ecranul Foto → ', h('b', {}, '🖼 Din galerie'), ' (selectezi mai multe poze odată).'),
       h('div', { class: 'row' },
-        h('button', { class: 'btn primary grow', onclick: gen }, r.has ? '🔑 Generează altă cheie' : '🔑 Generează cheia'),
+        h('button', { class: 'btn primary grow', onclick: gen }, r.has ? '🔑 Arată ghidul (cheie nouă)' : '🔑 Începe configurarea'),
         r.has ? h('button', { class: 'btn danger', onclick: async () => {
           if (!confirm('Oprești scurtătura? Cheia nu va mai funcționa.')) return;
           await api('api/key', { method: 'DELETE' }); screenCont(); } }, 'Oprește') : null));
   }).catch(() => {});
-  card.append(h('div', { class: 'row' }, h('b', { class: 'grow' }, '📲 Scurtătură iPhone'), h('span', { class: 'badge off' }, 'Partajează')), body);
+  card.append(h('div', { class: 'row' }, h('b', { class: 'grow' }, '📲 Scurtătură iPhone'), h('span', { class: 'badge off' }, 'Partager')), body);
   return h('div', {}, h('h2', {}, 'Trimite din galerie'), card);
 }
 

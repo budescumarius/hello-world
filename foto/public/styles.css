@@ -155,3 +155,12 @@ div.f { margin: 0 0 14px; }
 .chip .n { margin-left: 6px; font-size: 12px; opacity: .7; }
 .steps { padding-left: 20px; line-height: 1.5; }
 .steps ul { padding-left: 18px; margin: 4px 0; }
+
+/* ghidul pentru scurtătura iPhone */
+.guide .step { display: flex; gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
+.guide .num { flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--blue); color: #fff; font-weight: 800; display: grid; place-items: center; }
+.guide .st { font-weight: 800; font-size: 17px; margin: 4px 0 6px; }
+.guide .sb { flex: 1; min-width: 0; }
+.guide .sb p { margin: 6px 0; }
+.guide .sb ul { padding-left: 18px; margin: 6px 0; line-height: 1.6; }
+.guide b.ios { background: #eef2ff; border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
