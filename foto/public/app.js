@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '22'; // la fel ca VERSION din api.php
+const APP_VERSION = '23'; // la fel ca VERSION din api.php
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -1200,8 +1200,9 @@ function shortcutCard() {
           h('li', {}, k('Ajouter un champ'), ' → ', k('Texte'), ': la cheie scrie ', k('dest'), '; la valoare apasă și alege variabila ', k('Élément choisi'), '.'),
           h('li', {}, k('Ajouter un champ'), ' → ', k('Fichier'), ': la cheie scrie ', k('photo'), '; la valoare alege variabila ', k('Image redimensionnée'), '.'))),
       step(9, 'Să apară la „Partager”',
-        h('p', {}, 'Sus, apasă pe numele ', k('Foto Șantier'), ' (sau pe ', k('ⓘ'), ' / ', k('Détails'), ' de jos) și activează ', k('Afficher dans la feuille de partage'), '.'),
-        h('p', {}, 'Dacă te întreabă ce primește, lasă doar ', k('Images'), '. Apoi ', k('OK'), ' / ', k('✓'), ' sus.')),
+        h('p', {}, 'Sus de tot, în primul bloc scrie ', k('Recevoir … depuis Nulle part'), '. Apasă pe ', k('Nulle part'), ' și alege ', k('Feuille de partage'), '.'),
+        h('p', {}, 'Apoi apasă pe ', k('Apps et 18 de plus'), ' (sau ', k('Tout'), ') → ', k('Tout désélectionner'), ' → bifează doar ', k('Images'), '.'),
+        h('p', { class: 'muted small' }, 'Pe iPhone-uri mai vechi, aceeași setare e la ⓘ / Détails → „Afficher dans la feuille de partage”. La final apasă ‹ sus, ca să salvezi.')),
       step('✓', 'Folosire',
         h('p', {}, 'În ', k('Photos'), ': ', k('Sélectionner'), ' → alegi pozele → butonul ', k('Partager'), ' (pătratul cu săgeată) → derulează lista → ', k('Foto Șantier'), ' → alegi șantierul / folderul. Gata.'),
         h('p', { class: 'muted small' }, 'Prima dată iPhone-ul întreabă dacă scurtătura are voie să trimită la batiphoto: apasă ', k('Autoriser'), '.')));
