@@ -106,7 +106,11 @@ function row_json(array $r): string {
 // $group : réponse { type: [...] } (requête multi-types, lignes triées par type) ; $see / $view : filtre et vue (terrain, responsable)
 // Liste « lite » : devis / factures / commandes sans leurs lignes, avec leur résumé des totaux (_sum, écrit par l'application)
 const LITE_TYPES = ['quote', 'invoice', 'order'];
-function lite_data(array $d): array { unset($d['lines'], $d['progressRows']); $d['_lite'] = true; return $d; }
+function lite_data(array $d): array {
+    // nombre de lignes chiffrées gardé (brouillon vide ou non), puis les lignes retirées
+    $d['_items'] = count(array_filter((array)($d['lines'] ?? []), fn($l) => is_array($l) && ($l['kind'] ?? '') === 'item'));
+    unset($d['lines'], $d['progressRows']); $d['_lite'] = true; return $d;
+}
 // version « lite » enregistrée avec le document (colonne items.lite) : les listes la lisent sans rien recalculer
 function lite_json(string $type, $data): ?string { return in_array($type, LITE_TYPES, true) && is_array($data) && isset($data['_sum']) ? json_encode(lite_data($data), JSON_UNESCAPED_UNICODE) : null; }
 function stream_items(string $sql, array $args, ?array $group = null, ?callable $see = null, ?callable $view = null, bool $lite = false): void {

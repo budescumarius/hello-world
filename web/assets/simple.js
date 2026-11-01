@@ -73,7 +73,8 @@ const grow = (t) => { t.style.height = 'auto'; t.style.height = `${t.scrollHeigh
 
 // ---------------------------------------------------------------- Accueil
 // Brouillons vides (aucune ligne, pas de numéro) laissés par un ancien parcours abandonné : supprimés, jamais comptés
-const realDoc = (x) => !!x.number && x.data.status !== 'brouillon' || (x.data.lines || []).some((l) => l.kind === 'item' && ((l.desc || '').trim() || num(l.price)));
+// un résumé « lite » n'est jamais considéré comme vide (ses lignes ne sont pas chargées) : jamais supprimé ici
+const realDoc = (x) => !!x.data._lite || !!x.number && x.data.status !== 'brouillon' || (x.data.lines || []).some((l) => l.kind === 'item' && ((l.desc || '').trim() || num(l.price)));
 async function purgeEmpty(list, typ) {
   const junk = list.filter((x) => !realDoc(x) && (x.data.status || 'brouillon') === 'brouillon' && !(x.data.payments || []).length && (x.data.simple || !x.data.clientId));
   for (const x of junk) { try { await db.del(typ, x.id); } catch (e) { /* déjà supprimé */ } }
@@ -95,7 +96,7 @@ async function homeSimple() {
   const co = company(); const s = sellerInfo();
   const inv = all.invoice.map((i) => ({ i, s: invState(i) }));
   const owed = inv.filter((x) => ['impayee', 'partielle', 'retard'].includes(x.s.s)); const late = owed.filter((x) => x.s.s === 'retard');
-  const drafts = inv.filter((x) => x.s.s === 'brouillon' && (x.i.data.lines || []).length);
+  const drafts = inv.filter((x) => x.s.s === 'brouillon' && docItems(x.i.data));
   const qWait = all.quote.filter((q) => q.data.status === 'envoye');
   const sum = (l, f) => l.reduce((a, x) => a + f(x), 0);
   const missing = !co.vat || !co.iban || !s.street || !s.city;
@@ -773,7 +774,8 @@ async function creditWizard(id) {
 }
 
 // Devis accepté → facture (tout, ou un acompte en % ou en montant)
-function billQuote(q) {
+async function billQuote(q) {
+  q = await fullOf('quote', q);
   const d = q.data; const t = totals(d);
   const mk = async (lines, kind) => {
     const co = company();

@@ -146,7 +146,7 @@ route('dashboard', async () => {
   inv.filter((x) => isEA(x.i)).forEach((x) => { const e = eaState(x.i); const who = cname(x.i.data.clientId) || x.i.data.title || '';
     if (e.k === 'approuve' || e.late) add(2, { tone: 'go', icon: 'percent', title: `${e.late ? 'Délai d\'approbation passé' : 'État approuvé'} : EA${x.i.data.situationNo || ''} ${who}`, sub: e.late ? `Sans réponse depuis le ${fmtDate(e.approveBy)} : considéré comme accepté` : `Approuvé le ${fmtDate(e.approvedAt)}`, amount: x.s.t.total, href: `#/invoice/${x.i.id}`, act: ['Facturer', `#/invoice/${x.i.id}`] });
     else if (e.k === 'conteste') add(1, { tone: 'late', icon: 'percent', title: `État EA${x.i.data.situationNo || ''} contesté par ${who}`, sub: e.note || 'À corriger puis renvoyer', href: `#/invoice/${x.i.id}`, act: ['Corriger', `#/invoice/${x.i.id}/encodage`] }); });
-  const drafts = inv.filter((x) => x.s.s === 'brouillon' && !isEA(x.i) && (x.i.data.lines || []).some((l) => l.kind === 'item'));
+  const drafts = inv.filter((x) => x.s.s === 'brouillon' && !isEA(x.i) && docItems(x.i.data));
   if (drafts.length) add(4, drafts.length === 1 ? { tone: 'info', icon: 'edit', title: `Facture à terminer : ${cname(drafts[0].i.data.clientId) || drafts[0].i.data.title || ''}`, sub: 'Brouillon pas encore envoyé', amount: drafts[0].s.t.total, href: `#/invoice/${drafts[0].i.id}`, act: ['Terminer', `#/invoice/${drafts[0].i.id}`] }
     : { tone: 'info', icon: 'edit', title: `${drafts.length} factures en brouillon`, sub: 'Pas encore envoyées', amount: sum(drafts, (x) => x.s.t.total), href: '#/invoices', act: ['Voir', '#/invoices'] });
   // rapports envoyés par le terrain, pas encore lus

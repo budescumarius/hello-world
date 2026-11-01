@@ -431,6 +431,7 @@ route('quote', async (id) => {
 // Postes d'un devis → articles de la bibliothèque (réutilisables dans les prochains devis) ; un poste déjà présent (même nom et unité) est mis à jour
 // auto : devis accepté → ses postes (prix de vente) alimentent la bibliothèque sans question
 async function quoteToLibrary(q, { auto = false, quiet = false } = {}) {
+  q = await fullOf('quote', q);
   const d = q.data; const disc = num(d.discount) / 100;
   const items = d.lines.filter((l) => l.kind === 'item' && !l.option && !l.deduction && String(l.desc || '').trim() && num(l.price) > 0);
   if (!items.length) { if (!auto) toast('Aucun poste chiffré dans ce devis', 3000); return { c: 0, u: 0 }; }
@@ -476,6 +477,7 @@ async function quoteToLibrary(q, { auto = false, quiet = false } = {}) {
 }
 
 async function createProjectFromQuote(q) {
+  q = await fullOf('quote', q);
   const t = totals(q.data);
   const p = await persist('project', { data: { name: q.data.title || `Chantier ${q.number}`, clientId: q.data.clientId, address: q.data.siteAddress || '', status: 'preparation', managerId: q.data.ownerId || S.me.id, start: today(), color: '#3b5bdb', budget: t.base } });
   q.project_id = p.id;
@@ -510,6 +512,7 @@ function acompteLines(q, { pct, amount }) {
   return lines;
 }
 async function invoiceFromQuote(q) {
+  if (q.data && q.data._lite) { const direct = q._direct; q = await fullOf('quote', q); if (direct) q = { ...q, _direct: true }; }
   // avenant : facturé seul, ou inclus dans les états d'avancement / le solde du devis principal
   if (q.data.avenantOf && !q._direct) {
     const main = await db.get('quote', +q.data.avenantOf).catch(() => null);
@@ -559,6 +562,7 @@ async function invoiceFromQuote(q) {
 // Acomptes et états d'avancement déjà facturés : encodés avec leur numéro d'origine (factures « reprises »), pour que
 // le prochain état reparte du bon cumul et que l'acompte déjà déduit soit pris en compte.
 async function historyFromOtherApp(q, prev, base) {
+  q = await fullOf('quote', q); prev = await fullList('invoice', prev);
   const d = q.data; const disc = num(d.discount) / 100; const rate0 = (totals(d).vats[0] || { rate: defVat() }).rate;
   const src = d.lines.filter((l) => l.kind === 'title' || (l.kind === 'item' && !l.option));
   const rows = src.map((l) => (l.kind === 'title' ? { lineId: l.id, kind: 'title', level: tlevel(l), desc: l.desc, ...(l.no ? { no: l.no } : {}) }
@@ -649,6 +653,7 @@ function prevProgress(list, lineId, exceptId) {
 // au marché : états d'avancement, facture de solde et récapitulatif du devis principal en tiennent compte.
 const avenantsOf = (q, quotes) => quotes.filter((x) => +x.data.avenantOf === q.id).sort((a, b) => num(a.data.avenantNo) - num(b.data.avenantNo));
 async function marketLines(q, { separatelyBilled = true } = {}) {
+  q = await fullOf('quote', q);
   const d = q.data; const out = [];
   d.lines.forEach((l) => { if (l.kind === 'title' || (l.kind === 'item' && !l.option)) out.push({ ...l, _disc: num(d.discount) / 100 }); });
   if (d.avenantOf) return out;
@@ -662,6 +667,7 @@ async function marketLines(q, { separatelyBilled = true } = {}) {
   return out;
 }
 async function createAvenant(q) {
+  q = await fullOf('quote', q);
   const quotes = await db.list('quote');
   const main = q.data.avenantOf ? quotes.find((x) => x.id === +q.data.avenantOf) || q : q;
   const no = Math.max(0, ...avenantsOf(main, quotes).map((x) => num(x.data.avenantNo))) + 1;
@@ -686,6 +692,7 @@ function acompteState(list, exceptId) {
 
 // existing : facture d'avancement en brouillon à modifier
 async function progressInvoice(q, prev, base, existing) {
+  q = await fullOf('quote', q); prev = await fullList('invoice', prev); if (existing) existing = await fullOf('invoice', existing);
   const d = q.data;
   // marché = devis + avenants acceptés (chaque avenant : un chapitre « Avenant n° … », sa remise propre)
   const src = await marketLines(q);
@@ -839,6 +846,7 @@ async function newOrder(preset = {}) {
   go(`#/order/${it.id}`);
 }
 async function ordersFromQuote(q) {
+  q = await fullOf('quote', q);
   const [contacts, articles] = await Promise.all([db.list('contact'), db.list('article')]);
   const sups = contacts.filter((c) => ['fournisseur', 'soustraitant'].includes(c.data.kind));
   if (!sups.length) return toast('Ajoutez d\'abord vos fournisseurs et sous-traitants dans Contacts', 4000);

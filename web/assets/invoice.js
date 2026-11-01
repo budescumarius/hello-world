@@ -53,7 +53,7 @@ async function invUnmarkSent(it) {
 }
 
 // Note de crédit qui annule une facture (mêmes lignes en négatif)
-const invCredit = (it) => { const d = it.data; return newInvoice({ project_id: it.project_id, data: { kind: 'avoir', clientId: d.clientId, quoteId: d.quoteId, reverse: d.reverse, discount: d.discount, defaultVat: d.defaultVat, title: `Annulation facture ${it.number}`, refInvoice: it.number, lines: d.lines.map((l) => (l.kind === 'item' ? { ...l, id: lid(), qty: -num(l.qty) } : { ...l, id: lid() })) } }); };
+const invCredit = async (it) => { it = await fullOf('invoice', it); const d = it.data; return newInvoice({ project_id: it.project_id, data: { kind: 'avoir', clientId: d.clientId, quoteId: d.quoteId, reverse: d.reverse, discount: d.discount, defaultVat: d.defaultVat, title: `Annulation facture ${it.number}`, refInvoice: it.number, lines: d.lines.map((l) => (l.kind === 'item' ? { ...l, id: lid(), qty: -num(l.qty) } : { ...l, id: lid() })) } }); };
 // Facture validée : avertissement légal (note de crédit conseillée), puis modifier ou supprimer quand même
 const invChangeValidated = (it) => validatedInvoiceChange(it, null, { edit: `#/invoice/${it.id}/encodage`, credit: () => invCredit(it), afterDel: () => go('#/invoices') });
 
@@ -124,6 +124,7 @@ function proformaActions(it) {
   ];
 }
 async function proformaConvert(it) {
+  it = await fullOf('invoice', it);
   const d = it.data;
   menuSheet(`Convertir la pro forma ${it.number || ''} en facture`, [['facture', 'Facture'], ['acompte', 'Facture d\'acompte (déduite ensuite des états / du solde)']].map(([k, l]) => ({
     label: l, primary: k === (d.proformaKind || 'facture'),

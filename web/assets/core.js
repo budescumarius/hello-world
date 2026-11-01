@@ -87,6 +87,11 @@ const noProforma = (l) => l.filter((x) => !x.data || x.data.kind !== 'proforma')
 const noEstimate = (l) => l.filter((x) => !x.data || !x.data.estimate);
 // plusieurs types en une requête ; sans chantier, chaque liste rejoint la mémoire (et en sort si elle y est déjà)
 const LITE_TYPES = ['quote', 'invoice', 'order'];
+// Élément venu d'une liste « lite » (résumé, sans ses lignes) : on charge le document complet avant de s'en servir
+// le document a-t-il des lignes chiffrées ? (aussi pour un résumé « lite »)
+const docItems = (d) => (d && d._lite ? num(d._items) : ((d && d.lines) || []).filter((l) => l.kind === 'item').length);
+async function fullOf(type, it) { return it && it.data && it.data._lite ? db.get(type, it.id) : it; }
+async function fullList(type, list) { return (list || []).some((x) => x.data && x.data._lite) ? Promise.all(list.map((x) => fullOf(type, x))) : list; }
 async function dbMany(types, project, lite) {
   const L = lite ? '&lite=1' : ''; const key = (t) => `T:${t}${lite && LITE_TYPES.includes(t) ? '&lite=1' : ''}`;
   if (project != null) return dbcGet(`M:${types.join(',')}:${project}${L}`, `items&types=${types.join(',')}&project=${project}${L}`);
