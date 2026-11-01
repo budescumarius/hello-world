@@ -742,25 +742,43 @@ switch ($seg[0] ?? '') {
         if (!class_exists('ZipArchive')) fail(500, 'Extension PHP zip absente chez l\'hébergeur.');
         set_time_limit(0);
         $cid = cid();
-        $items = [];
-        foreach (q('SELECT * FROM items WHERE company_id = ? ORDER BY type, id', [$cid])->fetchAll() as $r) $items[$r['type']][] = row_out($r);
         $sets = [];
         foreach (q('SELECT k, v FROM settings WHERE company_id = ?', [$cid])->fetchAll() as $r) if (!in_array($r['k'], ['vapid', 'sub', 'saas', 'smtp', 'peppolap', 'ai'], true)) $sets[$r['k']] = json_decode($r['v'], true);
+        // fichiers écrits au fil de la lecture (mémoire constante, même pour une grosse firme)
+        $pdo = db();
+        $jf = tempnam(sys_get_temp_dir(), 'bpj'); $jh = fopen($jf, 'w');
+        fwrite($jh, '{"exporte_le":' . json_encode(now()) . ',"entreprise":' . json_encode($sets['company']['name'] ?? '', JSON_UNESCAPED_UNICODE) . ',"parametres":' . json_encode($sets, JSON_UNESCAPED_UNICODE) . ',"elements":[');
+        $pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+        $st = $pdo->prepare('SELECT * FROM items WHERE company_id = ? ORDER BY type, id'); $st->execute([$cid]); $first = true;
+        while ($r = $st->fetch(PDO::FETCH_ASSOC)) { fwrite($jh, ($first ? '' : ",\n") . row_json($r)); $first = false; }
+        $st->closeCursor(); $pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
+        fwrite($jh, '],"utilisateurs":' . json_encode(q('SELECT id, name, email, role, active, created_at, last_login FROM users WHERE company_id = ?', [$cid])->fetchAll(), JSON_UNESCAPED_UNICODE)
+            . ',"fichiers":' . json_encode(q('SELECT id, project_id, name, mime, size, path, created_at FROM files WHERE company_id = ?', [$cid])->fetchAll(), JSON_UNESCAPED_UNICODE) . '}');
+        fclose($jh);
+        // sauvegarde restaurable de cette firme (phpMyAdmin › Importer) : ses lignes de chaque table
+        $sf = tempnam(sys_get_temp_dir(), 'bps'); $sh = fopen($sf, 'w');
+        fwrite($sh, "-- Sauvegarde BatiPro de la firme $cid du " . date('Y-m-d H:i:s') . "\n-- Restauration : phpMyAdmin > base de l'application > Importer ce fichier (remplace les lignes de cette firme).\nSET NAMES utf8mb4;\n");
+        foreach (['companies' => 'id', 'users' => 'company_id', 'settings' => 'company_id', 'counters' => 'company_id', 'items' => 'company_id', 'files' => 'company_id', 'activity' => 'company_id'] as $t => $col) {
+            $pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+            $st = $pdo->prepare("SELECT * FROM `$t` WHERE `$col` = ?"); $st->execute([$cid]); $rows = [];
+            $flush = function () use (&$rows, $sh, $t) { if ($rows) fwrite($sh, "REPLACE INTO `$t` VALUES\n" . implode(",\n", $rows) . ";\n"); $rows = []; };
+            while ($r = $st->fetch(PDO::FETCH_NUM)) { $rows[] = '(' . implode(',', array_map(fn($v) => $v === null ? 'NULL' : $pdo->quote((string)$v), $r)) . ')'; if (count($rows) >= 200) $flush(); }
+            $st->closeCursor(); $pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true); $flush();
+        }
+        fclose($sh);
         $tmp = tempnam(sys_get_temp_dir(), 'bpe');
         $z = new ZipArchive(); $z->open($tmp, ZipArchive::OVERWRITE);
-        $z->addFromString('donnees.json', json_encode(['exporte_le' => now(), 'entreprise' => $sets['company']['name'] ?? '', 'parametres' => $sets, 'elements' => $items,
-            'utilisateurs' => q('SELECT id, name, email, role, active, created_at, last_login FROM users WHERE company_id = ?', [$cid])->fetchAll(),
-            'fichiers' => q('SELECT id, project_id, name, mime, size, path, created_at FROM files WHERE company_id = ?', [$cid])->fetchAll(),
-            'journal' => q('SELECT * FROM activity WHERE company_id = ? ORDER BY id', [$cid])->fetchAll()], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+        $z->addFile($jf, 'donnees.json'); $z->addFile($sf, 'sauvegarde.sql');
         foreach (q('SELECT id, name, path FROM files WHERE company_id = ?', [$cid])->fetchAll() as $f) {
             $src = __DIR__ . '/uploads/' . $f['path'];
             if (is_file($src)) { $n = 'fichiers/' . $f['id'] . '-' . preg_replace('/[^\w.\- ]+/u', '_', (string)$f['name']); $z->addFile($src, $n); $z->setCompressionName($n, ZipArchive::CM_STORE); }
         }
-        $z->addFromString('LISEZ-MOI.txt', "Export complet des donnees de votre entreprise (" . date('d/m/Y H:i') . ").\ndonnees.json : clients, devis, factures, chantiers, achats, heures, parametres (format JSON).\nfichiers/ : photos, PDF, plans et documents envoyes.\n");
-        $z->close();
-        log_activity($me['id'], 'update', 'settings', null, null, 'Export de toutes les données');
+        $z->addFromString('LISEZ-MOI.txt', "Export complet des donnees de votre entreprise (" . date('d/m/Y H:i') . ").\nsauvegarde.sql : copie restaurable de toutes vos donnees (phpMyAdmin > Importer).\ndonnees.json : clients, devis, factures, chantiers, achats, heures, parametres (format JSON).\nfichiers/ : photos, PDF, plans et documents envoyes.\n");
+        $z->close(); @unlink($jf); @unlink($sf);
+        log_activity($me['id'], 'update', 'settings', null, null, 'Sauvegarde téléchargée');
+        while (ob_get_level()) ob_end_clean();
         header('Content-Type: application/zip'); header('Content-Length: ' . filesize($tmp));
-        header('Content-Disposition: attachment; filename="export-donnees-' . date('Y-m-d') . '.zip"'); header('Cache-Control: no-store');
+        header('Content-Disposition: attachment; filename="sauvegarde-batipro-' . date('Y-m-d-Hi') . '.zip"'); header('Cache-Control: no-store');
         readfile($tmp); @unlink($tmp); exit;
 
     case 'platform':

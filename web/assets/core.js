@@ -333,6 +333,7 @@ function accountMenu() {
   if (isField()) items.push({ label: 'Installer l\'application sur le téléphone', icon: 'download', run: () => installHelp() });
   if (isAdmin() && S.sub && S.sub.status !== 'free') items.push({ label: 'Mon abonnement', icon: 'coins', run: () => go('#/abonnement') });
   if (isAdmin()) items.push({ label: 'Paramètres', icon: 'gear', run: () => go('#/settings') });
+  if (isAdmin()) items.push({ label: 'Sauvegarde (télécharger mes données)', icon: 'download', run: () => go('#/settings/backup') });
   if (S.me.super) items.push({ label: 'Plateforme (firmes)', icon: 'people', run: () => go('#/platform') });
   if (S.firm && S.firm.own === false) items.push({ label: 'Revenir à ma firme', icon: 'back', run: () => switchFirm(0) });
   items.push({ label: 'Conditions et confidentialité', icon: 'file', run: () => window.open('legal.php', '_blank') });

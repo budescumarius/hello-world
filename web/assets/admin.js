@@ -276,7 +276,7 @@ route('stats', async () => {
 // ---------------------------------------------------------------- Paramètres
 route('settings', async (tab = 'company') => {
   if (!isAdmin()) return go('#/dashboard');
-  const page = layout({ active: '', icon: 'gear', title: 'Paramètres', tabs: [['company', 'Entreprise'], ['docs', 'Documents & numérotation'], ['templates', 'Modèles de documents'], ['contracts', 'Contrats types'], ['peppol', 'Peppol'], ['mail', 'Email'], ['ai', 'Assistant IA'], ['users', 'Utilisateurs'], ['notifs', 'Notifications'], ['activity', 'Journal d\'activité']].filter(([k]) => !(isSimple() && k === 'ai')).map(([k, l]) => `<a href="#/settings/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
+  const page = layout({ active: '', icon: 'gear', title: 'Paramètres', tabs: [['company', 'Entreprise'], ['docs', 'Documents & numérotation'], ['templates', 'Modèles de documents'], ['contracts', 'Contrats types'], ['peppol', 'Peppol'], ['mail', 'Email'], ['ai', 'Assistant IA'], ['users', 'Utilisateurs'], ['notifs', 'Notifications'], ['activity', 'Journal d\'activité'], ['backup', 'Sauvegarde']].filter(([k]) => !(isSimple() && k === 'ai')).map(([k, l]) => `<a href="#/settings/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
   const co = { ...company() };
   if (tab === 'users') return settingsUsers(page);
   if (tab === 'notifs') return settingsNotifs(page);
@@ -285,6 +285,17 @@ route('settings', async (tab = 'company') => {
   if (tab === 'ai') return aiSettings(page);
   if (tab === 'templates') return templateSettings(page);
   if (tab === 'contracts') return settingsContracts(page);
+  if (tab === 'backup') {
+    page.innerHTML = `<div class="card"><div class="card-h"><h3>${I.download} Sauvegarde de mon entreprise</h3></div>
+      <p>Un fichier ZIP avec <b>toutes vos données</b> (clients, devis, factures, chantiers, achats, heures, paramètres, utilisateurs) et <b>tous vos fichiers</b> (photos, PDF, plans, documents).</p>
+      <ul class="bk-info"><li><b>sauvegarde.sql</b> : copie restaurable (phpMyAdmin › Importer)</li><li><b>donnees.json</b> : les mêmes données, lisibles par un autre programme</li><li><b>fichiers/</b> : vos documents</li></ul>
+      <div class="btns"><button class="btn primary" data-dl>${I.download} Télécharger une sauvegarde maintenant</button></div>
+      <p class="muted">Conseil : une fois par mois, gardez ce fichier sur votre ordinateur ou dans Google Drive / OneDrive.</p></div>
+      ${S.me.super ? '<div class="card" data-bk></div>' : ''}`;
+    $('[data-dl]', page).onclick = (e) => { e.target.disabled = true; toast('Préparation de la sauvegarde… le téléchargement va démarrer', 6000); location.href = 'api.php?r=export/all'; setTimeout(() => { e.target.disabled = false; }, 8000); };
+    if (S.me.super) backupsCard($('[data-bk]', page));
+    return;
+  }
   if (tab === 'activity') {
     const act = await api('GET', 'activity&limit=200');
     page.innerHTML = `<div class="card"><div class="feed">${act.map((a) => `<div><b>${esc(a.user_name || '')}</b> ${{ create: 'a créé', update: 'a modifié', delete: 'a supprimé', mail: 'a envoyé par email' }[a.action] || a.action} <span class="muted">${esc(TYPE_LABELS[a.type] || a.type)}</span> ${esc(a.label || '')}<small class="muted">${fmtDT(a.created_at)}</small></div>`).join('')}</div></div>`;
