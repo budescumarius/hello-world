@@ -1052,12 +1052,14 @@ function backup_dir(): string {
     return $d;
 }
 // Copie complète de la base de données (toutes les firmes) en SQL compressé, restaurable dans phpMyAdmin
-function backup_db(string $file): void {
+// $skip : préfixes de tables à laisser de côté (copie envoyée par e-mail : sans les extraits bancaires du module Pilotage)
+function backup_db(string $file, array $skip = []): void {
     @set_time_limit(0); ignore_user_abort(true);
     $gz = gzopen($file, 'wb4');
     if (!$gz) throw new RuntimeException('Impossible d\'écrire la sauvegarde.');
     gzwrite($gz, "-- Sauvegarde BatiPro du " . date('Y-m-d H:i:s') . "\nSET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS = 0;\n");
     foreach (db()->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN) as $t) {
+        foreach ($skip as $pre) if (str_starts_with($t, $pre)) continue 2;
         $create = db()->query("SHOW CREATE TABLE `$t`")->fetch(PDO::FETCH_NUM)[1];
         gzwrite($gz, "\nDROP TABLE IF EXISTS `$t`;\n$create;\n");
         // lecture ligne par ligne (sans tout charger en mémoire : une grosse base dépasserait la limite de PHP et la sauvegarde serait vide)
@@ -1074,6 +1076,12 @@ function backup_db(string $file): void {
     }
     gzwrite($gz, "\nSET FOREIGN_KEY_CHECKS = 1;\n");
     gzclose($gz);
+}
+/** Copie destinée à l'e-mail hebdomadaire : sans les tables bancaires du module Pilotage. */
+function backup_mail_copy(string $dir): string {
+    $f = "$dir/mail-" . bin2hex(random_bytes(6)) . '.sql.gz';
+    backup_db($f, ['pil_bank_']);
+    return $f;
 }
 // Sauvegarde du jour (une fois par 24 h) : garde 14 jours + le 1er de chaque mois pendant un an ;
 // une fois par semaine, la copie part par e-mail aux gestionnaires de la plateforme (copie hors de l'hébergement)
@@ -1095,18 +1103,21 @@ function backup_auto(bool $force = false): ?string {
     $st = ['at' => date('Y-m-d H:i:s'), 'file' => basename($file), 'size' => filesize($file)] + $st;
     if (empty($st['mailed']) || time() - strtotime((string)$st['mailed']) > 6.5 * 86400) {
         $to = q('SELECT name, email FROM users WHERE super = 1 AND active = 1')->fetchAll();
-        if ($to && filesize($file) < 15 * 1024 * 1024) {
+        // copie e-mail : toutes les données sauf les extraits bancaires (tables pil_bank_*), qui restent dans la sauvegarde quotidienne du serveur
+        $mailFile = backup_mail_copy($dir);
+        if ($to && filesize($mailFile) < 15 * 1024 * 1024) {
             $prevCid = $GLOBALS['BP_CID'] ?? null;
             try {
                 $GLOBALS['BP_CID'] = 1;
                 send_mail(array_map(fn($u) => ['email' => $u['email'], 'name' => $u['name']], $to), [], 'Sauvegarde BâtiPro du ' . date('d/m/Y'),
-                    "Bonjour,\n\nVoici la sauvegarde hebdomadaire de la base de données BâtiPro (toutes les firmes).\nGardez cet e-mail : en cas de problème chez l'hébergeur, ce fichier permet de tout restaurer (phpMyAdmin → Importer).\n\nLes fichiers envoyés (photos, PDF, plans) se téléchargent depuis Plateforme → Sauvegardes → « Tout télécharger ».\n",
-                    [['name' => basename($file), 'mime' => 'application/gzip', 'data' => file_get_contents($file)]]);
+                    "Bonjour,\n\nVoici la sauvegarde hebdomadaire de la base de données BâtiPro (toutes les firmes).\nGardez cet e-mail : en cas de problème chez l'hébergeur, ce fichier permet de tout restaurer (phpMyAdmin → Importer).\n\nLes fichiers envoyés (photos, PDF, plans) se téléchargent depuis Plateforme → Sauvegardes → « Tout télécharger ».\nPar sécurité, les extraits bancaires (module Pilotage) ne sont pas dans cette copie : ils sont dans les sauvegardes quotidiennes du serveur.\n",
+                    [['name' => basename($file), 'mime' => 'application/gzip', 'data' => file_get_contents($mailFile)]]);
                 $st['mailed'] = date('Y-m-d H:i:s');
                 unset($st['mailError']);
             } catch (Throwable $e) { $st['mailError'] = $e->getMessage(); error_log('[batipro sauvegarde] ' . $e->getMessage()); }
             finally { $GLOBALS['BP_CID'] = $prevCid; }
         }
+        @unlink($mailFile);
     }
     set_setting('backup', $st, 1);
     return $file;

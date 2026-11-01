@@ -165,17 +165,68 @@ T::test('rapprochement : facture trouvée par sa communication structurée (sûr
     [, $cli] = $admin->req('POST', 'items/contact', ['data' => ['kind' => 'client', 'company' => 'Client Fictif SA', 'iban' => $X['CP']['client']]]);
     [, $inv] = $admin->req('POST', 'items/invoice', ['data' => ['clientId' => $cli['id'], 'status' => 'emise', 'date' => '2026-01-10', 'due' => '2026-02-10', 'communication' => preg_replace('/\D/', '', $X['COMM']['invoice']),
         'lines' => [['kind' => 'item', 'desc' => 'Travaux', 'qty' => 1, 'price' => 2000, 'vat' => 21]]]]);
+    db()->exec("UPDATE items SET number = 'FAC-TEST-RAP' WHERE id = " . (int)$inv['id']); $inv['number'] = 'FAC-TEST-RAP';
     [, $sup] = $admin->req('POST', 'items/contact', ['data' => ['kind' => 'fournisseur', 'company' => 'Fournisseur Fictif SRL', 'iban' => $X['CP']['fournisseur']]]);
     [, $exp] = $admin->req('POST', 'items/expense', ['data' => ['supplierId' => $sup['id'], 'date' => '2026-02-01', 'amount' => 500, 'vat' => 21, 'communication' => preg_replace('/\D/', '', $X['COMM']['expense']), 'structured' => true, 'iban' => $X['CP']['fournisseur']]]);
     $t = db()->query("SELECT id FROM pil_bank_tx WHERE account_id = {$acc['europabank']} AND amount = 242000")->fetchColumn();
     [$c, $s] = $admin->req('GET', "pilot/tx/$t/suggest"); T::eq(200, $c);
-    T::eq(['invoice', $inv['id'], 'sûr'], [$s[0]['type'], $s[0]['id'], $s[0]['level']], json_encode($s, JSON_UNESCAPED_UNICODE));
+    T::eq(['invoice', $inv['id'], 'sûr', $inv['number']], [$s[0]['type'], $s[0]['id'], $s[0]['level'], $s[0]['ref']], json_encode($s, JSON_UNESCAPED_UNICODE));
     $e = db()->query("SELECT id FROM pil_bank_tx WHERE account_id = {$acc['europabank']} AND amount = -60500")->fetchColumn();
     [, $s2] = $admin->req('GET', "pilot/tx/$e/suggest"); T::eq(['expense', $exp['id']], [$s2[0]['type'] ?? null, $s2[0]['id'] ?? null], json_encode($s2, JSON_UNESCAPED_UNICODE));
+    T::eq(true, $s[0]['can_pay'], 'paiement possible');
     [$c, $u] = $admin->req('PUT', "pilot/tx/$t", ['match' => ['type' => 'invoice', 'id' => $inv['id']]]); T::eq(200, $c);
-    T::eq(['invoice', $inv['id']], [$u['match_type'], $u['match_id']]);
+    T::eq(['invoice', $inv['id'], 0], [$u['match_type'], $u['match_id'], $u['match_paid']]);
     [, $after] = $admin->req('GET', "items/invoice/{$inv['id']}");
-    T::eq([$inv['version'], []], [$after['version'], $after['data']['payments'] ?? []], 'la facture n\'est pas modifiée par le rapprochement');
+    T::eq([$inv['version'], []], [$after['version'], $after['data']['payments'] ?? []], '« rapprocher seulement » : la facture n\'est pas modifiée');
+    $GLOBALS['RAP'] = ['inv' => $inv, 'exp' => $exp, 't' => (int)$t, 'e' => (int)$e, 'cli' => $cli['id']];
+});
+T::test('rapprocher et enregistrer le paiement : paiement ajouté à la facture (montant et date de la banque), une seule fois ; retiré avec le rapprochement', function () use ($admin) {
+    ['inv' => $inv, 't' => $t] = $GLOBALS['RAP'];
+    [$c, $u] = $admin->req('PUT', "pilot/tx/$t", ['match' => ['type' => 'invoice', 'id' => $inv['id'], 'pay' => true]]); T::eq(200, $c, json_encode($u, JSON_UNESCAPED_UNICODE));
+    T::eq(1, $u['match_paid']);
+    [, $f] = $admin->req('GET', "items/invoice/{$inv['id']}");
+    T::eq(1, count($f['data']['payments'])); $p = $f['data']['payments'][0];
+    T::eq([2420, '2026-01-25', 'Virement', $t], [$p['amount'], $p['date'], $p['method'], $p['bankTx']]);
+    T::ok($f['version'] > $inv['version'], 'version de la facture augmentée (pas de conflit silencieux avec un autre utilisateur)');
+    [$c] = $admin->req('PUT', "pilot/tx/$t", ['match' => ['type' => 'invoice', 'id' => $inv['id'], 'pay' => true]]); T::eq(200, $c);
+    [, $f] = $admin->req('GET', "items/invoice/{$inv['id']}"); T::eq(1, count($f['data']['payments']), 'pas de double paiement');
+    T::ok((int)db()->query("SELECT COUNT(*) FROM activity WHERE type = 'invoice' AND item_id = {$inv['id']} AND label LIKE 'Paiement%rapprochement%'")->fetchColumn() >= 1, 'journal d\'activité');
+    [$c, $u] = $admin->req('PUT', "pilot/tx/$t", ['match' => null]); T::eq(200, $c); T::eq(0, $u['match_paid']);
+    [, $f] = $admin->req('GET', "items/invoice/{$inv['id']}"); T::eq([], $f['data']['payments'], 'paiement retiré avec le rapprochement');
+    [$c] = $admin->req('PUT', "pilot/tx/$t", ['match' => ['type' => 'invoice', 'id' => $inv['id'], 'pay' => true]]); T::eq(200, $c);
+});
+T::test('paiement refusé s\'il dépasse le reste à payer (rien n\'est enregistré) ; sens entrée/sortie vérifié', function () use ($admin, $acc) {
+    ['inv' => $inv, 'e' => $e] = $GLOBALS['RAP'];
+    $b = (int)db()->query("SELECT id FROM pil_bank_tx WHERE account_id = {$acc['belfius']} AND amount = 242000")->fetchColumn();
+    [$c, $r] = $admin->req('PUT', "pilot/tx/$b", ['match' => ['type' => 'invoice', 'id' => $inv['id'], 'pay' => true]]);
+    T::eq(400, $c); T::ok(str_contains($r['error'], 'dépasse le reste'), $r['error']);
+    T::eq(null, db()->query("SELECT match_id FROM pil_bank_tx WHERE id = $b")->fetchColumn(), 'rapprochement annulé lui aussi (tout ou rien)');
+    [, $f] = $admin->req('GET', "items/invoice/{$inv['id']}"); T::eq(1, count($f['data']['payments']));
+    [$c] = $admin->req('PUT', "pilot/tx/$e", ['match' => ['type' => 'invoice', 'id' => $inv['id']]]); T::eq(400, $c, 'une sortie ne se rapproche pas d\'une facture');
+});
+T::test('achat : paiement ajouté, « payé » et date de paiement mis à jour, historique de l\'achat ; retiré si le rapprochement est retiré', function () use ($admin) {
+    ['exp' => $exp, 'e' => $e] = $GLOBALS['RAP'];
+    [$c, $u] = $admin->req('PUT', "pilot/tx/$e", ['match' => ['type' => 'expense', 'id' => $exp['id'], 'pay' => true]]); T::eq(200, $c, json_encode($u, JSON_UNESCAPED_UNICODE));
+    [, $x] = $admin->req('GET', "items/expense/{$exp['id']}");
+    T::eq([605, true, '2026-02-10'], [$x['data']['payments'][0]['amount'], $x['data']['paid'], $x['data']['paidDate']]);
+    T::ok(str_contains(end($x['data']['history'])['txt'], 'extrait bancaire'), 'historique de l\'achat');
+    [$c] = $admin->req('PUT', "pilot/tx/$e", ['match' => null]); T::eq(200, $c);
+    [, $x] = $admin->req('GET', "items/expense/{$exp['id']}");
+    T::eq([[], false, null], [$x['data']['payments'], $x['data']['paid'], $x['data']['paidDate']]);
+});
+T::test('paiement déjà saisi à la main (même montant, ± 7 jours) : pas ajouté une seconde fois', function () use ($admin, $acc) {
+    $cli = $GLOBALS['RAP']['cli'];
+    [, $inv] = $admin->req('POST', 'items/invoice', ['data' => ['clientId' => $cli, 'status' => 'emise', 'date' => '2026-01-05', 'lines' => [['kind' => 'item', 'desc' => 'Solde', 'qty' => 1, 'price' => 10600, 'vat' => 0]],
+        'payments' => [['date' => '2026-01-26', 'amount' => 10600, 'method' => 'Virement']]]]);
+    $t = (int)db()->query("SELECT id FROM pil_bank_tx WHERE account_id = {$acc['bnp']} AND amount = 1060000")->fetchColumn();
+    [, $s] = $admin->req('GET', "pilot/tx/$t/suggest");
+    $sx = array_values(array_filter($s, fn($x) => $x['id'] === $inv['id']))[0] ?? null;
+    T::ok($sx && $sx['existing_payment'] === '2026-01-26' && !$sx['can_pay'], json_encode($s, JSON_UNESCAPED_UNICODE));
+    [$c, $u] = $admin->req('PUT', "pilot/tx/$t", ['match' => ['type' => 'invoice', 'id' => $inv['id'], 'pay' => true]]); T::eq(200, $c);
+    T::eq(0, $u['match_paid']);
+    [, $f] = $admin->req('GET', "items/invoice/{$inv['id']}"); T::eq(1, count($f['data']['payments']));
+    [$c] = $admin->req('PUT', "pilot/tx/$t", ['match' => null]); T::eq(200, $c);
+    [, $f] = $admin->req('GET', "items/invoice/{$inv['id']}"); T::eq(1, count($f['data']['payments']), 'le paiement saisi à la main n\'est jamais retiré');
 });
 T::test('historique mensuel : transferts internes exclus des entrées/sorties ; soldes reconstitués = soldes de la banque', function () use ($admin, $X, $acc) {
     [$c, $m] = $admin->req('GET', 'pilot/monthly&months=3&until=2026-03'); T::eq(200, $c);
@@ -191,9 +242,14 @@ T::test('annulation d\'un import : mouvements retirés, journal et original cons
     // apprentissage par le nom (paiement par carte, sans IBAN) : retenu pour le prochain import
     $card = db()->query("SELECT id FROM pil_bank_tx WHERE account_id = {$acc['bnp']} AND cp_name = 'QUINCAILLERIE FICTIVE BRUXELLES'")->fetchColumn();
     [$c] = $admin->req('PUT', "pilot/tx/$card", ['category' => 'materiaux', 'learn' => true]); T::eq(200, $c);
+    // paiement enregistré par un mouvement de cet import : retiré lors de l'annulation
+    [, $inv] = $admin->req('POST', 'items/invoice', ['data' => ['clientId' => $GLOBALS['RAP']['cli'], 'status' => 'emise', 'date' => '2026-01-05', 'lines' => [['kind' => 'item', 'desc' => 'Solde', 'qty' => 1, 'price' => 10600, 'vat' => 0]]]]);
+    $cl = (int)db()->query("SELECT id FROM pil_bank_tx WHERE account_id = {$acc['bnp']} AND amount = 1060000")->fetchColumn();
+    [$c] = $admin->req('PUT', "pilot/tx/$cl", ['match' => ['type' => 'invoice', 'id' => $inv['id'], 'pay' => true]]); T::eq(200, $c);
     $imp = db()->query("SELECT * FROM pil_bank_imports WHERE account_id = {$acc['bnp']} AND status = 'importe'")->fetch();
     [$c] = $admin->req('DELETE', "pilot/imports/{$imp['id']}"); T::eq(200, $c);
     T::eq(0, (int)db()->query("SELECT COUNT(*) FROM pil_bank_tx WHERE import_id = {$imp['id']}")->fetchColumn());
+    [, $f] = $admin->req('GET', "items/invoice/{$inv['id']}"); T::eq([], $f['data']['payments'] ?? [], 'paiement retiré de la facture avec l\'import');
     T::eq('annule', db()->query("SELECT status FROM pil_bank_imports WHERE id = {$imp['id']}")->fetchColumn());
     [$c, , $raw] = $admin->req('GET', "pilot/imports/{$imp['id']}/file"); T::eq(200, $c); T::ok(str_starts_with($raw, '%PDF'), 'original téléchargeable');
     [$c] = $admin->req('POST', 'pilot/import', $file('bnp-fictif.pdf', 'bnp-fictif.layout.json')); T::eq(200, $c, 'ré-import après annulation');
@@ -209,7 +265,14 @@ T::test('sécurité : original inaccessible en direct, « user » refusé, autre
     T::ok(!str_contains(json_encode($l), 'SECRET AUTRE FIRME'), 'mouvement d\'une autre firme visible !');
     [$c] = $admin->req('PUT', 'pilot/tx/' . (int)db()->lastInsertId(), ['note' => 'x']); T::eq(404, $c);
 });
-T::test('aucune route de paiement ni de connexion bancaire dans le module', function () {
+T::test('sauvegarde : la copie e-mail hebdomadaire ne contient pas les tables bancaires ; la sauvegarde du serveur les contient', function () {
+    $php = 'require "/var/www/html/lib.php"; $m = backup_mail_copy(sys_get_temp_dir()); $s = implode("", gzfile($m)); unlink($m);'
+        . ' echo str_contains($s, "CREATE TABLE `items`") ? "I" : "-", str_contains($s, "pil_bank") ? "B" : "-";'
+        . ' $f = sys_get_temp_dir() . "/full.sql.gz"; backup_db($f); $s = implode("", gzfile($f)); unlink($f); echo str_contains($s, "CREATE TABLE `pil_bank_tx`") ? "F" : "-";';
+    $r = trim((string)shell_exec('docker exec bp-test-web php -r ' . escapeshellarg($php) . ' 2>&1'));
+    T::eq('I-F', $r, 'I = données BatiPro présentes, - = pas de tables bancaires dans l\'e-mail, F = sauvegarde complète sur le serveur');
+});
+T::test('aucune connexion bancaire ni ordre de virement : aucun appel réseau sortant dans le module', function () {
     $src = file_get_contents(__DIR__ . '/../../pilotage/bank.php') . file_get_contents(__DIR__ . '/../../pilotage/bank_parse.php');
     T::ok(!preg_match('/curl_|fsockopen|file_get_contents\(\s*[\'"]https?:|stream_socket/i', $src), 'aucun appel réseau sortant');
 });

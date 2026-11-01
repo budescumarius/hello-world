@@ -51,7 +51,14 @@ Pour **CSV / XLS / XLSX**, aucun lecteur n'a été écrit sans exemple réel : i
   - « **sûr** » : même communication structurée.
   - « **probable** » : montant = reste à payer ou total TTC, et même contact ou même IBAN.
 
-  Le rapprochement **relie** le mouvement au document. Il **n'enregistre pas de paiement** dans la facture ou l'achat : BâtiPro n'est pas modifié (vérifié par un test). L'enregistrement automatique du paiement pourra être ajouté plus tard, sur demande.
+  Deux boutons par proposition (décision du 01/11/2026) :
+  - « **Rapprocher et enregistrer le paiement** » : le paiement est ajouté dans la facture ou l'achat (`data.payments[]`).
+    - Montant et date sont ceux de la banque, mode « Virement », avec une remarque « Extrait <banque> – opération n° … » et le lien `bankTx`.
+    - La version du document augmente et l'opération est notée dans le journal d'activité. Pour un achat, « payé » et la date de paiement sont recalculés comme dans BâtiPro, et une ligne est ajoutée à son historique.
+    - **Refusé** si le montant dépasse le reste à payer, si la facture n'est pas validée, ou si l'achat est refusé ou encore « à valider ». Dans ce cas, rien n'est enregistré, pas même le rapprochement.
+    - **Jamais en double** : pas de second ajout pour le même mouvement, ni si un paiement du même montant (± 7 jours) a déjà été saisi à la main.
+    - Retirer le rapprochement, ou annuler l'import, **retire ce paiement** et seulement celui-là. Un paiement saisi à la main n'est jamais touché.
+  - « **Rapprocher seulement** » : lien sans aucune modification du document.
 
 ## Écrans (espace **Pilotage**, visible seulement par les administrateurs d'une firme où le module est activé)
 
@@ -79,13 +86,9 @@ Pour **CSV / XLS / XLSX**, aucun lecteur n'a été écrit sans exemple réel : i
 - Les montants sont stockés en **centimes entiers** (BIGINT), jamais en nombres à virgule.
 - **Tests avec des extraits 100 % fictifs** (`tests/fixtures/bank/`, générés par `make-bank-fixtures.mjs`) : faux noms, IBAN et communications inventés mais valides, structure identique aux vrais extraits.
 
-### ⚠ Point à décider : sauvegarde hebdomadaire par e-mail
+### Sauvegarde hebdomadaire par e-mail (option b retenue)
 
-La sauvegarde automatique de BâtiPro (`backup_db`) copie **toutes** les tables. Les nouvelles tables bancaires partent donc aussi dans l'e-mail hebdomadaire envoyé aux super-administrateurs. Rien n'a été changé sans votre accord. Options :
-
-- **(a)** garder tel quel ;
-- **(b)** exclure les tables `pil_bank_*` de l'e-mail, en les gardant dans la sauvegarde quotidienne sur le serveur ;
-- **(c)** chiffrer la pièce jointe.
+La sauvegarde quotidienne du serveur reste **complète**, tables bancaires comprises. En revanche, la copie envoyée chaque semaine par **e-mail** est produite à part, **sans les tables `pil_bank_*`**. Le texte de l'e-mail le signale. Changement dans `lib.php` : `backup_db()` accepte des préfixes de tables à exclure, et une nouvelle fonction `backup_mail_copy()` produit cette copie. Un test le vérifie.
 
 ## Fichiers modifiés et ajoutés
 

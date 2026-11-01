@@ -56,6 +56,18 @@ const shots = process.argv[2];
     check('aperçu d\'un PDF illisible : refusé proprement', rule);
   }
   await shot('pilotage-mouvements');
+  // rapprochement avec enregistrement du paiement, depuis la fiche du mouvement
+  const tx = await p.evaluate(async () => { const t = (await api('GET', 'pilot/tx')).find((x) => x.amount === 242000 && x.booking_date === '2026-01-25'); if (t.match_id) await api('PUT', `pilot/tx/${t.id}`, { match: null }); return t; });
+  await p.evaluate(() => { ui.pilTx = { status: '' }; }); await p.goto(BASE + '/#/pilotage'); await p.goto(BASE + '/#/pilotage/mouvements');
+  await p.waitForFunction(() => (document.querySelector('.top h1') || {}).textContent === 'Mouvements bancaires');
+  await p.fill('.search input', 'CLIENT FICTIF SA'); await p.waitForTimeout(300);
+  const rows = await p.$$('.dt tbody tr');
+  for (const r of rows) { if (/2\s420,00/.test(await r.textContent())) { await r.click(); break; } }
+  await p.waitForSelector('.modal [data-pay="1"]', { timeout: 10000 });
+  await shot('pilotage-rapprochement');
+  await p.click('.modal [data-pay="1"]'); await p.waitForTimeout(1200);
+  const inv = await p.evaluate(async (id) => { const t = (await api('GET', 'pilot/tx')).find((x) => x.id === id); return t.match_id ? (await db.get('invoice', t.match_id)).data.payments : []; }, tx.id);
+  check('bouton « Rapprocher et enregistrer le paiement » : paiement visible dans la facture', inv.length === 1 && inv[0].amount === 2420 && inv[0].bankTx === tx.id, JSON.stringify(inv));
   await p.goto(BASE + '/#/pilotage/historique'); await p.waitForFunction(() => (document.querySelector('.top h1') || {}).textContent === 'Historique 24 mois' && document.querySelector('.page .dt'), null, { timeout: 15000 });
   check('historique 24 mois affiché', (await p.textContent('.page')).includes('Consolidé'));
   await shot('pilotage-historique');

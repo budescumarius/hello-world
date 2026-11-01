@@ -47,7 +47,10 @@ function pil_bank_schema(): void {
     static $done = false;
     if ($done) return;
     $done = true;
-    if (q("SHOW TABLES LIKE 'pil_bank_tx'")->fetch()) return;
+    if (q("SHOW TABLES LIKE 'pil_bank_tx'")->fetch()) {
+        if (!q("SHOW COLUMNS FROM pil_bank_tx LIKE 'match_paid'")->fetch()) db()->exec('ALTER TABLE pil_bank_tx ADD match_paid TINYINT NOT NULL DEFAULT 0 AFTER match_at');
+        return;
+    }
     $pdo = db();
     $pdo->exec("CREATE TABLE IF NOT EXISTS pil_bank_accounts (
         id INT AUTO_INCREMENT PRIMARY KEY, company_id INT NOT NULL, bank VARCHAR(60) NOT NULL, iban VARCHAR(34) NOT NULL, label VARCHAR(120) NOT NULL DEFAULT '',
@@ -64,7 +67,7 @@ function pil_bank_schema(): void {
         booking_date DATE NOT NULL, value_date DATE NULL, amount BIGINT NOT NULL, cp_name VARCHAR(190) NOT NULL DEFAULT '', cp_iban VARCHAR(34) NOT NULL DEFAULT '',
         communication TEXT NULL, structured VARCHAR(24) NULL, bank_ref VARCHAR(40) NOT NULL DEFAULT '', type_code VARCHAR(10) NOT NULL DEFAULT '', raw TEXT NULL, fp CHAR(64) NOT NULL,
         category VARCHAR(30) NOT NULL DEFAULT 'a_classer', cat_source VARCHAR(16) NOT NULL DEFAULT 'auto', status VARCHAR(12) NOT NULL DEFAULT 'a_verifier',
-        transfer_account_id INT NULL, transfer_tx_id INT NULL, match_type VARCHAR(12) NULL, match_id INT NULL, match_by INT NULL, match_at DATETIME NULL,
+        transfer_account_id INT NULL, transfer_tx_id INT NULL, match_type VARCHAR(12) NULL, match_id INT NULL, match_by INT NULL, match_at DATETIME NULL, match_paid TINYINT NOT NULL DEFAULT 0,
         name_fix VARCHAR(190) NULL, note VARCHAR(255) NULL, history TEXT NULL, updated_by INT NULL, updated_at DATETIME NULL,
         KEY company_account_date (company_id, account_id, booking_date), KEY company_fp (company_id, fp), KEY company_import (company_id, import_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     $pdo->exec("CREATE TABLE IF NOT EXISTS pil_bank_rules (
@@ -301,6 +304,8 @@ function pil_cancel_import(int $id, array $me): void {
     if (!$imp) fail(404, 'Import introuvable ou déjà annulé.');
     $pdo = db(); $pdo->beginTransaction();
     try {
+        // paiements écrits dans les factures / achats par ces mouvements : retirés eux aussi
+        foreach (q('SELECT * FROM pil_bank_tx WHERE company_id = ? AND import_id = ? AND match_paid = 1', [cid(), $id])->fetchAll() as $t) pil_payment_remove((string)$t['match_type'], (int)$t['match_id'], $t, $me);
         $ids = array_map('intval', q('SELECT id FROM pil_bank_tx WHERE company_id = ? AND import_id = ?', [cid(), $id])->fetchAll(PDO::FETCH_COLUMN));
         if ($ids) {
             $in = implode(',', $ids);
@@ -315,7 +320,7 @@ function pil_cancel_import(int $id, array $me): void {
 
 // ------------------------------------------------------------------ Mouvements : lecture et corrections
 function pil_tx_out(array $r): array {
-    foreach (['id', 'account_id', 'import_id', 'seq', 'amount', 'transfer_account_id', 'transfer_tx_id', 'match_id', 'match_by', 'updated_by'] as $k) if ($r[$k] !== null) $r[$k] = (int)$r[$k];
+    foreach (['id', 'account_id', 'import_id', 'seq', 'amount', 'transfer_account_id', 'transfer_tx_id', 'match_id', 'match_by', 'updated_by', 'match_paid'] as $k) if (isset($r[$k])) $r[$k] = (int)$r[$k];
     $r['history'] = $r['history'] ? json_decode($r['history'], true) : [];
     unset($r['company_id'], $r['fp']);
     return $r;
@@ -335,7 +340,13 @@ function pil_tx_list(array $f): array {
 
 /** Correction par l'utilisateur : catégorie, nom affiché, note, statut. Le brut de la banque n'est jamais modifié. */
 function pil_tx_update(int $id, array $b, array $me): array {
-    $t = q('SELECT * FROM pil_bank_tx WHERE id = ? AND company_id = ?', [$id, cid()])->fetch();
+    // un rapprochement peut écrire un paiement dans la facture ou l'achat : tout ou rien
+    if (array_key_exists('match', $b) && !db()->inTransaction()) {
+        db()->beginTransaction();
+        try { $r = pil_tx_update($id, $b, $me); db()->commit(); return $r; }
+        catch (Throwable $e) { db()->rollBack(); throw $e; }
+    }
+    $t = q('SELECT * FROM pil_bank_tx WHERE id = ? AND company_id = ? FOR UPDATE', [$id, cid()])->fetch();
     if (!$t) throw new PilError('Mouvement introuvable', 404);
     $hist = $t['history'] ? (json_decode($t['history'], true) ?: []) : [];
     $set = []; $args = [];
@@ -365,12 +376,19 @@ function pil_tx_update(int $id, array $b, array $me): array {
     }
     if (array_key_exists('match', $b)) {
         $m = $b['match'];
+        // ancien rapprochement qui avait ajouté un paiement : ce paiement est retiré du document
+        if ($t['match_id'] && (int)$t['match_paid']) { pil_payment_remove((string)$t['match_type'], (int)$t['match_id'], $t, $me); $set[] = 'match_paid = 0'; $hist[] = ['at' => now(), 'by' => $me['id'], 'field' => 'paiement', 'from' => 'enregistré', 'to' => 'retiré']; }
         if ($m === null) { $chg('match_type', null); $chg('match_id', null); $set[] = 'match_by = NULL'; $set[] = 'match_at = NULL'; }
         else {
             $type = (string)($m['type'] ?? ''); $mid = (int)($m['id'] ?? 0);
             if (!in_array($type, ['invoice', 'expense'], true) || !$mid) throw new PilError('Rapprochement invalide', 400);
             if (!q('SELECT id FROM items WHERE id = ? AND company_id = ? AND type = ?', [$mid, cid(), $type])->fetch()) throw new PilError('Document introuvable', 404);
+            if (($type === 'invoice') !== ((int)$t['amount'] > 0)) throw new PilError($type === 'invoice' ? 'Une facture se rapproche d\'une entrée d\'argent.' : 'Un achat se rapproche d\'une sortie d\'argent.', 400);
             $chg('match_type', $type); $chg('match_id', $mid); $set[] = 'match_by = ?'; $args[] = $me['id']; $set[] = 'match_at = ?'; $args[] = now();
+            if (!empty($m['pay'])) {
+                $r = pil_payment_add($type, $mid, $t, $me);
+                if ($r === 'ajoute') { $set[] = 'match_paid = 1'; $hist[] = ['at' => now(), 'by' => $me['id'], 'field' => 'paiement', 'from' => null, 'to' => 'enregistré dans ' . ($type === 'invoice' ? 'la facture' : 'l\'achat')]; }
+            }
         }
     }
     if ($set) {
@@ -382,6 +400,79 @@ function pil_tx_update(int $id, array $b, array $me): array {
     return pil_tx_out(q('SELECT * FROM pil_bank_tx WHERE id = ? AND company_id = ?', [$id, cid()])->fetch());
 }
 
+// ------------------------------------------------------------------ Paiement écrit dans la facture / l'achat (après confirmation)
+/** Total, déjà payé et reste d'un document BatiPro, en centimes (mêmes règles que invState / purchState). */
+function pil_doc_due(string $type, array $d): array {
+    if ($type === 'invoice') {
+        $total = (int)round(pil_doc_totals($d)['total'] * 100);
+        $paid = (int)round(array_sum(array_map(fn($p) => pil_num($p['amount'] ?? 0), (array)($d['payments'] ?? []))) * 100);
+    } else {
+        $total = (int)round(pil_purch_ttc($d) * 100);
+        $paid = is_array($d['payments'] ?? null) && $d['payments'] ? (int)round(array_sum(array_map(fn($p) => pil_num($p['amount'] ?? 0), $d['payments'])) * 100) : (!empty($d['paid']) ? $total : 0);
+    }
+    return ['total' => $total, 'paid' => $paid, 'rest' => $total - $paid];
+}
+/** Paiement déjà présent (saisi à la main) : même montant, ± 7 jours. */
+function pil_payment_existing(array $d, array $t): ?array {
+    foreach ((array)($d['payments'] ?? []) as $p) {
+        if (!empty($p['bankTx'])) continue;
+        if ((int)round(pil_num($p['amount'] ?? 0) * 100) === abs((int)$t['amount']) && !empty($p['date']) && abs(strtotime((string)$p['date']) - strtotime((string)$t['booking_date'])) <= 7 * 86400) return $p;
+    }
+    return null;
+}
+function pil_doc_save(string $type, array $row, array $d, array $me, string $label): void {
+    q('UPDATE items SET data = ?, lite = ?, version = version + 1, updated_by = ?, updated_at = ? WHERE id = ? AND company_id = ?',
+        [json_encode($d, JSON_UNESCAPED_UNICODE), lite_json($type, $d), $me['id'], now(), (int)$row['id'], cid()]);
+    log_activity($me['id'], 'update', $type, (int)$row['id'], $row['project_id'] !== null ? (int)$row['project_id'] : null, $label);
+}
+/** = purchSyncPaid() de purchase.js : « paid » / « paidDate » recalculés. */
+function pil_purch_sync(array &$d): void {
+    $full = !empty($d['payments']) && abs(pil_doc_due('expense', ['paid' => false] + $d)['rest']) < 1;
+    $d['paid'] = $full; $dates = array_column($d['payments'], 'date'); sort($dates);
+    $d['paidDate'] = $full ? end($dates) : null;
+}
+/**
+ * Ajoute le paiement du mouvement bancaire au document. Renvoie 'ajoute', 'deja' (déjà enregistré) ou lève une PilError.
+ * Le montant est celui de la banque ; il ne peut pas dépasser le reste à payer.
+ */
+function pil_payment_add(string $type, int $mid, array $t, array $me): string {
+    $row = q('SELECT * FROM items WHERE id = ? AND company_id = ? AND type = ? FOR UPDATE', [$mid, cid(), $type])->fetch();
+    $d = json_decode((string)$row['data'], true) ?: [];
+    foreach ((array)($d['payments'] ?? []) as $p) if ((int)($p['bankTx'] ?? 0) === (int)$t['id']) return 'deja';
+    if (pil_payment_existing($d, $t)) return 'deja';
+    if ($type === 'invoice') {
+        if (($d['status'] ?? '') !== 'emise' || in_array($d['kind'] ?? '', ['proforma', 'avoir'], true)) throw new PilError('Seule une facture validée peut recevoir un paiement.', 400);
+    } else {
+        if (!empty($d['refused'])) throw new PilError('Cet achat est refusé : aucun paiement possible.', 400);
+        if (($d['status'] ?? '') === 'avalider' || !empty($d['toCheck'])) throw new PilError('Validez d\'abord la facture d\'achat dans BâtiPro, puis rapprochez-la.', 400);
+        // ancien achat marqué « payé » sans détail : la tranche est reconstituée (comme purchPayment)
+        if (!empty($d['paid']) && empty($d['payments'])) $d['payments'] = [['date' => $d['paidDate'] ?? $t['booking_date'], 'amount' => pil_purch_ttc($d), 'method' => 'Virement']];
+    }
+    $due = pil_doc_due($type, $d); $amt = abs((int)$t['amount']);
+    if ($amt > $due['rest']) throw new PilError(sprintf('Le montant du mouvement (%s) dépasse le reste à payer (%s). Rapprochez sans enregistrer le paiement, ou corrigez le document.', pil_fmt($amt), pil_fmt($due['rest'])), 400);
+    $acc = q('SELECT bank FROM pil_bank_accounts WHERE id = ? AND company_id = ?', [(int)$t['account_id'], cid()])->fetch();
+    $d['payments'] = array_values((array)($d['payments'] ?? []));
+    $d['payments'][] = ['date' => $t['booking_date'], 'amount' => $amt / 100, 'method' => 'Virement',
+        'note' => 'Extrait ' . ($acc['bank'] ?? 'banque') . ($t['seq'] !== null ? ' – opération n° ' . $t['seq'] : ''), 'bankTx' => (int)$t['id']];
+    if ($type === 'expense') {
+        pil_purch_sync($d);
+        $d['history'][] = ['t' => gmdate('Y-m-d\TH:i:s.v\Z'), 'uid' => $me['id'], 'txt' => 'Paiement de ' . pil_fmt($amt) . ' (extrait bancaire) le ' . pil_d($t['booking_date'])];
+    }
+    pil_doc_save($type, $row, $d, $me, 'Paiement ' . pil_fmt($amt) . ' (rapprochement bancaire)');
+    return 'ajoute';
+}
+/** Retire le paiement ajouté par un rapprochement (et seulement celui-là). */
+function pil_payment_remove(string $type, int $mid, array $t, array $me): void {
+    $row = q('SELECT * FROM items WHERE id = ? AND company_id = ? AND type = ? FOR UPDATE', [$mid, cid(), $type])->fetch();
+    if (!$row) return;
+    $d = json_decode((string)$row['data'], true) ?: [];
+    $before = count((array)($d['payments'] ?? []));
+    $d['payments'] = array_values(array_filter((array)($d['payments'] ?? []), fn($p) => (int)($p['bankTx'] ?? 0) !== (int)$t['id']));
+    if (count($d['payments']) === $before) return;
+    if ($type === 'expense') { pil_purch_sync($d); $d['history'][] = ['t' => gmdate('Y-m-d\TH:i:s.v\Z'), 'uid' => $me['id'], 'txt' => 'Paiement de ' . pil_fmt(abs((int)$t['amount'])) . ' retiré (rapprochement bancaire annulé)']; }
+    pil_doc_save($type, $row, $d, $me, 'Paiement retiré (rapprochement bancaire annulé)');
+}
+
 // ------------------------------------------------------------------ Rapprochement avec les factures et achats de BatiPro (propositions)
 /** Propositions pour un mouvement : communication structurée identique (sûr), sinon même montant + même IBAN/contact (probable). Rien n'est écrit dans BatiPro. */
 function pil_match_suggestions(array $t): array {
@@ -390,13 +481,13 @@ function pil_match_suggestions(array $t): array {
     $contacts = pil_contacts_by_iban();
     $cpContact = $t['cp_iban'] !== '' ? ($contacts[$t['cp_iban']]['id'] ?? null) : null;
     $type = $amt > 0 ? 'invoice' : 'expense';
-    foreach (q('SELECT id, project_id, data FROM items WHERE company_id = ? AND type = ?', [cid(), $type])->fetchAll() as $r) {
+    foreach (q('SELECT id, project_id, number, data FROM items WHERE company_id = ? AND type = ?', [cid(), $type])->fetchAll() as $r) {
         $d = json_decode($r['data'], true) ?: [];
         if ($type === 'invoice') {
             if (($d['status'] ?? '') !== 'emise' || ($d['kind'] ?? '') === 'proforma' || ($d['kind'] ?? '') === 'avoir') continue;
             $total = (int)round(pil_doc_totals($d)['total'] * 100);
             $paid = (int)round(array_sum(array_map(fn($p) => pil_num($p['amount'] ?? 0), $d['payments'] ?? [])) * 100);
-            $rest = $total - $paid; $who = (int)($d['clientId'] ?? 0); $ref = (string)($d['number'] ?? '');
+            $rest = $total - $paid; $who = (int)($d['clientId'] ?? 0); $ref = (string)($r['number'] ?? '');
         } else {
             if (!empty($d['refused'])) continue;
             $total = (int)round(pil_purch_ttc($d) * 100);
@@ -411,8 +502,10 @@ function pil_match_suggestions(array $t): array {
         if ($cpContact && $who === $cpContact) { $score += 30; $why[] = 'même contact (IBAN)'; }
         elseif ($type === 'expense' && $t['cp_iban'] !== '' && pil_norm_iban((string)($d['iban'] ?? '')) === $t['cp_iban']) { $score += 30; $why[] = 'même IBAN que l\'achat'; }
         if ($score < 60) continue;
+        $ex = pil_payment_existing($d, $t);
         $out[] = ['type' => $type, 'id' => (int)$r['id'], 'ref' => $ref, 'date' => $d['date'] ?? null, 'total' => $total, 'rest' => $rest, 'contact_id' => $who ?: null,
-            'score' => $score, 'level' => $score >= 100 ? 'sûr' : 'probable', 'why' => $why];
+            'score' => $score, 'level' => $score >= 100 ? 'sûr' : 'probable', 'why' => $why, 'existing_payment' => $ex['date'] ?? null,
+            'can_pay' => !$ex && abs($amt) <= $rest && ($type === 'invoice' || (($d['status'] ?? '') !== 'avalider' && empty($d['toCheck'])))];
     }
     usort($out, fn($a, $b) => $b['score'] <=> $a['score']);
     return array_slice($out, 0, 5);

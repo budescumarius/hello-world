@@ -193,7 +193,7 @@ async function pilImportsPage() {
       { label: 'Télécharger l\'extrait original', icon: 'download', run: () => { location.href = `api.php?r=pilot/imports/${i.id}/file`; } },
       { label: 'Voir les mouvements', icon: 'eye', run: () => { ui.pilTx = { ...(ui.pilTx || {}), import: i.id }; go('#/pilotage/mouvements'); } },
       ...(i.status === 'importe' ? [{ sep: true }, { label: 'Annuler cet import…', icon: 'trash', danger: true, run: async () => {
-        if (!confirm(`Annuler l'import « ${i.filename} » ?\n\nSes ${i.tx_new} mouvement(s) seront retirés (avec leurs classements et rapprochements). Le journal et le fichier original sont conservés.`)) return;
+        if (!confirm(`Annuler l'import « ${i.filename} » ?\n\nSes ${i.tx_new} mouvement(s) seront retirés (avec leurs classements et rapprochements), ainsi que les paiements qu\'ils ont ajoutés aux factures et achats. Le journal et le fichier original sont conservés.`)) return;
         await api('DELETE', `pilot/imports/${i.id}`); pilCatsP = null; toast('Import annulé'); render();
       } }] : []),
     ]),
@@ -280,17 +280,28 @@ async function pilTxModal(t, cats, accs) {
   const box = $('[data-match]', m.el);
   const href = (x) => (x.type === 'invoice' ? `#/invoice/${x.id}` : `#/purchase/${x.id}`);
   if (t.match_id) {
-    box.innerHTML = `<div class="alert ok">Rapproché avec ${t.match_type === 'invoice' ? 'la facture' : 'l\'achat'} <a href="${href({ type: t.match_type, id: t.match_id })}">n° ${t.match_id}</a> (${fmtDT(t.match_at)}, ${esc(userName(t.match_by))}). <button class="btn sm" data-unmatch>Retirer</button></div>`;
-    $('[data-unmatch]', box).onclick = async () => { await api('PUT', `pilot/tx/${t.id}`, { match: null }); m.close(); render(); };
+    box.innerHTML = `<div class="alert ok">Rapproché avec ${t.match_type === 'invoice' ? 'la facture' : 'l\'achat'} <a href="${href({ type: t.match_type, id: t.match_id })}">n° ${t.match_id}</a> (${fmtDT(t.match_at)}, ${esc(userName(t.match_by))}).
+      ${t.match_paid ? `<br>Paiement de ${pilMoney(Math.abs(t.amount))} enregistré dans ${t.match_type === 'invoice' ? 'la facture' : 'l\'achat'}.` : '<br><small>Aucun paiement ajouté par ce rapprochement.</small>'}
+      <button class="btn sm" data-unmatch>Retirer</button></div>`;
+    $('[data-unmatch]', box).onclick = async () => {
+      if (t.match_paid && !confirm(`Retirer le rapprochement ?\n\nLe paiement de ${pilMoney(Math.abs(t.amount))} ajouté dans ${t.match_type === 'invoice' ? 'la facture' : 'l\'achat'} sera supprimé.`)) return;
+      try { await api('PUT', `pilot/tx/${t.id}`, { match: null }); m.close(); render(); } catch (e) { toast('Erreur : ' + e.message, 5000); }
+    };
     return;
   }
   if (t.category === 'transfert_interne') { box.innerHTML = '<p class="muted">Transfert entre vos comptes : pas de rapprochement.</p>'; return; }
   try {
     const sug = await api('GET', `pilot/tx/${t.id}/suggest`);
-    box.innerHTML = sug.length ? `<div class="rows">${sug.map((x, i) => `<div class="row static"><span class="grow"><a href="${href(x)}">${x.type === 'invoice' ? 'Facture' : 'Achat'} ${esc(x.ref || '#' + x.id)}</a> · ${fmtDate(x.date)} · total ${pilMoney(x.total)} · reste ${pilMoney(x.rest)}<br><small class="muted">${badge(x.level, x.level === 'sûr' ? '#2f9e44' : '#f08c00')} ${esc(x.why.join(', '))}</small></span><button class="btn sm" data-m="${i}">Rapprocher</button></div>`).join('')}</div>
-      <small class="muted">Le rapprochement relie le mouvement au document ; il n'enregistre pas de paiement dans la facture ou l'achat.</small>`
+    const amt = Math.abs(t.amount);
+    box.innerHTML = sug.length ? `<div class="rows">${sug.map((x, i) => `<div class="row static"><span class="grow"><a href="${href(x)}">${x.type === 'invoice' ? 'Facture' : 'Achat'} ${esc(x.ref || '#' + x.id)}</a> · ${fmtDate(x.date)} · total ${pilMoney(x.total)} · reste ${pilMoney(x.rest)}<br><small class="muted">${badge(x.level, x.level === 'sûr' ? '#2f9e44' : '#f08c00')} ${esc(x.why.join(', '))}</small>
+        ${x.existing_payment ? `<br><small>Paiement de ce montant déjà enregistré le ${fmtDate(x.existing_payment)} : il ne sera pas ajouté une seconde fois.</small>` : !x.can_pay && amt > x.rest ? `<br><small class="late">Le mouvement (${pilMoney(amt)}) dépasse le reste à payer : rapprochement sans paiement.</small>` : ''}</span>
+        <span class="btns">${x.can_pay ? `<button class="btn sm primary" data-m="${i}" data-pay="1">Rapprocher et enregistrer le paiement</button>` : ''}<button class="btn sm" data-m="${i}" data-pay="0">Rapprocher seulement</button></span></div>`).join('')}</div>
+      <small class="muted">« Enregistrer le paiement » ajoute ${pilMoney(amt)} à la date du ${fmtDate(t.booking_date)} dans la facture ou l'achat (retiré si vous annulez le rapprochement ou l'import).</small>`
       : '<p class="muted">Aucune facture ni aucun achat correspondant (communication structurée, montant, IBAN).</p>';
-    $$('[data-m]', box).forEach((b) => { b.onclick = async () => { const x = sug[+b.dataset.m]; await api('PUT', `pilot/tx/${t.id}`, { match: { type: x.type, id: x.id } }); m.close(); toast('Rapprochement enregistré'); render(); }; });
+    $$('[data-m]', box).forEach((b) => { b.onclick = async () => {
+      const x = sug[+b.dataset.m]; const pay = b.dataset.pay === '1';
+      try { await api('PUT', `pilot/tx/${t.id}`, { match: { type: x.type, id: x.id, pay } }); m.close(); toast(pay ? 'Rapprochement et paiement enregistrés' : 'Rapprochement enregistré'); render(); } catch (e) { toast('Erreur : ' + e.message, 6000); }
+    }; });
   } catch (e) { box.innerHTML = `<div class="alert">${esc(e.message)}</div>`; }
 }
 
