@@ -2009,3 +2009,4 @@ body.loading::before { content: ''; position: fixed; top: 0; left: 0; right: 0; 
   .print-shell .top-title { min-width: 0; flex: 1 1 100%; }
   .print-shell .top-title h1 { white-space: normal; }
 }
+.exp-what { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 10px 0; } .exp-what label.chip { cursor: pointer; }

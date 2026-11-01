@@ -88,21 +88,28 @@ route('export', async () => {
   const [from, to] = range();
   const inP = (d) => d && d >= from && d <= to;
   const perLabel = P.q === 'x' ? `du ${fmtDate(from)} au ${fmtDate(to)}` : `T${P.q} ${P.y}`;
+  // ce qu'on exporte (au choix, cumulable) : comme dans les logiciels comptables
+  const W = new Set(Array.isArray(P.what) && P.what.length ? P.what : ['emises', 'avoirs', 'achats']);
+  const paidIn = (pays) => (pays || []).some((x) => inP(x.date));
+  const okInv = (i) => i.data.status === 'emise' && !i.data.external && i.data.kind !== 'proforma';
+  const okExp = (e) => purchState(e) !== 'refusee' && !e.data.external;
+  const seen = new Set();
   const rows = [
     // factures et dépenses reprises d'un autre logiciel : le comptable les a déjà
-    ...invoices.filter((i) => i.data.status === 'emise' && !i.data.external && inP(i.data.date)).map((i) => invRow(i, contacts)),
-    ...expenses.filter((e) => purchState(e) !== 'refusee' && !e.data.external && inP(e.data.date)).map((e) => purchRow(e, contacts)),
-  ].sort((a, b) => a.typ.localeCompare(b.typ) || (a.date || '').localeCompare(b.date || '') || String(a.n).localeCompare(String(b.n)));
+    ...invoices.filter((i) => okInv(i) && ((i.data.kind === 'avoir' ? W.has('avoirs') && inP(i.data.date) : (W.has('emises') && inP(i.data.date)) || (W.has('encaissees') && paidIn(i.data.payments))))).map((i) => invRow(i, contacts)),
+    ...expenses.filter((e) => okExp(e) && ((W.has('achats') && inP(e.data.date)) || (W.has('achpayes') && (paidIn(e.data.payments) || (e.data.paid && inP(e.data.paidDate)))))).map((e) => purchRow(e, contacts)),
+  ].filter((r) => { const k = `${r.typ}${r.id}`; if (seen.has(k)) return false; seen.add(k); return true; }).sort((a, b) => a.typ.localeCompare(b.typ) || (a.date || '').localeCompare(b.date || '') || String(a.n).localeCompare(String(b.n)));
   const TYP = { vente: ['Facture émise', '#3b5bdb'], avoir: ['Note de crédit', '#7048e8'], achat: ['Facture d\'achat', '#e8590c'] };
   const page = layout({ title: 'Envoyer au comptable', icon: 'mail', back: isSimple() ? '#/dashboard' : null, sub: `Du ${fmtDate(from)} au ${fmtDate(to)}`, actions: `<button class="btn" data-zip2>${I.download} ZIP</button><button class="btn primary" data-send2>${I.mail} Envoyer au comptable</button>` });
   const years = [y, y - 1, y - 2];
   page.innerHTML = `<div class="card exp-per"><div class="card-h"><h3>Période</h3></div>
       <div class="chips">${years.map((yy) => `<button class="chip ${+P.y === yy && P.q !== 'x' ? 'on' : ''}" data-y="${yy}">${yy}</button>`).join('')}</div>
       <div class="chips">${[1, 2, 3, 4].map((q) => `<button class="chip ${P.q === q ? 'on' : ''}" data-q="${q}">T${q} <small>${['janv.–mars', 'avr.–juin', 'juil.–sept.', 'oct.–déc.'][q - 1]}</small></button>`).join('')}<button class="chip ${P.q === 'x' ? 'on' : ''}" data-q="x">Autres dates</button></div>
+      <div class="exp-what"><b>Exporter :</b> ${[['emises', 'Factures émises (date de facture)'], ['encaissees', 'Factures encaissées (payées sur la période)'], ['avoirs', 'Notes de crédit'], ['achats', 'Factures d\'achat (date de facture)'], ['achpayes', 'Achats payés sur la période']].map(([k, l]) => `<label class="chip ${W.has(k) ? 'on' : ''}"><input type="checkbox" data-w="${k}" ${W.has(k) ? 'checked' : ''} hidden>${W.has(k) ? '✓ ' : ''}${l}</label>`).join('')}</div>
       ${P.q === 'x' ? `<div class="grid-form">${fieldHTML({ name: 'from', label: 'Du', type: 'date' }, from)}${fieldHTML({ name: 'to', label: 'Au', type: 'date' }, to)}</div>` : ''}
-      <p class="muted">Tout est coché : décochez ce que vous ne voulez pas envoyer. « Un seul PDF » met toutes les factures émises et reçues de la période dans un fichier (avec un récapitulatif). Le ZIP contient un PDF par facture (ventes, notes de crédit), les pièces des achats et les journaux CSV.</p></div>
+      <p class="muted">Choisissez la période et ce qu'il faut exporter. Le ZIP contient les fichiers PDF tels qu'ils ont été envoyés (vos factures) ou reçus (PDF du fournisseur, PDF joint aux factures Peppol ; photos converties en PDF), rangés par dossier, et les journaux CSV. Tout est coché : décochez ce que vous ne voulez pas envoyer.</p></div>
     <div class="kpis" data-k></div><div id="tbl"></div>
-    <div class="exp-go"><button class="btn" data-onepdf>${I.file} Un seul PDF (toutes les factures)</button><button class="btn" data-zip>${I.download} Télécharger le ZIP</button><button class="btn primary" data-send>${I.mail} Envoyer au comptable</button></div>`;
+    <div class="exp-go"><button class="btn" data-onepdf>${I.file} Un seul PDF</button><button class="btn primary" data-zip>${I.download} Télécharger le ZIP (PDF)</button><button class="btn primary" data-send>${I.mail} Envoyer au comptable</button></div>`;
   const st = { sel: null };
   const sum = () => {
     const sel = rows.filter((r) => st.sel.has(r.id)); const by = (t) => sel.filter((r) => r.typ === t);
@@ -127,6 +134,7 @@ route('export', async () => {
   $('[data-onepdf]', page).onclick = () => exportOnePdf(rows.filter((r) => st.sel.has(r.id)), from, to, perLabel);
   $('[data-zip2]').onclick = () => $('[data-zip]', page).click(); $('[data-send2]').onclick = () => $('[data-send]', page).click();
   $('[data-send]', page).onclick = () => sendToAccountant(rows.filter((r) => st.sel.has(r.id)), perLabel);
+  $$('[data-w]', page).forEach((c) => { c.onchange = () => { const s2 = new Set(W); if (c.checked) s2.add(c.dataset.w); else s2.delete(c.dataset.w); P.what = [...s2]; saveUi(); render(); }; });
   $$('[data-y]', page).forEach((b) => { b.onclick = () => { P.y = +b.dataset.y; if (P.q === 'x') P.q = 1; saveUi(); render(); }; });
   $$('[data-q]', page).forEach((b) => { b.onclick = () => { P.q = b.dataset.q === 'x' ? 'x' : +b.dataset.q; saveUi(); render(); }; });
   $$('[name=from],[name=to]', page).forEach((i) => { i.onchange = () => { P[i.name] = i.value; saveUi(); render(); }; });
@@ -138,11 +146,36 @@ async function exportFiles(picked, light = false) {
   files.push(...await docsPdfFiles('invoice', ventes, 'Ventes/', light), ...await docsPdfFiles('invoice', avoirs, 'Notes de credit/', light));
   const achats = picked.filter((r) => r.typ === 'achat');
   for (const [i, r] of achats.entries()) {
-    if (!r.it.data.fileId) continue;
-    toast(`Pièces d'achat ${i + 1} / ${achats.length}…`, 60000);
-    const res = await fetch(fileUrl(r.it.data.fileId), { credentials: 'same-origin' }); if (!res.ok) continue;
-    const ext = ((r.it.data.fileName || '').match(/\.(\w{2,5})$/) || [, 'pdf'])[1];
-    files.push({ name: `Achats/${r.date || ''}_${fileTitle(r.who)}_${fileTitle(r.n || String(r.id))}.${ext}`, data: new Uint8Array(await res.arrayBuffer()) });
+    const fid = r.it.data.fileId;
+    const base = `Achats/${r.date || ''}_${fileTitle(r.who)}_${fileTitle(r.n || String(r.id))}`;
+    if (!fid) continue;
+    toast(`Factures d'achat ${i + 1} / ${achats.length}…`, 60000);
+    try {
+      const res = await fetch(fileUrl(fid), { credentials: 'same-origin' }); if (!res.ok) continue;
+      const type = res.headers.get('content-type') || ''; const buf = new Uint8Array(await res.arrayBuffer());
+      const head = new TextDecoder().decode(buf.slice(0, 400));
+      if (/pdf/.test(type) || head.startsWith('%PDF')) { files.push({ name: `${base}.pdf`, data: buf }); continue; } // PDF reçu, tel quel
+      if (/xml/.test(type) || /<\?xml|<Invoice|<CreditNote/.test(head)) {
+        const xml = new TextDecoder().decode(buf); let att = null;
+        try { att = (parseUBL(xml).attachments || []).find((a) => /pdf/i.test(a.mime) || /\.pdf$/i.test(a.name)); } catch (e) { /* UBL illisible */ }
+        if (att) { const bin = atob(String(att.data).replace(/\s+/g, '')); const u = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k); files.push({ name: `${base}.pdf`, data: u }); }
+        else if (typeof ublHtml === 'function') { const blob = await makePdf(`<div class="doc">${ublHtml(xml)}</div>`, { light: true }); files.push({ name: `${base}.pdf`, data: new Uint8Array(await blob.arrayBuffer()) }); }
+        files.push({ name: `Achats/XML Peppol/${r.date || ''}_${fileTitle(r.who)}_${fileTitle(r.n || String(r.id))}.xml`, data: buf });
+        continue;
+      }
+      if (/^image\//.test(type)) { // photo / ticket → une page PDF
+        await loadScript('assets/vendor/jspdf-2.5.1.umd.min.js');
+        const url = URL.createObjectURL(new Blob([buf], { type })); const im = new Image(); await new Promise((ok, ko) => { im.onload = ok; im.onerror = ko; im.src = url; });
+        const sc = Math.min(1, 2000 / Math.max(im.naturalWidth, im.naturalHeight)); const w = Math.round(im.naturalWidth * sc); const h = Math.round(im.naturalHeight * sc);
+        const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); g.drawImage(im, 0, 0, w, h); URL.revokeObjectURL(url);
+        const land = w > h * 1.15; const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: land ? 'landscape' : 'portrait', compress: true });
+        const PW = land ? 297 : 210; const PH = land ? 210 : 297; const k = Math.min((PW - 16) / w, (PH - 16) / h);
+        doc.addImage(c.toDataURL('image/jpeg', 0.85), 'JPEG', (PW - w * k) / 2, 8, w * k, h * k);
+        files.push({ name: `${base}.pdf`, data: new Uint8Array(doc.output('arraybuffer')) }); continue;
+      }
+      const ext = ((r.it.data.fileName || '').match(/\.(\w{2,5})$/) || [, 'bin'])[1];
+      files.push({ name: `${base}.${ext}`, data: buf });
+    } catch (e) { console.warn('pièce non exportée', e); }
   }
   const head = ['Type', 'Numero / reference', 'Date', 'Client / fournisseur', 'HT', 'TVA', 'TVAC', 'Piece'];
   const line = (r) => [r.typ === 'vente' ? 'Facture' : r.typ === 'avoir' ? 'Note de credit' : 'Achat', r.n, fmtDate(r.date), r.who, fnum(r.ht), fnum(r.tva), fnum(r.ttc), r.piece || 'sans piece'];
@@ -212,7 +245,7 @@ async function exportZip(picked, from, to) {
   if (!picked.length) return;
   const btn = $('[data-zip]'); if (btn) btn.disabled = true;
   try {
-    const files = await exportFiles(picked, true);
+    const files = await exportFiles(picked, false); // qualité normale : comme les factures envoyées
     downloadBlob(makeZip(files), `${fileTitle(company().name || 'export')}-comptabilite-${from}-${to}.zip`);
     toast(`ZIP prêt : ${files.length} fichiers ✓`, 3500);
   } catch (e) { console.error(e); toast('Export impossible : ' + e.message, 5000); } finally { if (btn) btn.disabled = false; }
