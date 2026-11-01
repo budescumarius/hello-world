@@ -1,0 +1,507 @@
+'use strict';
+/* Factures clients : liste (statut de paiement et de facturation électronique) et page en onglets Informations / Encodage / Totaux / Visualisation. */
+
+const INV_TYPE = { ...IKIND, facture: 'Facture simple' };
+const PAY_TERMS = [[0, 'Paiement comptant'], [7, '7 jour(s) après date de facturation'], [10, '10 jour(s) après date de facturation'], [15, '15 jour(s) après date de facturation'], [30, '30 jour(s) après date de facturation'], [45, '45 jour(s) après date de facturation'], [60, '60 jour(s) après date de facturation']];
+
+// Statut affiché (paiement / envoi)
+// État d'avancement : avant d'être facturé, il est envoyé au client qui l'approuve dans le délai choisi
+const EA_ST = { brouillon: ['État à envoyer', '#868e96'], envoye: ['État envoyé – à approuver', '#3b5bdb'], approuve: ['État approuvé – à facturer', '#2f9e44'], conteste: ['État contesté – à corriger', '#e5484d'] };
+const isEA = (i) => i.data.kind === 'situation' && i.data.status !== 'emise';
+function eaState(i) { const e = i.data.ea || {}; const k = e.status || 'brouillon'; return { ...e, k, late: k === 'envoye' && !!e.approveBy && e.approveBy < today() }; }
+function invDisp(i) {
+  const s = invState(i); const d = i.data;
+  if (isEA(i)) { const e = eaState(i); return e.late ? { k: 'ea_late', l: 'Délai d\'approbation passé', c: '#e8590c', sub: `depuis le ${fmtDate(e.approveBy)}` } : { k: 'ea_' + e.k, l: EA_ST[e.k][0], c: EA_ST[e.k][1], sub: e.k === 'envoye' && e.approveBy ? `avant le ${fmtDate(e.approveBy)}` : '' }; }
+  const lastPay = (d.payments || []).map((p) => p.date).filter(Boolean).sort().pop();
+  if (s.s === 'brouillon') return { k: 'brouillon', l: 'Brouillon', c: '#868e96' };
+  if (d.kind === 'proforma') return d.convertedTo ? { k: 'proforma', l: 'Pro forma → facturée', c: '#2f9e44', sub: d.convertedNumber || '' } : { k: 'proforma', l: 'Pro forma', c: '#7048e8', sub: (d.sent || []).length ? 'envoyée' : '' };
+  if (s.s === 'avoir') return { k: 'avoir', l: 'Note de crédit', c: '#adb5bd' };
+  if (s.s === 'payee') return { k: 'payee', l: 'Payé', c: '#2f9e44', sub: fmtDate(lastPay) };
+  if (s.s === 'partielle') return { k: 'partielle', l: 'Part. payé', c: '#e8a10c', sub: fmtDate(lastPay) };
+  if (s.s === 'retard') return { k: 'retard', l: 'En retard', c: '#e5484d', sub: `éch. ${fmtDate(d.due)}` };
+  const sent = (d.sent || []).length || (d.peppol && d.peppol.sentAt);
+  const man = (d.sent || []).find((x) => x.manual);
+  return sent ? { k: 'envoye', l: 'Envoyé', c: '#3b5bdb', sub: man ? `${man.to.toLowerCase()} · éch. ${fmtDate(d.due)}` : `éch. ${fmtDate(d.due)}` } : { k: 'aenvoyer', l: 'À envoyer', c: '#f08c00' };
+}
+const invDispHtml = (i) => { const x = invDisp(i); return `<span class="pst">${badge(x.l, x.c)}${x.sub ? `<small class="muted">${esc(x.sub)}</small>` : ''}</span>`; };
+// Facturation électronique (Peppol)
+function invEInv(i, contacts) {
+  const d = i.data;
+  if (d.status !== 'emise' || d.kind === 'proforma') return '<span class="muted">—</span>';
+  if (d.peppol && d.peppol.sentAt) return `<span class="pst">${badge('Envoyé', '#3b5bdb')}<small class="muted">Peppol ${fmtDate(d.peppol.sentAt)}</small></span>`;
+  const c = byId(contacts, d.clientId);
+  return c && buyerInfo(c).peppolId && buyerInfo(c).isCompany ? badge('À envoyer', '#f08c00') : '<small class="muted">Hors Peppol</small>';
+}
+
+// Facture envoyée hors de l'application (en main propre, par la poste, WhatsApp…) : marquée « Envoyée » à la main
+const SEND_WAYS = ['Remise en main propre', 'Par la poste', 'Par e-mail (autre messagerie)', 'WhatsApp / SMS', 'Autre'];
+async function invMarkSent(list, after) {
+  const ok = list.filter((i) => i.data.status === 'emise' && !isEA(i) && !(i.data.sent || []).length);
+  if (!ok.length) return toast('Rien à marquer : seules les factures validées pas encore envoyées peuvent l\'être', 4000);
+  const v = await ask(ok.length > 1 ? `Marquer ${ok.length} factures comme envoyées` : `Facture ${ok[0].number} envoyée`, [
+    { name: 'how', label: 'Envoyée comment ?', type: 'select', options: SEND_WAYS.map((x) => [x, x]) },
+    { name: 'date', label: 'Date d\'envoi', type: 'date' },
+  ], { how: SEND_WAYS[0], date: today() });
+  if (!v) return;
+  for (const it of ok) { it.data.sent = [...(it.data.sent || []), { t: `${v.date || today()}T12:00:00`, to: v.how, manual: true, by: S.me.id }]; await persist('invoice', it, { silent: true }); }
+  toast(ok.length > 1 ? `${ok.length} factures marquées envoyées` : 'Facture marquée envoyée', 2500);
+  if (after) after(); else render();
+}
+async function invUnmarkSent(it) {
+  if (!confirm('Retirer l\'envoi enregistré à la main ? La facture repassera « À envoyer ».')) return;
+  it.data.sent = (it.data.sent || []).filter((x) => !x.manual); await persist('invoice', it, { silent: true }); render();
+}
+
+// Note de crédit qui annule une facture (mêmes lignes en négatif)
+const invCredit = async (it) => { it = await fullOf('invoice', it); const d = it.data; return newInvoice({ project_id: it.project_id, data: { kind: 'avoir', clientId: d.clientId, quoteId: d.quoteId, reverse: d.reverse, discount: d.discount, defaultVat: d.defaultVat, title: `Annulation facture ${it.number}`, refInvoice: it.number, lines: d.lines.map((l) => (l.kind === 'item' ? { ...l, id: lid(), qty: -num(l.qty) } : { ...l, id: lid() })) } }); };
+// Facture validée : avertissement légal (note de crédit conseillée), puis modifier ou supprimer quand même
+const invChangeValidated = (it) => validatedInvoiceChange(it, null, { edit: `#/invoice/${it.id}/encodage`, credit: () => invCredit(it), afterDel: () => go('#/invoices') });
+
+// ---------------------------------------------------------------- Liste
+route('invoices', async () => {
+  const [invoices, contacts, projects] = await Promise.all([db.list('invoice', { proforma: true, lite: true }), db.list('contact'), db.list('project')]);
+  const rows = invoices.map((i) => ({ ...i, st: invState(i) }));
+  const real = rows.filter((r) => r.data.kind !== 'proforma'); // les pro forma ne comptent dans aucun total
+  const y = String(new Date().getFullYear());
+  const yr = real.filter((r) => (r.data.date || '').startsWith(y) && r.st.s !== 'brouillon');
+  const page = layout({ active: 'finances', icon: 'coins', title: 'Factures clients', actions: `<button class="btn" data-act="csv">${I.mail} Envoyer au comptable</button><button class="btn primary" data-act="new">${I.plus} Nouveau</button>` });
+  page.innerHTML = `<div class="kpis">${kpi(`Facturé ${y} HT`, money(yr.reduce((a, r) => a + r.st.t.base, 0)))}${kpi('Brouillons', real.filter((r) => r.st.s === 'brouillon').length, { sub: money(real.filter((r) => r.st.s === 'brouillon').reduce((a, r) => a + r.st.t.total, 0)) + ' TTC' })}
+    ${kpi('À recevoir TTC', money(real.filter((r) => ['impayee', 'partielle', 'retard'].includes(r.st.s)).reduce((a, r) => a + r.st.rest, 0)))}${kpi('En retard', money(real.filter((r) => r.st.s === 'retard').reduce((a, r) => a + r.st.rest, 0)), { cls: real.some((r) => r.st.s === 'retard') ? 'bad' : '', sub: `${real.filter((r) => r.st.s === 'retard').length} facture(s)` })}</div><div id="tbl"></div>`;
+  const tbl = $('#tbl');
+  dataTable(tbl, {
+    rows, state: ui.tbl_inv2 || (ui.tbl_inv2 = { sort: -2 }), pageSize: 20, select: { actions: (p) => multiActions('invoice', p) },
+    search: (i) => [i.number, i.data.title, i.data.ref, contactName(byId(contacts, i.data.clientId)), (byId(projects, i.project_id) || { data: {} }).data.name, fnum(i.st.t.total)].join(' '),
+    filters: { def: '', options: [['', 'Toutes'], ['brouillon', 'Brouillons', '#868e96'], ['aenvoyer', 'À envoyer', '#f08c00'], ['envoye', 'Envoyées', '#3b5bdb'], ['partielle', 'Part. payées', '#e8a10c'], ['payee', 'Payées', '#2f9e44'], ['retard', 'En retard', '#e5484d'], ['avoir', 'Notes de crédit', '#adb5bd'], ['proforma', 'Pro forma', '#7048e8']], match: (i, f) => invDisp(i).k === f },
+    columns: [
+      { l: 'N°', v: (i) => `<b class="nowrap">${esc(i.number || '—')}</b>${i.data.external ? '<br><small class="muted" title="Facture émise dans l\'ancien logiciel">reprise</small>' : ''}`, sort: (i) => i.number || '' },
+      { l: 'Date', v: (i) => fmtDate(i.data.date), sort: (i) => `${i.data.date || ''}${String(i.id).padStart(8, '0')}` },
+      { l: 'Type', v: (i) => esc(INV_TYPE[i.data.kind] || 'Facture') },
+      { l: 'Client', v: (i) => esc(contactName(byId(contacts, i.data.clientId))), sort: (i) => contactName(byId(contacts, i.data.clientId)) },
+      { l: 'Référence', v: (i) => `${esc(i.data.title || i.data.ref || '—')}${i.project_id ? `<br><small class="muted">${esc((byId(projects, i.project_id) || { data: {} }).data.name || '')}</small>` : ''}` },
+      { l: 'Total TTC', cls: 'r', v: (i) => `<b>${money(i.st.t.total)}</b>`, sort: (i) => i.st.t.total },
+      { l: 'Fact. électronique', v: (i) => invEInv(i, contacts) },
+      { l: 'Statut', v: invDispHtml, sort: (i) => invDisp(i).k },
+      { l: '', v: (i) => `<span class="row-acts"><button class="icon-btn sm" data-cm="${i.id}" title="Commentaires">${I.chat}${(i.data.comments || []).length ? `<i class="cnt">${i.data.comments.length}</i>` : ''}</button><button class="icon-btn sm" data-ed="${i.id}" title="Modifier">${I.edit}</button><button class="icon-btn sm" data-mo="${i.id}" title="Plus">${I.more}</button></span>` },
+    ],
+    onRow: (i) => go(`#/invoice/${i.id}`), empty: 'Aucune facture',
+    footer: (l) => {
+      const f = l.filter((r) => r.st.s !== 'brouillon' && r.data.kind !== 'proforma');
+      const sum = (fn) => f.reduce((a, r) => a + fn(r), 0);
+      return `<tr><td colspan="9"><div class="inv-tot"><div><small>Total HT</small><b>${money(sum((r) => r.st.t.base))}</b></div><div><small>Total TVA</small><b>${money(sum((r) => r.st.t.vat))}</b></div><div><small>Total TTC</small><b>${money(sum((r) => r.st.t.total))}</b></div><div><small>Montant à recevoir TTC</small><b>${money(sum((r) => (['impayee', 'partielle', 'retard'].includes(r.st.s) ? r.st.rest : 0)))}</b></div></div></td></tr>`;
+    },
+  });
+  tbl.addEventListener('click', (ev) => {
+    const b = ev.target.closest('[data-cm],[data-ed],[data-mo]'); if (!b) return;
+    const it = rows.find((x) => x.id === +(b.dataset.cm || b.dataset.ed || b.dataset.mo)); if (!it) return;
+    if (b.dataset.ed) return go(`#/invoice/${it.id}`);
+    if (b.dataset.cm) return invComments(it);
+    invMenu(it);
+  });
+  $('[data-act=new]').onclick = () => menuSheet('Nouvelle facture', [
+    { label: 'Facture simple', icon: 'file', primary: true, run: () => newInvoice({ data: { kind: 'facture' } }) },
+    { label: 'Facture d\'acompte', icon: 'coins', run: () => newInvoice({ data: { kind: 'acompte' } }) },
+    { label: 'Facture pro forma (sans valeur fiscale)', icon: 'file', run: () => newInvoice({ data: { kind: 'proforma' } }) },
+    { label: 'Facture d\'avancement ou depuis un devis…', icon: 'calc', run: () => go('#/quotes') },
+    { label: 'Note de crédit', icon: 'copy', run: () => newInvoice({ data: { kind: 'avoir' } }) },
+    { sep: true },
+    { label: 'Facture déjà émise (autre logiciel)…', icon: 'download', run: () => externalInvoice() },
+  ]);
+  $('[data-act=csv]').onclick = () => go('#/export');
+});
+
+// ---------------------------------------------------------------- Facture émise dans un autre logiciel : gardée pour le suivi (chantier, encaissé),
+// avec son numéro d'origine ; jamais renvoyée au client ni au comptable, ni numérotée ici
+async function externalInvoice(preset = {}) {
+  const [contacts, projects] = await Promise.all([db.list('contact'), db.list('project')]);
+  formModal({
+    title: 'Facture déjà émise (autre logiciel)', saveLabel: 'Enregistrer',
+    values: { kind: 'facture', date: today(), vat: defVat(), paid: true, ...preset },
+    fields: [
+      { name: 'info', type: 'html', cls: 'full', html: '<p class="muted">Pour le suivi du chantier et de ce qui est encaissé. La facture garde son numéro d\'origine ; elle n\'est envoyée ni au client ni au comptable (il l\'a déjà).</p>' },
+      { name: 'number', label: 'N° de la facture', required: true }, { name: 'date', label: 'Date', type: 'date', required: true },
+      { name: 'kind', label: 'Type', type: 'select', options: [['facture', 'Facture'], ['acompte', 'Facture d\'acompte'], ['finale', 'Facture de solde'], ['avoir', 'Note de crédit']] },
+      { name: 'clientId', label: 'Client', type: 'contact', contacts, kinds: ['client', 'prospect', 'architecte', 'autre'], required: true },
+      { name: 'project_id', label: 'Chantier', type: 'select', options: [['', '—'], ...projects.map((p) => [p.id, `${p.number || ''} · ${p.data.name}`])], cls: 'full' },
+      { name: 'title', label: 'Objet', cls: 'full' },
+      { name: 'ht', label: 'Montant HT', type: 'money', required: true }, { name: 'vat', label: 'TVA', type: 'select', options: vatList().map((x) => [x, `${fnum(x)} %`]) },
+      { name: 'reverse', label: 'Autoliquidation (TVA due par le client)', type: 'check' },
+      { name: 'paid', label: 'Déjà encaissée', type: 'check' }, { name: 'paidAmount', label: 'Montant encaissé TVAC (si partiel)', type: 'money' }, { name: 'paidDate', label: 'Date de l\'encaissement', type: 'date' },
+    ],
+    async onSave(v) {
+      await resolveContact(v, 'clientId', 'client');
+      const sign = v.kind === 'avoir' ? -1 : 1; const ht = r2(num(v.ht)) * sign; const ttc = r2(ht * (1 + (v.reverse ? 0 : num(v.vat)) / 100));
+      const paid = v.paid ? (num(v.paidAmount) > 0 ? r2(num(v.paidAmount)) : ttc) : 0;
+      const it = await persist('invoice', { project_id: v.project_id ? +v.project_id : null, data: { kind: v.kind, status: 'emise', external: true, clientId: v.clientId, title: v.title || '', date: v.date, due: v.date, emittedAt: v.date, payDays: 0,
+        reverse: !!v.reverse, defaultVat: num(v.vat), ownerId: S.me.id, billSame: true, discount: 0, notes: '',
+        lines: [{ id: lid(), kind: 'item', desc: `${v.title || 'Travaux'} (facture ${v.number}, émise dans l'ancien logiciel)`, unit: 'forfait', qty: 1, price: ht, vat: num(v.vat), type: 'divers' }],
+        payments: paid && sign > 0 ? [{ date: v.paidDate || v.date, amount: paid, method: 'Virement', note: 'Reprise' }] : [] } });
+      it.number = v.number.trim(); await persist('invoice', it, { silent: true });
+      toast(`Facture ${it.number} enregistrée (reprise)`, 3000); render();
+    },
+  });
+}
+
+// ---------------------------------------------------------------- Pro forma : document sans valeur fiscale, numéroté à part (PF-…),
+// jamais compté ni envoyé au comptable ; converti ensuite en vraie facture (mêmes lignes) quand le client confirme / paie
+function proformaActions(it) {
+  const d = it.data; const locked = d.status === 'emise';
+  return [
+    ...(!d.convertedTo ? [{ label: 'Convertir en facture…', icon: 'coins', primary: true, run: () => proformaConvert(it) }] : [{ label: `Ouvrir la facture ${d.convertedNumber || ''}`.trim(), icon: 'file', primary: true, run: () => go(`#/invoice/${d.convertedTo}`) }]),
+    { label: 'PDF / Imprimer', icon: 'print', run: () => go(`#/print/invoice/${it.id}`) },
+    ...(locked ? [{ label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/invoice/${it.id}?mail=1`) },
+      ...(!(d.sent || []).length ? [{ label: 'Marquer comme envoyée (envoi manuel)…', icon: 'check', run: () => invMarkSent([it]) }] : [])] : []),
+    ...(locked && !d.convertedTo ? [{ label: 'Modifier la pro forma', icon: 'edit', run: async () => { d.status = 'brouillon'; d.reopened = { at: new Date().toISOString() }; await persist('invoice', it); go(`#/invoice/${it.id}/encodage`); } }] : []),
+    ...(d.quoteId ? [{ label: 'Ouvrir le devis', icon: 'calc', run: () => go(`#/quote/${d.quoteId}`) }] : []),
+    { label: 'Commentaires', icon: 'chat', run: () => invComments(it) },
+    { sep: true },
+    { label: 'Supprimer la pro forma', icon: 'trash', danger: true, run: async () => { if (confirm('Supprimer cette facture pro forma ? (sans valeur fiscale : elle peut être supprimée)')) { await db.del('invoice', it.id); go('#/invoices'); } } },
+  ];
+}
+async function proformaConvert(it) {
+  it = await fullOf('invoice', it);
+  const d = it.data;
+  menuSheet(`Convertir la pro forma ${it.number || ''} en facture`, [['facture', 'Facture'], ['acompte', 'Facture d\'acompte (déduite ensuite des états / du solde)']].map(([k, l]) => ({
+    label: l, primary: k === (d.proformaKind || 'facture'),
+    run: async () => {
+      const copy = JSON.parse(JSON.stringify(d));
+      ['sent', 'payments', 'peppol', 'reopened', 'emittedAt', 'convertedTo', 'convertedNumber', 'proformaKind', 'comments', 'communication'].forEach((x) => delete copy[x]);
+      const co = company();
+      const inv = await persist('invoice', { project_id: it.project_id || null, data: { ...copy, kind: k, status: 'brouillon', date: today(), due: addDays(today(), num(copy.payDays) || num(co.paymentDays) || 30), fromProformaId: it.id, fromProforma: it.number || '', docNote: [copy.docNote, it.number ? `Suite à la facture pro forma ${it.number}.` : ''].filter(Boolean).join('\n') } });
+      d.convertedTo = inv.id; d.convertedNumber = ''; await persist('invoice', it, { silent: true });
+      toast('Facture créée depuis la pro forma : vérifiez-la puis soumettez-la', 4000); go(`#/invoice/${inv.id}`);
+    },
+  })));
+}
+// Travaux d'un état d'avancement par taux de TVA (lignes de l'avancement, sans les lignes ajoutées ni les déductions)
+function eaWorkByVat(lines) {
+  const w = {}; for (const l of lines || []) { if (l.kind !== 'item' || l.extra || l.deduction || l.option) continue; w[num(l.vat)] = r2((w[num(l.vat)] || 0) + r2(num(l.qty) * num(l.price))); }
+  return w;
+}
+// remboursement en % : recalculé sur les travaux de l'état (après une modification de l'avancement)
+function eaRefundUpdate(lines) {
+  const w = eaWorkByVat(lines);
+  for (const l of lines) if (l.extra && l.refundPct) l.price = -r2((w[num(l.vat)] || 0) * num(l.refundPct) / 100);
+  return lines;
+}
+// Déduire (rembourser) une partie d'un acompte qui n'est pas lié au devis : choix de l'acompte, % ou montant, réparti par taux de TVA
+async function eaDeductAcompte(it, done) {
+  const d = it.data; const [all, contacts] = await Promise.all([db.list('invoice'), db.list('contact')]);
+  const acs = all.filter((i) => i.data.kind === 'acompte' && i.data.status === 'emise' && !(d.quoteId && +i.data.quoteId === +d.quoteId));
+  const list = [...acs.filter((i) => +i.data.clientId === +d.clientId), ...acs.filter((i) => +i.data.clientId !== +d.clientId)];
+  if (!list.length) return toast('Aucune facture d\'acompte validée à déduire', 4000);
+  const used = (ac) => r2(-all.filter((i) => i.id !== it.id).concat([it]).reduce((a, i) => a + (i.data.lines || []).filter((l) => +l.acId === ac.id).reduce((x, l) => x + r2(num(l.qty) * num(l.price)), 0), 0));
+  const cname = (id) => contactName(byId(contacts, id));
+  const v = await ask('Déduire un acompte', [
+    { name: 'acId', label: 'Quel acompte ?', type: 'select', cls: 'full', options: list.map((i) => { const b = totals(i.data).base; return [i.id, `${i.number} · ${fmtDate(i.data.date)} · ${money(b)} HT · reste à déduire ${money(r2(b - used(i)))}${+i.data.clientId === +d.clientId ? '' : ` · autre client ${cname(i.data.clientId)}`}`]; }) },
+    { name: 'pct', label: 'Pourcentage de l\'acompte à déduire (%)', type: 'percent' },
+    { name: 'amount', label: 'ou montant HT à déduire', type: 'money' },
+  ], { acId: list[0].id, pct: 10 });
+  if (!v) return;
+  const ac = byId(list, +v.acId); const at = totals(ac.data); const left = r2(at.base - used(ac));
+  let want = num(v.amount) > 0 ? num(v.amount) : r2(at.base * num(v.pct) / 100);
+  if (!(want > 0)) return toast('Indiquez un pourcentage ou un montant', 3000);
+  if (want > left + 0.005) { if (!confirm(`Il ne reste que ${money(left)} à déduire de cet acompte. Déduire ${money(left)} ?`)) return; want = left; }
+  const many = at.vats.length > 1; const lbl = num(v.amount) > 0 ? money(want) : `${fnum(num(v.pct))} %`;
+  for (const x of at.vats) {
+    const part = r2(want * (at.base ? x.base / at.base : 1));
+    if (part > 0) d.lines.push({ id: lid(), kind: 'item', extra: true, deduction: 'acompteLibre', acId: ac.id, acNumber: ac.number, desc: `Déduction ${lbl} de l'acompte ${ac.number}${many ? ` (TVA ${fnum(x.rate)} %)` : ''}`, unit: 'forfait', qty: 1, price: -part, vat: x.rate, type: 'divers' });
+  }
+  toast(`Déduction de ${money(want)} HT ajoutée`, 3000); done();
+}
+function invMenu(it) {
+  if (it.data.kind === 'proforma') return menuSheet(`Facture pro forma ${it.number || '(brouillon)'}`, proformaActions(it));
+  const d = it.data; const locked = d.status === 'emise';
+  menuSheet(`${INV_TYPE[d.kind] || 'Facture'} ${it.number || '(brouillon)'}`, [
+    { label: 'Ouvrir', icon: 'edit', run: () => go(`#/invoice/${it.id}`) },
+    { label: 'PDF / Imprimer', icon: 'print', run: () => go(`#/print/invoice/${it.id}`) },
+    ...(locked ? [{ label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/invoice/${it.id}?mail=1`) },
+      { label: 'Peppol – facture électronique', icon: 'file', run: () => peppolInvoice(it) },
+      ...(d.kind !== 'avoir' && invState(it).rest > 0.005 ? [{ label: 'Ajouter un paiement', icon: 'coins', run: () => invPayment(it, null) }] : []),
+      ...(!isEA(it) && !(d.sent || []).length && !(d.peppol && d.peppol.sentAt) ? [{ label: 'Marquer comme envoyée (envoi manuel)…', icon: 'check', run: () => invMarkSent([it]) }] : []),
+      ...((d.sent || []).some((x) => x.manual) ? [{ label: 'Annuler « envoyée manuellement »', icon: 'x', run: () => invUnmarkSent(it) }] : [])] : []),
+    { label: 'Commentaires', icon: 'chat', run: () => invComments(it) },
+    ...(locked ? [{ sep: true }, { label: 'Modifier / supprimer la facture validée…', icon: 'edit', run: () => invChangeValidated(it) }] : []),
+    ...(!locked ? [{ sep: true }, { label: 'Supprimer le brouillon', icon: 'trash', danger: true, run: async () => { if (confirm('Supprimer ce brouillon ?')) { await db.del('invoice', it.id); render(); } } }] : []),
+  ]);
+}
+
+function invComments(it) {
+  const d = it.data; d.comments = d.comments || [];
+  const m = modal(`${mhead(`Commentaires – ${it.number || d.title || 'facture'}`)}<div class="m-body"><div class="feed">${d.comments.map((c) => `<div><b>${esc(userName(c.uid))}</b> ${esc(c.text)}<small class="muted">${fmtDT(c.t)}</small></div>`).join('') || '<p class="muted">Aucun commentaire.</p>'}</div>
+    <label class="field"><span>Nouveau commentaire</span><textarea rows="3" data-txt placeholder="ex. client a demandé un report de paiement…"></textarea></label></div>
+    <div class="m-foot"><span class="grow"></span><button class="btn" data-close>Fermer</button><button class="btn primary" data-add>Ajouter</button></div>`);
+  $$('[data-close]', m.el).forEach((b) => { b.onclick = () => m.close(); });
+  $('[data-add]', m.el).onclick = async () => {
+    const t = $('[data-txt]', m.el).value.trim(); if (!t) return;
+    d.comments.push({ t: new Date().toISOString(), uid: S.me.id, text: t });
+    await persist('invoice', it); m.close(); render();
+  };
+}
+
+function invPayment(it, i) {
+  const d = it.data; d.payments = d.payments || [];
+  const s = invState(it);
+  const p = i == null ? { date: today(), amount: Math.max(0, s.rest), method: 'Virement' } : d.payments[i];
+  formModal({
+    title: i == null ? 'Nouveau paiement' : 'Paiement', values: p,
+    fields: [{ name: 'amount', label: 'Montant', type: 'money', required: true }, { name: 'date', label: 'Date', type: 'date' }, { name: 'method', label: 'Mode', type: 'select', options: PAY_METHODS.map((x) => [x, x]) }, { name: 'note', label: 'Remarque', cls: 'full' }],
+    async onSave(v) { Object.assign(p, v, { amount: num(v.amount) }); if (i == null) d.payments.push(p); await persist('invoice', it); render(); },
+    onDelete: i == null ? null : async () => { d.payments.splice(i, 1); await persist('invoice', it); render(); },
+  });
+}
+
+// ---------------------------------------------------------------- Page facture (onglets)
+route('invoice', async (id, tab = 'informations') => {
+  const it = await db.get('invoice', +id);
+  const [contacts, projects, installs] = await Promise.all([db.list('contact'), db.list('project'), db.list('installation').catch(() => [])]);
+  const d = it.data; d.payments = d.payments || [];
+  const locked = d.status === 'emise';
+  const prog = d.kind === 'situation' && !!d.quoteId;
+  const TABS = [['informations', 'Informations', 'file'], ['encodage', 'Encodage', 'edit'], ['totaux', 'Totaux', 'percent'], ['visualisation', 'Visualisation', 'eye']];
+  if (!TABS.some(([k]) => k === tab)) tab = 'informations';
+  const type = INV_TYPE[d.kind] || 'Facture';
+  const disp = invDisp(it);
+  const save = debounce(async () => { try { await persist('invoice', it, { silent: true }); const el = $('[data-saved]'); if (el) el.textContent = 'Enregistré'; } catch (e) { toast('Erreur : ' + e.message); } }, 700);
+  const changed = () => { const el = $('[data-saved]'); if (el) el.textContent = 'Modification…'; save(); };
+  const page = layout({ active: 'finances', icon: 'coins', back: '#/invoices',
+    title: isEA(it) ? `État d'avancement EA${d.situationNo || ''}${d.title ? ` – ${d.title}` : ''}` : `${locked ? type : `Modifier une ${type.toLowerCase()}`}${it.number ? ` ${it.number}` : ''}${d.title ? ` – ${d.title}` : ''}`,
+    sub: `${badge(disp.l, disp.c)}${d.peppol && d.peppol.sentAt ? ` ${badge('Peppol ✓', '#0c8599')}` : ''} <span class="muted" data-saved></span>`,
+    tabs: TABS.map(([k, l, ic]) => `<a href="#/invoice/${it.id}/${k}" class="${k === tab ? 'on' : ''}">${I[ic] || ''} ${l}</a>`).join('') });
+  page.innerHTML = `${isEA(it) ? '<div data-ea></div>' : ''}<div class="inv-page" data-body></div>
+    <div class="pi-bar">${locked ? `<button class="btn" data-back>Retour</button><span class="grow"></span><a class="btn" href="#/print/invoice/${it.id}">${I.print} PDF</a><span class="btn-split"><button class="btn primary" data-send>${I.mail} Envoyer</button><button class="btn primary" data-more aria-label="Autres actions">${I.chevron}</button></span>`
+      : `<span class="grow"></span><button class="btn" data-back>Annuler</button><span class="btn-split"><button class="btn primary" data-submit>${isEA(it) ? 'Facturer' : 'Soumettre'}</button><button class="btn primary" data-more aria-label="Autres actions">${I.chevron}</button></span>`}</div>`;
+  const body = $('[data-body]', page);
+  const dis = locked ? 'disabled' : '';
+  if (isEA(it)) eaPanel(it, $('[data-ea]', page), () => emit());
+  const c = byId(contacts, d.clientId);
+
+  if (tab === 'informations') {
+    const clientOpts = contacts.filter((x) => ['client', 'prospect', 'architecte', 'autre'].includes(x.data.kind) || x.id === +d.clientId);
+    const addr = (x) => { const cd = (x && x.data) || {}; const l = [cd.address, [cd.zip, cd.city].filter(Boolean).join(' '), cd.country].filter(Boolean); return l.length ? `${I.pin || ''}<div>${l.map(esc).join('<br>')}${cd.vat ? `<br><small class="muted">TVA : ${esc(cd.vat)}</small>` : ''}</div>` : '<span class="muted">Adresse non renseignée sur la fiche du client.</span>'; };
+    if (d.billSame == null) d.billSame = true;
+    if (d.payDays == null && d.date && d.due) d.payDays = Math.max(0, Math.round((new Date(d.due) - new Date(d.date)) / 864e5));
+    body.innerHTML = `<section class="card"><div class="card-h"><h3>Informations générales</h3></div>
+      <div class="inv-2col"><div>
+        <div class="section-t">Détails de la facture</div>
+        ${fieldsGrid([{ name: 'title', label: 'Référence *', cls: 'full', placeholder: 'ex. EA1 – Hippodrome' }, { name: 'ownerId', label: 'Responsable', type: 'user' }, { name: 'kind', label: 'Type de facture', type: 'select', options: optsOf(INV_TYPE) },
+          { name: 'date', label: 'Date *', type: 'date' }, { name: 'number', label: 'Numéro', placeholder: 'attribué à la validation' }], { ...d, number: it.number || '' })}
+        <div class="section-t">Lié à un chantier / installation</div>
+        ${fieldsGrid([{ name: 'project_id', label: 'Chantier', type: 'select', options: [['', '—'], ...projects.map((p) => [p.id, `${p.number} · ${p.data.name}`])], cls: 'full' },
+          { name: 'installId', label: 'Installation', type: 'select', options: [['', '—'], ...installs.map((x) => [x.id, x.data.name || x.data.title || `Installation ${x.id}`])], cls: 'full' }], { ...d, project_id: it.project_id || '' })}
+      </div><div>
+        <div class="section-t">Coordonnées du client</div>
+        ${fieldsGrid([{ name: 'clientId', label: 'Client *', type: 'contact', contacts: clientOpts, cls: 'full' }], d)}
+        <div class="field full"><span>Adresse du client</span><div class="addr-box" data-addr>${addr(c)}</div></div>
+      </div></div></section>
+      <section class="card"><div class="card-h"><h3>Informations de facturation</h3></div>
+      <div class="inv-2col"><div>
+        <div class="section-t">Détails de facturation</div>
+        ${fieldsGrid([{ name: 'defaultVat', label: 'Taux de TVA par défaut *', type: 'select', options: vatList().map((r) => [r, `${fnum(r)} %${r === 6 ? ' (taux réduit)' : r === 21 ? ' (taux normal)' : ''}`]) },
+          { name: 'payDays', label: 'Conditions de paiement *', type: 'select', options: PAY_TERMS.some(([k]) => k === num(d.payDays)) || d.payDays == null ? PAY_TERMS : [...PAY_TERMS, [num(d.payDays), `${d.payDays} jour(s) après date de facturation`]] },
+          { name: 'due', label: 'Date d\'échéance', type: 'date' }, { name: 'communication', label: 'Communication structurée', placeholder: 'générée à la validation' },
+          { name: 'reverse', label: 'Autoliquidation (TVA due par le client)', type: 'check', cls: 'full' }],
+          { ...d, defaultVat: d.defaultVat ?? defVat(), payDays: d.payDays ?? (num(company().paymentDays) || 30), communication: d.communication ? commFmt(d.communication) : '' })}
+        ${!locked ? '<button type="button" class="link-btn" data-applyvat>Appliquer ce taux à toutes les lignes</button>' : ''}
+      </div><div>
+        <div class="section-t">Coordonnées de facturation</div>
+        <label class="toggle"><input type="checkbox" name="billSame" ${d.billSame !== false ? 'checked' : ''} ${dis}><i></i> Coordonnées de facturation identiques à celles du client</label>
+        <div data-bill ${d.billSame !== false ? 'hidden' : ''}>${fieldsGrid([{ name: 'billName', label: 'Nom / société facturée', cls: 'full' }, { name: 'billAddress', label: 'Adresse de facturation', type: 'textarea', rows: 3, cls: 'full' }, { name: 'billVat', label: 'N° TVA', cls: 'full' }], { billName: d.billName || (c ? contactName(c) : ''), billAddress: d.billAddress || '', billVat: d.billVat || '' })}</div>
+        <div class="section-t">Facturation électronique</div>
+        ${fieldsGrid([{ name: 'orderRef', label: 'Référence du bon de commande (fournie par l\'acheteur)', cls: 'full', placeholder: 'Entrer la référence' },
+          { name: 'contractRef', label: 'Engagement juridique / n° de contrat', cls: 'full', placeholder: 'Entrer la référence' },
+          { name: 'buyerRef', label: 'Référence acheteur (service, personne de contact)', cls: 'full', placeholder: 'par défaut : la référence de la facture' }], d)}
+      </div></div></section>`;
+    if (locked) $$('input,select,textarea', body).forEach((x) => { x.disabled = true; });
+    const val = (n) => { const el = body.querySelector(`[name="${n}"]`); return el ? (el.type === 'checkbox' ? el.checked : el.value) : undefined; };
+    body.addEventListener('change', async (ev) => {
+      const n = ev.target.name; if (!n || locked) return;
+      if (n === 'clientId') {
+        const v = { clientId: val('clientId') === '__new' ? '__new' : (val('clientId') ? +val('clientId') : null) };
+        await resolveContact(v, 'clientId', 'client');
+        if (v.clientId && val('clientId') === '__new') return render();
+        d.clientId = v.clientId; $('[data-addr]', body).innerHTML = addr(byId(contacts, d.clientId));
+      } else if (n === 'project_id') { it.project_id = val('project_id') ? +val('project_id') : null; }
+      else if (n === 'installId') { d.installId = val('installId') ? +val('installId') : null; }
+      else if (n === 'ownerId') { d.ownerId = val('ownerId') ? +val('ownerId') : null; }
+      else if (n === 'payDays' || n === 'date') { d[n] = n === 'payDays' ? num(val(n)) : val(n); if (d.date) { d.due = addDays(d.date, num(d.payDays ?? val('payDays'))); body.querySelector('[name=due]').value = d.due; } }
+      else if (n === 'billSame') { d.billSame = val('billSame'); $('[data-bill]', body).hidden = d.billSame; }
+      else if (n === 'reverse') d.reverse = val('reverse');
+      else if (n === 'defaultVat') d.defaultVat = num(val('defaultVat'));
+      else if (n === 'communication') d.communication = val('communication').replace(/\D/g, '').length === 12 ? val('communication').replace(/\D/g, '') : val('communication');
+      else if (n === 'number') return;
+      else d[n] = val(n);
+      changed();
+    });
+    body.addEventListener('input', (ev) => { const n = ev.target.name; if (!locked && ['title', 'billName', 'billAddress', 'billVat', 'orderRef', 'contractRef', 'buyerRef'].includes(n)) { d[n] = ev.target.value; changed(); } });
+    if (!locked) vatAutofill($('[data-bill]', body), { name: 'billName' }, { field: 'billVat', address: 'billAddress' });
+    const num0 = body.querySelector('[name=number]'); if (num0) num0.readOnly = true;
+    const av = $('[data-applyvat]', body);
+    if (av) av.onclick = () => { const r = num(val('defaultVat')); d.defaultVat = r; d.lines.forEach((l) => { if (l.kind === 'item') l.vat = r; }); changed(); toast(`TVA ${fnum(r)} % appliquée à toutes les lignes`); };
+  }
+
+  if (tab === 'encodage') {
+    body.innerHTML = `${prog ? `<div class="alert info">État d'avancement EA${d.situationNo || ''} : les lignes sont calculées depuis l'avancement du devis. ${!locked ? '<button class="btn sm" data-prog>Modifier l\'avancement</button>' : ''}</div>` : ''}
+      ${locked ? '<div class="alert info">Facture validée : les lignes ne sont plus modifiables. Pour corriger, créez une note de crédit. <button type="button" class="btn sm" data-reopen>Modifier quand même…</button></div>' : ''}
+      ${d.reopened && !locked ? `<div class="alert warn">⚠ Facture n° ${esc(it.number || '')} rouverte le ${fmtDate(String(d.reopened.at).slice(0, 10))} : elle garde son numéro. Prévenez votre comptable et le client.</div>` : ''}
+      <section class="card inv-enc"><div id="lines"></div><div class="inv-enc-foot"><span class="grow"></span><div data-marge></div><div><small class="muted">Total HT</small><b data-ht></b></div></div></section>`;
+    const foot = () => { const t = totals(d); $('[data-ht]', body).textContent = money(t.base); const m = $('[data-marge]', body); m.innerHTML = t.cost > 0 ? `<small class="muted">Marge bénéficiaire</small><b>${fnum(t.base ? ((t.base - t.cost) / t.base) * 100 : 0, 1)} % / ${money(t.base - t.cost)}</b>` : ''; };
+    linesEditor($('#lines', body), d, { showCost: false, defVat: d.defaultVat, readOnly: locked || prog, onChange: () => { foot(); changed(); } });
+    const ro = $('[data-reopen]', body); if (ro) ro.onclick = () => invChangeValidated(it);
+    // état d'avancement : lignes ajoutées à la main (travaux en plus, déduction d'un acompte pas lié au devis…)
+    if (prog) {
+      const ex = d.lines.filter((l) => l.extra);
+      body.insertAdjacentHTML('beforeend', `<section class="card"><div class="card-h"><h3>Lignes supplémentaires</h3><small class="muted">en plus de l'avancement · gardées si vous modifiez l'avancement</small></div>
+        ${ex.length ? `<div class="rows">${ex.map((l) => `<div class="row"><span class="grow"><b>${esc(l.desc)}</b><small class="muted">TVA ${fnum(num(l.vat))} %</small></span><b>${money(r2(num(l.qty) * num(l.price)))}</b>${locked ? '' : `<button class="icon-btn sm" data-exdel="${l.id}" title="Retirer">${I.trash}</button>`}</div>`).join('')}</div>` : '<p class="muted">Aucune.</p>'}
+        ${locked ? '' : `<div class="btns" style="margin-top:10px"><button class="btn primary" data-exremb>${I.plus} Déduction d'acompte (%)</button><button class="btn" data-exfree>${I.plus} Ligne libre</button><button class="btn" data-exac>${I.coins} Déduire un acompte (calcul en %)</button></div>`}
+        <div class="field" style="margin-top:14px"><span>Sur la facture</span><div class="seg" data-oneline><a href="#" data-ol="1" class="${d.oneLine ? 'on' : ''}">Une seule ligne « Avancement travaux ${esc(d.ref || `EA${d.situationNo || ''}`)} »</a><a href="#" data-ol="0" class="${d.oneLine ? '' : 'on'}">Le détail des postes</a></div>
+          <small class="muted">${d.oneLine ? `La facture montre : « Avancement travaux ${esc(d.ref || '')} » avec son montant, puis vos lignes supplémentaires. Le détail reste disponible (PDF « Détaillée »).` : 'La facture montre le tableau de l\'avancement poste par poste.'}</small></div></section>`);
+      const done = () => { foot(); changed(); render(); };
+      $$('[data-exdel]', body).forEach((b) => { b.onclick = () => { d.lines = d.lines.filter((l) => l.id !== b.dataset.exdel); done(); }; });
+      const fr = $('[data-exfree]', body); if (fr) fr.onclick = async () => {
+        const v = await ask('Ligne libre', [{ name: 'desc', label: 'Description', required: true, cls: 'full' }, { name: 'amount', label: 'Montant HT (négatif pour une remise / un remboursement)', type: 'number', required: true }, { name: 'vat', label: 'TVA', type: 'select', options: vatList().map((x) => [x, `${fnum(x)} %`]) }], { vat: num(d.defaultVat) || defVat() });
+        if (!v || !num(v.amount)) return;
+        d.lines.push({ id: lid(), kind: 'item', extra: true, desc: v.desc.trim(), unit: 'forfait', qty: 1, price: r2(num(v.amount)), vat: num(v.vat), type: 'divers' }); done();
+      };
+      const ac = $('[data-exac]', body); if (ac) ac.onclick = () => eaDeductAcompte(it, done);
+      // déduction d'acompte : un % des postes avancés dans cet état (ou un montant fixe), ligne visible sur la facture
+      const rb = $('[data-exremb]', body); if (rb) rb.onclick = async () => {
+        const work = eaWorkByVat(d.lines); const base = Object.values(work).reduce((a, x) => a + x, 0);
+        const v = await ask('Déduction d\'acompte', [
+          { name: 'pct', label: `Pourcentage des travaux de cet état (${money(base)} HT)`, type: 'percent', hint: 'Le montant est calculé tout seul, et recalculé si vous modifiez l\'avancement' },
+          { name: 'amount', label: 'ou montant HT fixe (au lieu du %)', type: 'money' },
+          { name: 'desc', label: 'Texte de la ligne (facultatif)', cls: 'full', placeholder: 'Déduction acompte 30 % sur les postes avancés dans cet état' },
+        ], { pct: 30 });
+        if (!v) return;
+        const pct = num(v.pct); const fixed = num(v.amount);
+        if (!(fixed > 0) && !(pct > 0)) return toast('Indiquez le pourcentage', 3000);
+        const rates = Object.keys(work).filter((r) => work[r]); const many = rates.length > 1;
+        if (fixed > 0) {
+          d.lines.push({ id: lid(), kind: 'item', extra: true, refund: true, desc: (v.desc || '').trim() || 'Déduction acompte', unit: 'forfait', qty: 1, price: -r2(fixed), vat: num(rates[0] ?? d.defaultVat), type: 'divers' });
+        } else {
+          if (!rates.length) return toast('Aucun travail dans cet état : encodez d\'abord l\'avancement', 4000);
+          for (const r of rates) d.lines.push({ id: lid(), kind: 'item', extra: true, refund: true, refundPct: pct, desc: `${(v.desc || '').trim() || `Déduction acompte ${fnum(pct)} % sur les postes avancés dans cet état (${d.ref || `EA${d.situationNo || ''}`})`}${many ? ` (TVA ${fnum(+r)} %)` : ''}`, unit: 'forfait', qty: 1, price: -r2(work[r] * pct / 100), vat: +r, type: 'divers' });
+        }
+        done();
+      };
+      if (rb && new URLSearchParams(location.hash.split('?')[1] || '').has('remb')) { history.replaceState(null, '', `#/invoice/${it.id}/encodage`); setTimeout(() => rb.click(), 150); }
+      $$('[data-ol]', body).forEach((a) => { a.onclick = (e) => { e.preventDefault(); d.oneLine = a.dataset.ol === '1'; done(); }; });
+    }
+    foot();
+    const pg = $('[data-prog]', body);
+    if (pg) pg.onclick = async () => { const e = eaState(it); if (['envoye', 'approuve'].includes(e.k) && !confirm(`Cet état a déjà été ${e.k === 'approuve' ? 'approuvé par' : 'envoyé à'} votre client. Le modifier ? Il faudra le lui renvoyer pour approbation.`)) return; const q = await db.get('quote', +d.quoteId); const others = (await db.list('invoice')).filter((x) => +x.data.quoteId === q.id && x.id !== it.id); progressInvoice(q, others, { project_id: it.project_id, data: {} }, it); };
+  }
+
+  if (tab === 'totaux') {
+    const s = invState(it);
+    body.innerHTML = `<div class="cols-2"><div>
+      <section class="card"><div class="card-h"><h3>Remise et mentions</h3></div>
+        ${fieldsGrid([{ name: 'discount', label: 'Remise globale %', type: 'percent' }, { name: 'reverse', label: 'Autoliquidation', type: 'check' },
+          { name: 'notes', label: 'Mentions / remarques imprimées sur la facture', type: 'textarea', rows: 4, cls: 'full' }], { discount: d.discount || '', reverse: d.reverse, notes: d.notes || '' })}</section>
+      ${locked && d.kind !== 'avoir' ? `<section class="card"><div class="card-h"><h3>Paiements reçus</h3>${s.rest > 0.005 ? `<button class="btn sm primary" data-pay>${I.plus} Paiement</button>` : ''}</div>
+        <div class="rows">${d.payments.map((p, i) => `<button class="row" data-payi="${i}"><span class="grow"><b>${money(p.amount)}</b><small class="muted">${fmtDate(p.date)} · ${esc(p.method || '')}${p.note ? ' · ' + esc(p.note) : ''}</small></span></button>`).join('') || '<div class="empty sm">Aucun paiement</div>'}</div>
+        <div class="totals flat"><div class="tr"><span>Payé</span><b>${money(s.paid)}</b></div><div class="tr big"><span>Reste à payer</span><span class="${s.s === 'retard' ? 'late' : ''}">${money(s.rest)}</span></div></div></section>` : ''}
+      </div><div><section class="card"><div class="card-h"><h3>Totaux</h3></div><div data-tot></div></section></div></div>`;
+    if (locked) $$('input,select,textarea', body).forEach((x) => { x.disabled = true; });
+    const drawTot = () => { $('[data-tot]', body).innerHTML = totalsBox(totals(d), d, false); };
+    drawTot();
+    body.addEventListener('input', (ev) => { const n = ev.target.name; if (locked || !n) return; d[n] = n === 'discount' ? num(ev.target.value) : n === 'reverse' ? ev.target.checked : ev.target.value; drawTot(); changed(); });
+    body.addEventListener('change', (ev) => { if (ev.target.name === 'reverse' && !locked) { d.reverse = ev.target.checked; drawTot(); changed(); } });
+    const pb = $('[data-pay]', body); if (pb) pb.onclick = () => invPayment(it, null);
+    $$('[data-payi]', body).forEach((b) => { b.onclick = () => invPayment(it, +b.dataset.payi); });
+  }
+
+  if (tab === 'visualisation') {
+    await save.flush();
+    body.innerHTML = `<div class="inv-vis"><section class="card inv-vis-side"><h3>Affiner la présentation de votre document</h3>
+        <p class="muted sm">Le modèle définit l'apparence de la facture (couleurs, colonnes, mentions) et ce que voit votre client lors de l'envoi.</p>
+        <label class="field"><span>Modèle</span><select disabled><option>Modèle de l'entreprise</option></select></label>
+        ${isAdmin() ? `<a class="btn" href="#/settings/templates">${I.edit} Modifier le modèle</a>` : ''}
+        <div class="inv-vis-acts"><a class="btn" href="#/print/invoice/${it.id}">${I.print} PDF / Imprimer</a>${locked ? `<a class="btn" href="#/print/invoice/${it.id}?mail=1">${I.mail} Envoyer par email</a>` : ''}</div></section>
+      <div class="inv-vis-doc"><div class="print-page" data-doc><p class="muted">Chargement de l'aperçu…</p></div></div></div>`;
+    try { const r = await docHtml('invoice', it.id); const el = $('[data-doc]', body); if (el) el.innerHTML = r.html; } catch (e) { $('[data-doc]', body).innerHTML = `<p class="late">${esc(e.message)}</p>`; }
+  }
+
+  // --- barre du bas
+  const back = () => go(it.project_id && location.hash.includes('from=project') ? `#/project/${it.project_id}/invoices` : '#/invoices');
+  $('[data-back]', page).onclick = async () => { await save.flush(); back(); };
+  const c2 = () => byId(contacts, d.clientId);
+  const emit = async (after) => {
+    await save.flush();
+    if (!d.clientId) { toast('Choisissez d\'abord le client (onglet Informations)', 4000); return go(`#/invoice/${it.id}/informations`); }
+    if (!(d.title || '').trim()) { toast('Indiquez la référence de la facture', 4000); return go(`#/invoice/${it.id}/informations`); }
+    if (!d.lines.some((l) => l.kind === 'item')) { toast('La facture ne contient aucune ligne (onglet Encodage)', 4000); return go(`#/invoice/${it.id}/encodage`); }
+    if (d.reverse && !(c2() && c2().data.vat)) return toast('Autoliquidation : indiquez d\'abord le n° de TVA du client (obligatoire sur la facture)', 5000);
+    if (isEA(it) && eaState(it).k !== 'approuve' && !eaState(it).late && !confirm('Le client n\'a pas encore approuvé cet état d\'avancement. Le facturer quand même ?')) return;
+    if (!confirm(d.reopened && it.number ? `Valider à nouveau la facture n° ${it.number} (même numéro) ?` : 'Soumettre la facture ? Elle reçoit son numéro définitif et ne sera plus modifiable.')) return;
+    // facture rouverte : elle garde son numéro
+    const r = d.reopened && it.number ? { number: it.number } : await api('POST', `number/${d.kind === 'avoir' ? 'avoir' : d.kind === 'proforma' ? 'proforma' : 'invoice'}`);
+    if (d.reopened) d.reopened.revalidatedAt = new Date().toISOString();
+    it.number = r.number; d.status = 'emise'; d.emittedAt = today();
+    if (d.ea) d.ea.invoicedAt = today();
+    if (!d.communication && company().country !== 'FR') d.communication = structComm(r.number.replace(/\D/g, ''));
+    await persist('invoice', it); toast(`${d.kind === 'proforma' ? 'Pro forma' : 'Facture'} ${it.number} soumise`);
+    if (d.billreqId) billreqDone(it).catch(() => {});
+    if (d.fromProformaId) db.get('invoice', +d.fromProformaId).then((pf) => { if (pf && pf.data.kind === 'proforma') { pf.data.convertedTo = it.id; pf.data.convertedNumber = it.number; return persist('invoice', pf, { silent: true }); } }).catch(() => {});
+    if (after === 'mail') return go(`#/print/invoice/${it.id}?mail=1`);
+    if (after === 'peppol') { go(`#/invoice/${it.id}/visualisation`); return setTimeout(() => peppolInvoice(it), 600); }
+    if (after === 'manual') return invMarkSent([it], () => go(`#/invoice/${it.id}/visualisation`));
+    go(`#/invoice/${it.id}/visualisation`);
+  };
+  const sub = $('[data-submit]', page); if (sub) sub.onclick = () => emit();
+  const snd = $('[data-send]', page); if (snd) snd.onclick = () => go(`#/print/invoice/${it.id}?mail=1`);
+  $('[data-more]', page).onclick = () => (d.kind === 'proforma' && locked ? menuSheet('Facture pro forma', proformaActions(it)) : menuSheet(locked ? 'Facture' : 'Soumettre', locked ? [
+    { label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/invoice/${it.id}?mail=1`) },
+    { label: 'Peppol – facture électronique', icon: 'file', primary: true, run: () => peppolInvoice(it) },
+    ...(d.kind !== 'avoir' && invState(it).rest > 0.005 ? [{ label: 'Ajouter un paiement', icon: 'coins', run: () => invPayment(it, null) }] : []),
+    ...(!isEA(it) && !(d.sent || []).length && !(d.peppol && d.peppol.sentAt) ? [{ label: 'Marquer comme envoyée (envoi manuel)…', icon: 'check', run: () => invMarkSent([it]) }] : []),
+    ...((d.sent || []).some((x) => x.manual) ? [{ label: 'Annuler « envoyée manuellement »', icon: 'x', run: () => invUnmarkSent(it) }] : []),
+    ...(d.kind !== 'avoir' ? [{ label: 'Créer une note de crédit', icon: 'copy', run: () => invCredit(it) }] : []),
+    { sep: true },
+    { label: 'Modifier la facture validée…', icon: 'edit', run: () => invChangeValidated(it) },
+    { label: 'Supprimer la facture validée…', icon: 'trash', danger: true, run: () => invChangeValidated(it) },
+    ...(d.quoteId ? [{ label: 'Ouvrir le devis', icon: 'calc', run: () => go(`#/quote/${d.quoteId}`) }] : []),
+    { label: 'Commentaires', icon: 'chat', run: () => invComments(it) },
+  ] : [
+    { label: 'Soumettre et envoyer par email', icon: 'mail', run: () => emit('mail') },
+    ...(peppolApOn() ? [{ label: 'Soumettre et envoyer via Peppol', icon: 'file', run: () => emit('peppol') }] : []),
+    { label: 'Soumettre – envoyée autrement (main propre, poste…)', icon: 'check', run: () => emit('manual') },
+    { label: 'Enregistrer le brouillon', icon: 'file', run: async () => { await save.flush(); toast('Brouillon enregistré'); } },
+    ...(d.quoteId ? [{ label: 'Ouvrir le devis', icon: 'calc', run: () => go(`#/quote/${d.quoteId}`) }] : []),
+    { sep: true },
+    { label: 'Supprimer le brouillon', danger: true, icon: 'trash', run: async () => { if (confirm('Supprimer ce brouillon ?')) { await db.del('invoice', it.id); if (d.fromProformaId) { const pf = await db.get('invoice', +d.fromProformaId).catch(() => null); if (pf && +pf.data.convertedTo === it.id) { delete pf.data.convertedTo; delete pf.data.convertedNumber; await persist('invoice', pf, { silent: true }); } } go('#/invoices'); } } },
+  ]));
+  cleanupView = () => save.flush();
+});
+
+// Panneau de l'état d'avancement : préparer → envoyer au client → approbation dans le délai → facturer
+function eaPanel(it, box, emit) {
+  const d = it.data; const e = eaState(it);
+  const step = { brouillon: 1, conteste: 1, envoye: 2, approuve: 3 }[e.k] || 1;
+  const steps = [['Préparer', 'quantités et % réalisés'], ['Envoyer au client', e.k === 'envoye' || e.k === 'approuve' ? `le ${fmtDate(e.sentAt)}` : 'pour approbation'], ['Approbation', e.k === 'approuve' ? `le ${fmtDate(e.approvedAt)}` : e.approveBy ? `avant le ${fmtDate(e.approveBy)}` : 'délai au choix'], ['Facturer', 'numéro définitif']];
+  const msg = e.k === 'conteste' ? `<div class="alert">Contesté par le client${e.note ? ` : « ${esc(e.note)} »` : ''}. Corrigez l'avancement puis renvoyez l'état.</div>`
+    : e.late ? `<div class="alert">Délai d'approbation passé depuis le ${fmtDate(e.approveBy)} sans réponse du client : selon vos conditions, l'état est considéré comme accepté. Vous pouvez le facturer.</div>`
+    : e.k === 'envoye' ? `<p class="muted">Envoyé le ${fmtDate(e.sentAt)} · le client a jusqu'au <b>${fmtDate(e.approveBy)}</b> pour l'approuver (${Math.max(0, dnum(e.approveBy) - dnum(today()))} jour(s) restant(s)).</p>` : '';
+  box.innerHTML = `<section class="card ea-card"><div class="card-h"><h3>État d'avancement EA${d.situationNo || ''}</h3>${badge(...(e.late ? ['Délai passé', '#e8590c'] : EA_ST[e.k]))}</div>
+    <ol class="ea-steps">${steps.map(([t, sub], i) => `<li class="${i + 1 < step ? 'done' : i + 1 === step ? 'on' : ''}"><b>${t}</b><small>${esc(sub)}</small></li>`).join('')}</ol>${msg}
+    <div class="btns">
+      ${['brouillon', 'conteste'].includes(e.k) ? `<button class="btn primary" data-ea="send">${I.mail} Envoyer au client pour approbation</button>` : ''}
+      ${e.k === 'envoye' ? `<button class="btn primary" data-ea="ok">${I.check} Le client a approuvé</button><button class="btn" data-ea="no">${I.x} Le client conteste</button><button class="btn" data-ea="resend">${I.mail} Renvoyer</button>` : ''}
+      ${e.k === 'approuve' || e.late ? `<button class="btn primary" data-ea="bill">${I.coins} Facturer cet état</button>` : ''}
+      <a class="btn" href="#/print/invoice/${it.id}">${I.print} Voir l'état (PDF)</a>${d.status !== 'emise' ? `<a class="btn" href="#/invoice/${it.id}/encodage?remb=1">${I.plus} Déduction d'acompte (%)</a>` : ''}</div></section>`;
+  const save = async (patch) => { d.ea = { ...(d.ea || {}), ...patch }; await persist('invoice', it, { silent: true }); render(); };
+  const send = async () => {
+    const v = await ask('Envoyer l\'état d\'avancement au client', [{ name: 'days', label: 'Délai pour approuver (jours)', type: 'number', required: true, hint: 'Sans remarque du client dans ce délai, l\'état est considéré comme accepté.' }], { days: ui.eaDays || 7 });
+    if (!v) return;
+    const days = Math.max(1, Math.round(num(v.days))); ui.eaDays = days; saveUi();
+    d.ea = { ...(d.ea || {}), status: 'envoye', sentAt: today(), approveBy: addDays(today(), days), days, note: '' };
+    await persist('invoice', it, { silent: true });
+    go(`#/print/invoice/${it.id}?mail=1`);
+  };
+  $$('[data-ea]', box).forEach((b) => { b.onclick = async () => {
+    const a = b.dataset.ea;
+    if (a === 'send' || a === 'resend') return send();
+    if (a === 'ok') return save({ status: 'approuve', approvedAt: today() });
+    if (a === 'no') { const v = await ask('Le client conteste l\'état', [{ name: 'note', label: 'Remarque du client', type: 'textarea', rows: 3 }]); if (v) save({ status: 'conteste', note: v.note || '', contestedAt: today() }); return; }
+    if (a === 'bill') return emit();
+  }; });
+}
