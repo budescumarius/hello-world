@@ -1,0 +1,23 @@
+# Setări pentru găzduire Apache (Hostico / cPanel)
+Options -Indexes
+DirectoryIndex index.html
+
+# Forțează HTTPS (necesar pentru instalare pe telefon, offline și cameră)
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTPS} !=on
+  RewriteCond %{HTTP:X-Forwarded-Proto} !https
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+</IfModule>
+
+AddType application/manifest+json .webmanifest
+AddType image/svg+xml .svg
+AddDefaultCharset utf-8
+AddCharset utf-8 .js .css .webmanifest
+
+# Fișierele care anunță versiuni noi nu se păstrează în cache-ul browserului
+<IfModule mod_headers.c>
+  <FilesMatch "^(sw\.js|index\.html|manifest\.webmanifest)$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+</IfModule>
