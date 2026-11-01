@@ -19,13 +19,14 @@ Aplicație web instalabilă (PWA) pentru urmărirea șantierelor: planuri, punct
 - **Costuri de șantier**: cheltuieli (cu foto după bon/factură) și ore lucrate. Comparație **estimat vs. real** pe tipuri, buget, facturat, încasat și profit.
 - **Planning (Gantt)** pe proiect și pentru toate șantierele împreună. Etapele se pot genera automat din capitolele devizului.
 - **Setări**: datele firmei, logo, monedă, cote TVA, prefixe și numerotare pentru devize și facturi.
-### Stoc personal (materiale date din stocul propriu)
-- **Dau material**: material (se creează automat la prima scriere), cantitate, **data și ora** (completate automat, modificabile), cui (persoană / firmă), șantier, notă și **poze**.
-- **Retur**: marchezi la dare „Retur așteptat: Da”, iar lista **De returnat** arată, pe persoane, ce mai ai de primit. Atingi un rând → retur cu cantitatea precompletată (poate fi și parțial).
-- **Intrare în stoc** (opțional): dacă îți notezi și ce cumperi / aduci, aplicația arată cât mai ai **în stoc**.
-- Fișă pe fiecare material (dat, returnat, la cine este, istoric), tab **Stoc** în fiecare proiect cu ce ai dat pe acel șantier, **export CSV** pentru Excel.
-
 - **Backup / restaurare** a tuturor datelor într-un fișier JSON (îl poți salva în iCloud Drive / Fișiere).
+
+## Aplicația „Stoc” (separată)
+Aplicație independentă, doar pentru evidența materialelor date din **stocul personal** – în folderul `app/stoc/`, publicată la `https://<utilizator>.github.io/<repo>/stoc/`. Se instalează separat pe ecranul principal (iconiță portocalie „Stoc”) și are datele ei proprii.
+- **Dau material**: material (se creează automat), cantitate, **data și ora** (automat, modificabile), cui, șantier, notă și **poze**.
+- **Retur**: la dare alegi „Retur așteptat: Da”; lista **De returnat** arată pe persoane ce mai ai de primit. Atingi → retur cu cantitatea precompletată (și parțial).
+- **Intrare în stoc** (opțional) → vezi cât mai ai în stoc. Preț unitar opțional → valoarea materialelor date.
+- Pagini pe **Șantiere** și **Persoane**, fișă pe fiecare material, căutare, **export CSV** pentru Excel, **backup / restaurare** cu poze.
 
 ## Publicare
 1. Pe GitHub: **Settings → Pages → Build and deployment → Source: GitHub Actions**.

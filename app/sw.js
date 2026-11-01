@@ -1,7 +1,7 @@
 // Service worker: aplicația funcționează complet offline după prima încărcare.
 const VERSION = 'santier-v3';
 const ASSETS = [
-  './', './index.html', './styles.css', './app.js', './gestiune.js', './stoc.js', './manifest.webmanifest',
+  './', './index.html', './styles.css', './app.js', './gestiune.js', './manifest.webmanifest',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'
 ];
 
@@ -12,7 +12,7 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('santier-') && k !== VERSION).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -21,6 +21,8 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+  // Aplicația Stoc (subfolderul stoc/) are propriul service worker
+  if (url.href.startsWith(new URL('./stoc/', self.registration.scope).href)) return;
 
   if (url.origin === location.origin) {
     // Stale-while-revalidate pentru fișierele aplicației
