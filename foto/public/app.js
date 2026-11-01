@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '23'; // la fel ca VERSION din api.php
+const APP_VERSION = '24'; // la fel ca VERSION din api.php
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -1218,6 +1218,9 @@ function shortcutCard() {
     fill(body,
       h('p', { class: 'small' }, 'Trimite poze direct din aplicația Photos: ', h('b', {}, 'Partager → Foto Șantier'), ' → alegi șantierul.'),
       h('p', { class: 'muted small' }, 'Varianta cea mai simplă, fără nicio configurare: ecranul Foto → ', h('b', {}, '🖼 Din galerie'), ' (selectezi mai multe poze odată).'),
+      r.log?.length ? h('div', { class: 'sclog' }, h('div', { class: 'small', style: 'font-weight:700;margin:8px 0 4px' }, 'Ultimele trimiteri din scurtătură:'),
+        r.log.map((l) => h('div', { class: 'small ' + (l.ok ? 'ok' : 'err') }, (l.ok ? '✅ ' : '⛔ ') + fmtShort(l.at) + ' – ', l.message))) :
+        r.has ? h('p', { class: 'small muted' }, 'Încă nicio trimitere din scurtătură n-a ajuns la server. Dacă ai trimis și nu apare aici, verifică adresa 2 din ultima acțiune.') : null,
       h('div', { class: 'row' },
         h('button', { class: 'btn primary grow', onclick: gen }, r.has ? '🔑 Arată ghidul (cheie nouă)' : '🔑 Începe configurarea'),
         r.has ? h('button', { class: 'btn danger', onclick: async () => {

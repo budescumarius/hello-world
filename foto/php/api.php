@@ -19,12 +19,12 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '23'; // la fel ca APP_VERSION din app.js
+const VERSION = '24'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
 // ---------------------------------------------------------------- baza de date
-const SCHEMA = 8; // crește când se schimbă structura bazei
+const SCHEMA = 9; // crește când se schimbă structura bazei
 function open_db(string $file): PDO {
     $db = new PDO('sqlite:' . $file, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
     $db->exec('PRAGMA busy_timeout = 10000; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY;');
@@ -159,6 +159,9 @@ CREATE TABLE IF NOT EXISTS login_fail (k TEXT NOT NULL, at INTEGER NOT NULL);
         if (!$has('entries', 'file_hash')) $db->exec('ALTER TABLE entries ADD COLUMN file_hash TEXT');
         $db->exec('CREATE INDEX IF NOT EXISTS idx_e_hash ON entries(hash) WHERE hash IS NOT NULL');
         $db->exec('CREATE INDEX IF NOT EXISTS idx_e_file_hash ON entries(file_hash) WHERE file_hash IS NOT NULL');
+        // v9 – jurnalul trimiterilor din scurtătura iPhone (ca omul să vadă în aplicație ce s-a întâmplat)
+        $db->exec("CREATE TABLE IF NOT EXISTS shortcut_log (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, at TEXT NOT NULL DEFAULT (datetime('now')), ok INTEGER NOT NULL, message TEXT NOT NULL)");
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_sclog_user ON shortcut_log(user_id, id DESC)');
         $db->exec('PRAGMA user_version = ' . SCHEMA);
         $db->exec('COMMIT');
     } catch (Throwable $e) { $db->exec('ROLLBACK'); throw $e; }
@@ -461,6 +464,16 @@ function gd_jpeg($im, int $max, int $q): string {
     ob_start(); imagejpeg($dst, null, $q); $out = (string) ob_get_clean();
     return $out;
 }
+function sc_log(array $u, bool $ok, string $msg): void {
+    q('INSERT INTO shortcut_log(user_id, ok, message) VALUES (?, ?, ?)', [$u['id'], $ok ? 1 : 0, $msg]);
+    q('DELETE FROM shortcut_log WHERE user_id = ? AND id NOT IN (SELECT id FROM shortcut_log WHERE user_id = ? ORDER BY id DESC LIMIT 20)', [$u['id'], $u['id']]);
+}
+// răspunde scurtăturii și notează în jurnal (vizibil în aplicație: Cont → Trimite din galerie)
+function sc_reply(array $u, string $msg, int $code, bool $then = false): void { sc_log($u, $code < 300, $msg); text_out($msg, $code, $then); }
+function ini_bytes(string $v): int {
+    $n = (int) $v; $u = strtolower(substr(trim($v), -1));
+    return $u === 'g' ? $n << 30 : ($u === 'm' ? $n << 20 : ($u === 'k' ? $n << 10 : $n));
+}
 function shortcut(string $route): void {
     $u = key_user();
     if (!$u) { text_out('Cheie greșită sau dezactivată. Generează una nouă în aplicație: Cont → Scurtătură iPhone.', 401); return; }
@@ -470,16 +483,28 @@ function shortcut(string $route): void {
         text_out(implode("\n", array_keys($dest)));
         return;
     }
+    // cerere prea mare pentru hosting: PHP aruncă tot conținutul (și câmpul dest, și poza)
+    $len = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+    if ($len > 0 && !$_POST && !$_FILES) {
+        sc_reply($u, 'Poza e prea mare pentru hosting (' . round($len / 1048576, 1) . ' MB, limita e ' . ini_get('post_max_size') . '). '
+            . 'Adaugă în scurtătură, înainte de trimitere, acțiunea „Redimensionner l’image” cu lățimea 2048.', 413);
+        return;
+    }
     $label = trim((string) ($_POST['dest'] ?? ''));
-    if (!isset($dest[$label])) { text_out("Nu găsesc „{$label}” printre șantierele tale.", 400); return; }
+    if ($label === '') { sc_reply($u, 'Lipsește câmpul „dest” (șantierul ales). În ultima acțiune „Obtenir le contenu de l’URL” adaugă un câmp Texte „dest” = Élément choisi.', 400); return; }
+    if (!isset($dest[$label])) { sc_reply($u, "Nu găsesc „{$label}” printre șantierele tale.", 400); return; }
     [$sid, $fid] = $dest[$label];
     // toate fișierele trimise, oricum ar fi numit câmpul (photo, photo[], file…)
-    $files = [];
+    $files = []; $tooBig = 0;
     foreach ($_FILES as $f) {
-        if (is_array($f['tmp_name'])) { foreach ($f['tmp_name'] as $i => $t) if (!$f['error'][$i]) $files[] = $t; }
-        elseif (!$f['error']) $files[] = $f['tmp_name'];
+        foreach ((array) $f['tmp_name'] as $i => $t) {
+            $err = is_array($f['error']) ? $f['error'][$i] : $f['error'];
+            if ($err === UPLOAD_ERR_OK) $files[] = $t;
+            elseif (in_array($err, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)) $tooBig++;
+        }
     }
-    if (!$files) { text_out('Nu a sosit nicio poză. Verifică în scurtătură câmpul „photo” (tip: Fișier).', 400); return; }
+    if (!$files && $tooBig) { sc_reply($u, 'Poza e prea mare pentru hosting (limita e ' . ini_get('upload_max_filesize') . '). Adaugă în scurtătură „Redimensionner l’image” cu lățimea 2048.', 413); return; }
+    if (!$files) { sc_reply($u, 'Nu a sosit nicio poză. În ultima acțiune adaugă un câmp Fichier „photo” = Image redimensionnée (sau Image convertie).', 400); return; }
     $n = 0; $dups = 0; $errors = [];
     foreach ($files as $tmp) {
         $raw = (string) file_get_contents($tmp);
@@ -497,7 +522,8 @@ function shortcut(string $route): void {
     if ($dups) $msg .= ' (' . $dups . ($dups === 1 ? ' era deja trimisă – păstrată o singură dată)' : ' erau deja trimise – păstrate o singură dată)');
     $n += $dups;
     if ($errors) $msg .= "\n" . implode("\n", array_unique($errors));
-    text_out($msg, $n ? 200 : 400, $n > 0);
+    if ($n - $dups > 0) $msg .= "\nLe găsești în aplicație: 🖼 Poze sau Șantiere → $label.";
+    sc_reply($u, $msg, $n ? 200 : 400, $n > 0);
     if ($n && sync_active()) sync_work(25);
 }
 
@@ -1327,7 +1353,14 @@ function route(string $route, string $path, string $method): void {
     }
 
     // ---------- cheie personală (scurtătura iPhone „Foto Șantier”)
-    if ($route === 'GET api/key') { $u = need(); out(['has' => (bool) val('SELECT key_hash FROM users WHERE id = ?', [$u['id']])]); return; }
+    if ($route === 'GET api/key') {
+        $u = need();
+        $log = all('SELECT at, ok, message FROM shortcut_log WHERE user_id = ? ORDER BY id DESC LIMIT 8', [$u['id']]);
+        foreach ($log as &$l) { $l['ok'] = (bool) $l['ok']; $l['at'] = str_replace(' ', 'T', $l['at']) . 'Z'; }
+        out(['has' => (bool) val('SELECT key_hash FROM users WHERE id = ?', [$u['id']]), 'log' => $log,
+             'limit' => ini_get('upload_max_filesize') . ' / ' . ini_get('post_max_size')]);
+        return;
+    }
     if ($route === 'POST api/key') {
         $u = need();
         $key = 'fs_' . bin2hex(random_bytes(20));

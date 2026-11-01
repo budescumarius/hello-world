@@ -164,3 +164,6 @@ div.f { margin: 0 0 14px; }
 .guide .sb p { margin: 6px 0; }
 .guide .sb ul { padding-left: 18px; margin: 6px 0; line-height: 1.6; }
 .guide b.ios { background: #eef2ff; border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+
+.sclog > div { padding: 6px 8px; border-radius: 8px; margin: 4px 0; white-space: pre-wrap; }
+.sclog .ok { background: #dcfce7; } .sclog .err { background: #fee2e2; }
