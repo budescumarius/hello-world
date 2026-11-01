@@ -19,7 +19,7 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '27'; // la fel ca APP_VERSION din app.js
+const VERSION = '28'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
@@ -508,6 +508,9 @@ function shortcut(string $route): void {
     }
     $label = trim((string) ($_POST['dest'] ?? $_GET['dest'] ?? '')); // dest: câmp de formular sau în adresă (…&dest=)
     if ($label === '') { sc_reply($u, 'Lipsește câmpul „dest” (șantierul ales). În ultima acțiune „Obtenir le contenu de l’URL” adaugă un câmp Texte „dest” = Élément choisi.', 400); return; }
+    // „[Vindevogel]” sau „"Vindevogel"”: paranteze / ghilimele puse în jurul variabilei – le scoatem
+    if (!preg_match('#"\s*,\s*"#', $label)) $label = trim($label, " \t[]\"'");
+    if ($label === '') { sc_reply($u, 'Lipsește șantierul ales (dest).', 400); return; }
     if ($label[0] === '[' || $label[0] === '{') { // s-a pus lista întreagă (Contenu de l’URL) în loc de șantierul ales
         sc_reply($u, 'La „dest” a sosit lista întreagă de șantiere, nu șantierul ales. În scurtătură, la dest (în formular sau după &dest= în adresă) pune variabila „Élément choisi”, nu „Contenu de l’URL”.', 400);
         return;
