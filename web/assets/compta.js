@@ -100,16 +100,16 @@ route('export', async () => {
       <div class="chips">${years.map((yy) => `<button class="chip ${+P.y === yy && P.q !== 'x' ? 'on' : ''}" data-y="${yy}">${yy}</button>`).join('')}</div>
       <div class="chips">${[1, 2, 3, 4].map((q) => `<button class="chip ${P.q === q ? 'on' : ''}" data-q="${q}">T${q} <small>${['janv.–mars', 'avr.–juin', 'juil.–sept.', 'oct.–déc.'][q - 1]}</small></button>`).join('')}<button class="chip ${P.q === 'x' ? 'on' : ''}" data-q="x">Autres dates</button></div>
       ${P.q === 'x' ? `<div class="grid-form">${fieldHTML({ name: 'from', label: 'Du', type: 'date' }, from)}${fieldHTML({ name: 'to', label: 'Au', type: 'date' }, to)}</div>` : ''}
-      <p class="muted">Tout est coché : décochez ce que vous ne voulez pas envoyer. Le ZIP contient un PDF par facture (ventes, notes de crédit), les pièces des achats et les journaux CSV.</p></div>
+      <p class="muted">Tout est coché : décochez ce que vous ne voulez pas envoyer. « Un seul PDF » met toutes les factures émises et reçues de la période dans un fichier (avec un récapitulatif). Le ZIP contient un PDF par facture (ventes, notes de crédit), les pièces des achats et les journaux CSV.</p></div>
     <div class="kpis" data-k></div><div id="tbl"></div>
-    <div class="exp-go"><button class="btn" data-zip>${I.download} Télécharger le ZIP</button><button class="btn primary" data-send>${I.mail} Envoyer au comptable</button></div>`;
+    <div class="exp-go"><button class="btn" data-onepdf>${I.file} Un seul PDF (toutes les factures)</button><button class="btn" data-zip>${I.download} Télécharger le ZIP</button><button class="btn primary" data-send>${I.mail} Envoyer au comptable</button></div>`;
   const st = { sel: null };
   const sum = () => {
     const sel = rows.filter((r) => st.sel.has(r.id)); const by = (t) => sel.filter((r) => r.typ === t);
     $('[data-k]', page).innerHTML = kpi('Factures émises', String(by('vente').length), { sub: `${money(by('vente').reduce((a, r) => a + r.ttc, 0))} TVAC` })
       + kpi('Notes de crédit', String(by('avoir').length), { sub: `${money(by('avoir').reduce((a, r) => a + r.ttc, 0))} TVAC` })
       + kpi('Factures d\'achat', String(by('achat').length), { sub: `${money(by('achat').reduce((a, r) => a + r.ttc, 0))} TVAC${by('achat').some((r) => !r.piece) ? ` · ${by('achat').filter((r) => !r.piece).length} sans pièce` : ''}`, cls: by('achat').some((r) => !r.piece) ? 'warn' : '' });
-    $('[data-zip]', page).disabled = !sel.length; $('[data-send]', page).disabled = !sel.length;
+    $('[data-zip]', page).disabled = !sel.length; $('[data-send]', page).disabled = !sel.length; $('[data-onepdf]', page).disabled = !sel.length;
   };
   dataTable($('#tbl', page), {
     rows, state: st, search: (r) => [r.n, r.who, r.piece].join(' '),
@@ -124,6 +124,7 @@ route('export', async () => {
   });
   sum();
   $('[data-zip]', page).onclick = () => exportZip(rows.filter((r) => st.sel.has(r.id)), from, to);
+  $('[data-onepdf]', page).onclick = () => exportOnePdf(rows.filter((r) => st.sel.has(r.id)), from, to, perLabel);
   $('[data-zip2]').onclick = () => $('[data-zip]', page).click(); $('[data-send2]').onclick = () => $('[data-send]', page).click();
   $('[data-send]', page).onclick = () => sendToAccountant(rows.filter((r) => st.sel.has(r.id)), perLabel);
   $$('[data-y]', page).forEach((b) => { b.onclick = () => { P.y = +b.dataset.y; if (P.q === 'x') P.q = 1; saveUi(); render(); }; });
@@ -148,6 +149,64 @@ async function exportFiles(picked, light = false) {
   if (picked.some((r) => r.typ !== 'achat')) files.push({ name: 'Journal des ventes.csv', data: csvBytes([head, ...picked.filter((r) => r.typ !== 'achat').map(line)]) });
   if (picked.some((r) => r.typ === 'achat')) files.push({ name: 'Journal des achats.csv', data: csvBytes([head, ...picked.filter((r) => r.typ === 'achat').map(line)]) });
   return files;
+}
+// Un seul PDF pour le comptable : récapitulatif, factures émises, notes de crédit, puis factures reçues
+// (PDF du fournisseur page par page, photo ou ticket ; un achat sans pièce a une page avec ses montants)
+async function exportOnePdf(picked, from, to, label) {
+  if (!picked.length) return;
+  const btn = $('[data-onepdf]'); if (btn) btn.disabled = true;
+  try {
+    await loadScript('assets/vendor/jspdf-2.5.1.umd.min.js');
+    let pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    const byDate = (a, b) => (a.date || '').localeCompare(b.date || '') || String(a.n).localeCompare(String(b.n));
+    const ventes = picked.filter((r) => r.typ === 'vente').sort(byDate); const avoirs = picked.filter((r) => r.typ === 'avoir').sort(byDate); const achats = picked.filter((r) => r.typ === 'achat').sort(byDate);
+    const sum = (l, k) => l.reduce((a, r) => a + num(r[k]), 0);
+    const block = (title, l) => (l.length ? `<div class="d-sec"><h2>${title} (${l.length})</h2><table class="d-lines"><thead><tr><th>Date</th><th>N°</th><th>Client / fournisseur</th><th class="r">HT</th><th class="r">TVA</th><th class="r">TVAC</th></tr></thead><tbody>
+      ${l.map((r) => `<tr><td>${fmtDate(r.date)}</td><td>${esc(r.n || '—')}</td><td>${esc(r.who)}</td><td class="r">${money(r.ht)}</td><td class="r">${money(r.tva)}</td><td class="r">${money(r.ttc)}</td></tr>`).join('')}
+      <tr><td colspan="3"><b>Total</b></td><td class="r"><b>${money(sum(l, 'ht'))}</b></td><td class="r"><b>${money(sum(l, 'tva'))}</b></td><td class="r"><b>${money(sum(l, 'ttc'))}</b></td></tr></tbody></table></div>` : '');
+    const co = company();
+    const recap = `<div class="doc"><div class="d-head"><div class="d-from"><b class="d-co">${esc(co.name || '')}</b><div class="muted">${esc(co.vat || '')}</div></div><div class="d-meta"><h1>Documents comptables</h1><div><b>${esc(label)}</b></div><div class="muted">du ${fmtDate(from)} au ${fmtDate(to)} · édité le ${fmtDate(today())}</div></div></div>
+      ${block('Factures émises', ventes)}${block('Notes de crédit', avoirs)}${block('Factures reçues (achats)', achats)}</div>`;
+    toast('Récapitulatif…', 60000);
+    pdf = await makePdf(recap, { into: pdf, light: true });
+    const docs = [...ventes, ...avoirs];
+    for (const [i, r] of docs.entries()) { toast(`Factures émises ${i + 1} / ${docs.length}…`, 60000); pdf = await makePdf((await docHtml('invoice', r.id)).html, { into: pdf, light: true }); }
+    // une image pleine page A4 (marges 8 mm), orientée comme l'image
+    const addImg = (url, w, h) => { const land = w > h * 1.15; pdf.addPage('a4', land ? 'landscape' : 'portrait'); const PW = land ? 297 : 210; const PH = land ? 210 : 297; const k = Math.min((PW - 16) / w, (PH - 16) / h); pdf.addImage(url, 'JPEG', (PW - w * k) / 2, 8, w * k, h * k, undefined, 'FAST'); };
+    const canvasJpeg = (draw, w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); draw(g); return c.toDataURL('image/jpeg', 0.82); };
+    for (const [i, r] of achats.entries()) {
+      toast(`Factures reçues ${i + 1} / ${achats.length}…`, 60000);
+      const fid = r.it.data.fileId; let done = false;
+      if (fid) {
+        try {
+          const res = await fetch(fileUrl(fid), { credentials: 'same-origin' });
+          const type = res.headers.get('content-type') || ''; const buf = await res.arrayBuffer();
+          if (res.ok && /pdf/.test(type)) {
+            const lib = await loadPdfJs(); const doc = await lib.getDocument({ data: buf }).promise;
+            for (let p = 1; p <= Math.min(doc.numPages, 30); p++) {
+              const page = await doc.getPage(p); const vp = page.getViewport({ scale: 1.6 });
+              const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+              await page.render({ canvasContext: g, viewport: vp }).promise; addImg(c.toDataURL('image/jpeg', 0.82), c.width, c.height);
+            }
+            done = true;
+          } else if (res.ok && (/xml/.test(type) || /^\s*<\?xml|<Invoice|<CreditNote/.test(new TextDecoder().decode(buf.slice(0, 400)))) && typeof ublHtml === 'function') {
+            // facture électronique Peppol (UBL) : mise en page comme dans l'application
+            pdf = await makePdf(`<div class="doc">${ublHtml(new TextDecoder().decode(buf))}</div>`, { into: pdf, light: true }); done = true;
+          } else if (res.ok && /^image\//.test(type)) {
+            const url = URL.createObjectURL(new Blob([buf], { type })); const im = new Image(); await new Promise((ok, ko) => { im.onload = ok; im.onerror = ko; im.src = url; });
+            const sc = Math.min(1, 1800 / Math.max(im.naturalWidth, im.naturalHeight)); const w = Math.round(im.naturalWidth * sc); const h = Math.round(im.naturalHeight * sc);
+            addImg(canvasJpeg((g) => g.drawImage(im, 0, 0, w, h), w, h), w, h); URL.revokeObjectURL(url); done = true;
+          }
+        } catch (e) { console.warn('pièce illisible', e); }
+      }
+      if (!done) { // pas de pièce (ou illisible) : une page avec l'essentiel
+        pdf.addPage('a4', 'portrait'); pdf.setFontSize(14); pdf.text(`Facture d'achat – ${r.who || ''}`.replace(/[\u202f\u00a0]/g, ' '), 15, 25); pdf.setFontSize(11);
+        [[`N° / référence : ${r.n || '—'}`], [`Date : ${fmtDate(r.date)}`], [`HT : ${money(r.ht)}   TVA : ${money(r.tva)}   TVAC : ${money(r.ttc)}`], [fid ? 'Pièce illisible dans l\'application : voir le ZIP.' : 'Pas de pièce jointe dans l\'application.']].forEach(([t], k) => pdf.text(t.replace(/[\u202f\u00a0]/g, ' '), 15, 40 + k * 8));
+      }
+    }
+    downloadBlob(pdf.output('blob'), `${fileTitle(co.name || 'export')}-comptabilite-${from}-${to}.pdf`);
+    toast(`PDF prêt : ${docs.length} facture(s) émise(s), ${achats.length} reçue(s) ✓`, 4000);
+  } catch (e) { console.error(e); toast('PDF impossible : ' + e.message, 6000); } finally { if (btn) btn.disabled = false; }
 }
 async function exportZip(picked, from, to) {
   if (!picked.length) return;
