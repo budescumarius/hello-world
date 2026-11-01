@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '18'; // la fel ca VERSION din api.php
+const APP_VERSION = '19'; // la fel ca VERSION din api.php
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -62,6 +62,14 @@ const fmtShort = (iso) => new Date(iso).toLocaleString('ro-RO', { day: 'numeric'
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
 
 const state = { user: null, sites: [], siteId: null };
+// Folderul ales e ținut minte pentru fiecare șantier („État des lieux”, „Réception”…). null = direct în șantier.
+const siteById = (id) => state.sites.find((x) => x.id === id);
+function currentFolder(siteId = state.siteId) {
+  if (!siteId) return null;
+  const v = Number(localStorage.getItem('folder:' + siteId)) || null;
+  return siteById(siteId)?.folders?.some((f) => f.id === v) ? v : null;
+}
+const setFolder = (siteId, folderId) => { if (siteId) localStorage.setItem('folder:' + siteId, folderId ?? ''); };
 const can = {
   manage: () => ['admin', 'responsabil'].includes(state.user?.role),
   admin: () => state.user?.role === 'admin',
@@ -135,11 +143,11 @@ async function pump() {
       try {
         let saved;
         if (it.kind === 'note') {
-          saved = await api('api/entries/note', { method: 'POST', json: { clientId: it.clientId, siteId: it.siteId, comment: it.comment, takenAt: it.takenAt } });
+          saved = await api('api/entries/note', { method: 'POST', json: { clientId: it.clientId, siteId: it.siteId, folderId: it.folderId ?? null, comment: it.comment, takenAt: it.takenAt } });
         } else {
           const head = new Uint8Array(4);
           new DataView(head.buffer).setUint32(0, it.thumb ? it.thumb.size : 0);
-          const meta = encodeURIComponent(JSON.stringify({ clientId: it.clientId, siteId: it.siteId, comment: it.comment, takenAt: it.takenAt }));
+          const meta = encodeURIComponent(JSON.stringify({ clientId: it.clientId, siteId: it.siteId, folderId: it.folderId ?? null, comment: it.comment, takenAt: it.takenAt }));
           saved = await api('api/entries/photo', { method: 'POST', headers: { 'X-Meta': meta, 'Content-Type': 'application/octet-stream' }, body: new Blob(it.thumb ? [head, it.thumb, it.full] : [head, it.full]) });
         }
         Q.offline = false; Q.error = null;
@@ -312,7 +320,7 @@ const isJpegFile = async (file) => {
 
 async function addPhotos(files, fromCamera) {
   const comment = ($('#comment')?.value || '').trim();
-  const siteId = state.siteId;
+  const siteId = state.siteId, folderId = currentFolder();
   let n = 0;
   for (const file of files) {
     const takenAt = new Date(fromCamera ? Date.now() : file.lastModified || Date.now()).toISOString();
@@ -333,7 +341,7 @@ async function addPhotos(files, fromCamera) {
       }
     }
     try {
-      await enqueue({ clientId: uid(), kind: 'photo', siteId, comment, takenAt, full, thumb });
+      await enqueue({ clientId: uid(), kind: 'photo', siteId, folderId, comment, takenAt, full, thumb });
       n++;
     } catch (e) {
       toast('Nu am putut salva poza: ' + e.message);
@@ -431,6 +439,47 @@ function progressiveImg(e) {
   return img;
 }
 
+// ============ foldere ============
+// Rândul de foldere: [Toate] [General] [État des lieux] … [+ Folder]
+function folderChips(folders, current, onPick, { all = false, counts = null, onAdd = null } = {}) {
+  const chip = (val, label, n) => h('button', { type: 'button', class: 'chip' + (current === val ? ' on' : ''), onclick: () => onPick(val) },
+    label, n != null ? h('span', { class: 'n' }, n) : null);
+  return h('div', { class: 'chips' },
+    all ? chip('all', 'Toate', counts?.all) : null,
+    chip(null, 'General', counts ? counts.root : null),
+    folders.map((f) => chip(f.id, '📁 ' + f.name, counts ? f.count : null)),
+    onAdd ? h('button', { type: 'button', class: 'chip add', onclick: onAdd }, '+ Folder') : null);
+}
+function newFolder(siteId, onDone) {
+  sheet((box, close) => {
+    const name = h('input', { placeholder: 'Ex: État des lieux' });
+    const err = h('div', { class: 'error' });
+    const save = async () => {
+      try {
+        const r = await api('api/folders', { method: 'POST', json: { siteId, name: name.value } });
+        close(); await refreshMe(); onDone?.(r.id); toast('✓ Folder creat');
+      } catch (e) { err.textContent = e.message; }
+    };
+    box.append(h('h2', {}, 'Folder nou'),
+      h('div', { class: 'chips' }, ['État des lieux', 'Réception', 'Avant', 'Après', 'Réserves'].map((t) =>
+        h('button', { type: 'button', class: 'chip', onclick: () => { name.value = t; name.focus(); } }, t))),
+      h('label', { class: 'f' }, h('span', {}, 'Nume'), name), err,
+      h('div', { class: 'row' }, h('button', { class: 'btn grow', onclick: close }, 'Renunță'), h('button', { class: 'btn primary grow', onclick: save }, 'Creează')));
+    name.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+    setTimeout(() => name.focus(), 50);
+  });
+}
+async function pickFolder(siteId, current, onPick) {
+  const { folders } = await api('api/folders?site=' + siteId);
+  sheet((box, close) => {
+    box.append(h('h2', {}, 'Alege folderul'),
+      h('div', { class: 'pick-list' },
+        h('button', { class: current == null ? 'on' : '', onclick: () => { close(); onPick(null); } }, 'General', h('small', {}, 'direct în șantier')),
+        folders.map((f) => h('button', { class: current === f.id ? 'on' : '', onclick: () => { close(); onPick(f.id); } }, '📁 ' + f.name, h('small', {}, f.count + ' poze'))),
+        can.manage() ? h('button', { class: 'new', onclick: () => { close(); newFolder(siteId, (id) => onPick(id)); } }, '+ Folder nou') : null));
+  });
+}
+
 // ============ vizualizare poză ============
 function openViewer(list, index, onChange) {
   let i = index;
@@ -467,11 +516,12 @@ function openViewer(list, index, onChange) {
         h('button', { class: 'icon-btn', onclick: () => go(1), disabled: i === list.length - 1, 'aria-label': 'Următor' }, '›')),
       imgBox,
       h('div', { class: 'info' },
-        h('div', { class: 'meta' }, `${e.site_name || 'Fără șantier'} · ${e.user_name || '—'} · ${fmtShort(e.taken_at)}`),
+        h('div', { class: 'meta' }, `${e.site_name || 'Fără șantier'}${e.folder_name ? ' › ' + e.folder_name : ''} · ${e.user_name || '—'} · ${fmtShort(e.taken_at)}`),
         e.kind === 'photo' && e.comment ? h('p', { class: 'cm' }, e.comment) : null,
         h('div', { class: 'btns' },
           canEdit ? h('button', { class: 'btn sm', onclick: () => editComment(e) }, '💬 Comentariu') : null,
           canEdit ? h('button', { class: 'btn sm', onclick: () => moveSite(e) }, '🏗 Șantier') : null,
+          canEdit && e.site_id ? h('button', { class: 'btn sm', onclick: () => pickFolder(e.site_id, e.folder_id ?? null, (fid) => patch(e, { folderId: fid })) }, '📁 Folder') : null,
           e.kind === 'photo' ? h('a', { class: 'btn sm', href: fileUrl(e, 'full') + '&dl=1', download: '' }, '⬇') : null,
           canDelete ? h('button', { class: 'btn sm danger', onclick: () => del(e) }, '🗑') : null)));
   }
@@ -693,6 +743,8 @@ function screenFoto() {
         h('div', { class: 'lbl' }, 'Șantier'),
         h('div', { class: 'nm' }, site ? site.name : 'Fără șantier')),
       h('span', { class: 'chev' }, '›')),
+    site && (site.folders?.length || can.manage()) ? folderChips(site.folders || [], currentFolder(), (fid) => { setFolder(site.id, fid); screenFoto(); },
+      { onAdd: can.manage() ? () => newFolder(site.id, (id) => { setFolder(site.id, id); screenFoto(); }) : null }) : null,
     h('button', { class: 'shoot', onclick: () => $('#cam').click() }, h('span', { class: 'ic' }, '📷'), 'Fă poză'),
     h('div', { class: 'actions2' },
       h('button', { class: 'btn', onclick: () => $('#gal').click() }, '🖼 Din galerie'),
@@ -714,7 +766,7 @@ function noteSheet() {
           const t = ta.value.trim();
           if (!t) return ta.focus();
           close();
-          await enqueue({ clientId: uid(), kind: 'note', siteId: state.siteId, comment: t, takenAt: new Date().toISOString() });
+          await enqueue({ clientId: uid(), kind: 'note', siteId: state.siteId, folderId: currentFolder(), comment: t, takenAt: new Date().toISOString() });
           toast('✓ Notă trimisă');
         } }, 'Trimite')));
     setTimeout(() => ta.focus(), 50);
@@ -731,13 +783,26 @@ async function screenPoze() {
   {
     // muncitorul vede doar șantierele lui (din /api/me); adminul/responsabilul și pe cele arhivate
     const sites = can.manage() ? (await api('api/sites?lite=1').catch(() => ({ sites: state.sites }))).sites : state.sites;
-    const sel = h('select', { onchange: () => { if (sel.value) params.site = sel.value; else delete params.site; draw(); } },
+    const fsel = h('select', { hidden: true, onchange: () => { if (fsel.value) params.folder = fsel.value; else delete params.folder; draw(); } });
+    const sel = h('select', { onchange: async () => {
+      if (sel.value) params.site = sel.value; else delete params.site;
+      delete params.folder; fsel.hidden = true;
+      draw();
+      if (/^\d+$/.test(sel.value)) { // folderele șantierului ales
+        const { folders } = await api('api/folders?site=' + sel.value).catch(() => ({ folders: [] }));
+        if (folders.length) {
+          fill(fsel, h('option', { value: '' }, 'Toate folderele'), h('option', { value: 'root' }, 'General'),
+            folders.map((f) => h('option', { value: f.id }, '📁 ' + f.name)));
+          fsel.hidden = false;
+        }
+      }
+    } },
       h('option', { value: '' }, 'Toate șantierele'),
       sites.map((s) => h('option', { value: s.id }, s.name + (s.archived ? ' (arhivat)' : ''))),
       h('option', { value: 'none' }, 'Fără șantier'));
     const me = h('select', { onchange: () => { if (me.value) params.mine = 1; else delete params.mine; draw(); } },
       h('option', { value: '' }, 'Toată echipa'), h('option', { value: '1' }, 'Doar ale mele'));
-    filters.append(sel, me);
+    filters.append(sel, fsel, me);
   }
 }
 
@@ -776,6 +841,7 @@ async function screenSantier(id) {
   const { sites } = await api('api/sites?id=' + Number(id));
   const s = sites.find((x) => x.id === Number(id));
   if (!s) { location.hash = 'santiere'; return; }
+  const folderBox = h('div'), actions = h('div'), content = h('div', { style: 'margin-top:8px' });
   fill(view, 
     h('div', { class: 'top' },
       h('button', { class: 'icon-btn', onclick: () => { location.hash = 'santiere'; } }, '‹'),
@@ -783,8 +849,45 @@ async function screenSantier(id) {
       h('button', { class: 'btn sm', onclick: () => editSite(s) }, '✏️ Editează')),
     s.address ? h('p', { class: 'muted', style: 'margin-top:-8px' }, '📍 ', s.address) : null,
     h('p', { class: 'muted small' }, '👷 ', s.users.length ? s.users.map((u) => u.name).join(', ') : 'Nimeni atribuit'),
-    h('button', { class: 'btn primary block', onclick: () => { state.siteId = s.id; localStorage.setItem('siteId', s.id); $('#cam').click(); location.hash = ''; } }, '📷 Fă poză aici'),
-    h('div', { style: 'margin-top:8px' }, feed({ site: s.id })));
+    folderBox, actions, content);
+  // folderul afișat: 'all' | null (General) | id
+  let sel = 'all';
+  const shoot = (input) => { // poza / galeria merg în șantierul și folderul afișate
+    state.siteId = s.id; localStorage.setItem('siteId', s.id);
+    setFolder(s.id, typeof sel === 'number' ? sel : null);
+    $(input).click(); location.hash = '';
+  };
+  async function draw() {
+    const { folders, root } = await api('api/folders?site=' + s.id).catch(() => ({ folders: [], root: 0 }));
+    if (typeof sel === 'number' && !folders.some((f) => f.id === sel)) sel = 'all';
+    const cur = folders.find((f) => f.id === sel);
+    fill(folderBox, folderChips(folders, sel, (v) => { sel = v; draw(); }, {
+      all: true, counts: { all: s.count, root, }, onAdd: can.manage() ? () => newFolder(s.id, (id) => { sel = id; draw(); }) : null }),
+      cur && can.manage() ? h('div', { class: 'row small', style: 'margin:-4px 0 8px' },
+        h('button', { class: 'btn sm', onclick: () => renameFolder(cur, draw) }, '✏️ Redenumește'),
+        h('button', { class: 'btn sm danger', onclick: async () => {
+          if (!confirm(`Ștergi folderul „${cur.name}”? Pozele rămân în șantier (la General).`)) return;
+          await api('api/folders/' + cur.id, { method: 'DELETE' }); await refreshMe(); sel = 'all'; draw(); toast('Folder șters');
+        } }, '🗑 Șterge folderul')) : null);
+    const where = sel === 'all' ? '' : sel === null ? ' (General)' : ` (📁 ${cur.name})`;
+    fill(actions, h('div', { class: 'actions2', style: 'margin-top:0' },
+      h('button', { class: 'btn primary', onclick: () => shoot('#cam') }, '📷 Fă poză aici'),
+      h('button', { class: 'btn primary', onclick: () => shoot('#gal') }, '🖼 Din galerie aici')),
+      where ? h('p', { class: 'muted small', style: 'margin:6px 0 0' }, 'Pozele noi merg în' + where) : null);
+    fill(content, feed(sel === 'all' ? { site: s.id } : { site: s.id, folder: sel === null ? 'root' : sel }));
+  }
+  draw();
+}
+function renameFolder(f, after) {
+  sheet((box, close) => {
+    const name = h('input', { value: f.name });
+    const err = h('div', { class: 'error' });
+    box.append(h('h2', {}, 'Redenumește folderul'), h('label', { class: 'f' }, h('span', {}, 'Nume'), name), err,
+      h('button', { class: 'btn primary block', onclick: async () => {
+        try { await api('api/folders/' + f.id, { method: 'PATCH', json: { name: name.value } }); close(); await refreshMe(); after(); toast('✓ Redenumit'); }
+        catch (e) { err.textContent = e.message; }
+      } }, 'Salvează'));
+  });
 }
 
 async function editSite(s) {
@@ -931,6 +1034,7 @@ async function screenCont(query) {
         await api('api/logout', { method: 'POST' }); caches.delete(IMG_CACHE).catch(() => {}); localStorage.removeItem('me'); localStorage.removeItem(FEEDS_KEY); feedMem.clear(); state.user = null; route();
       } }, 'Ieșire')));
   fill(view, box);
+  box.append(shortcutCard());
   if (can.admin()) box.append(await driveCard(query));
 }
 
@@ -1033,6 +1137,50 @@ function nasCard(n, editing = false) {
   return card;
 }
 
+// Scurtătura iPhone: pozele se trimit din Poze → Partajează → „Foto Șantier”
+function shortcutCard() {
+  const card = h('div', { class: 'card' });
+  const base = new URL('api/shortcut/', location.href).href;
+  const copyRow = (label, text) => h('div', { style: 'margin:8px 0' }, h('div', { class: 'small muted' }, label),
+    h('div', { class: 'row' }, h('code', { class: 'small grow', style: 'word-break:break-all;user-select:all;-webkit-user-select:all' }, text),
+      h('button', { class: 'btn sm', onclick: () => navigator.clipboard?.writeText(text).then(() => toast('✓ Copiat')) }, '📋')));
+  const steps = (key) => h('div', {},
+    h('p', { class: 'small' }, '⚠️ Cheia e ca o parolă: nu o da altcuiva. Dacă generezi alta, cea veche nu mai merge.'),
+    copyRow('1. Adresa listei de șantiere', base + 'destinations?key=' + key),
+    copyRow('2. Adresa de trimitere', base + 'upload?key=' + key),
+    h('ol', { class: 'small steps' },
+      h('li', {}, 'Deschide aplicația ', h('b', {}, 'Raccourcis'), ' (Scurtături) → ', h('b', {}, '+'), ' → numele ', h('b', {}, 'Foto Șantier'), '.'),
+      h('li', {}, 'Apasă ', h('b', {}, 'ⓘ'), ' → activează ', h('b', {}, '„Afficher dans la feuille de partage”'), ' și lasă doar ', h('b', {}, 'Images'), '.'),
+      h('li', {}, 'Acțiunea ', h('b', {}, '„Obtenir le contenu de l’URL”'), ' cu adresa 1.'),
+      h('li', {}, 'Acțiunea ', h('b', {}, '„Séparer le texte”'), ' → ', h('b', {}, 'Nouvelles lignes'), '.'),
+      h('li', {}, 'Acțiunea ', h('b', {}, '„Choisir dans la liste”'), '.'),
+      h('li', {}, 'Acțiunea ', h('b', {}, '„Répéter avec chaque élément”'), ' pentru ', h('b', {}, 'Entrée du raccourci'), ', iar înăuntru:',
+        h('ul', {},
+          h('li', {}, h('b', {}, '„Convertir l’image”'), ' → ', h('b', {}, 'JPEG'), ';'),
+          h('li', {}, h('b', {}, '„Redimensionner l’image”'), ' → lățime ', h('b', {}, '2048'), ';'),
+          h('li', {}, h('b', {}, '„Obtenir le contenu de l’URL”'), ' cu adresa 2, ', h('b', {}, 'Méthode: POST'), ', ', h('b', {}, 'Corps: Formulaire'), ' cu două câmpuri: ',
+            h('b', {}, 'dest'), ' (Texte) = ', h('i', {}, 'Élément choisi'), ' și ', h('b', {}, 'photo'), ' (Fichier) = ', h('i', {}, 'Image redimensionnée'), '.'))),
+      h('li', {}, 'La final, acțiunea ', h('b', {}, '„Afficher la notification”'), ' cu ', h('i', {}, 'Contenu de l’URL'), ' (vezi „✓ 3 poze trimise…”).')),
+    h('p', { class: 'small muted' }, 'Apoi: Poze → selectezi pozele → Partager → Foto Șantier → alegi șantierul (și folderul). Gata.'));
+  const body = h('div');
+  const gen = async () => {
+    if (body.dataset.has && !confirm('Generezi o cheie nouă? Scurtătura cu cheia veche nu va mai merge.')) return;
+    const { key } = await api('api/key', { method: 'POST' });
+    fill(body, steps(key)); body.dataset.has = '1';
+  };
+  api('api/key').then((r) => {
+    if (r.has) body.dataset.has = '1';
+    fill(body, h('p', { class: 'muted small' }, 'Trimite poze direct din galeria iPhone (Partajează → „Foto Șantier”), cu alegerea șantierului și a folderului. Se face o singură dată pe fiecare telefon.'),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn primary grow', onclick: gen }, r.has ? '🔑 Generează altă cheie' : '🔑 Generează cheia'),
+        r.has ? h('button', { class: 'btn danger', onclick: async () => {
+          if (!confirm('Oprești scurtătura? Cheia nu va mai funcționa.')) return;
+          await api('api/key', { method: 'DELETE' }); screenCont(); } }, 'Oprește') : null));
+  }).catch(() => {});
+  card.append(h('div', { class: 'row' }, h('b', { class: 'grow' }, '📲 Scurtătură iPhone'), h('span', { class: 'badge off' }, 'Partajează')), body);
+  return h('div', {}, h('h2', {}, 'Trimite din galerie'), card);
+}
+
 function changePassword() {
   sheet((box, close) => {
     const old = h('input', { type: 'password', autocomplete: 'current-password' });
@@ -1045,6 +1193,33 @@ function changePassword() {
         try { await api('api/password', { method: 'POST', json: { old: old.value, password: nw.value } }); close(); toast('✓ Parola a fost schimbată'); }
         catch (e) { err.textContent = e.message; }
       } }, 'Salvează'));
+  });
+}
+
+// Android: Galerie → Partajează → Foto Șantier. Service worker-ul a pus pozele în „foto-share”.
+async function screenShare() {
+  const files = [];
+  try {
+    const c = await caches.open('foto-share');
+    for (const k of await c.keys()) {
+      const r = await c.match(k); const b = await r.blob();
+      files.push(new File([b], decodeURIComponent(r.headers.get('X-Name') || 'poza.jpg'), { type: b.type, lastModified: Number(r.headers.get('X-Modified')) || Date.now() }));
+    }
+    await caches.delete('foto-share');
+  } catch {}
+  history.replaceState(null, '', location.pathname);
+  screenFoto();
+  if (!files.length) return;
+  sheet((box, close) => {
+    const draw = () => {
+      const site = siteById(state.siteId), fid = currentFolder();
+      fill(box, h('div', { class: 'grab' }), h('h2', {}, `📲 ${files.length} ${files.length === 1 ? 'poză' : 'poze'} de trimis`),
+        h('button', { class: 'site-pick' + (site ? '' : ' none'), onclick: () => pickSite((id) => { state.siteId = id; localStorage.setItem('siteId', id ?? ''); draw(); }, state.siteId) },
+          h('div', { style: 'flex:1;min-width:0' }, h('div', { class: 'lbl' }, 'Șantier'), h('div', { class: 'nm' }, site ? site.name : 'Fără șantier')), h('span', { class: 'chev' }, '›')),
+        site?.folders?.length ? folderChips(site.folders, fid, (v) => { setFolder(site.id, v); draw(); }) : null,
+        h('button', { class: 'btn primary block', onclick: () => { close(); screenFoto(); addPhotos(files, false); } }, 'Trimite'));
+    };
+    draw();
   });
 }
 
@@ -1083,6 +1258,7 @@ async function route() {
     else if (page === 'santier' && can.manage()) await screenSantier(arg);
     else if (page === 'echipa' && can.admin()) await screenEchipa();
     else if (page === 'cont' || page === 'setari') await screenCont(query);
+    else if (page === 'share') await screenShare();
     else screenFoto();
   } catch (e) {
     if (e.status !== 401) fill(view, h('div', { class: 'empty' }, h('div', { class: 'big' }, '📶'), e.message === 'Failed to fetch' ? 'Fără internet. Poți face poze în continuare din ecranul Foto.' : e.message));

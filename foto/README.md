@@ -13,6 +13,20 @@ O aplicație simplă pentru telefon. Echipa face poze pe șantier, iar pozele aj
 **E rapid:** poza e micșorată în telefon (≈300–600 KB în loc de 3–5 MB) și se trimite în fundal, așa că poți face imediat următoarea poză.
 **Merge și fără semnal:** pozele rămân în telefon și se trimit singure când revine internetul.
 
+## Foldere pe șantier
+Fiecare șantier poate avea foldere, de ex. **État des lieux**, **Réception**, **Avant / Après**.
+- **Admin / responsabil**: creează folderele din pagina șantierului (**+ Folder**), le redenumesc sau le șterg. Când un folder e șters, pozele rămân în șantier, la „General”.
+- **Toată lumea**: pe ecranul Foto alege folderul de sub șantier; poza, galeria și notele merg acolo. Aplicația ține minte folderul ales pentru fiecare șantier.
+- În pagina șantierului: **📷 Fă poză aici** și **🖼 Din galerie aici** trimit direct în folderul afișat.
+- O poză se mută în alt folder din poza mărită: **📁 Folder**.
+- În Google Drive / pe NAS: `Poze Șantier / <șantier> / <folder> / poza.jpg`.
+
+## Trimitere direct din galeria telefonului
+- **Android**: după instalarea aplicației pe ecranul principal, ea apare în **Partajează**. Selectezi pozele → Foto Șantier → alegi șantierul și folderul → Trimite.
+- **iPhone**: Apple nu permite aplicațiilor web să apară în Partajează, așa că se folosește o **scurtătură** (aplicația Scurtături / Raccourcis), făcută o singură dată pe fiecare telefon.
+  În aplicație: **Cont → Trimite din galerie → Generează cheia**. Apar cele 2 adrese și pașii. Apoi: Poze → selectezi → Partajează → **Foto Șantier** → alegi șantierul / folderul.
+  Cheia e personală: pozele apar pe numele omului și respectă drepturile lui. Din Cont se poate opri oricând.
+
 ## Roluri
 | Rol | Ce vede | Ce poate modifica / șterge |
 |---|---|---|

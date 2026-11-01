@@ -1,5 +1,5 @@
 // Foto Șantier – pornire instant și poze din memoria telefonului.
-const CACHE = 'foto-santier-v23';         // interfața (se schimbă la fiecare versiune)
+const CACHE = 'foto-santier-v24';         // interfața (se schimbă la fiecare versiune)
 const IMG = 'foto-img';                    // pozele (rămân între versiuni)
 const IMG_MAX = 1500;                      // câte fișiere de poze păstrăm cel mult
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png'];
@@ -9,7 +9,7 @@ self.addEventListener('install', (e) => {
 });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
-    .then((ks) => Promise.all(ks.filter((k) => k !== CACHE && k !== IMG).map((k) => caches.delete(k))))
+    .then((ks) => Promise.all(ks.filter((k) => k !== CACHE && k !== IMG && k !== 'foto-share').map((k) => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 
@@ -64,8 +64,24 @@ async function trimImages() {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   const rel = url.pathname.slice(new URL(self.registration.scope).pathname.length);
+
+  // Android: Galerie → Partajează → Foto Șantier. Pozele se pun deoparte, apoi aplicația întreabă unde să le trimită.
+  if (e.request.method === 'POST' && url.origin === location.origin && rel === 'share') {
+    e.respondWith((async () => {
+      try {
+        const fd = await e.request.formData();
+        const files = fd.getAll('photos').filter((f) => f && f.size);
+        await caches.delete('foto-share');
+        const c = await caches.open('foto-share');
+        await Promise.all(files.map((f, i) => c.put(new Request(new URL('share-inbox/' + i, self.registration.scope)),
+          new Response(f, { headers: { 'Content-Type': f.type || 'image/jpeg', 'X-Name': encodeURIComponent(f.name || 'poza.jpg'), 'X-Modified': String(f.lastModified || Date.now()) } }))));
+      } catch {}
+      return Response.redirect(new URL('./#share', self.registration.scope).href, 303);
+    })());
+    return;
+  }
+  if (e.request.method !== 'GET' || url.origin !== location.origin) return;
 
   // Poze: adresa are codul unic al încărcării (?v=…), deci conținutul nu se schimbă niciodată:
   // din memorie dacă există, altfel de pe server (și o păstrăm).

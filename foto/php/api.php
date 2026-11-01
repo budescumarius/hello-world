@@ -19,12 +19,12 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '18'; // la fel ca APP_VERSION din app.js
+const VERSION = '19'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
 // ---------------------------------------------------------------- baza de date
-const SCHEMA = 5; // crește când se schimbă structura bazei
+const SCHEMA = 6; // crește când se schimbă structura bazei
 function open_db(string $file): PDO {
     $db = new PDO('sqlite:' . $file, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
     $db->exec('PRAGMA busy_timeout = 10000; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY;');
@@ -60,6 +60,7 @@ function init_storage(): PDO {
 }
 
 function migrate(PDO $db): void {
+    $ver = (int) $db->query('PRAGMA user_version')->fetchColumn();
     $db->exec('PRAGMA journal_mode = WAL');
     $db->exec("
 CREATE TABLE IF NOT EXISTS users (
@@ -100,6 +101,7 @@ CREATE TABLE IF NOT EXISTS login_fail (k TEXT NOT NULL, at INTEGER NOT NULL);
     $db->exec('CREATE INDEX IF NOT EXISTS idx_entries_time ON entries(taken_at DESC, id DESC)'); // galeria: cele mai noi primele, fără sortare
 
     // v5 – volum mare: indexuri complete pe șantier / autor + contoare ținute la zi de baza de date (triggere)
+    if ($ver < 5) {
     $db->exec('BEGIN IMMEDIATE');
     try {
         $db->exec('CREATE INDEX IF NOT EXISTS idx_e_site ON entries(site_id, taken_at DESC, id DESC)');
@@ -134,6 +136,22 @@ CREATE TABLE IF NOT EXISTS login_fail (k TEXT NOT NULL, at INTEGER NOT NULL);
         $db->exec('UPDATE sites SET cover_v = (SELECT client_id FROM entries WHERE id = sites.cover_id), cover_at = (SELECT taken_at FROM entries WHERE id = sites.cover_id)');
         $db->exec('UPDATE users SET photo_count = (SELECT COUNT(*) FROM entries e WHERE e.user_id = users.id)');
         $db->exec("UPDATE stats SET v = (SELECT COUNT(*) FROM entries WHERE site_id IS NULL) WHERE k = 'unassigned'");
+        $db->exec('PRAGMA user_version = 5');
+        $db->exec('COMMIT');
+    } catch (Throwable $e) { $db->exec('ROLLBACK'); throw $e; }
+    }
+
+    // v6 – foldere pe șantier („État des lieux”, „Réception”…) + cheie personală pentru scurtătura iPhone
+    $db->exec('BEGIN IMMEDIATE');
+    try {
+        $db->exec("CREATE TABLE IF NOT EXISTS folders (
+            id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE, name TEXT NOT NULL,
+            drive_folder_id TEXT, nas_name TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')))");
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_folders_site ON folders(site_id)');
+        if (!$has('entries', 'folder_id')) $db->exec('ALTER TABLE entries ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_e_folder ON entries(folder_id, taken_at DESC, id DESC)');
+        if (!$has('users', 'key_hash')) $db->exec('ALTER TABLE users ADD COLUMN key_hash TEXT');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_users_key ON users(key_hash)');
         $db->exec('PRAGMA user_version = ' . SCHEMA);
         $db->exec('COMMIT');
     } catch (Throwable $e) { $db->exec('ROLLBACK'); throw $e; }
@@ -275,10 +293,11 @@ function set_user_sites(int $userId, array $ids): void {
 }
 
 // ---------------------------------------------------------------- intrări (poze / note)
-const ENTRY_SELECT = "SELECT e.id, e.client_id, e.kind, e.site_id, e.user_id, e.comment, e.taken_at, e.size, e.drive_status,
-  s.name AS site_name, u.name AS user_name FROM entries e LEFT JOIN sites s ON s.id = e.site_id LEFT JOIN users u ON u.id = e.user_id";
+const ENTRY_SELECT = "SELECT e.id, e.client_id, e.kind, e.site_id, e.folder_id, e.user_id, e.comment, e.taken_at, e.size, e.drive_status,
+  s.name AS site_name, f.name AS folder_name, u.name AS user_name FROM entries e LEFT JOIN sites s ON s.id = e.site_id
+  LEFT JOIN folders f ON f.id = e.folder_id LEFT JOIN users u ON u.id = e.user_id";
 function fix_entry(array $e): array {
-    foreach (['id', 'site_id', 'user_id', 'size'] as $k) if ($e[$k] !== null) $e[$k] = (int) $e[$k];
+    foreach (['id', 'site_id', 'folder_id', 'user_id', 'size'] as $k) if ($e[$k] !== null) $e[$k] = (int) $e[$k];
     return $e;
 }
 function get_entry(int $id): array { return fix_entry(one(ENTRY_SELECT . ' WHERE e.id = ?', [$id])); }
@@ -290,6 +309,26 @@ function norm_date($s): string {
 function resolve_site(array $u, $siteId) {
     if ($siteId === null || $siteId === '') return null;
     return can_use_site($u, $siteId) && val('SELECT 1 FROM sites WHERE id = ?', [(int) $siteId]) ? (int) $siteId : null;
+}
+// Folderul e valabil doar dacă aparține șantierului ales; altfel poza merge direct în șantier.
+function resolve_folder($siteId, $folderId) {
+    if (!$siteId || $folderId === null || $folderId === '' || !(int) $folderId) return null;
+    return val('SELECT id FROM folders WHERE id = ? AND site_id = ?', [(int) $folderId, (int) $siteId]) ? (int) $folderId : null;
+}
+// Nume de folder deja folosit pe șantier? (fără deosebire de litere mari/mici, inclusiv É/é)
+function folder_name_taken(int $sid, string $name, int $except = 0): bool {
+    $low = function_exists('mb_strtolower') ? mb_strtolower($name, 'UTF-8') : strtolower($name);
+    foreach (all('SELECT id, name FROM folders WHERE site_id = ? AND id != ?', [$sid, $except]) as $f) {
+        if ((function_exists('mb_strtolower') ? mb_strtolower($f['name'], 'UTF-8') : strtolower($f['name'])) === $low) return true;
+    }
+    return false;
+}
+function site_folders(array $siteIds): array { // [siteId => [[id, name], ...]]
+    if (!$siteIds) return [];
+    $by = [];
+    foreach (all('SELECT id, site_id, name FROM folders WHERE site_id IN (' . implode(',', array_map('intval', $siteIds)) . ') ORDER BY name COLLATE NOCASE') as $f)
+        $by[(int) $f['site_id']][] = ['id' => (int) $f['id'], 'name' => $f['name']];
+    return $by;
 }
 // Număr nou pentru fiecare poză, niciodată refolosit (altfel, după ștergerea ultimei poze,
 // telefonul ar putea arăta poza veche din memoria lui pentru același număr).
@@ -311,6 +350,106 @@ function insert_entry(string $sql, array $params): int {
     } catch (Throwable $e) { $db->exec('ROLLBACK'); throw $e; }
 }
 function is_jpeg(string $b): bool { return strlen($b) > 3 && substr($b, 0, 3) === "\xFF\xD8\xFF"; }
+
+function store_photo(array $u, string $cid, $sid, $fid, string $comment, string $full, string $thumb, string $taken): int {
+    global $PHOTOS;
+    $dir = substr($taken, 0, 7);
+    if (!is_dir("$PHOTOS/$dir")) mkdir("$PHOTOS/$dir", 0755, true);
+    $base = $dir . '/' . uuid();
+    if (file_put_contents("$PHOTOS/$base.jpg", $full) === false || file_put_contents("$PHOTOS/{$base}_t.jpg", $thumb) === false) {
+        fail(500, 'Nu pot salva poza (spațiu pe disc?)');
+    }
+    return insert_entry("INSERT INTO entries(id, client_id, kind, site_id, folder_id, user_id, comment, file, thumb, size, taken_at) VALUES (?, ?, 'photo', ?, ?, ?, ?, ?, ?, ?, ?)",
+        [$cid, $sid, $fid, $u['id'], $comment, "$base.jpg", "{$base}_t.jpg", strlen($full), $taken]);
+}
+
+// ---------------------------------------------------------------- scurtătura iPhone („Foto Șantier” din Partajează)
+// Pozele vin direct de pe telefon (fără aplicație): serverul face poza mare (2048 px), miniatura,
+// rotația corectă și scoate datele EXIF/GPS, ca aplicația.
+function key_user() {
+    $key = (string) ($_POST['key'] ?? $_GET['key'] ?? '');
+    if (strlen($key) < 20) return null;
+    $u = one('SELECT id, name, username, role FROM users WHERE key_hash = ? AND active = 1', [hash('sha256', $key)]);
+    if ($u) $u['id'] = (int) $u['id'];
+    return $u;
+}
+function text_out(string $t, int $code = 200, bool $then = false): void {
+    http_response_code($code);
+    header('Content-Type: text/plain; charset=utf-8');
+    header('Cache-Control: no-store');
+    header('Content-Length: ' . strlen($t));
+    if ($then) { ignore_user_abort(true); @set_time_limit(120); header('Connection: close'); }
+    echo $t;
+    if ($then) finish_request();
+}
+// „Vindevogel”, „Vindevogel › État des lieux”, … => [siteId, folderId]
+function destinations(array $u): array {
+    $sites = is_admin($u)
+        ? all('SELECT id, name FROM sites WHERE archived = 0 ORDER BY name COLLATE NOCASE')
+        : all('SELECT s.id, s.name FROM sites s JOIN site_users su ON su.site_id = s.id WHERE su.user_id = ? AND s.archived = 0 ORDER BY s.name COLLATE NOCASE', [$u['id']]);
+    $folders = site_folders(array_column($sites, 'id'));
+    $d = [];
+    foreach ($sites as $s) {
+        $label = trim(str_replace(["\n", "\r"], ' ', $s['name']));
+        if (isset($d[$label])) $label .= ' (#' . $s['id'] . ')';
+        $d[$label] = [(int) $s['id'], null];
+        foreach ($folders[(int) $s['id']] ?? [] as $f) $d[$label . ' › ' . $f['name']] = [(int) $s['id'], $f['id']];
+    }
+    $d['Fără șantier'] = [null, null];
+    return $d;
+}
+function gd_load(string $path) { // imaginea, întoarsă corect după EXIF
+    if (!function_exists('imagecreatefromstring')) return null;
+    $im = @imagecreatefromstring((string) file_get_contents($path));
+    if (!$im) return null;
+    $o = function_exists('exif_read_data') ? (int) ((@exif_read_data($path) ?: [])['Orientation'] ?? 1) : 1;
+    if (in_array($o, [2, 4, 5, 7], true) && function_exists('imageflip')) imageflip($im, IMG_FLIP_HORIZONTAL);
+    $rot = [3 => 180, 4 => 180, 5 => 270, 6 => 270, 7 => 90, 8 => 90][$o] ?? 0;
+    if ($rot) { $r = imagerotate($im, $rot, 0); if ($r) $im = $r; }
+    return $im;
+}
+function gd_jpeg($im, int $max, int $q): string {
+    $w = imagesx($im); $h = imagesy($im);
+    $k = min(1, $max / max($w, $h));
+    $nw = max(1, (int) round($w * $k)); $nh = max(1, (int) round($h * $k));
+    $dst = imagecreatetruecolor($nw, $nh);
+    imagecopyresampled($dst, $im, 0, 0, 0, 0, $nw, $nh, $w, $h);
+    ob_start(); imagejpeg($dst, null, $q); $out = (string) ob_get_clean();
+    return $out;
+}
+function shortcut(string $route): void {
+    $u = key_user();
+    if (!$u) { text_out('Cheie greșită sau dezactivată. Generează una nouă în aplicație: Cont → Scurtătură iPhone.', 401); return; }
+    $dest = destinations($u);
+    if ($route === 'GET api/shortcut/destinations') { text_out(implode("\n", array_keys($dest))); return; }
+    $label = trim((string) ($_POST['dest'] ?? ''));
+    if (!isset($dest[$label])) { text_out("Nu găsesc „{$label}” printre șantierele tale.", 400); return; }
+    [$sid, $fid] = $dest[$label];
+    // toate fișierele trimise, oricum ar fi numit câmpul (photo, photo[], file…)
+    $files = [];
+    foreach ($_FILES as $f) {
+        if (is_array($f['tmp_name'])) { foreach ($f['tmp_name'] as $i => $t) if (!$f['error'][$i]) $files[] = $t; }
+        elseif (!$f['error']) $files[] = $f['tmp_name'];
+    }
+    if (!$files) { text_out('Nu a sosit nicio poză. Verifică în scurtătură câmpul „photo” (tip: Fișier).', 400); return; }
+    $n = 0; $errors = [];
+    foreach ($files as $tmp) {
+        $raw = (string) file_get_contents($tmp);
+        $exif = function_exists('exif_read_data') ? (@exif_read_data($tmp) ?: []) : [];
+        $taken = norm_date(isset($exif['DateTimeOriginal']) ? str_replace(':', '-', substr($exif['DateTimeOriginal'], 0, 10)) . substr($exif['DateTimeOriginal'], 10) : null);
+        $im = gd_load($tmp);
+        if ($im) { $full = gd_jpeg($im, 2048, 82); $thumb = gd_jpeg($im, 300, 62); }
+        elseif (is_jpeg($raw)) { $full = $raw; $thumb = $raw; }
+        else { $errors[] = 'o poză nu e JPEG: adaugă în scurtătură acțiunea „Convertește imaginea” (JPEG)'; continue; }
+        $cid = 'sc-' . substr(sha1($u['id'] . '|' . sha1($raw)), 0, 40); // aceeași poză trimisă de două ori nu se dublează
+        if (!val('SELECT 1 FROM entries WHERE client_id = ?', [$cid])) store_photo($u, $cid, $sid, $fid, '', $full, $thumb, $taken);
+        $n++;
+    }
+    $msg = $n ? "✓ $n " . ($n === 1 ? 'poză trimisă' : 'poze trimise') . " în $label" : 'Nicio poză trimisă';
+    if ($errors) $msg .= "\n" . implode("\n", array_unique($errors));
+    text_out($msg, $n ? 200 : 400, $n > 0);
+    if ($n && sync_active()) sync_work(25);
+}
 
 // ---------------------------------------------------------------- Google Drive
 function drive_client(): array { return [setting('drive_client_id') ?: '', setting('drive_client_secret') ?: '']; }
@@ -391,11 +530,22 @@ function site_folder($siteId): string {
     q('UPDATE sites SET drive_folder_id = ? WHERE id = ?', [$id, $site['id']]);
     return $id;
 }
+// Unde stă poza în Drive: <șantier>/<folder> sau direct <șantier>.
+function drive_parent(array $e): string {
+    $site = site_folder($e['site_id']);
+    if (empty($e['folder_id']) || !$e['site_id']) return $site;
+    $f = one('SELECT id, name, drive_folder_id FROM folders WHERE id = ?', [(int) $e['folder_id']]);
+    if (!$f) return $site;
+    if (folder_ok($f['drive_folder_id'])) return $f['drive_folder_id'];
+    $id = create_folder($f['name'], $site);
+    q('UPDATE folders SET drive_folder_id = ? WHERE id = ?', [$id, $f['id']]);
+    return $id;
+}
 function drive_upload(array $e): string {
     global $PHOTOS;
     $d = str_replace(['T', ':'], ['_', '-'], substr($e['taken_at'], 0, 19));
     $who = trim((string) preg_replace('/[^\p{L}\p{N}]+/u', '_', $e['user_name'] ?: 'necunoscut'), '_');
-    $meta = ['name' => "{$d}_{$who}_{$e['id']}.jpg", 'parents' => [site_folder($e['site_id'])]];
+    $meta = ['name' => "{$d}_{$who}_{$e['id']}.jpg", 'parents' => [drive_parent($e)]];
     if ($e['comment'] !== '') $meta['description'] = $e['comment'];
     $b = 'b' . bin2hex(random_bytes(8));
     $body = "--$b\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" . json_encode($meta, JSON_UNESCAPED_UNICODE)
@@ -407,7 +557,7 @@ function drive_update(int $entryId): void {
     if (!drive_active() || !$e || !$e['drive_file_id']) return;
     try {
         $cur = gapi('GET', "https://www.googleapis.com/drive/v3/files/{$e['drive_file_id']}?fields=parents");
-        $qs = http_build_query(['addParents' => site_folder($e['site_id']), 'removeParents' => implode(',', $cur['parents'] ?? [])]);
+        $qs = http_build_query(['addParents' => drive_parent($e), 'removeParents' => implode(',', $cur['parents'] ?? [])]);
         gapi('PATCH', "https://www.googleapis.com/drive/v3/files/{$e['drive_file_id']}?$qs", json_encode(['description' => $e['comment']], JSON_UNESCAPED_UNICODE));
     } catch (Throwable $err) { error_log('Drive update: ' . $err->getMessage()); }
 }
@@ -494,6 +644,16 @@ function nas_site_folder($siteId): string {
     if ($site['nas_folder'] !== $name) q('UPDATE sites SET nas_folder = ? WHERE id = ?', [$name, $site['id']]);
     return "$root/$name";
 }
+function nas_entry_folder(array $e): string {
+    $site = nas_site_folder($e['site_id']);
+    if (empty($e['folder_id']) || !$e['site_id']) return $site;
+    $f = one('SELECT id, name, nas_name FROM folders WHERE id = ?', [(int) $e['folder_id']]);
+    if (!$f) return $site;
+    $name = $f['nas_name'] ?: nas_clean_name($f['name']);
+    nas_mkdir("$site/$name");
+    if ($f['nas_name'] !== $name) q('UPDATE folders SET nas_name = ? WHERE id = ?', [$name, $f['id']]);
+    return "$site/$name";
+}
 function nas_file_name(array $e): string {
     $d = str_replace(['T', ':'], ['_', '-'], substr($e['taken_at'], 0, 19));
     $who = trim((string) preg_replace('/[^\p{L}\p{N}]+/u', '_', $e['user_name'] ?: 'necunoscut'), '_');
@@ -506,7 +666,7 @@ function nas_put_comment(string $path, string $comment): void {
 }
 function nas_upload(array $e): string {
     global $PHOTOS;
-    $path = nas_site_folder($e['site_id']) . '/' . nas_file_name($e);
+    $path = nas_entry_folder($e) . '/' . nas_file_name($e);
     $c = nas_req('PUT', $path, ['Content-Type: image/jpeg'], file_get_contents($PHOTOS . '/' . $e['file']));
     if ($c < 200 || $c >= 300) throw new NasError("NAS: nu pot salva poza (HTTP $c)", $c);
     if ($e['comment'] !== '') nas_put_comment($path, $e['comment']);
@@ -520,7 +680,7 @@ function nas_update(int $entryId): void {
     if (!nas_active() || !$e || !$e['nas_path']) return;
     try {
         $path = $e['nas_path'];
-        $folder = nas_site_folder($e['site_id']);
+        $folder = nas_entry_folder($e);
         if (dirname($path) !== $folder) {
             $to = $folder . '/' . basename($path);
             $c = nas_move($path, $to);
@@ -660,7 +820,9 @@ function route(string $route, string $path, string $method): void {
         $sites = is_admin($u)
             ? all('SELECT id, name, address FROM sites WHERE archived = 0 ORDER BY name COLLATE NOCASE')
             : all('SELECT s.id, s.name, s.address FROM sites s JOIN site_users su ON su.site_id = s.id WHERE su.user_id = ? AND s.archived = 0 ORDER BY s.name COLLATE NOCASE', [$u['id']]);
-        foreach ($sites as &$s) $s['id'] = (int) $s['id'];
+        $fold = site_folders(array_column($sites, 'id'));
+        foreach ($sites as &$s) { $s['id'] = (int) $s['id']; $s['folders'] = $fold[$s['id']] ?? []; }
+        unset($s);
         out(['user' => $u, 'sites' => $sites]);
         return;
     }
@@ -843,15 +1005,9 @@ function route(string $route, string $path, string $method): void {
         $full = substr($raw, 4 + $tlen);
         $thumb = $tlen > 0 ? substr($raw, 4, $tlen) : $full; // fără miniatură: folosim poza
         if (!is_jpeg($thumb) || !is_jpeg($full)) fail(400, 'Format invalid (doar JPEG)');
-        $taken = norm_date($meta['takenAt'] ?? null);
-        $dir = substr($taken, 0, 7);
-        if (!is_dir("$PHOTOS/$dir")) mkdir("$PHOTOS/$dir", 0755, true);
-        $base = $dir . '/' . uuid();
-        if (file_put_contents("$PHOTOS/$base.jpg", $full) === false || file_put_contents("$PHOTOS/{$base}_t.jpg", $thumb) === false) {
-            fail(500, 'Nu pot salva poza (spațiu pe disc?)');
-        }
-        $newId = insert_entry("INSERT INTO entries(id, client_id, kind, site_id, user_id, comment, file, thumb, size, taken_at) VALUES (?, ?, 'photo', ?, ?, ?, ?, ?, ?, ?)",
-            [$cid, resolve_site($u, $meta['siteId'] ?? null), $u['id'], clean($meta['comment'] ?? '', 2000), "$base.jpg", "{$base}_t.jpg", strlen($full), $taken]);
+        $sid = resolve_site($u, $meta['siteId'] ?? null);
+        $newId = store_photo($u, $cid, $sid, resolve_folder($sid, $meta['folderId'] ?? null), clean($meta['comment'] ?? '', 2000),
+            $full, $thumb, norm_date($meta['takenAt'] ?? null));
         out(get_entry($newId)); // copierea în Drive/NAS o pornește telefonul separat (api/sync/kick) + cron
         return;
     }
@@ -863,8 +1019,9 @@ function route(string $route, string $path, string $method): void {
         if ($comment === '') fail(400, 'Scrie ceva în notă');
         $ex = one('SELECT id, user_id FROM entries WHERE client_id = ?', [$cid]);
         if ($ex) { if ((int) $ex['user_id'] !== $u['id']) fail(409, 'Conflict'); out(get_entry((int) $ex['id'])); return; }
-        $newId = insert_entry("INSERT INTO entries(id, client_id, kind, site_id, user_id, comment, taken_at, drive_status) VALUES (?, ?, 'note', ?, ?, ?, ?, 'none')",
-            [$cid, resolve_site($u, $b['siteId'] ?? null), $u['id'], $comment, norm_date($b['takenAt'] ?? null)]);
+        $sid = resolve_site($u, $b['siteId'] ?? null);
+        $newId = insert_entry("INSERT INTO entries(id, client_id, kind, site_id, folder_id, user_id, comment, taken_at, drive_status) VALUES (?, ?, 'note', ?, ?, ?, ?, ?, 'none')",
+            [$cid, $sid, resolve_folder($sid, $b['folderId'] ?? null), $u['id'], $comment, norm_date($b['takenAt'] ?? null)]);
         out(get_entry($newId));
         return;
     }
@@ -887,7 +1044,12 @@ function route(string $route, string $path, string $method): void {
         if ($site === 'none' || $site !== '' || $mine || $admin) {
             $w = []; $p = [];
             if ($site === 'none') $w[] = 'e.site_id IS NULL';
-            elseif ($site !== '') { $w[] = 'e.site_id = ?'; $p[] = (int) $site; }
+            elseif ($site !== '') {
+                $w[] = 'e.site_id = ?'; $p[] = (int) $site;
+                $fq = (string) ($_GET['folder'] ?? '');
+                if ($fq === 'root') $w[] = 'e.folder_id IS NULL';
+                elseif ($fq !== '') { $w[] = 'e.folder_id = ?'; $p[] = (int) $fq; }
+            }
             $ownOnly = $mine || (!$admin && ($site === 'none' || ($site !== '' && !in_array((int) $site, assigned($u['id']), true))));
             if ($ownOnly) { $w[] = 'e.user_id = ?'; $p[] = $u['id']; }
             $sql = ENTRY_SELECT . ' WHERE ' . ($w ? implode(' AND ', $w) : '1') . $cur . $order;
@@ -955,9 +1117,15 @@ function route(string $route, string $path, string $method): void {
         }
         $comment = array_key_exists('comment', $b) ? clean($b['comment'], 2000) : $e['comment'];
         if ($e['kind'] === 'note' && $comment === '') fail(400, 'Nota nu poate fi goală');
-        q('UPDATE entries SET site_id = ?, comment = ? WHERE id = ?', [$siteId, $comment, $eid]);
         $oldSite = $e['site_id'] === null ? null : (int) $e['site_id'];
-        if (!(($e['drive_file_id'] || $e['nas_path']) && ($siteId !== $oldSite || $comment !== $e['comment']))) { out(get_entry($eid)); return; }
+        $oldFolder = $e['folder_id'] === null ? null : (int) $e['folder_id'];
+        // folderul: cel cerut (dacă e al șantierului); la mutarea pe alt șantier, fără folder dacă nu se spune altfel
+        if (array_key_exists('folderId', $b)) {
+            $folderId = resolve_folder($siteId, $b['folderId']);
+            if ($b['folderId'] !== null && $folderId === null) fail(400, 'Folderul nu e al acestui șantier');
+        } else $folderId = $siteId === $oldSite ? $oldFolder : null;
+        q('UPDATE entries SET site_id = ?, folder_id = ?, comment = ? WHERE id = ?', [$siteId, $folderId, $comment, $eid]);
+        if (!(($e['drive_file_id'] || $e['nas_path']) && ($siteId !== $oldSite || $folderId !== $oldFolder || $comment !== $e['comment']))) { out(get_entry($eid)); return; }
         {
             respond_then(get_entry($eid));
             if ($e['drive_file_id']) drive_update($eid);
@@ -977,6 +1145,86 @@ function route(string $route, string $path, string $method): void {
         header('Cache-Control: private, max-age=31536000, immutable');
         if (!empty($_GET['dl'])) header('Content-Disposition: attachment; filename="poza_' . substr($e['taken_at'], 0, 10) . '_' . $e['id'] . '.jpg"');
         readfile($file);
+        return;
+    }
+
+    // ---------- foldere pe șantier
+    if ($route === 'GET api/folders') {
+        $u = need();
+        $sid = (int) ($_GET['site'] ?? 0);
+        if (!$sid || !can_use_site($u, $sid)) fail(403, 'Nu ai acces la acest șantier');
+        $counts = [];
+        foreach (all('SELECT folder_id, COUNT(*) AS n FROM entries WHERE site_id = ? GROUP BY folder_id', [$sid]) as $r) $counts[(int) $r['folder_id']] = (int) $r['n'];
+        $folders = [];
+        foreach (site_folders([$sid])[$sid] ?? [] as $f) $folders[] = $f + ['count' => $counts[$f['id']] ?? 0];
+        out(['folders' => $folders, 'root' => $counts[0] ?? 0]);
+        return;
+    }
+    if ($route === 'POST api/folders') {
+        $u = need('admin', 'responsabil');
+        $b = body();
+        $sid = (int) ($b['siteId'] ?? 0);
+        $name = clean($b['name'] ?? '', 80);
+        if (!$sid || !can_use_site($u, $sid) || !val('SELECT 1 FROM sites WHERE id = ?', [$sid])) fail(403, 'Nu ai acces la acest șantier');
+        if ($name === '') fail(400, 'Scrie numele folderului');
+        if (folder_name_taken($sid, $name)) fail(400, 'Există deja un folder cu acest nume');
+        q('INSERT INTO folders(site_id, name) VALUES (?, ?)', [$sid, $name]);
+        out(['id' => (int) $db->lastInsertId(), 'name' => $name]);
+        return;
+    }
+    if (preg_match('#^(PATCH|DELETE) api/folders/(\d+)$#', $route, $m)) {
+        $u = need('admin', 'responsabil');
+        $f = one('SELECT * FROM folders WHERE id = ?', [(int) $m[2]]);
+        if (!$f || !can_use_site($u, (int) $f['site_id'])) fail(404, 'Folderul nu există');
+        $fid = (int) $f['id'];
+        if ($m[1] === 'PATCH') {
+            $name = clean(body()['name'] ?? '', 80);
+            if ($name === '') fail(400, 'Scrie numele folderului');
+            if (folder_name_taken((int) $f['site_id'], $name, $fid)) fail(400, 'Există deja un folder cu acest nume');
+            q('UPDATE folders SET name = ? WHERE id = ?', [$name, $fid]);
+            if (!($f['drive_folder_id'] || $f['nas_name'])) { out(['ok' => true]); return; }
+            respond_then(['ok' => true]);
+            if ($f['drive_folder_id'] && drive_active()) {
+                try { gapi('PATCH', "https://www.googleapis.com/drive/v3/files/{$f['drive_folder_id']}", json_encode(['name' => $name], JSON_UNESCAPED_UNICODE)); }
+                catch (Throwable $e) { error_log('Drive rename folder: ' . $e->getMessage()); }
+            }
+            if ($f['nas_name'] && nas_active()) {
+                try {
+                    $site = nas_site_folder((int) $f['site_id']); $new = nas_clean_name($name);
+                    $c = nas_move("$site/{$f['nas_name']}", "$site/$new");
+                    if ($c >= 200 && $c < 300) {
+                        q('UPDATE folders SET nas_name = ? WHERE id = ?', [$new, $fid]);
+                        foreach (all('SELECT id, nas_path FROM entries WHERE folder_id = ? AND nas_path IS NOT NULL', [$fid]) as $r)
+                            q('UPDATE entries SET nas_path = ? WHERE id = ?', ["$site/$new/" . basename($r['nas_path']), $r['id']]);
+                    }
+                } catch (Throwable $e) { error_log('NAS rename folder: ' . $e->getMessage()); }
+            }
+            return;
+        }
+        // ștergere: pozele rămân, direct în șantier (și se mută la fel în Drive / NAS)
+        $moved = all('SELECT id FROM entries WHERE folder_id = ? AND (drive_file_id IS NOT NULL OR nas_path IS NOT NULL)', [$fid]);
+        q('UPDATE entries SET folder_id = NULL WHERE folder_id = ?', [$fid]);
+        q('DELETE FROM folders WHERE id = ?', [$fid]);
+        if (!$moved && !$f['drive_folder_id'] && !$f['nas_name']) { out(['ok' => true]); return; }
+        respond_then(['ok' => true]);
+        foreach ($moved as $r) { drive_update((int) $r['id']); nas_update((int) $r['id']); }
+        if ($f['drive_folder_id']) drive_delete($f['drive_folder_id']);
+        if ($f['nas_name'] && nas_active()) { try { nas_req('DELETE', nas_site_folder((int) $f['site_id']) . '/' . $f['nas_name'] . '/'); } catch (Throwable $e) {} }
+        return;
+    }
+
+    // ---------- cheie personală (scurtătura iPhone „Foto Șantier”)
+    if ($route === 'GET api/key') { $u = need(); out(['has' => (bool) val('SELECT key_hash FROM users WHERE id = ?', [$u['id']])]); return; }
+    if ($route === 'POST api/key') {
+        $u = need();
+        $key = 'fs_' . bin2hex(random_bytes(20));
+        q('UPDATE users SET key_hash = ? WHERE id = ?', [hash('sha256', $key), $u['id']]);
+        out(['key' => $key]);
+        return;
+    }
+    if ($route === 'DELETE api/key') { $u = need(); q('UPDATE users SET key_hash = NULL WHERE id = ?', [$u['id']]); out(['ok' => true]); return; }
+    if ($route === 'GET api/shortcut/destinations' || $route === 'POST api/shortcut/upload') {
+        shortcut($route);
         return;
     }
 

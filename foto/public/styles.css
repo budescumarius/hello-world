@@ -145,3 +145,13 @@ input[type=search] { width: 100%; border: 1px solid var(--line); background: var
 .cover img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
 div.f > span { display: block; font-size: 14px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
 div.f { margin: 0 0 14px; }
+
+/* foldere */
+.chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 10px; margin-bottom: 2px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: none; border: 1px solid var(--line); background: var(--card); border-radius: 99px; padding: 8px 14px; font-weight: 600; font-size: 15px; white-space: nowrap; min-height: 40px; }
+.chip.on { background: var(--blue); border-color: var(--blue); color: #fff; }
+.chip.add { border-style: dashed; color: var(--blue); }
+.chip .n { margin-left: 6px; font-size: 12px; opacity: .7; }
+.steps { padding-left: 20px; line-height: 1.5; }
+.steps ul { padding-left: 18px; margin: 4px 0; }

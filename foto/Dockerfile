@@ -2,6 +2,12 @@
 FROM php:8.3-apache
 
 # Apache: .htaccess activ (rutare api/ și files/), compresie și cache. PHP: opcache + limite pentru poze.
+# GD + EXIF: miniaturi și rotația corectă pentru pozele trimise din scurtătura iPhone
+RUN apt-get update && apt-get install -y --no-install-recommends libjpeg62-turbo-dev libpng-dev \
+ && docker-php-ext-configure gd --with-jpeg \
+ && docker-php-ext-install -j"$(nproc)" gd exif \
+ && rm -rf /var/lib/apt/lists/*
+
 RUN a2enmod rewrite headers deflate \
  && sed -ri 's#AllowOverride None#AllowOverride All#' /etc/apache2/apache2.conf \
  && docker-php-ext-enable opcache \
