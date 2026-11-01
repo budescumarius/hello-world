@@ -1,0 +1,65 @@
+{
+  "_note": "Données 100 % fictives. Entrées des tests de non-régression des calculs financiers (JS actuel, puis futur portage PHP). Date du jour figée : 2026-11-01.",
+  "today": "2026-11-01",
+  "documents": {
+    "devis_remise_2_taux": {
+      "discount": 10,
+      "lines": [
+        { "kind": "title", "desc": "Gros œuvre" },
+        { "kind": "item", "desc": "Maçonnerie", "qty": 10, "price": 100, "vat": 21, "cost": 60, "type": "mat" },
+        { "kind": "item", "desc": "Main-d'œuvre", "qty": 2, "price": 50, "vat": 6, "cost": 30, "type": "mo" },
+        { "kind": "item", "desc": "Option non retenue", "qty": 5, "price": 1000, "vat": 21, "cost": 500, "option": true },
+        { "kind": "text", "desc": "Remarque" }
+      ]
+    },
+    "autoliquidation": { "reverse": true, "lines": [{ "kind": "item", "qty": 1, "price": 1000, "vat": 21, "cost": 700 }] },
+    "note_de_credit": { "kind": "avoir", "lines": [{ "kind": "item", "qty": -2, "price": 100, "vat": 21 }] },
+    "ouvrage_cout_ventile": { "lines": [{ "kind": "item", "qty": 3, "price": 200, "vat": 6, "costBy": { "mat": 40, "mo": 50 } }] }
+  },
+  "invoices": {
+    "brouillon": { "data": { "status": "brouillon", "due": "2026-10-01", "lines": [{ "kind": "item", "qty": 1, "price": 1000, "vat": 21 }] } },
+    "emise_non_echue": { "data": { "status": "emise", "due": "2026-12-01", "lines": [{ "kind": "item", "qty": 1, "price": 1000, "vat": 21 }] } },
+    "emise_en_retard": { "data": { "status": "emise", "due": "2026-10-01", "lines": [{ "kind": "item", "qty": 1, "price": 1000, "vat": 21 }] } },
+    "partielle": { "data": { "status": "emise", "due": "2026-12-01", "payments": [{ "date": "2026-10-15", "amount": 500 }], "lines": [{ "kind": "item", "qty": 1, "price": 1000, "vat": 21 }] } },
+    "partielle_en_retard": { "data": { "status": "emise", "due": "2026-10-01", "payments": [{ "date": "2026-10-15", "amount": 500 }], "lines": [{ "kind": "item", "qty": 1, "price": 1000, "vat": 21 }] } },
+    "payee_en_deux_fois": { "data": { "status": "emise", "due": "2026-10-01", "payments": [{ "amount": 1000 }, { "amount": "210,00" }], "lines": [{ "kind": "item", "qty": 1, "price": 1000, "vat": 21 }] } },
+    "avoir": { "data": { "kind": "avoir", "status": "emise", "lines": [{ "kind": "item", "qty": -1, "price": 100, "vat": 21 }] } }
+  },
+  "purchases": {
+    "a_payer": { "data": { "amount": 1000, "vat": 21, "due": "2026-12-01" } },
+    "plusieurs_taux": { "data": { "amount": 1100, "vatLines": [{ "rate": 21, "amount": 210 }, { "rate": 6, "amount": 6 }], "due": "2026-12-01" } },
+    "ttc_force": { "data": { "amount": 1000, "vat": 21, "ttc": "1300", "due": "2026-12-01" } },
+    "ancien_paye": { "data": { "amount": 1000, "vat": 21, "paid": true } },
+    "partiel": { "data": { "amount": 1000, "vat": 21, "due": "2026-12-01", "payments": [{ "amount": 400 }] } },
+    "partiel_en_retard": { "data": { "amount": 1000, "vat": 21, "due": "2026-10-01", "payments": [{ "amount": 400 }] } },
+    "refusee": { "data": { "amount": 1000, "vat": 21, "refused": true } },
+    "a_valider": { "data": { "amount": 1000, "vat": 21, "status": "avalider" } }
+  },
+  "project": {
+    "p": { "id": 10, "data": { "budget": 50000 } },
+    "all": {
+      "quote": [
+        { "data": { "status": "accepte", "discount": 10, "lines": [
+          { "kind": "item", "qty": 10, "price": 100, "vat": 21, "cost": 60, "type": "mat" },
+          { "kind": "item", "qty": 2, "price": 50, "vat": 6, "cost": 30, "type": "mo" } ] } },
+        { "data": { "status": "refuse", "lines": [{ "kind": "item", "qty": 1, "price": 99999, "vat": 21, "cost": 1 }] } }
+      ],
+      "invoice": [
+        { "data": { "status": "emise", "due": "2026-12-01", "payments": [{ "amount": 200 }], "lines": [{ "kind": "item", "qty": 1, "price": 500, "vat": 6 }] } },
+        { "data": { "status": "brouillon", "lines": [{ "kind": "item", "qty": 1, "price": 7777, "vat": 6 }] } },
+        { "data": { "kind": "avoir", "status": "emise", "lines": [{ "kind": "item", "qty": -1, "price": 100, "vat": 6 }] } }
+      ],
+      "expense": [
+        { "project_id": 10, "data": { "amount": 300, "category": "mat" } },
+        { "project_id": null, "data": { "category": "st", "alloc": [{ "pid": 10, "amount": 200 }, { "pid": 11, "amount": 999 }] } },
+        { "project_id": 10, "data": { "amount": 1000, "category": "mat", "refused": true } },
+        { "project_id": 99, "data": { "amount": 5000, "category": "mat" } }
+      ],
+      "timesheet": [{ "data": { "hours": 8, "rate": 45 } }],
+      "order": [
+        { "data": { "status": "envoyee", "lines": [{ "kind": "item", "qty": 1, "price": 100, "vat": 21 }] } },
+        { "data": { "status": "facturee", "lines": [{ "kind": "item", "qty": 1, "price": 5000, "vat": 21 }] } }
+      ]
+    }
+  }
+}

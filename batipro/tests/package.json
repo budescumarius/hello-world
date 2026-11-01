@@ -1,0 +1,13 @@
+{
+  "name": "batipro-tests",
+  "private": true,
+  "description": "Tests de non-régression BatiPro (outil de développement, non déployé)",
+  "type": "module",
+  "scripts": {
+    "test:js": "node --test js/*.test.mjs",
+    "golden": "node js/make-golden.mjs"
+  },
+  "devDependencies": {
+    "acorn": "8.14.0"
+  }
+}

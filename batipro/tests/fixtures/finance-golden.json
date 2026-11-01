@@ -1,0 +1,214 @@
+{
+  "_note": "Généré par « npm run golden » à partir du code de assets/*.js. Ne pas modifier à la main.",
+  "today": "2026-11-01",
+  "sourceDigest": "f0e93c730c12f2a7d669d2a34605a3af5c0277f34c28c5b7739effde4dd73f50",
+  "totals": {
+    "devis_remise_2_taux": {
+      "net": 1100,
+      "discount": 110,
+      "base": 990,
+      "vats": [
+        {
+          "rate": 21,
+          "lines": 1000,
+          "allowance": 100,
+          "base": 900,
+          "vat": 189
+        },
+        {
+          "rate": 6,
+          "lines": 100,
+          "allowance": 10,
+          "base": 90,
+          "vat": 5.4
+        }
+      ],
+      "vat": 194.4,
+      "total": 1184.4,
+      "cost": 660,
+      "costBy": {
+        "mat": 600,
+        "mo": 60
+      },
+      "margin": 330
+    },
+    "autoliquidation": {
+      "net": 1000,
+      "discount": 0,
+      "base": 1000,
+      "vats": [
+        {
+          "rate": 21,
+          "lines": 1000,
+          "allowance": 0,
+          "base": 1000,
+          "vat": 0
+        }
+      ],
+      "vat": 0,
+      "total": 1000,
+      "cost": 700,
+      "costBy": {
+        "divers": 700
+      },
+      "margin": 300
+    },
+    "note_de_credit": {
+      "net": -200,
+      "discount": 0,
+      "base": -200,
+      "vats": [
+        {
+          "rate": 21,
+          "lines": -200,
+          "allowance": 0,
+          "base": -200,
+          "vat": -42
+        }
+      ],
+      "vat": -42,
+      "total": -242,
+      "cost": 0,
+      "costBy": {
+        "divers": 0
+      },
+      "margin": -200
+    },
+    "ouvrage_cout_ventile": {
+      "net": 600,
+      "discount": 0,
+      "base": 600,
+      "vats": [
+        {
+          "rate": 6,
+          "lines": 600,
+          "allowance": 0,
+          "base": 600,
+          "vat": 36
+        }
+      ],
+      "vat": 36,
+      "total": 636,
+      "cost": 270,
+      "costBy": {
+        "mat": 120,
+        "mo": 150
+      },
+      "margin": 330
+    }
+  },
+  "invState": {
+    "brouillon": {
+      "s": "brouillon",
+      "paid": 0,
+      "rest": 1210,
+      "total": 1210
+    },
+    "emise_non_echue": {
+      "s": "impayee",
+      "paid": 0,
+      "rest": 1210,
+      "total": 1210
+    },
+    "emise_en_retard": {
+      "s": "retard",
+      "paid": 0,
+      "rest": 1210,
+      "total": 1210
+    },
+    "partielle": {
+      "s": "partielle",
+      "paid": 500,
+      "rest": 710,
+      "total": 1210
+    },
+    "partielle_en_retard": {
+      "s": "retard",
+      "paid": 500,
+      "rest": 710,
+      "total": 1210
+    },
+    "payee_en_deux_fois": {
+      "s": "payee",
+      "paid": 1210,
+      "rest": 0,
+      "total": 1210
+    },
+    "avoir": {
+      "s": "avoir",
+      "paid": 0,
+      "rest": -121,
+      "total": -121
+    }
+  },
+  "purchases": {
+    "a_payer": {
+      "ttc": 1210,
+      "paid": 0,
+      "rest": 1210,
+      "state": "apayer"
+    },
+    "plusieurs_taux": {
+      "ttc": 1316,
+      "paid": 0,
+      "rest": 1316,
+      "state": "apayer"
+    },
+    "ttc_force": {
+      "ttc": 1300,
+      "paid": 0,
+      "rest": 1300,
+      "state": "apayer"
+    },
+    "ancien_paye": {
+      "ttc": 1210,
+      "paid": 1210,
+      "rest": 0,
+      "state": "payee"
+    },
+    "partiel": {
+      "ttc": 1210,
+      "paid": 400,
+      "rest": 810,
+      "state": "partiel"
+    },
+    "partiel_en_retard": {
+      "ttc": 1210,
+      "paid": 400,
+      "rest": 810,
+      "state": "retard"
+    },
+    "refusee": {
+      "ttc": 1210,
+      "paid": 0,
+      "rest": 1210,
+      "state": "refusee"
+    },
+    "a_valider": {
+      "ttc": 1210,
+      "paid": 0,
+      "rest": 1210,
+      "state": "avalider"
+    }
+  },
+  "projectFinance": {
+    "budget": 990,
+    "est": 660,
+    "estBy": {
+      "mat": 600,
+      "mo": 60
+    },
+    "real": 860,
+    "realBy": {
+      "mat": 300,
+      "st": 200,
+      "mo": 360
+    },
+    "engaged": 100,
+    "invoiced": 400,
+    "cashed": 200,
+    "due": 330,
+    "hours": 8,
+    "margin": 30
+  }
+}
