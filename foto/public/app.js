@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '24'; // la fel ca VERSION din api.php
+const APP_VERSION = '25'; // la fel ca VERSION din api.php
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -1208,10 +1208,12 @@ function shortcutCard() {
         h('p', { class: 'muted small' }, 'Prima dată iPhone-ul întreabă dacă scurtătura are voie să trimită la batiphoto: apasă ', k('Autoriser'), '.')));
   };
   const body = h('div');
-  const gen = async () => {
-    if (body.dataset.has && !confirm('Generezi o cheie nouă? Scurtătura făcută cu cheia veche nu va mai merge.')) return;
-    const { key } = await api('api/key', { method: 'POST' });
+  // ghidul folosește mereu aceeași cheie; una nouă doar din butonul separat (cu confirmare)
+  const gen = async (fresh) => {
+    if (fresh && !confirm('Faci o cheie nouă? Scurtătura care folosește cheia veche nu va mai merge până nu copiezi din nou adresele.')) return;
+    const { key } = await api('api/key' + (fresh ? '?new=1' : ''), { method: 'POST' });
     fill(body, guide(key)); body.dataset.has = '1';
+    if (fresh) toast('Cheie nouă: copiază din nou adresa 1 și adresa 2 în scurtătură', 6000);
   };
   api('api/key').then((r) => {
     if (r.has) body.dataset.has = '1';
@@ -1220,9 +1222,12 @@ function shortcutCard() {
       h('p', { class: 'muted small' }, 'Varianta cea mai simplă, fără nicio configurare: ecranul Foto → ', h('b', {}, '🖼 Din galerie'), ' (selectezi mai multe poze odată).'),
       r.log?.length ? h('div', { class: 'sclog' }, h('div', { class: 'small', style: 'font-weight:700;margin:8px 0 4px' }, 'Ultimele trimiteri din scurtătură:'),
         r.log.map((l) => h('div', { class: 'small ' + (l.ok ? 'ok' : 'err') }, (l.ok ? '✅ ' : '⛔ ') + fmtShort(l.at) + ' – ', l.message))) :
-        r.has ? h('p', { class: 'small muted' }, 'Încă nicio trimitere din scurtătură n-a ajuns la server. Dacă ai trimis și nu apare aici, verifică adresa 2 din ultima acțiune.') : null,
+        r.has ? h('p', { class: 'small muted' }, 'Încă nicio trimitere din scurtătură n-a ajuns la server cu cheia ta.') : null,
+      r.badKey ? h('p', { class: 'small', style: 'background:#fef3c7;padding:8px;border-radius:8px' },
+        `⚠️ ${fmtShort(r.badKey.at)}: o scurtătură a încercat cu o cheie veche (${r.badKey.key}). Apasă „Arată ghidul” și copiază din nou adresa 1 și adresa 2 în scurtătură.`) : null,
       h('div', { class: 'row' },
-        h('button', { class: 'btn primary grow', onclick: gen }, r.has ? '🔑 Arată ghidul (cheie nouă)' : '🔑 Începe configurarea'),
+        h('button', { class: 'btn primary grow', onclick: () => gen(false) }, r.has ? '📖 Arată ghidul și adresele' : '🔑 Începe configurarea'),
+        r.has ? h('button', { class: 'btn', onclick: () => gen(true) }, '🔄 Cheie nouă') : null,
         r.has ? h('button', { class: 'btn danger', onclick: async () => {
           if (!confirm('Oprești scurtătura? Cheia nu va mai funcționa.')) return;
           await api('api/key', { method: 'DELETE' }); screenCont(); } }, 'Oprește') : null));

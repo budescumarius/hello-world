@@ -19,12 +19,12 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '24'; // la fel ca APP_VERSION din app.js
+const VERSION = '25'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
 // ---------------------------------------------------------------- baza de date
-const SCHEMA = 9; // crește când se schimbă structura bazei
+const SCHEMA = 10; // crește când se schimbă structura bazei
 function open_db(string $file): PDO {
     $db = new PDO('sqlite:' . $file, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
     $db->exec('PRAGMA busy_timeout = 10000; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY;');
@@ -162,6 +162,8 @@ CREATE TABLE IF NOT EXISTS login_fail (k TEXT NOT NULL, at INTEGER NOT NULL);
         // v9 – jurnalul trimiterilor din scurtătura iPhone (ca omul să vadă în aplicație ce s-a întâmplat)
         $db->exec("CREATE TABLE IF NOT EXISTS shortcut_log (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, at TEXT NOT NULL DEFAULT (datetime('now')), ok INTEGER NOT NULL, message TEXT NOT NULL)");
         $db->exec('CREATE INDEX IF NOT EXISTS idx_sclog_user ON shortcut_log(user_id, id DESC)');
+        // v10 – cheia rămâne vizibilă în aplicație (ghidul nu mai generează alta la fiecare deschidere)
+        if (!$has('users', 'api_key')) $db->exec('ALTER TABLE users ADD COLUMN api_key TEXT');
         $db->exec('PRAGMA user_version = ' . SCHEMA);
         $db->exec('COMMIT');
     } catch (Throwable $e) { $db->exec('ROLLBACK'); throw $e; }
@@ -476,7 +478,20 @@ function ini_bytes(string $v): int {
 }
 function shortcut(string $route): void {
     $u = key_user();
-    if (!$u) { text_out('Cheie greșită sau dezactivată. Generează una nouă în aplicație: Cont → Scurtătură iPhone.', 401); return; }
+    if (!$u) {
+        // cheie veche / greșită: notăm (adminul o vede în aplicație) și spunem clar ce e de făcut
+        $k = (string) ($_POST['key'] ?? $_GET['key'] ?? '');
+        set_setting('shortcut_badkey', json_encode(['at' => gmdate('Y-m-d\TH:i:s\Z'), 'key' => $k === '' ? '(fără cheie)' : substr($k, 0, 10) . '…', 'what' => $route], JSON_UNESCAPED_UNICODE));
+        $msg = '⚠️ Cheie veche sau greșită. Deschide aplicația → Cont → Trimite din galerie → Arată ghidul și copiază din nou adresa 1 și adresa 2 în scurtătură.';
+        if (!empty($_GET['json'])) { out([$msg]); return; } // apare chiar în lista de alegere de pe iPhone
+        text_out($msg, 401);
+        return;
+    }
+    if ($route === 'GET api/shortcut/upload') {
+        sc_reply($u, 'Trimiterea a sosit cu metoda GET. În ultima acțiune „Obtenir le contenu de l’URL” apasă › și pune Méthode: POST, Corps de la requête: Formulaire.', 405);
+        return;
+    }
+    if ($route === 'POST api/shortcut/destinations') $route = 'POST api/shortcut/upload'; // s-a pus adresa 1 și la trimitere: merge oricum
     $dest = destinations($u);
     if ($route === 'GET api/shortcut/destinations') {
         if (!empty($_GET['json'])) { out(array_keys($dest)); return; } // listă gata de ales în Raccourcis (fără „Séparer le texte”)
@@ -1357,19 +1372,23 @@ function route(string $route, string $path, string $method): void {
         $u = need();
         $log = all('SELECT at, ok, message FROM shortcut_log WHERE user_id = ? ORDER BY id DESC LIMIT 8', [$u['id']]);
         foreach ($log as &$l) { $l['ok'] = (bool) $l['ok']; $l['at'] = str_replace(' ', 'T', $l['at']) . 'Z'; }
-        out(['has' => (bool) val('SELECT key_hash FROM users WHERE id = ?', [$u['id']]), 'log' => $log,
+        $bad = is_admin($u) ? json_decode((string) setting('shortcut_badkey'), true) : null;
+        out(['has' => (bool) val('SELECT key_hash FROM users WHERE id = ?', [$u['id']]), 'log' => $log, 'badKey' => $bad,
              'limit' => ini_get('upload_max_filesize') . ' / ' . ini_get('post_max_size')]);
         return;
     }
-    if ($route === 'POST api/key') {
+    if ($route === 'POST api/key') { // ?new=1: cheie nouă (cea veche nu mai merge); altfel cheia existentă
         $u = need();
-        $key = 'fs_' . bin2hex(random_bytes(20));
-        q('UPDATE users SET key_hash = ? WHERE id = ?', [hash('sha256', $key), $u['id']]);
+        $key = empty($_GET['new']) ? val('SELECT api_key FROM users WHERE id = ? AND key_hash IS NOT NULL', [$u['id']]) : null;
+        if (!$key) {
+            $key = 'fs_' . bin2hex(random_bytes(20));
+            q('UPDATE users SET key_hash = ?, api_key = ? WHERE id = ?', [hash('sha256', $key), $key, $u['id']]);
+        }
         out(['key' => $key]);
         return;
     }
-    if ($route === 'DELETE api/key') { $u = need(); q('UPDATE users SET key_hash = NULL WHERE id = ?', [$u['id']]); out(['ok' => true]); return; }
-    if ($route === 'GET api/shortcut/destinations' || $route === 'POST api/shortcut/upload') {
+    if ($route === 'DELETE api/key') { $u = need(); q('UPDATE users SET key_hash = NULL, api_key = NULL WHERE id = ?', [$u['id']]); out(['ok' => true]); return; }
+    if (preg_match('#^(GET|POST) api/shortcut/(destinations|upload)$#', $route)) {
         shortcut($route);
         return;
     }
