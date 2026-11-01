@@ -2002,3 +2002,10 @@ a.rz-link-c { color: inherit; text-decoration: none; background: var(--surface);
 /* Chargement d'une page : fine barre animée en haut de l'écran */
 body.loading::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 9999; background: linear-gradient(90deg, transparent, var(--ochre, #e2a12b), transparent); background-size: 40% 100%; background-repeat: no-repeat; animation: bpload 1s linear infinite; }
 @keyframes bpload { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+/* Téléphone : boutons de la page d'impression sur plusieurs lignes (sinon toute la page déborde sur le côté) */
+@media screen and (max-width: 860px) {
+  .print-shell .top-actions { flex-wrap: wrap; min-width: 0; max-width: 100%; justify-content: flex-start; gap: 6px; }
+  .print-shell .top-actions .btn { flex: 0 0 auto; }
+  .print-shell .top-title { min-width: 0; flex: 1 1 100%; }
+  .print-shell .top-title h1 { white-space: normal; }
+}

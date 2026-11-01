@@ -39,7 +39,8 @@ switch ($seg[0] ?? '') {
             $ip = client_ip();
             q('DELETE FROM logins WHERE at < ?', [date('Y-m-d H:i:s', time() - 900)]);
             // 10 essais ratés en 15 minutes : bloqué par adresse IP, et aussi par compte (attaque depuis plusieurs IP)
-            $email = mb_strtolower(trim((string)($b['email'] ?? '')));
+            $email = mb_strtolower(trim(is_string($b['email'] ?? null) ? $b['email'] : ''));
+            if (!is_string($b['password'] ?? null)) $b['password'] = '';
             $acc = 'u:' . substr(hash('sha256', $email), 0, 40);
             $tries = (int)q('SELECT COUNT(*) FROM logins WHERE ip = ?', [$ip])->fetchColumn();
             $triesAcc = (int)q('SELECT COUNT(*) FROM logins WHERE ip = ?', [$acc])->fetchColumn();

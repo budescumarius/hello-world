@@ -653,10 +653,19 @@ function fitDocs() {
     d.style.width = `${dw}px`; d.style.maxWidth = 'none';
     d.style.zoom = z < 0.999 ? String(Math.floor(z * 1000) / 1000) : '';
   });
+  // autres documents imprimables (PV, résumé de chantier, journal, bon de commande…) : réduits s'ils dépassent l'écran
+  $$('.print-shell .doc:not(.mb-paper)').forEach((d) => {
+    const host = d.parentElement; if (!host) return;
+    d.style.zoom = '';
+    const cs = getComputedStyle(host);
+    const w = host.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const sw = d.scrollWidth;
+    if (sw > w + 2) d.style.zoom = String(Math.floor((w / sw) * 1000) / 1000);
+  });
 }
 (() => {
   let raf = 0; const run = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(fitDocs); };
   window.addEventListener('resize', run);
-  new MutationObserver((ms) => { if (ms.some((m) => [...m.addedNodes].some((n) => n.nodeType === 1 && (n.matches('.doc.mb-paper') || n.querySelector('.doc.mb-paper'))))) run(); })
+  new MutationObserver((ms) => { if (ms.some((m) => [...m.addedNodes].some((n) => n.nodeType === 1 && (n.matches('.doc') || n.querySelector('.doc'))))) run(); })
     .observe(document.documentElement, { childList: true, subtree: true });
 })();
