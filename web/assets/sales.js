@@ -572,9 +572,10 @@ async function historyFromOtherApp(q, prev, base) {
   const m = modal(`${mhead(`Reprise de la facturation – devis ${q.number}`)}<div class="m-body">
     <p class="muted">Pour un chantier commencé dans un autre logiciel : encodez ce qui est <b>déjà facturé</b>. Ces factures gardent leur numéro d'origine, ne sont renvoyées ni au client ni au comptable, et la suite (prochain état d'avancement, déduction de l'acompte, solde) en tient compte.${prev.length ? ` <b>Ce devis a déjà ${prev.length} facture(s) dans BâtiPro.</b>` : ''}</p>
     <div class="section-t">1. Factures d'acompte déjà émises</div><div data-acs></div><button type="button" class="btn sm" data-addac>${I.plus} Ajouter un acompte</button>
-    <div class="section-t">2. États d'avancement déjà facturés</div>
-    <label class="chk"><input type="checkbox" data-hasea checked> Il y a déjà des états d'avancement</label>
-    <div data-ea><div class="grid-form">${fieldHTML({ name: 'eano', label: 'N° du dernier état (ex. 2 pour EA2)', type: 'number' }, 2)}${fieldHTML({ name: 'eanum', label: 'Numéros des factures (ex. 2026-012, 2026-019)' }, '')}
+    <div class="section-t">2. Factures simples déjà émises (travaux, solde, suppléments…)</div><div data-fs></div><button type="button" class="btn sm" data-addfs>${I.plus} Ajouter une facture</button>
+    <div class="section-t">3. États d'avancement déjà facturés</div>
+    <label class="chk"><input type="checkbox" data-hasea>&nbsp;Il y a déjà des états d'avancement</label>
+    <div data-ea hidden><div class="grid-form">${fieldHTML({ name: 'eano', label: 'N° du dernier état (ex. 2 pour EA2)', type: 'number' }, 2)}${fieldHTML({ name: 'eanum', label: 'Numéros des factures (ex. 2026-012, 2026-019)' }, '')}
       ${fieldHTML({ name: 'eadate', label: 'Date du dernier état', type: 'date' }, '')}${fieldHTML({ name: 'eaded', label: 'Acompte déjà déduit sur ces états (HT)', type: 'money' }, '')}</div>
       <p class="muted sm">Avancement <b>cumulé</b> à la fin du dernier état (ex. EA1 15 % + EA2 10 % → 25 %). Sur un chapitre, le % s'applique à toutes ses lignes.</p>
       <div class="btns"><label class="pg-chap">Tout le devis <input class="pct" data-allp inputmode="decimal" placeholder="—"><em>%</em></label></div>
@@ -590,6 +591,14 @@ async function historyFromOtherApp(q, prev, base) {
     $$('[data-ac]', m.el).forEach((row) => { const a = acs[+row.dataset.ac]; $$('input,select', row).forEach((inp) => { inp.oninput = inp.onchange = () => { a[inp.name] = inp.type === 'checkbox' ? inp.checked : inp.value; }; }); });
   };
   drawAcs();
+  // factures simples déjà émises : n°, date, objet, montant HT, TVA, payée
+  const fs = [];
+  const drawFs = () => {
+    $('[data-fs]', m.el).innerHTML = fs.map((a, i) => `<div class="grid-form hist-ac" data-fsi="${i}">${fieldHTML({ name: 'number', label: 'N° de facture' }, a.number)}${fieldHTML({ name: 'date', label: 'Date', type: 'date' }, a.date)}
+      ${fieldHTML({ name: 'desc', label: 'Objet (facultatif)' }, a.desc)}${fieldHTML({ name: 'ht', label: 'Montant HT', type: 'money' }, a.ht)}${fieldHTML({ name: 'rate', label: 'TVA', type: 'select', options: vatOptions(a.rate) }, a.rate)}${fieldHTML({ name: 'paid', label: 'Payée', type: 'check' }, a.paid)}</div>`).join('');
+    $$('[data-fsi]', m.el).forEach((row) => { const a = fs[+row.dataset.fsi]; $$('input,select', row).forEach((inp) => { inp.oninput = inp.onchange = () => { a[inp.name] = inp.type === 'checkbox' ? inp.checked : inp.value; }; }); });
+  };
+  $('[data-addfs]', m.el).onclick = () => { fs.push({ number: '', date: '', desc: '', ht: '', rate: rate0, paid: true }); drawFs(); };
   $('[data-addac]', m.el).onclick = () => { acs.push({ number: '', date: '', ht: '', rate: rate0, paid: true }); drawAcs(); };
   const items = rows.filter((r) => r.kind === 'item');
   const upd = () => {
@@ -610,7 +619,9 @@ async function historyFromOtherApp(q, prev, base) {
     if (okAcs.some((a) => !a.number || !a.date)) return toast('Indiquez le numéro et la date de chaque acompte', 4000);
     if (hasEa && !items.some((r) => r.cum > 0)) return toast('Encodez l\'avancement cumulé (ou décochez « états d\'avancement »)', 4000);
     if (hasEa && !$('[name=eadate]', m.el).value) return toast('Indiquez la date du dernier état', 4000);
-    if (!okAcs.length && !hasEa) return toast('Rien à reprendre', 3000);
+    const okFs = fs.filter((a) => num(a.ht));
+    if (okFs.some((a) => !a.number || !a.date)) return toast('Indiquez le numéro et la date de chaque facture', 4000);
+    if (!okAcs.length && !okFs.length && !hasEa) return toast('Rien à reprendre', 3000);
     const mk = async (data, number) => {
       const it = await persist('invoice', { project_id: base.project_id || null, data: { status: 'emise', external: true, ownerId: S.me.id, billSame: true, payments: [], discount: 0, reverse: !!d.reverse, defaultVat: rate0, notes: '', ...base.data, ...data } });
       it.number = number; await persist('invoice', it, { silent: true }); return it;
@@ -619,6 +630,12 @@ async function historyFromOtherApp(q, prev, base) {
       const ht = r2(num(a.ht)); const ttc = r2(ht * (1 + (d.reverse ? 0 : num(a.rate)) / 100));
       await mk({ kind: 'acompte', date: a.date, due: a.date, emittedAt: a.date, payDays: 0, title: `Acompte – ${d.title || q.number}`,
         lines: [{ id: lid(), kind: 'item', desc: `Acompte sur devis ${q.number} (facture ${a.number}, reprise de l'ancien logiciel)`, unit: 'forfait', qty: 1, price: ht, vat: num(a.rate), type: 'divers' }],
+        payments: a.paid ? [{ date: a.date, amount: ttc, method: 'Virement', note: 'Reprise' }] : [] }, a.number);
+    }
+    for (const a of okFs) {
+      const ht = r2(num(a.ht)); const ttc = r2(ht * (1 + (d.reverse ? 0 : num(a.rate)) / 100));
+      await mk({ kind: 'facture', date: a.date, due: a.date, emittedAt: a.date, payDays: 0, title: a.desc || d.title || q.number,
+        lines: [{ id: lid(), kind: 'item', desc: `${a.desc || `Travaux – devis ${q.number}`} (facture ${a.number}, reprise de l'ancien logiciel)`, unit: 'forfait', qty: 1, price: ht, vat: num(a.rate), type: 'divers' }],
         payments: a.paid ? [{ date: a.date, amount: ttc, method: 'Virement', note: 'Reprise' }] : [] }, a.number);
     }
     if (hasEa) {

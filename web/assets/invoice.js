@@ -103,9 +103,43 @@ route('invoices', async () => {
     { label: 'Facture pro forma (sans valeur fiscale)', icon: 'file', run: () => newInvoice({ data: { kind: 'proforma' } }) },
     { label: 'Facture d\'avancement ou depuis un devis…', icon: 'calc', run: () => go('#/quotes') },
     { label: 'Note de crédit', icon: 'copy', run: () => newInvoice({ data: { kind: 'avoir' } }) },
+    { sep: true },
+    { label: 'Facture déjà émise (autre logiciel)…', icon: 'download', run: () => externalInvoice() },
   ]);
   $('[data-act=csv]').onclick = () => go('#/export');
 });
+
+// ---------------------------------------------------------------- Facture émise dans un autre logiciel : gardée pour le suivi (chantier, encaissé),
+// avec son numéro d'origine ; jamais renvoyée au client ni au comptable, ni numérotée ici
+async function externalInvoice(preset = {}) {
+  const [contacts, projects] = await Promise.all([db.list('contact'), db.list('project')]);
+  formModal({
+    title: 'Facture déjà émise (autre logiciel)', saveLabel: 'Enregistrer',
+    values: { kind: 'facture', date: today(), vat: defVat(), paid: true, ...preset },
+    fields: [
+      { name: 'info', type: 'html', cls: 'full', html: '<p class="muted">Pour le suivi du chantier et de ce qui est encaissé. La facture garde son numéro d\'origine ; elle n\'est envoyée ni au client ni au comptable (il l\'a déjà).</p>' },
+      { name: 'number', label: 'N° de la facture', required: true }, { name: 'date', label: 'Date', type: 'date', required: true },
+      { name: 'kind', label: 'Type', type: 'select', options: [['facture', 'Facture'], ['acompte', 'Facture d\'acompte'], ['finale', 'Facture de solde'], ['avoir', 'Note de crédit']] },
+      { name: 'clientId', label: 'Client', type: 'contact', contacts, kinds: ['client', 'prospect', 'architecte', 'autre'], required: true },
+      { name: 'project_id', label: 'Chantier', type: 'select', options: [['', '—'], ...projects.map((p) => [p.id, `${p.number || ''} · ${p.data.name}`])], cls: 'full' },
+      { name: 'title', label: 'Objet', cls: 'full' },
+      { name: 'ht', label: 'Montant HT', type: 'money', required: true }, { name: 'vat', label: 'TVA', type: 'select', options: vatList().map((x) => [x, `${fnum(x)} %`]) },
+      { name: 'reverse', label: 'Autoliquidation (TVA due par le client)', type: 'check' },
+      { name: 'paid', label: 'Déjà encaissée', type: 'check' }, { name: 'paidAmount', label: 'Montant encaissé TVAC (si partiel)', type: 'money' }, { name: 'paidDate', label: 'Date de l\'encaissement', type: 'date' },
+    ],
+    async onSave(v) {
+      await resolveContact(v, 'clientId', 'client');
+      const sign = v.kind === 'avoir' ? -1 : 1; const ht = r2(num(v.ht)) * sign; const ttc = r2(ht * (1 + (v.reverse ? 0 : num(v.vat)) / 100));
+      const paid = v.paid ? (num(v.paidAmount) > 0 ? r2(num(v.paidAmount)) : ttc) : 0;
+      const it = await persist('invoice', { project_id: v.project_id ? +v.project_id : null, data: { kind: v.kind, status: 'emise', external: true, clientId: v.clientId, title: v.title || '', date: v.date, due: v.date, emittedAt: v.date, payDays: 0,
+        reverse: !!v.reverse, defaultVat: num(v.vat), ownerId: S.me.id, billSame: true, discount: 0, notes: '',
+        lines: [{ id: lid(), kind: 'item', desc: `${v.title || 'Travaux'} (facture ${v.number}, émise dans l'ancien logiciel)`, unit: 'forfait', qty: 1, price: ht, vat: num(v.vat), type: 'divers' }],
+        payments: paid && sign > 0 ? [{ date: v.paidDate || v.date, amount: paid, method: 'Virement', note: 'Reprise' }] : [] } });
+      it.number = v.number.trim(); await persist('invoice', it, { silent: true });
+      toast(`Facture ${it.number} enregistrée (reprise)`, 3000); render();
+    },
+  });
+}
 
 // ---------------------------------------------------------------- Pro forma : document sans valeur fiscale, numéroté à part (PF-…),
 // jamais compté ni envoyé au comptable ; converti ensuite en vraie facture (mêmes lignes) quand le client confirme / paie
