@@ -664,6 +664,9 @@ function pil_route(string $method, array $seg): void {
             }
             break;
         case 'dashboard': if ($method === 'GET') out(pil_dashboard()); break;
+        case 'forecast': case 'receivables': case 'hypotheses': case 'flags': case 'commitments':
+            require_once __DIR__ . '/treasury.php';
+            pil_treasury_route($method, $seg, $me);
         case 'monthly': if ($method === 'GET') out(pil_monthly(max(1, min(60, (int)($_GET['months'] ?? 24))), preg_match('/^\d{4}-\d{2}$/', (string)($_GET['until'] ?? '')) ? $_GET['until'] : null)); break;
     }
     fail(404, 'Route inconnue');

@@ -5,7 +5,7 @@
 
 const pilOn = () => isAdmin() && !!(S.settings.pilotage && S.settings.pilotage.enabled);
 SPACES.push({ k: 'pilot', l: 'Pilotage', i: 'chart', h: '#/pilotage', show: pilOn,
-  sec: [['Contrôle', '#/pilotage'], ['Mouvements', '#/pilotage/mouvements'], ['Historique 24 mois', '#/pilotage/historique'], ['Importer un extrait', '#/pilotage/import'], ['Journal des imports', '#/pilotage/imports'], ['Comptes', '#/pilotage/comptes']] });
+  sec: [['Trésorerie', '#/pilotage/tresorerie'], ['Engagements', '#/pilotage/engagements'], ['Factures et échéances', '#/pilotage/echeances'], ['Contrôle bancaire', '#/pilotage'], ['Mouvements', '#/pilotage/mouvements'], ['Historique 24 mois', '#/pilotage/historique'], ['Importer un extrait', '#/pilotage/import'], ['Journal des imports', '#/pilotage/imports'], ['Comptes', '#/pilotage/comptes']] });
 
 const pilMoney = (c) => (c == null ? '—' : money(c / 100));
 const PIL_ST = { a_verifier: ['À vérifier', '#f08c00'], valide: ['Validé', '#2f9e44'] };
@@ -50,7 +50,7 @@ async function pilReadFile(f) {
 route('pilotage', async (sub, arg) => {
   if (!isAdmin()) { layout({ icon: 'chart', title: 'Pilotage' }).innerHTML = empty('Réservé aux administrateurs', 'Le pilotage financier est accessible aux administrateurs de l\'entreprise.'); return; }
   if (!pilOn()) return pilEnablePage();
-  const pages = { mouvements: pilTxPage, historique: pilHistPage, import: pilImportPage, imports: pilImportsPage, comptes: pilAccountsPage };
+  const pages = { tresorerie: pilTreasuryPage, engagements: pilCommitmentsPage, echeances: pilDuePage, mouvements: pilTxPage, historique: pilHistPage, import: pilImportPage, imports: pilImportsPage, comptes: pilAccountsPage };
   return (pages[sub] || pilDashPage)(arg);
 });
 
@@ -108,7 +108,7 @@ async function pilAccountsPage() {
       async onSave(v) { await api('PUT', `pilot/accounts/${a.id}`, v); render(); } }),
     empty: 'Aucun compte : ajoutez vos comptes Europabank, Belfius et BNP Paribas Fortis',
   });
-  $('[data-add]', page).onclick = () => formModal({ title: 'Nouveau compte bancaire', fields: [{ name: 'iban', label: 'IBAN', required: true, placeholder: 'BE00 0000 0000 0000' }, { name: 'label', label: 'Nom (ex. Compte courant)' }, { name: 'bank', label: 'Banque', hint: 'Déduite de l\'IBAN si vide' }],
+  $('[data-add]').onclick = () => formModal({ title: 'Nouveau compte bancaire', fields: [{ name: 'iban', label: 'IBAN', required: true, placeholder: 'BE00 0000 0000 0000' }, { name: 'label', label: 'Nom (ex. Compte courant)' }, { name: 'bank', label: 'Banque', hint: 'Déduite de l\'IBAN si vide' }],
     async onSave(v) { await api('POST', 'pilot/accounts', v); toast('Compte ajouté'); render(); } });
 }
 
@@ -319,4 +319,229 @@ async function pilHistPage() {
     ${d.accounts.map((a) => `<div class="card"><div class="card-h"><h3>${esc(pilAccName(a))}</h3><span class="muted">${esc(ibanFmt(a.iban))}</span></div><div class="pil-tx-wrap"><table class="dt"><thead><tr><th>Mois</th><th class="r">Solde début</th><th class="r">Entrées</th><th class="r">Sorties</th><th class="r">Transferts internes</th><th class="r">Solde fin</th><th class="r">Mvts</th><th>Couverture</th></tr></thead><tbody>
       ${a.months.slice().reverse().filter((x) => x.opening != null).map((x) => `<tr><td class="nowrap">${ML(x.m)}</td><td class="r">${pilMoney(x.opening)}</td><td class="r good">${pilMoney(x.in)}</td><td class="r">${pilMoney(x.out)}</td><td class="r muted">${x.internal ? pilMoney(x.internal) : '—'}</td><td class="r"><b>${pilMoney(x.closing)}</b></td><td class="r">${x.n}</td><td>${x.coverage >= 1 ? '<span class="good">100 %</span>' : `<span class="late">${Math.round(x.coverage * 100)} %</span>`}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">Aucun extrait importé pour ce compte</td></tr>'}
     </tbody></table></div></div>`).join('')}`;
+}
+
+// ================================================================ Étape 3 : trésorerie, engagements, factures et échéances
+const PIL_SC = { optimiste: ['Optimiste', '#2f9e44'], realiste: ['Réaliste', '#3b5bdb'], pessimiste: ['Pessimiste', '#e5484d'] };
+const PIL_RISK = { eleve: ['Risque élevé', '#e5484d'], moyen: ['Risque moyen', '#f08c00'], faible: ['Risque faible', '#868e96'] };
+const PIL_SRC = { facture: 'Facture client', etat_avancement: 'État d\'avancement', achat: 'Facture fournisseur', credit: 'Crédit', leasing: 'Leasing', charge: 'Charge fixe', prudence: 'Prudence', paiement_non_vu: 'Paiement pas encore sur l\'extrait' };
+const PIL_FREQ_L = { mensuel: 'Mensuel', bimestriel: 'Tous les 2 mois', trimestriel: 'Trimestriel', semestriel: 'Semestriel', annuel: 'Annuel', unique: 'Une seule fois' };
+const PIL_KIND_L = {
+  credit: ['Crédits', { investissement: 'Crédit d\'investissement', caisse: 'Crédit de caisse', professionnel: 'Crédit professionnel', hypothecaire: 'Crédit hypothécaire', temperament: 'Prêt à tempérament', autre: 'Autre financement' }],
+  leasing: ['Leasing', { vehicule: 'Véhicule', machine: 'Machine', materiel: 'Matériel', autre: 'Autre leasing' }],
+  charge: ['Charges fixes', { salaires: 'Salaires', onss: 'ONSS', precompte: 'Précompte professionnel', tva: 'TVA', assurances: 'Assurances', comptabilite: 'Comptabilité', loyer: 'Loyers', telecom: 'Télécommunications', energie: 'Énergie', abonnements: 'Abonnements', autre: 'Autres charges' }],
+};
+const PIL_CST = { confirme: ['Confirmé', '#2f9e44'], a_confirmer: ['À confirmer', '#f08c00'], suspendu: ['Suspendu', '#868e96'], termine: ['Terminé', '#adb5bd'] };
+const certBadge = (c) => (c === 'confirme' ? badge('Confirmé', '#2f9e44') : badge('Estimé', '#f08c00'));
+
+// graphique en lignes (SVG) : séries [{ name, color, values: [nombres] }], libellés en abscisse
+function pilLine(series, labels, { h = 220, fmt = (v) => pilMoney(v), zero = true } = {}) {
+  const all = series.flatMap((s) => s.values).filter((v) => v != null); if (!all.length) return '<div class="empty">Aucune donnée</div>';
+  let lo = Math.min(...all, zero ? 0 : Infinity); let hi = Math.max(...all, zero ? 0 : -Infinity); if (hi === lo) { hi += 1; lo -= 1; }
+  const W = 640; const P = 8; const n = labels.length; const x = (i) => P + (W - 2 * P) * (n > 1 ? i / (n - 1) : 0.5); const y = (v) => P + (h - 2 * P) * (1 - (v - lo) / (hi - lo));
+  const path = (vals) => vals.map((v, i) => (v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean).join(' ');
+  const step = Math.max(1, Math.ceil(n / 8));
+  return `<div class="pil-chart"><svg viewBox="0 0 ${W} ${h + 18}" preserveAspectRatio="none" role="img">
+    ${lo < 0 && hi > 0 ? `<line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" class="pil-zero"/>` : ''}
+    ${series.map((s) => `<polyline fill="none" stroke="${s.color}" stroke-width="2.2" points="${path(s.values)}"><title>${esc(s.name)}</title></polyline>`).join('')}
+    ${labels.map((l, i) => (i % step === 0 || i === n - 1 ? `<text x="${x(i)}" y="${h + 14}" text-anchor="middle">${esc(l)}</text>` : '')).join('')}
+  </svg><div class="pil-legend">${series.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join('')}<span class="muted">max ${fmt(hi)} · min ${fmt(lo)}</span></div></div>`;
+}
+const hbars = (rows) => { const max = Math.max(1, ...rows.map((r) => Math.abs(r.v))); return `<div class="pil-hbars">${rows.map((r) => `<div><span>${esc(r.l)}</span><i style="width:${(Math.abs(r.v) / max * 100).toFixed(1)}%;background:${r.c || '#3b5bdb'}"></i><b>${pilMoney(r.v)}</b></div>`).join('') || '<div class="empty">Aucune donnée</div>'}</div>`; };
+
+async function pilTreasuryPage() {
+  const [f, mo, coms, tx, cats] = await Promise.all([api('GET', 'pilot/forecast'), api('GET', 'pilot/monthly&months=24'), api('GET', 'pilot/commitments'), api('GET', 'pilot/tx'), pilCats()]);
+  const st = ui.pilTr = ui.pilTr || { sc: 'realiste', hz: 30 };
+  const page = layout({ icon: 'chart', title: 'Trésorerie et prévisions', sub: `Calcul du ${fmtDate(f.today)} · aucun montant inventé : extraits, factures, achats et engagements confirmés`,
+    actions: '<button class="btn" data-hyp>Hypothèses des scénarios</button>' });
+  const b = f.balances; const rel = f.reliability; const S0 = f.scenarios[st.sc]; const H = S0.horizons[st.hz];
+  const relC = rel.level === 'bonne' ? '#2f9e44' : rel.level === 'moyenne' ? '#f08c00' : '#e5484d';
+  const flows = S0.flows.filter((x) => (new Date(x.date) - new Date(f.today)) / 864e5 <= st.hz);
+  const months12 = mo.months.slice(-12);
+  const txIn = (m, pred) => tx.filter((t) => t.booking_date.startsWith(m) && pred(t)).reduce((a, t) => a + t.amount, 0);
+  const byCat = {}; tx.filter((t) => t.amount < 0 && t.category !== 'transfert_interne' && t.booking_date >= `${months12[0]}-01`).forEach((t) => { byCat[t.category] = (byCat[t.category] || 0) + t.amount; });
+  const upcoming = f.scenarios.realiste.flows.filter((x) => x.amount < 0 && x.source !== 'prudence' && (new Date(x.date) - new Date(f.today)) / 864e5 <= 30);
+  const fin = coms.filter((c) => ['credit', 'leasing'].includes(c.kind) && c.status === 'confirme');
+  page.innerHTML = `
+    <div class="card pil-rel"><div class="card-h"><h3>Fiabilité des prévisions</h3><span class="pil-score" style="--c:${relC}">${rel.score} / 100 · ${esc(rel.level)}</span></div>
+      <div class="pil-factors">${Object.values(rel.factors).map((x) => `<div><span>${esc(x.label)}</span><div class="meter"><i style="width:${Math.round(x.score * 100)}%"></i></div><small class="muted">${esc(x.detail)}</small></div>`).join('')}</div></div>
+    <div class="card"><div class="card-h"><h3>Soldes bancaires</h3><span class="muted">dernière situation connue de chaque compte – pas un solde « du jour »</span></div>
+      <div class="kpis">${b.accounts.map((a) => kpi(`${a.bank}${a.label ? ' – ' + a.label : ''}`, pilMoney(a.balance), { sub: a.date ? `au ${fmtDate(a.date)} (dernier extrait)${a.age_days > 7 ? ` · <span class="late">il y a ${a.age_days} jours</span>` : ''}` : '<span class="late">aucun extrait</span>' })).join('')}
+        ${kpi('Trésorerie bancaire consolidée', pilMoney(b.total), { cls: 'good', sub: b.oldest_date ? `extraits du ${fmtDate(b.oldest_date)} au ${fmtDate(b.latest_date)}` : '' })}
+        ${b.adjustment ? kpi('Ajusté des paiements connus', pilMoney(b.total + b.adjustment), { sub: `${pilMoney(b.adjustment)} enregistrés dans BâtiPro après le dernier extrait` }) : ''}</div></div>
+    <div class="card"><div class="card-h"><h3>Prévision</h3><div class="chips">${Object.entries(PIL_SC).map(([k, [l, c]]) => `<button class="chip ${st.sc === k ? 'on' : ''}" data-sc="${k}" style="--c:${c}"><i class="dot"></i>${l}</button>`).join('')}
+        ${[7, 30, 90].map((d) => `<button class="chip ${st.hz === d ? 'on' : ''}" data-hz="${d}">${d} jours</button>`).join('')}</div></div>
+      <div class="pil-formula">
+        <div><span>Solde de départ</span><b>${pilMoney(H.start)}</b></div>
+        <div><span>+ Entrées confirmées</span><b class="good">${pilMoney(H.in_confirmed)}</b></div><div><span>+ Entrées estimées</span><b class="good">${pilMoney(H.in_estimated)}</b></div>
+        <div><span>− Sorties confirmées</span><b>${pilMoney(H.out_confirmed)}</b></div><div><span>− Sorties estimées</span><b>${pilMoney(H.out_estimated)}</b></div>
+        <div class="tot"><span>= Solde final estimé</span><b class="${H.end < 0 ? 'late' : ''}">${pilMoney(H.end)}</b></div>
+        <div><span>Solde minimum</span><b class="${H.min < 0 ? 'late' : ''}">${pilMoney(H.min)}</b><small class="muted">le ${fmtDate(H.min_date)}</small></div>
+        <div><span>Trésorerie négative</span><b class="${H.negative_date ? 'late' : 'good'}">${H.negative_date ? 'le ' + fmtDate(H.negative_date) : 'non'}</b></div></div>
+      ${pilLine(Object.entries(PIL_SC).map(([k, [l, c]]) => ({ name: l, color: c, values: f.scenarios[k].series.map((p) => p.b) })), f.scenarios.realiste.series.map((p) => p.d.slice(8, 10) + '/' + p.d.slice(5, 7)))}
+      <table class="dt"><thead><tr><th>Scénario</th>${[7, 30, 90].map((d) => `<th class="r">Fin à ${d} j</th><th class="r">Minimum ${d} j</th>`).join('')}</tr></thead><tbody>
+        ${Object.entries(PIL_SC).map(([k, [l]]) => `<tr><td>${l}</td>${[7, 30, 90].map((d) => { const x = f.scenarios[k].horizons[d]; return `<td class="r ${x.end < 0 ? 'late' : ''}">${pilMoney(x.end)}</td><td class="r ${x.min < 0 ? 'late' : ''}">${pilMoney(x.min)}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div>
+    <div class="card"><div class="card-h"><h3>Alertes (${f.alerts.length})</h3></div><div class="rows">${f.alerts.map((a) => `<div class="row static pil-alert"><span class="grow">${badge(PIL_RISK[a.risk][0], PIL_RISK[a.risk][1])} <b>${esc(a.problem)}</b>
+        <br><small>${a.amount != null ? `Montant : <b>${pilMoney(a.amount)}</b> · ` : ''}${a.date ? `Date : ${fmtDate(a.date)} · ` : ''}Impact : ${esc(a.impact)}</small><br><small class="muted">Action recommandée : ${esc(a.action)}</small></span></div>`).join('') || '<div class="empty">Aucune alerte</div>'}</div></div>
+    <div class="card"><div class="card-h"><h3>Flux prévus – ${PIL_SC[st.sc][0].toLowerCase()}, ${st.hz} jours (${flows.length})</h3></div><div class="pil-tx-wrap"><table class="dt"><thead><tr><th>Date</th><th>Origine</th><th>Libellé</th><th>Statut</th><th class="r">Montant</th></tr></thead><tbody>
+      ${flows.map((x) => `<tr><td class="nowrap">${fmtDate(x.date)}</td><td><small>${esc(PIL_SRC[x.source] || x.source)}</small></td><td>${x.ref && x.ref.type === 'invoice' ? `<a href="#/invoice/${x.ref.id}">${esc(x.label)}</a>` : x.ref && x.ref.type === 'expense' ? `<a href="#/purchase/${x.ref.id}">${esc(x.label)}</a>` : esc(x.label)}</td><td>${certBadge(x.certainty)}</td><td class="r nowrap ${x.amount > 0 ? 'good' : ''}"><b>${pilMoney(x.amount)}</b></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Aucun flux prévu</td></tr>'}</tbody></table></div>
+      ${f.excluded.length ? `<details><summary class="muted">Non inclus dans la prévision (${f.excluded.length})</summary><div class="rows">${f.excluded.map((x) => `<div class="row static"><span class="grow">${esc(x.label)} <small class="muted">– ${esc(x.reason)}</small></span>${x.amount != null ? `<b>${pilMoney(x.amount)}</b>` : ''}</div>`).join('')}</div></details>` : ''}
+      <small class="muted">Délais clients observés : ${f.stats.global.n ? `${f.stats.global.n} factures payées, médiane ${Math.round(f.stats.global.median)} j après l'échéance (p25 ${Math.round(f.stats.global.p25)} j, p75 ${Math.round(f.stats.global.p75)} j)` : 'aucune facture payée dans l\'historique : délais non estimés'}.</small></div>
+    <div class="cols-2">
+      <div class="card"><div class="card-h"><h3>Trésorerie réelle sur 24 mois</h3><span class="muted">fin de mois, tous comptes</span></div>${pilLine([{ name: 'Solde consolidé', color: '#3b5bdb', values: mo.total.map((t, i) => (mo.accounts.some((a) => a.months[i].closing != null) ? t.closing : null)) }], mo.months.map((m) => m.slice(5) + '/' + m.slice(2, 4)))}</div>
+      <div class="card"><div class="card-h"><h3>Dépenses par catégorie</h3><span class="muted">12 derniers mois, extraits</span></div>${hbars(Object.entries(byCat).sort((a, c) => a[1] - c[1]).slice(0, 10).map(([k, v]) => ({ l: pilCatLabel(cats, k), v, c: pilCatColor(cats, k) })))}</div>
+      <div class="card"><div class="card-h"><h3>Encaissements clients par mois</h3></div>${barChart(months12.map((m) => ({ l: m.slice(5), v: txIn(m, (t) => t.category === 'encaissement_client') / 100 })), { color: '#2f9e44' })}</div>
+      <div class="card"><div class="card-h"><h3>Paiements fournisseurs et sous-traitants par mois</h3></div>${barChart(months12.map((m) => ({ l: m.slice(5), v: -txIn(m, (t) => ['materiaux', 'fournisseur', 'sous_traitance'].includes(t.category)) / 100 })), { color: '#f08c00' })}</div>
+      <div class="card"><div class="card-h"><h3>Échéances des 30 prochains jours</h3></div><div class="rows">${upcoming.map((x) => `<div class="row static"><span class="nowrap">${fmtDate(x.date)}</span><span class="grow">${esc(x.label)}</span>${certBadge(x.certainty)}<b>${pilMoney(x.amount)}</b></div>`).join('') || '<div class="empty">Aucune échéance</div>'}</div></div>
+      <div class="card"><div class="card-h"><h3>Crédits et leasing</h3><a href="#/pilotage/engagements">Registre</a></div><div class="rows">${fin.map((c) => `<div class="row static"><span class="grow"><b>${esc(c.label)}</b><br><small class="muted">${esc(c.lender || '')} · ${c.amount != null ? pilMoney(c.amount) + ' ' + (PIL_FREQ_L[c.frequency] || '').toLowerCase() : 'mensualité non renseignée'}${c.end_date ? ' · fin ' + fmtDate(c.end_date) : ''}</small></span><span class="r">${c.kind === 'credit' ? `capital restant<br><b>${c.remaining_now != null ? pilMoney(c.remaining_now) : '—'}</b>` : `reste à payer<br><b>${pilMoney(c.remaining_total)}</b>`}</span></div>`).join('') || '<div class="empty">Aucun crédit ni leasing confirmé</div>'}</div></div>
+    </div>`;
+  $$('[data-sc]', page).forEach((x) => { x.onclick = () => { st.sc = x.dataset.sc; saveUi(); render(); }; });
+  $$('[data-hz]', page).forEach((x) => { x.onclick = () => { st.hz = +x.dataset.hz; saveUi(); render(); }; });
+  $('[data-hyp]').onclick = () => pilHypModal(f.hypotheses);
+}
+
+function pilHypModal(h) {
+  const keys = Object.keys(PIL_SC);
+  const D = { p25: 'Rapide (25 % des clients paient plus vite)', median: 'Habituel (délai médian observé)', p75: 'Lent (75 % des clients paient plus vite)' };
+  const m = modal(`${mhead('Hypothèses des scénarios')}<div class="m-body"><p class="muted">Ces réglages s'appliquent aux factures clients (jamais certaines). Les sorties confirmées sont les mêmes dans les trois scénarios.</p>
+    <table class="dt"><thead><tr><th></th>${keys.map((k) => `<th>${PIL_SC[k][0]}</th>`).join('')}</tr></thead><tbody>
+      <tr><td>Délai de paiement des clients</td>${keys.map((k) => `<td><select data-k="${k}" data-f="delay">${Object.entries(D).map(([v, l]) => `<option value="${v}" ${h[k].delay === v ? 'selected' : ''}>${l}</option>`).join('')}</select></td>`).join('')}</tr>
+      <tr><td>Retard supplémentaire (jours)</td>${keys.map((k) => `<td><input data-k="${k}" data-f="extraDays" inputmode="numeric" value="${h[k].extraDays}"></td>`).join('')}</tr>
+      <tr><td>Probabilité d'encaissement observée pour les factures en retard</td>${keys.map((k) => `<td><input type="checkbox" data-k="${k}" data-f="useProbability" ${h[k].useProbability ? 'checked' : ''}></td>`).join('')}</tr>
+      <tr><td>Exclure les factures en retard de plus de … jours (vide = non)</td>${keys.map((k) => `<td><input data-k="${k}" data-f="excludeOverdueAfter" inputmode="numeric" value="${h[k].excludeOverdueAfter ?? ''}"></td>`).join('')}</tr>
+      <tr><td>Compter les états d'avancement approuvés (pas encore facturés)</td>${keys.map((k) => `<td><input type="checkbox" data-k="${k}" data-f="includeEaApproved" ${h[k].includeEaApproved ? 'checked' : ''}></td>`).join('')}</tr>
+      <tr><td>Compter les états d'avancement envoyés (non approuvés)</td>${keys.map((k) => `<td><input type="checkbox" data-k="${k}" data-f="includeEaSent" ${h[k].includeEaSent ? 'checked' : ''}></td>`).join('')}</tr>
+      <tr><td>Marge de prudence sur les sorties (%)</td>${keys.map((k) => `<td><input data-k="${k}" data-f="prudencePct" inputmode="decimal" value="${h[k].prudencePct}"></td>`).join('')}</tr>
+    </tbody></table></div><div class="m-foot"><button class="btn" data-reset>Valeurs par défaut</button><span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-save>Enregistrer</button></div>`, { wide: true });
+  const read = () => { const o = {}; keys.forEach((k) => { o[k] = {}; }); $$('[data-k]', m.el).forEach((el) => { o[el.dataset.k][el.dataset.f] = el.type === 'checkbox' ? el.checked : el.value === '' ? null : el.tagName === 'SELECT' ? el.value : num(el.value); }); return o; };
+  $('[data-save]', m.el).onclick = async () => { await api('PUT', 'pilot/hypotheses', read()); m.close(); toast('Hypothèses enregistrées'); render(); };
+  $('[data-reset]', m.el).onclick = async () => { if (!confirm('Revenir aux hypothèses par défaut ?')) return; await api('PUT', 'pilot/hypotheses', {}); m.close(); render(); };
+}
+
+// ---------- Engagements : crédits, leasing, charges fixes
+async function pilCommitmentsPage(tab) {
+  const [list, accs] = await Promise.all([api('GET', 'pilot/commitments'), api('GET', 'pilot/accounts')]);
+  const t = ['credit', 'leasing', 'charge', 'a_confirmer'].includes(tab) ? tab : 'credit';
+  const page = layout({ icon: 'chart', title: 'Engagements', sub: 'Crédits, leasing et charges fixes – seuls les engagements confirmés entrent dans les prévisions',
+    actions: `<button class="btn" data-detect>Détecter dans les extraits</button><button class="btn primary" data-add>Ajouter</button>` });
+  const toConf = list.filter((c) => c.status === 'a_confirmer');
+  const rows = t === 'a_confirmer' ? toConf : list.filter((c) => c.kind === t && c.status !== 'a_confirmer');
+  page.innerHTML = `<div class="chips pil-tabs">${[['credit', 'Crédits'], ['leasing', 'Leasing'], ['charge', 'Charges fixes'], ['a_confirmer', `À confirmer (${toConf.length})`]].map(([k, l]) => `<a class="chip ${k === t ? 'on' : ''}" href="#/pilotage/engagements/${k}">${l}</a>`).join('')}</div><div id="tbl"></div>`;
+  const accName = (id) => pilAccName(accs.find((a) => a.id === id));
+  dataTable($('#tbl'), {
+    rows, search: (c) => [c.label, c.lender].join(' '),
+    columns: [{ l: 'Libellé', v: (c) => `<b>${esc(c.label)}</b>${c.docs.length ? ` <small class="muted">📎 ${c.docs.length}</small>` : ''}<br><small class="muted">${esc(PIL_KIND_L[c.kind][1][c.subtype] || c.subtype)}${c.lender ? ' · ' + esc(c.lender) : ''}</small>` },
+      { l: 'Montant', cls: 'r', v: (c) => (c.amount != null ? `${pilMoney(c.amount)}<br><small class="muted">${esc(PIL_FREQ_L[c.frequency] || '')}</small>` : '<small class="muted">non renseigné</small>'), sort: (c) => c.amount || 0 },
+      { l: 'Prochaine échéance', v: (c) => (c.next_flows[0] ? `${fmtDate(c.next_flows[0].date)}<br><small class="muted">${esc(c.next_flows[0].detail || '')}</small>` : '—'), sort: (c) => (c.next_flows[0] || {}).date || '9' },
+      { l: 'Fin', v: (c) => fmtDate(c.end_date) || '—', sort: (c) => c.end_date || '9' },
+      { l: t === 'credit' ? 'Capital restant' : '12 prochains mois', cls: 'r', v: (c) => (c.kind === 'credit' ? (c.remaining_now != null ? pilMoney(c.remaining_now) : '—') + (c.schedule_notes && c.schedule_notes.length ? `<br><small class="late">${esc(c.schedule_notes[0])}</small>` : '') : pilMoney(c.next_12m)) },
+      { l: 'Compte', v: (c) => `<small>${esc(c.account_id ? accName(c.account_id) : '—')}</small>` },
+      { l: 'Statut', v: (c) => st(PIL_CST, c.status) }],
+    onRow: (c) => pilCommitmentForm(c.kind, c, accs),
+    empty: t === 'a_confirmer' ? 'Rien à confirmer' : 'Aucun engagement : cliquez sur « Ajouter »',
+  });
+  $('[data-add]').onclick = () => pilCommitmentForm(t === 'a_confirmer' ? 'charge' : t, null, accs);
+  $('[data-detect]').onclick = () => pilDetectModal(accs);
+}
+
+function pilCommitmentForm(kind, c, accs) {
+  const v = c ? { ...c } : { kind, status: 'confirme', frequency: 'mensuel', repayment: 'mensualites', subtype: Object.keys(PIL_KIND_L[kind][1])[0] };
+  ['amount', 'capital_initial', 'capital_remaining', 'residual'].forEach((k) => { if (v[k] != null) v[k] = String(v[k] / 100).replace('.', ','); });
+  const accOpts = [['', '—'], ...accs.map((a) => [a.id, pilAccName(a)])];
+  const fields = [
+    { name: 'subtype', label: 'Type', type: 'select', options: Object.entries(PIL_KIND_L[kind][1]) },
+    { name: 'label', label: 'Libellé', required: true },
+    { name: 'lender', label: kind === 'charge' ? 'Bénéficiaire' : 'Organisme financier' },
+    { name: 'account_id', label: 'Compte bancaire débité', type: 'select', options: accOpts },
+    { name: 'amount', label: kind === 'charge' ? 'Montant de l\'échéance (€)' : 'Mensualité / échéance (€)', type: 'money' },
+    { name: 'frequency', label: 'Fréquence', type: 'select', options: Object.entries(PIL_FREQ_L) },
+    { name: 'next_date', label: 'Prochaine échéance (date de prélèvement)', type: 'date' },
+    { name: 'start_date', label: 'Date de début', type: 'date' },
+    { name: 'end_date', label: 'Date de fin', type: 'date' },
+    ...(kind === 'credit' ? [{ name: 'capital_initial', label: 'Capital initial (€)', type: 'money' }, { name: 'capital_remaining', label: 'Capital restant dû (€)', type: 'money' },
+      { name: 'capital_asof', label: 'Capital restant à la date du', type: 'date', hint: 'Date à laquelle ce capital est connu (tableau d\'amortissement)' },
+      { name: 'rate', label: 'Taux d\'intérêt annuel (%)', type: 'percent' }, { name: 'repayment', label: 'Remboursement', type: 'select', options: [['mensualites', 'Mensualités (capital + intérêts)'], ['in_fine', 'In fine (intérêts, capital à la fin)']] },
+      { name: 'guarantees', label: 'Garanties', cls: 'full' }] : []),
+    ...(kind === 'leasing' ? [{ name: 'residual', label: 'Valeur de rachat (€)', type: 'money' }, { name: 'buyback', label: 'Rachat prévu à la fin (compté dans les prévisions)', type: 'check' }] : []),
+    { name: 'supplier_id', label: 'Fournisseur BâtiPro (si ses factures sont saisies dans les achats)', type: 'select', options: [['', '—']], hint: 'Évite de compter deux fois : l\'échéance est ignorée quand un achat de ce fournisseur existe à ± 15 jours' },
+    { name: 'status', label: 'Statut', type: 'select', options: Object.entries(PIL_CST).map(([k, [l]]) => [k, l]) },
+    { name: 'notes', label: 'Notes', type: 'textarea', cls: 'full' },
+  ];
+  formModal({
+    title: c ? c.label : `Nouveau : ${PIL_KIND_L[kind][0].toLowerCase()}`, fields, values: v, wide: true, saveLabel: c && c.status === 'a_confirmer' ? 'Enregistrer' : 'Enregistrer',
+    extra: c ? `<div class="field full"><span>Documents</span><div class="rows">${c.docs.map((d, i) => `<div class="row static"><a href="api.php?r=pilot/commitments/${c.id}/doc/${i}">${esc(d.name)}</a><small class="muted">${fmtDT(d.at)}</small></div>`).join('') || '<small class="muted">Aucun document</small>'}</div>
+      <input type="file" data-doc accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"></div>${c.status === 'a_confirmer' ? '<div class="alert info full">Engagement détecté ou à vérifier : vérifiez les montants et dates, puis choisissez le statut « Confirmé » pour l\'intégrer aux prévisions.</div>' : ''}` : '',
+    after: async (form) => {
+      const sel = form.elements.supplier_id;
+      const contacts = await db.list('contact').catch(() => []);
+      sel.innerHTML = `<option value="">—</option>${contacts.filter((x) => ['fournisseur', 'soustraitant'].includes(x.data.kind)).map((x) => `<option value="${x.id}" ${x.id === v.supplier_id ? 'selected' : ''}>${esc(contactName(x))}</option>`).join('')}`;
+      const doc = form.querySelector('[data-doc]');
+      if (doc) doc.onchange = async () => { const fd = new FormData(); fd.append('file', doc.files[0]); try { await api('POST', `pilot/commitments/${c.id}/doc`, fd); toast('Document ajouté'); closeModals(); render(); } catch (e) { toast('Erreur : ' + e.message, 5000); } };
+    },
+    async onSave(x) {
+      const body = { ...x, kind, account_id: x.account_id || null, supplier_id: x.supplier_id ? +x.supplier_id : null, buyback: !!x.buyback };
+      ['amount', 'capital_initial', 'capital_remaining', 'residual'].forEach((k) => { body[k] = x[k] === '' || x[k] == null ? null : Math.round(num(x[k]) * 100); });
+      body.rate = x.rate === '' || x.rate == null ? null : num(x.rate);
+      if (c) await api('PUT', `pilot/commitments/${c.id}`, body); else await api('POST', 'pilot/commitments', body);
+      toast('Enregistré'); render();
+    },
+    onDelete: c ? async () => { await api('DELETE', `pilot/commitments/${c.id}`); render(); } : null,
+  });
+}
+
+async function pilDetectModal(accs) {
+  const list = await api('GET', 'pilot/commitments/detect');
+  const m = modal(`${mhead('Charges récurrentes détectées dans les extraits')}<div class="m-body"><p class="muted">Montants semblables payés au même bénéficiaire pendant au moins 3 mois (12 derniers mois). Ce sont des <b>propositions</b> : une fois ajoutées, elles restent « à confirmer » et n'entrent pas dans les prévisions avant votre confirmation.</p>
+    <div class="rows">${list.map((x, i) => `<div class="row static"><span class="grow"><b>${esc(x.label)}</b><br><small class="muted">${x.months} mois · ${x.count} paiements · ${pilMoney(x.min)} à ${pilMoney(x.max)} · dernier le ${fmtDate(x.last)}</small></span><b>${pilMoney(x.amount)}</b>
+      ${x.already ? '<small class="muted">déjà ajoutée</small>' : `<button class="btn sm" data-i="${i}">Ajouter (à confirmer)</button>`}</div>`).join('') || '<div class="empty">Aucune charge récurrente détectée (il faut au moins 3 mois d\'extraits)</div>'}</div></div>`, { wide: true });
+  $$('[data-i]', m.el).forEach((b) => { b.onclick = async () => {
+    const x = list[+b.dataset.i];
+    const sub = { telecom: 'telecom', assurances: 'assurances', social: 'onss', impots: 'tva', loyer: 'loyer', salaires: 'salaires' }[x.category] || 'autre';
+    await api('POST', 'pilot/commitments', { kind: x.kind, subtype: x.kind === 'charge' ? sub : 'autre', label: x.label, amount: x.amount, frequency: 'mensuel', next_date: x.next, source: 'detecte', detect_key: x.key });
+    b.replaceWith(Object.assign(document.createElement('small'), { className: 'good', textContent: 'ajoutée – à confirmer' }));
+  }; });
+}
+
+// ---------- Factures clients et fournisseurs : états et échéances
+async function pilDuePage(tab) {
+  const r = await api('GET', 'pilot/receivables');
+  const t = tab === 'fournisseurs' ? 'fournisseurs' : 'clients';
+  const IST = { non_echu: ['Non échu', '#3b5bdb'], echu: ['Échu', '#e5484d'], partiel: ['Partiellement payé', '#e8a10c'], partiel_echu: ['Part. payé – échu', '#e8590c'], paye: ['Payé', '#2f9e44'], conteste: ['Contesté', '#7048e8'],
+    attente_approbation: ['En attente d\'approbation', '#868e96'], approuve_a_facturer: ['Approuvé – à facturer', '#0c8599'], brouillon_ea: ['État à envoyer', '#adb5bd'] };
+  const EST = { engage: ['Engagé – à payer', '#3b5bdb'], echu: ['Échu', '#e5484d'], partiel: ['Partiellement payé', '#e8a10c'], paye: ['Payé', '#2f9e44'], a_valider: ['À valider', '#f08c00'] };
+  const page = layout({ icon: 'chart', title: 'Factures et échéances' });
+  const sum = (l, k) => l.reduce((a, x) => a + x[k], 0);
+  const inv = r.invoices; const exp = r.expenses;
+  page.innerHTML = `<div class="kpis">${kpi('Clients : reste à encaisser', pilMoney(sum(inv.filter((i) => i.ea === null && i.state !== 'conteste'), 'rest')), { sub: `dont échu ${pilMoney(sum(inv.filter((i) => ['echu', 'partiel_echu'].includes(i.state)), 'rest'))}` })}
+      ${kpi('Contesté', pilMoney(sum(inv.filter((i) => i.state === 'conteste'), 'rest')))}${kpi('États d\'avancement pas encore facturés', pilMoney(sum(inv.filter((i) => i.ea !== null && i.ea !== 'conteste'), 'total')))}
+      ${kpi('Fournisseurs : engagé à payer', pilMoney(sum(exp, 'rest')), { sub: `dont échu ${pilMoney(sum(exp.filter((e) => e.state === 'echu'), 'rest'))} · à valider ${pilMoney(sum(exp.filter((e) => e.state === 'a_valider'), 'rest'))}` })}</div>
+    <div class="chips pil-tabs"><a class="chip ${t === 'clients' ? 'on' : ''}" href="#/pilotage/echeances/clients">Factures clients</a><a class="chip ${t === 'fournisseurs' ? 'on' : ''}" href="#/pilotage/echeances/fournisseurs">Factures fournisseurs</a></div><div id="tbl"></div>`;
+  if (t === 'clients') dataTable($('#tbl'), {
+    rows: inv, state: { sort: 4 }, search: (i) => [i.number, i.client_name].join(' '),
+    filters: { def: '', options: [['', 'Toutes'], ...Object.entries(IST).map(([k, [l, c]]) => [k, l, c])], match: (i, k) => i.state === k },
+    columns: [{ l: 'Facture', v: (i) => `<a href="#/invoice/${i.id}">${esc(i.number || (i.ea !== null ? 'État d\'avancement' : '#' + i.id))}</a>` }, { l: 'Client', v: (i) => esc(i.client_name) },
+      { l: 'Date', v: (i) => fmtDate(i.date), sort: (i) => i.date || '' }, { l: 'Échéance', v: (i) => `${fmtDate(i.due)}${i.late_days ? `<br><small class="late">${i.late_days} j de retard</small>` : ''}`, sort: (i) => i.due || '9' },
+      { l: 'Total', cls: 'r', v: (i) => pilMoney(i.total), sort: (i) => i.total }, { l: 'Reste', cls: 'r', v: (i) => `<b>${pilMoney(i.ea !== null ? i.total : i.rest)}</b>`, sort: (i) => i.rest },
+      { l: 'État', v: (i) => st(IST, i.state) + (i.flag_note ? `<br><small class="muted">${esc(i.flag_note)}</small>` : '') },
+      { l: '', v: (i) => (i.ea === null && i.rest > 0 ? `<button class="btn sm" data-flag="${i.id}">${i.flag === 'conteste' ? 'Retirer « contesté »' : 'Marquer contestée'}</button>` : '') }],
+    footer: (l) => `<tr><td colspan="5">${l.length} document(s)</td><td class="r"><b>${pilMoney(l.reduce((a, i) => a + (i.ea !== null ? i.total : i.rest), 0))}</b></td><td colspan="2"></td></tr>`,
+    empty: 'Aucune facture',
+  });
+  else dataTable($('#tbl'), {
+    rows: exp, state: { sort: 4 }, search: (e) => [e.ref, e.supplier_name].join(' '),
+    filters: { def: '', options: [['', 'Tous'], ...Object.entries(EST).map(([k, [l, c]]) => [k, l, c])], match: (e, k) => e.state === k },
+    columns: [{ l: 'Facture', v: (e) => `<a href="#/purchase/${e.id}">${esc(e.ref || '#' + e.id)}</a>` }, { l: 'Fournisseur', v: (e) => esc(e.supplier_name) }, { l: 'Date', v: (e) => fmtDate(e.date), sort: (e) => e.date || '' },
+      { l: 'Échéance', v: (e) => fmtDate(e.due) || '<small class="muted">non renseignée</small>', sort: (e) => e.due || '9' }, { l: 'Total TTC', cls: 'r', v: (e) => pilMoney(e.total), sort: (e) => e.total },
+      { l: 'Payé', cls: 'r', v: (e) => `${pilMoney(e.paid)}${e.payments_count > 1 ? `<br><small class="muted">${e.payments_count} paiements</small>` : ''}` }, { l: 'Reste', cls: 'r', v: (e) => `<b>${pilMoney(e.rest)}</b>`, sort: (e) => e.rest },
+      { l: 'État', v: (e) => st(EST, e.state) }, { l: 'Chantier', v: (e) => (e.project_id ? `<a href="#/project/${e.project_id}">voir</a>` : '') }],
+    footer: (l) => `<tr><td colspan="6">${l.length} facture(s)</td><td class="r"><b>${pilMoney(l.reduce((a, e) => a + e.rest, 0))}</b></td><td colspan="2"></td></tr>`,
+    empty: 'Aucune facture fournisseur',
+  });
+  $('#tbl').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-flag]'); if (!b) return;
+    const i = inv.find((x) => x.id === +b.dataset.flag);
+    if (i.flag === 'conteste') { await api('PUT', `pilot/flags/${i.id}`, { flag: '' }); render(); return; }
+    const v = await ask('Facture contestée', [{ name: 'note', label: 'Motif (facultatif)' }]);
+    if (v) { await api('PUT', `pilot/flags/${i.id}`, { flag: 'conteste', note: v.note }); toast('Facture marquée contestée : exclue des prévisions'); render(); }
+  });
 }

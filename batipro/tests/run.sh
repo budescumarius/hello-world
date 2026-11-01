@@ -35,6 +35,7 @@ curl -s -o /dev/null -w "   install.php : HTTP %{http_code}\n" -X POST http://12
 php tests/php/finance_test.php || exit 1
 php tests/php/api_test.php || exit 1
 php tests/php/bank_test.php || exit 1
+php tests/php/treasury_test.php || exit 1
 echo "== 3. Tâche planifiée"
 docker exec -u www-data "$WEB" php /var/www/html/cron.php > /tmp/bp-cron.log 2>&1 && echo "   cron.php : exécution OK" || { echo "   cron.php : ÉCHEC"; cat /tmp/bp-cron.log; exit 1; }
 echo "== 4. Interface réelle dans un navigateur (facultatif)"
