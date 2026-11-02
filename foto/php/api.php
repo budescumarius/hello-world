@@ -19,7 +19,7 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '29'; // la fel ca APP_VERSION din app.js
+const VERSION = '30'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
@@ -1438,7 +1438,7 @@ function route(string $route, string $path, string $method): void {
     // ---------- cheie personală (scurtătura iPhone „Foto Șantier”)
     if ($route === 'GET api/key') {
         $u = need();
-        $log = all('SELECT at, ok, message FROM shortcut_log WHERE user_id = ? ORDER BY id DESC LIMIT 8', [$u['id']]);
+        $log = all('SELECT at, ok, message FROM shortcut_log WHERE user_id = ? ORDER BY id DESC LIMIT 5', [$u['id']]);
         foreach ($log as &$l) { $l['ok'] = (bool) $l['ok']; $l['at'] = str_replace(' ', 'T', $l['at']) . 'Z'; }
         $bad = is_admin($u) ? json_decode((string) setting('shortcut_badkey'), true) : null;
         out(['has' => (bool) val('SELECT key_hash FROM users WHERE id = ?', [$u['id']]), 'log' => $log, 'badKey' => $bad,
@@ -1453,6 +1453,13 @@ function route(string $route, string $path, string $method): void {
             q('UPDATE users SET key_hash = ?, api_key = ? WHERE id = ?', [hash('sha256', $key), $key, $u['id']]);
         }
         out(['key' => $key]);
+        return;
+    }
+    if ($route === 'DELETE api/key/log') { // „Șterge lista” din cardul scurtăturii
+        $u = need();
+        q('DELETE FROM shortcut_log WHERE user_id = ?', [$u['id']]);
+        if (is_admin($u)) set_setting('shortcut_badkey', null);
+        out(['ok' => true]);
         return;
     }
     if ($route === 'DELETE api/key') { $u = need(); q('UPDATE users SET key_hash = NULL, api_key = NULL WHERE id = ?', [$u['id']]); out(['ok' => true]); return; }
@@ -1536,10 +1543,30 @@ function route(string $route, string $path, string $method): void {
         if (sync_active()) sync_work(50);
         return;
     }
+    if ($route === 'GET api/sync/status') { // cifrele din „Cont”, reîmprospătate cât timp se copiază
+        global $DATA;
+        need('admin');
+        $busy = function (string $name) use ($DATA): bool {
+            $f = @fopen($DATA . "/$name.lock", 'c');
+            if (!$f) return false;
+            $free = flock($f, LOCK_EX | LOCK_NB);
+            if ($free) flock($f, LOCK_UN);
+            fclose($f);
+            return !$free;
+        };
+        out(['drive' => ['active' => drive_active(), 'running' => $busy('drive'), 'lastError' => setting('drive_last_error'),
+                'pending' => (int) val("SELECT COUNT(*) FROM entries WHERE kind='photo' AND drive_status='pending'")],
+            'nas' => ['active' => nas_active(), 'running' => $busy('nas'), 'lastError' => setting('nas_last_error'),
+                'pending' => nas_configured() ? (int) val("SELECT COUNT(*) FROM entries WHERE kind='photo' AND nas_status='pending'") : 0]]);
+        return;
+    }
     if ($route === 'POST api/drive/sync') {
         need('admin');
+        $only = (string) (body()['only'] ?? '');
         respond_then(['ok' => true]);
-        sync_work(50);
+        if ($only === 'drive') drive_work(50);      // Drive și NAS pot merge în paralel, fiecare în cererea lui
+        elseif ($only === 'nas') nas_work(50);
+        else sync_work(50);
         return;
     }
     if ($route === 'POST api/drive/enabled') {

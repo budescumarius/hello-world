@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '29'; // la fel ca VERSION din api.php
+const APP_VERSION = '30'; // la fel ca VERSION din api.php
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -1094,18 +1094,67 @@ async function driveCard(query) {
   } else {
     card.append(
       d.enabled !== undefined ? toggleRow('Copiază automat pozele în Google Drive', d.enabled, 'api/drive/enabled') : null,
-      h('p', { class: 'small' }, `Folder: „${d.folder}” / <șantier>. `, d.enabled === false ? '⏸ În pauză.' : d.pending ? `⏳ ${d.pending} poze de copiat.` : '✓ Toate pozele sunt copiate.'),
-      d.lastError ? h('p', { class: 'error small' }, 'Ultima eroare: ' + d.lastError) : null,
+      h('p', { class: 'small' }, `Folder: „${d.folder}” / <șantier>. `,
+        syncLine('drive', { active: d.enabled !== false, pending: d.pending })),
+      syncErr('drive', d.lastError),
       h('div', { class: 'row' },
-        h('button', { class: 'btn grow', onclick: async () => { await api('api/drive/sync', { method: 'POST' }); toast('Sincronizare pornită'); } }, '🔄 Sincronizează'),
+        h('button', { class: 'btn grow', onclick: () => { syncWatch(true); toast('Sincronizare pornită'); } }, '🔄 Sincronizează'),
         h('button', { class: 'btn grow danger', onclick: async () => {
           if (!confirm('Deconectezi Google Drive? Pozele rămân pe server și în Drive.')) return;
           await api('api/drive/disconnect', { method: 'POST' }); screenCont();
         } }, 'Deconectează')));
   }
-  return h('div', {}, h('h2', {}, 'Stocare'),
+  const out = h('div', {}, h('h2', {}, 'Stocare'),
     h('p', { class: 'muted small' }, 'Pozele se salvează mereu pe server. Alege unde să fie copiate automat: Google Drive, NAS sau ambele.'),
     card, d.nas ? nasCard(d.nas) : null);
+  // Cât timp ești pe pagină și mai sunt poze de copiat, copierea continuă singură și cifrele scad pe ecran.
+  if ((d.connected && d.enabled !== false && d.pending) || (d.nas?.configured && d.nas.enabled && d.nas.pending)) setTimeout(() => syncWatch(true), 300);
+  return out;
+}
+
+// ---- Copierea în Drive / NAS: cifre actualizate pe loc
+const SYNC = { drive: null, nas: null, driveErr: null, nasErr: null, timer: 0, auto: { drive: false, nas: false }, at: {} };
+function syncText(x) {
+  if (!x.active) return '⏸ În pauză.';
+  if (!x.pending) return '✓ Toate pozele sunt copiate.';
+  return (x.running ? '🔄 Se copiază… ' : '⏳ ') + `${x.pending} ${x.pending === 1 ? 'poză' : 'poze'} de copiat.`;
+}
+function syncLine(kind, x) { return (SYNC[kind] = h('span', {}, syncText(x))); }
+function syncErr(kind, msg) {
+  const el = h('p', { class: 'error small' });
+  el.textContent = msg ? 'Ultima eroare: ' + msg : '';
+  el.style.display = msg ? '' : 'none';
+  return (SYNC[kind + 'Err'] = el);
+}
+function syncWatch(kick) {
+  if (kick) SYNC.auto = { drive: true, nas: true };
+  clearTimeout(SYNC.timer);
+  const tick = async () => {
+    if (!SYNC.drive?.isConnected && !SYNC.nas?.isConnected) { SYNC.auto = { drive: false, nas: false }; return; }
+    let st;
+    try { st = await api('api/sync/status'); } catch { SYNC.timer = setTimeout(tick, 5000); return; }
+    let again = 0;
+    for (const k of ['drive', 'nas']) {
+      const x = st[k], el = SYNC[k];
+      if (!x || !el?.isConnected) continue;
+      if (SYNC.auto[k] && x.active && x.pending && !x.running) {
+        // Dacă tura trecută n-a scăzut nimic (NAS oprit, internet căzut…), ne oprim și arătăm eroarea.
+        if (SYNC.at[k] !== undefined && x.pending >= SYNC.at[k]) SYNC.auto[k] = false;
+        else {
+          SYNC.at[k] = x.pending; x.running = true;
+          api('api/drive/sync', { method: 'POST', json: { only: k } }).catch(() => {});
+        }
+      }
+      if (!SYNC.auto[k] || !x.pending) delete SYNC.at[k];
+      el.textContent = syncText(x);
+      const er = SYNC[k + 'Err'];
+      if (er) { er.textContent = x.lastError ? 'Ultima eroare: ' + x.lastError : ''; er.style.display = x.lastError ? '' : 'none'; }
+      if (x.running || (SYNC.auto[k] && x.active && x.pending)) again = 3000;
+      else if (x.active && x.pending && !again) again = 20000;
+    }
+    if (again) SYNC.timer = setTimeout(tick, again);
+  };
+  tick();
 }
 
 function toggleRow(label, on, url) {
@@ -1116,6 +1165,7 @@ function toggleRow(label, on, url) {
   return h('label', { class: 'check', style: 'margin:10px 0' }, cb, h('span', { style: 'flex:1;font-weight:600' }, label));
 }
 
+function niceUrl(u) { try { return decodeURI(u); } catch { return u; } }
 function nasCard(n, editing = false) {
   const card = h('div', { class: 'card', style: 'margin-top:12px' });
   card.append(h('div', { class: 'row' }, h('b', { class: 'grow' }, '🗄 NAS (Synology, QNAP…)'),
@@ -1123,11 +1173,11 @@ function nasCard(n, editing = false) {
   if (n.configured && !editing) {
     card.append(
       toggleRow('Copiază automat pozele pe NAS', n.enabled, 'api/nas/enabled'),
-      h('p', { class: 'small', style: 'word-break:break-all' }, `${n.url} / ${n.folder} / <șantier>`, h('br'), `Utilizator: ${n.user}. `,
-        !n.enabled ? '⏸ În pauză.' : n.pending ? `⏳ ${n.pending} poze de copiat.` : '✓ Toate pozele sunt copiate.'),
-      n.lastError ? h('p', { class: 'error small' }, 'Ultima eroare: ' + n.lastError) : null,
+      h('p', { class: 'small', style: 'word-break:break-all' }, `${niceUrl(n.url)}${n.folder ? ' / ' + n.folder : ''} / <șantier>`, h('br'), `Utilizator: ${n.user}. `,
+        syncLine('nas', { active: n.enabled, pending: n.pending })),
+      syncErr('nas', n.lastError),
       h('div', { class: 'row' },
-        h('button', { class: 'btn grow', onclick: async () => { await api('api/drive/sync', { method: 'POST' }); toast('Sincronizare pornită'); setTimeout(screenCont, 1500); } }, '🔄 Sincronizează'),
+        h('button', { class: 'btn grow', onclick: () => { syncWatch(true); toast('Sincronizare pornită'); } }, '🔄 Sincronizează'),
         h('button', { class: 'btn grow', onclick: () => card.replaceWith(nasCard(n, true)) }, '✏️ Modifică'),
         h('button', { class: 'btn grow danger', onclick: async () => {
           if (!confirm('Elimini NAS-ul din aplicație? Pozele rămân pe server și pe NAS.')) return;
@@ -1135,7 +1185,7 @@ function nasCard(n, editing = false) {
         } }, 'Elimină')));
     return card;
   }
-  const url = h('input', { value: n.url, placeholder: 'https://numele-tau.synology.me:5006/photo', autocapitalize: 'none', spellcheck: 'false', inputmode: 'url' });
+  const url = h('input', { value: niceUrl(n.url), placeholder: 'https://numele-tau.synology.me:5006/photo', autocapitalize: 'none', spellcheck: 'false', inputmode: 'url' });
   const user = h('input', { value: n.user, autocapitalize: 'none', spellcheck: 'false', autocomplete: 'off' });
   const pass = h('input', { type: 'password', autocomplete: 'new-password', placeholder: n.configured ? 'Lasă gol ca să rămână aceeași' : '' });
   const insecure = h('input', { type: 'checkbox', checked: n.insecure });
@@ -1220,7 +1270,10 @@ function shortcutCard() {
     fill(body,
       h('p', { class: 'small' }, 'Trimite poze direct din aplicația Photos: ', h('b', {}, 'Partager → Foto Șantier'), ' → alegi șantierul.'),
       h('p', { class: 'muted small' }, 'Varianta cea mai simplă, fără nicio configurare: ecranul Foto → ', h('b', {}, '🖼 Din galerie'), ' (selectezi mai multe poze odată).'),
-      r.log?.length ? h('div', { class: 'sclog' }, h('div', { class: 'small', style: 'font-weight:700;margin:8px 0 4px' }, 'Ultimele trimiteri din scurtătură:'),
+      r.log?.length ? h('div', { class: 'sclog' }, h('div', { class: 'row', style: 'margin:8px 0 4px;align-items:center' },
+          h('b', { class: 'small grow' }, 'Ultimele trimiteri din scurtătură:'),
+          h('button', { class: 'btn sm', onclick: async () => {
+            await api('api/key/log', { method: 'DELETE' }); toast('✓ Lista a fost golită'); card.replaceWith(shortcutCard().lastChild); } }, '🧹 Golește lista')),
         r.log.map((l) => h('div', { class: 'small ' + (l.ok ? 'ok' : 'err') }, (l.ok ? '✅ ' : '⛔ ') + fmtShort(l.at) + ' – ', l.message))) :
         r.has ? h('p', { class: 'small muted' }, 'Încă nicio trimitere din scurtătură n-a ajuns la server cu cheia ta.') : null,
       r.badKey ? h('p', { class: 'small', style: 'background:#fef3c7;padding:8px;border-radius:8px' },
