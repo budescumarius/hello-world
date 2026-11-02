@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '30'; // la fel ca VERSION din api.php
+const APP_VERSION = '31'; // la fel ca VERSION din api.php
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -332,13 +332,24 @@ async function fileHash(file) {
 }
 
 async function addPhotos(files, fromCamera) {
+  pickerWait(false);
   const comment = ($('#comment')?.value || '').trim();
   const siteId = state.siteId, folderId = currentFolder();
-  let n = 0, same = 0;
+  if (files.length && $('#comment')) $('#comment').value = '';
+  let n = 0, same = 0, done = 0;
+  const total = files.length, many = total > 1;
+  const progress = () => { if (many) toast(`📥 ${total} poze primite · pregătesc ${Math.min(done + 1, total)}/${total} (se trimit deja)`, 60000); };
+  progress(); // apare imediat, nu după ce se pregătesc toate
   const seen = new Set(Q.items.map((it) => it.hash).filter(Boolean)); // deja în așteptare pe telefon
-  for (const file of files) {
+  // Amprenta pozei următoare se calculează cât timp se micșorează poza curentă.
+  const hashOf = (f) => fromCamera || !f ? Promise.resolve(null) : fileHash(f);
+  let nextHash = hashOf(files[0]);
+  for (let i = 0; i < files.length; i++, done++) {
+    const file = files[i];
+    const hash = await nextHash;
+    nextHash = hashOf(files[i + 1]);
+    if (done % 3 === 0) progress();
     const takenAt = new Date(fromCamera ? Date.now() : file.lastModified || Date.now()).toISOString();
-    const hash = fromCamera ? null : await fileHash(file); // pozele noi din cameră sunt mereu unice
     if (hash && seen.has(hash)) { same++; continue; }
     if (hash) seen.add(hash);
     let full, thumb;
@@ -364,13 +375,28 @@ async function addPhotos(files, fromCamera) {
       toast('Nu am putut salva poza: ' + e.message);
     }
   }
-  if (n) {
-    if ($('#comment')) $('#comment').value = '';
-    toast((n === 1 ? '✓ Poză salvată' : `✓ ${n} poze salvate`) + (same ? ` (${same} aleasă de două ori – trimisă o singură dată)` : ''));
-  } else if (same) toast('Aceste poze sunt deja în curs de trimitere');
+  if (n) toast((n === 1 ? '✓ Poză salvată' : `✓ ${n} poze pregătite – se trimit`) + (same ? ` (${same} aleasă de două ori – trimisă o singură dată)` : ''));
+  else if (same) toast('Aceste poze sunt deja în curs de trimitere');
 }
 
-$('#cam').addEventListener('change', (e) => { const f = [...e.target.files]; e.target.value = ''; addPhotos(f, true); });
+// Între „✓” în galerie și momentul în care iPhone-ul dă pozele aplicației pot trece câteva secunde
+// (mai ales dacă pozele sunt în iCloud). Arătăm imediat că lucrăm, ca să nu pară că nu s-a întâmplat nimic.
+let pickerOpen = false, pickerT = 0;
+function pickerWait(on) {
+  clearTimeout(pickerT);
+  if (!on) { if (pickerOpen) { pickerOpen = false; $('#toast').classList.remove('show'); } return; }
+  toast('⏳ Primesc pozele de la telefon…', 90000);
+  pickerT = setTimeout(() => pickerWait(false), 90000);
+}
+for (const sel of ['#gal', '#cam']) {
+  const inp = $(sel);
+  inp.addEventListener('click', () => { pickerOpen = true; });
+  inp.addEventListener('cancel', () => pickerWait(false));
+}
+const backFromPicker = () => { if (pickerOpen && document.visibilityState === 'visible') { pickerOpen = true; pickerWait(true); } };
+window.addEventListener('focus', () => setTimeout(backFromPicker, 50));
+document.addEventListener('visibilitychange', () => setTimeout(backFromPicker, 50));
+
 $('#gal').addEventListener('change', (e) => { const f = [...e.target.files]; e.target.value = ''; addPhotos(f, false); });
 
 // ============ căutare în liste lungi ============
