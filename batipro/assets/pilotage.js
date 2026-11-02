@@ -112,7 +112,7 @@ function pilEnablePage() {
 async function pilDashPage() {
   const [d, mo] = await Promise.all([api('GET', 'pilot/dashboard'), api('GET', 'pilot/monthly&months=24')]);
   const page = layout({ icon: 'chart', title: 'Contrôle bancaire', sub: 'Extraits importés, soldes et points à vérifier', actions: '<a class="btn primary" href="#/pilotage/import">Importer un extrait</a>' });
-  if (!d.accounts.length) { page.innerHTML = empty('Aucun compte bancaire', 'Ajoutez d\'abord vos comptes (Europabank, Belfius, BNP Paribas Fortis).', '<a class="btn primary" href="#/pilotage/comptes">Ajouter un compte</a>'); return; }
+  if (!d.accounts.length) { page.innerHTML = empty('Aucun compte bancaire', 'Ajoutez d\'abord vos comptes (Europabank, Belfius, BNP Paribas Fortis).', '<a class="btn primary" href="#/pilotage/comptes/liste?add=1">Ajouter un compte</a>'); return; }
   const known = d.accounts.filter((a) => a.balance != null);
   const total = known.reduce((s, a) => s + a.balance, 0);
   const toCheck = d.accounts.reduce((s, a) => s + a.to_check, 0);
@@ -152,6 +152,7 @@ async function pilAccountsPage() {
   });
   $('[data-add]').onclick = () => formModal({ title: 'Nouveau compte bancaire', fields: [{ name: 'iban', label: 'IBAN', required: true, placeholder: 'BE00 0000 0000 0000' }, { name: 'label', label: 'Nom (ex. Compte courant)' }, { name: 'bank', label: 'Banque', hint: 'Déduite de l\'IBAN si vide' }],
     async onSave(v) { await api('POST', 'pilot/accounts', v); toast('Compte ajouté'); render(); } });
+  if (/[?&]add=1/.test(location.hash)) { history.replaceState(null, '', location.hash.replace(/[?&]add=1/, '')); $('[data-add]').click(); } // venu d'un bouton « Ajouter un compte »
 }
 
 // ---------- Import
@@ -163,7 +164,7 @@ async function pilImportPage() {
       <label class="field"><span>Extrait(s)</span><input type="file" data-file multiple accept=".cod,.coda,.txt,.cod2,.pdf,application/pdf,.csv,.xlsx,.xls"></label></div>
       <p class="muted">Étapes : lecture → contrôle des soldes (solde initial + mouvements = solde final) → recherche des doublons et des périodes manquantes → aperçu → votre confirmation. Rien n'est enregistré avant la confirmation.</p></div>
     <div data-out></div>`;
-  if (!accs.length) $('[data-out]', page).innerHTML = `<div class="alert">Aucun compte bancaire. <a href="#/pilotage/comptes">Ajoutez vos comptes</a> avant d'importer.</div>`;
+  if (!accs.length) $('[data-out]', page).innerHTML = `<div class="alert">Aucun compte bancaire. <a href="#/pilotage/comptes/liste?add=1">Ajoutez vos comptes</a> avant d'importer.</div>`;
   $('[data-file]', page).onchange = async (e) => {
     const out = $('[data-out]', page); out.innerHTML = '';
     for (const f of e.target.files) {
