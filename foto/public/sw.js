@@ -1,5 +1,5 @@
 // Foto Șantier – pornire instant și poze din memoria telefonului.
-const CACHE = 'foto-santier-v36';         // interfața (se schimbă la fiecare versiune)
+const CACHE = 'foto-santier-v37';         // interfața (se schimbă la fiecare versiune)
 const IMG = 'foto-img';                    // pozele (rămân între versiuni)
 const IMG_MAX = 1500;                      // câte fișiere de poze păstrăm cel mult
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png'];

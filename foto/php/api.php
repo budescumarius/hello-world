@@ -19,7 +19,7 @@ $CONFIG = [
 if (is_file(__DIR__ . '/config.php')) $CONFIG = array_merge($CONFIG, (array) require __DIR__ . '/config.php');
 
 const ROLES = ['admin', 'responsabil', 'muncitor'];
-const VERSION = '31'; // la fel ca APP_VERSION din app.js
+const VERSION = '32'; // la fel ca APP_VERSION din app.js
 $DATA = rtrim($CONFIG['data_dir'], '/');
 $PHOTOS = $DATA . '/photos';
 
@@ -1283,6 +1283,45 @@ function route(string $route, string $path, string $method): void {
         header('Cache-Control: private, no-store');
         header('Content-Length: ' . strlen($buf));
         echo $buf;
+        return;
+    }
+    // Mută mai multe poze deodată într-un folder al aceluiași șantier (selecție în pagina șantierului).
+    // Pozele pe care utilizatorul nu are voie să le modifice sunt sărite și numărate.
+    if ($route === 'POST api/entries/move') {
+        global $db;
+        $u = need();
+        $b = body();
+        $ids = array_values(array_unique(array_map('intval', array_slice((array) ($b['ids'] ?? []), 0, 2000))));
+        $siteId = (int) ($b['siteId'] ?? 0);
+        if (!$ids || !$siteId) fail(400, 'Nicio poză aleasă');
+        if (!can_use_site($u, $siteId)) fail(403, 'Nu ai acces la acest șantier');
+        $folderId = resolve_folder($siteId, $b['folderId'] ?? null);
+        if (($b['folderId'] ?? null) !== null && $folderId === null) fail(400, 'Folderul nu e al acestui șantier');
+        $moved = 0; $skipped = 0; $found = 0; $sync = [];
+        $db->exec('BEGIN IMMEDIATE');
+        try {
+            foreach (array_chunk($ids, 400) as $chunk) {
+                $ph = implode(',', array_fill(0, count($chunk), '?'));
+                foreach (all("SELECT * FROM entries WHERE id IN ($ph)", $chunk) as $e) {
+                    $found++;
+                    if ((int) $e['site_id'] !== $siteId || !can_see_entry($u, $e) || !can_edit_entry($u, $e)) { $skipped++; continue; }
+                    if (($e['folder_id'] === null ? null : (int) $e['folder_id']) === $folderId) continue; // e deja acolo
+                    q('UPDATE entries SET folder_id = ? WHERE id = ?', [$folderId, $e['id']]);
+                    $moved++;
+                    if ($e['drive_file_id'] || $e['nas_path']) $sync[] = $e;
+                }
+            }
+            $db->exec('COMMIT');
+        } catch (Throwable $err) { $db->exec('ROLLBACK'); throw $err; }
+        $skipped += count($ids) - $found; // șterse între timp
+        $res = ['moved' => $moved, 'skipped' => $skipped];
+        if (!$sync) { out($res); return; }
+        respond_then($res);
+        @set_time_limit(900);
+        foreach ($sync as $e) { // Drive și NAS: mutăm și acolo, după ce telefonul a primit deja răspunsul
+            if ($e['drive_file_id']) drive_update((int) $e['id']);
+            if ($e['nas_path']) nas_update((int) $e['id']);
+        }
         return;
     }
     if (preg_match('#^(PATCH|DELETE) api/entries/(\d+)$#', $route, $m)) {

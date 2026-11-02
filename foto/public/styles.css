@@ -167,3 +167,12 @@ div.f { margin: 0 0 14px; }
 
 .sclog > div { padding: 6px 8px; border-radius: 8px; margin: 4px 0; white-space: pre-wrap; }
 .sclog .ok { background: #dcfce7; } .sclog .err { background: #fee2e2; }
+
+/* selecție mai multe poze */
+.tile.sel { outline: 3px solid var(--blue); outline-offset: -3px; }
+.tile.sel::after { content: '✓'; position: absolute; right: 5px; top: 5px; width: 24px; height: 24px; border-radius: 99px; background: var(--blue); color: #fff; font-weight: 800; font-size: 14px; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px #fff; }
+.tile.sel img { opacity: .75; }
+body.selecting .tile:not(.sel)::after { content: ''; position: absolute; right: 5px; top: 5px; width: 22px; height: 22px; border-radius: 99px; border: 2px solid #fff; background: #0003; }
+.selbar { position: fixed; left: 12px; right: 12px; bottom: calc(var(--tabs) + 10px + var(--safe-b)); z-index: 20; max-width: 736px; margin: 0 auto; display: flex; gap: 8px; align-items: center; background: #18181b; color: #fff; padding: 10px 10px 10px 16px; border-radius: 16px; box-shadow: 0 8px 24px #0004; }
+.selbar .btn:not(.primary) { background: #3f3f46; color: #fff; border-color: #3f3f46; }
+body.selecting #toast { bottom: calc(var(--tabs) + 80px + var(--safe-b)); }

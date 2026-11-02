@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '31'; // la fel ca VERSION din api.php
+const APP_VERSION = '32'; // la fel ca VERSION din api.php
 /* Foto Șantier – aplicația web pentru echipă */
 
 // ============ utilitare ============
@@ -500,7 +500,7 @@ function newFolder(siteId, onDone) {
     const save = async () => {
       try {
         const r = await api('api/folders', { method: 'POST', json: { siteId, name: name.value } });
-        close(); await refreshMe(); onDone?.(r.id); toast('✓ Folder creat');
+        close(); await refreshMe(); onDone?.(r.id, name.value.trim()); toast('✓ Folder creat');
       } catch (e) { err.textContent = e.message; }
     };
     box.append(h('h2', {}, 'Folder nou'),
@@ -517,9 +517,9 @@ async function pickFolder(siteId, current, onPick) {
   sheet((box, close) => {
     box.append(h('h2', {}, 'Alege folderul'),
       h('div', { class: 'pick-list' },
-        h('button', { class: current == null ? 'on' : '', onclick: () => { close(); onPick(null); } }, 'General', h('small', {}, 'direct în șantier')),
-        folders.map((f) => h('button', { class: current === f.id ? 'on' : '', onclick: () => { close(); onPick(f.id); } }, '📁 ' + f.name, h('small', {}, f.count + ' poze'))),
-        can.manage() ? h('button', { class: 'new', onclick: () => { close(); newFolder(siteId, (id) => onPick(id)); } }, '+ Folder nou') : null));
+        h('button', { class: current === null ? 'on' : '', onclick: () => { close(); onPick(null, 'General'); } }, 'General', h('small', {}, 'direct în șantier')),
+        folders.map((f) => h('button', { class: current === f.id ? 'on' : '', onclick: () => { close(); onPick(f.id, f.name); } }, '📁 ' + f.name, h('small', {}, f.count + ' poze'))),
+        can.manage() ? h('button', { class: 'new', onclick: () => { close(); newFolder(siteId, (id, name) => onPick(id, name)); } }, '+ Folder nou') : null));
   });
 }
 
@@ -612,6 +612,59 @@ function openViewer(list, index, onChange) {
   document.body.append(ov);
 }
 
+// ============ selecție mai multe poze (pagina șantierului) ============
+// „☑ Selectează” → atingi pozele → „📁 Mută în…”. Pozele altora (fără drept de modificare) sunt sărite de server.
+const SEL = { on: false, ids: new Set(), bar: null, site: null, after: null };
+function selStart(siteId, after) {
+  SEL.on = true; SEL.ids.clear(); SEL.site = siteId; SEL.after = after;
+  document.body.classList.add('selecting');
+  SEL.bar?.remove();
+  const count = h('b', { class: 'grow' });
+  SEL.bar = h('div', { class: 'selbar' }, count,
+    h('button', { class: 'btn sm', onclick: () => {
+      const tiles = [...view.querySelectorAll('.tile[data-id]')];
+      const all = tiles.every((t) => SEL.ids.has(+t.dataset.id));
+      for (const t of tiles) { t.classList.toggle('sel', !all); all ? SEL.ids.delete(+t.dataset.id) : SEL.ids.add(+t.dataset.id); }
+      selCount();
+    } }, 'Toate'),
+    h('button', { class: 'btn sm primary', onclick: selMove }, '📁 Mută în…'),
+    h('button', { class: 'btn sm', onclick: selStop, 'aria-label': 'Renunță' }, '✕'));
+  SEL.count = count;
+  document.body.append(SEL.bar);
+  selCount();
+}
+function selStop() {
+  SEL.on = false; SEL.ids.clear(); SEL.bar?.remove(); SEL.bar = null;
+  document.body.classList.remove('selecting');
+  view.querySelectorAll('.tile.sel').forEach((t) => t.classList.remove('sel'));
+}
+function selToggle(t) {
+  const id = +t.dataset.id;
+  if (SEL.ids.has(id)) SEL.ids.delete(id); else SEL.ids.add(id);
+  t.classList.toggle('sel', SEL.ids.has(id));
+  selCount();
+}
+function selCount() {
+  const n = SEL.ids.size;
+  if (SEL.count) SEL.count.textContent = n ? `${n} ${n === 1 ? 'aleasă' : 'alese'}` : 'Atinge pozele';
+}
+function selMove() {
+  if (!SEL.ids.size) return toast('Atinge întâi pozele pe care vrei să le muți');
+  const ids = [...SEL.ids], site = SEL.site, after = SEL.after;
+  pickFolder(site, undefined, async (fid, name) => {
+    try {
+      toast(`Mut ${ids.length} poze…`, 30000);
+      const r = await api('api/entries/move', { method: 'POST', json: { ids, siteId: site, folderId: fid } });
+      selStop();
+      for (const k of [...feedMem.keys()]) if (k.includes('site=' + site)) feedMem.delete(k); // listele vechi ale șantierului
+      toast(`✓ ${r.moved} ${r.moved === 1 ? 'poză mutată' : 'poze mutate'} în ${name || 'General'}` +
+        (r.skipped ? ` · ${r.skipped} sărite (poți muta doar pozele tale)` : ''), 5000);
+      after?.();
+    } catch (e) { toast(e.message, 6000); }
+  });
+}
+window.addEventListener('hashchange', () => { if (SEL.on) selStop(); });
+
 // ============ galerie ============
 // Miniaturile se descarcă doar când ajung aproape de ecran: cele vizibile primesc toată viteza.
 const lazyIO = 'IntersectionObserver' in window ? new IntersectionObserver((list) => {
@@ -647,12 +700,15 @@ function gallery(entries, { onChange, pending = [] } = {}) {
         grid = h('div', { class: 'grid' });
         wrap.append(grid);
       }
-      const open = () => openViewer(entries, Math.max(0, entries.indexOf(e)), onChange);
-      grid.append(e.kind === 'photo'
+      const open = (ev) => SEL.on ? selToggle(ev.currentTarget) : openViewer(entries, Math.max(0, entries.indexOf(e)), onChange);
+      const t = e.kind === 'photo'
         ? h('button', { class: 'tile', onclick: open },
             lazyImg(fileUrl(e, 'thumb'), e.comment),
             e.comment ? h('span', { class: 'c' }, '💬') : null)
-        : h('button', { class: 'tile note', onclick: open }, h('b', {}, '📝'), h('span', {}, e.comment)));
+        : h('button', { class: 'tile note', onclick: open }, h('b', {}, '📝'), h('span', {}, e.comment));
+      t.dataset.id = e.id;
+      if (SEL.ids.has(e.id)) t.classList.add('sel');
+      grid.append(t);
     }
   }
   addTiles(0);
@@ -895,6 +951,7 @@ async function screenSantier(id) {
     folderBox, actions, content);
   // folderul afișat: 'all' | null (General) | id
   let sel = 'all';
+  const refreshS = async () => { const r = await api('api/sites?id=' + s.id).catch(() => null); const n = r?.sites.find((x) => x.id === s.id); if (n) s.count = n.count; };
   const shoot = (input) => { // poza / galeria merg în șantierul și folderul afișate
     state.siteId = s.id; localStorage.setItem('siteId', s.id);
     setFolder(s.id, typeof sel === 'number' ? sel : null);
@@ -916,7 +973,9 @@ async function screenSantier(id) {
     fill(actions, h('div', { class: 'actions2', style: 'margin-top:0' },
       h('button', { class: 'btn primary', onclick: () => shoot('#cam') }, '📷 Fă poză aici'),
       h('button', { class: 'btn primary', onclick: () => shoot('#gal') }, '🖼 Din galerie aici')),
-      where ? h('p', { class: 'muted small', style: 'margin:6px 0 0' }, 'Pozele noi merg în' + where) : null);
+      h('div', { class: 'row', style: 'margin:8px 0 0;align-items:center' },
+        h('p', { class: 'muted small grow', style: 'margin:0' }, where ? 'Pozele noi merg în' + where : ''),
+        h('button', { class: 'btn sm', onclick: () => SEL.on ? selStop() : selStart(s.id, async () => { await refreshS(); draw(); }) }, '☑ Selectează')));
     fill(content, feed(sel === 'all' ? { site: s.id } : { site: s.id, folder: sel === null ? 'root' : sel }));
   }
   draw();
