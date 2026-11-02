@@ -410,9 +410,9 @@ function siteNewPoint(st, pos) {
   const photos = []; // { key, url }
   let companyId = ''; let due = '';
   const m = modal(`${mhead('Nouveau point')}<form class="m-body site-form">
-    <div class="site-photos" data-ph></div>
-    <label class="site-cam btn"><input type="file" accept="image/*" capture="environment" hidden data-cam>📷 Prendre une photo</label>
     <label class="field full"><span>Que faut-il faire ?</span><textarea name="title" rows="2" required placeholder="ex. Fissure au-dessus de la porte (🎤 du clavier pour dicter)"></textarea></label>
+    <div class="site-photos" data-ph></div>
+    <label class="site-cam btn"><input type="file" accept="image/*" capture="environment" hidden data-cam>📷 Ajouter une photo (facultatif)</label>
     <div class="field full"><span>Qui doit le faire ?</span><div class="chips" data-who>
       <button type="button" class="chip on" data-c="">Notre équipe</button>${who.near.map((c) => `<button type="button" class="chip" data-c="${c.id}">${esc(contactName(c))}</button>`).join('')}
       ${who.others.length ? `<select data-other aria-label="Autre intervenant"><option value="">Autre…</option>${who.others.map((c) => `<option value="${c.id}">${esc(contactName(c))}</option>`).join('')}</select>` : ''}</div></div>
@@ -436,7 +436,8 @@ function siteNewPoint(st, pos) {
   pick($('[data-due]', m.el), 'data-d', (v) => { due = v; });
   const oth = $('[data-other]', m.el); if (oth) oth.onchange = () => { companyId = oth.value; $$('[data-c]', m.el).forEach((x) => x.classList.toggle('on', !oth.value && x.dataset.c === '')); };
   $('[data-date]', m.el).onchange = (e) => { due = e.target.value; $$('[data-d]', m.el).forEach((x) => x.classList.remove('on')); };
-  try { cam.click(); } catch (e) { /* le navigateur demande un geste : bouton visible */ }
+  // pas d'appareil photo automatique : on peut juste noter quelque chose ; la photo reste à un bouton
+  if (!isPhone()) form.title.focus();
   $('[data-save]', m.el).onclick = async () => {
     const title = form.title.value.trim();
     if (!title) { toast('Écrivez en une phrase ce qu\'il faut faire'); form.title.focus(); return; }

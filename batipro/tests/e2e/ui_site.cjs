@@ -10,6 +10,7 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
   const p = await ctx.newPage();
   const errs = []; p.on('pageerror', (e) => errs.push(e.message));
   p.on('dialog', (d) => d.accept());
+  let choosers = 0; p.on('filechooser', () => { choosers++; });
   await p.goto(BASE + '/'); await p.fill('input[name=email]', 'admin@test.madibu.local'); await p.fill('input[name=password]', 'Admin-Test-2026'); await p.click('button[type=submit]');
   await p.waitForFunction('typeof S !== "undefined" && S.ready', null, { timeout: 30000 });
   const ids = await p.evaluate(async () => {
@@ -56,6 +57,8 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
   await p.click('[data-add]'); await p.waitForTimeout(200);
   const box = await p.$eval('.site-viewer', (e) => { const r = e.getBoundingClientRect(); return { x: r.left + r.width * 0.3, y: r.top + r.height * 0.5 }; });
   await p.mouse.click(box.x, box.y); await p.waitForSelector('.modal [data-cam]', { state: 'attached' });
+  await p.waitForTimeout(600);
+  check('nouveau point : l\'appareil photo ne s\'ouvre pas tout seul (photo facultative)', choosers === 0 && await p.isVisible('.modal textarea[name=title]'));
   await p.setInputFiles('.modal [data-cam]', { name: 'photo.png', mimeType: 'image/png', buffer: PNG }); await p.waitForTimeout(500);
   await p.fill('.modal textarea[name=title]', 'Fissure mur séjour');
   await p.click(`.modal [data-c="${ids.sub}"]`);
