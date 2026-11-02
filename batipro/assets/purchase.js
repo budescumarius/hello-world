@@ -441,6 +441,23 @@ route('purchase', async (id) => {
     if (!got.length) { btn.disabled = false; return toast('Aucun article reconnu dans ce PDF (facture scannée ?) : liez les montants ci-dessous.', 5000); }
     items = got; picked.clear(); toast(`${items.length} article(s) lu(s)`, 2000); d.items = items; syncAlloc(); drawItems();
   };
+  // Facture Peppol : les articles viennent du XML (montants exacts) mais sans la référence de livraison / chantier.
+  // On lit le PDF joint, on reconnaît chaque article (même montant, dans l'ordre) et on reprend seulement sa référence (« V/réf. », « BL »…).
+  const isPeppol = () => d.source === 'peppol' || !!d.peppol;
+  const applyPdfGroups = async (quiet) => {
+    let txt = ''; try { txt = await pdfFileText(fileId, 20); } catch (err) { /* PDF illisible */ }
+    const pdf = invoiceItemsFromText(txt);
+    if (!pdf.some((x) => x.grp)) { if (!quiet) toast('Aucune référence de livraison trouvée dans le PDF.', 4000); return false; }
+    let j = 0; let hit = 0; const grp = new Array(items.length).fill('');
+    items.forEach((it, i) => {
+      for (let k = j; k < Math.min(pdf.length, j + 8); k++) if (Math.abs(Math.abs(pdf[k].amount) - Math.abs(it.amount)) < 0.011) { grp[i] = pdf[k].grp || ''; j = k + 1; hit++; break; }
+    });
+    if (hit < Math.max(1, items.length * 0.6)) { if (!quiet) toast('Les articles du PDF ne correspondent pas assez à ceux de la facture Peppol : regroupement non appliqué.', 5000); return false; }
+    // article non retrouvé : même référence que l'article précédent (même bon de livraison)
+    let last = ''; items.forEach((it, i) => { if (grp[i]) last = grp[i]; if (last) it.grp = grp[i] || last; });
+    d.items = items; if (!quiet) toast(`Articles regroupés par référence (${hit}/${items.length} reconnus dans le PDF)`, 3000);
+    return true;
+  };
   const drawItems = () => {
     const box = $('[data-items]', page);
     if (!items.length) {
@@ -484,7 +501,7 @@ route('purchase', async (id) => {
       row.onclick = (ev) => { if (ev.target.tagName === 'SELECT' || ev.target.tagName === 'OPTION') return; const all = ids.every((i) => picked.has(i)); ids.forEach((i) => (all ? picked.delete(i) : picked.add(i))); drawItems(); };
       $('select', row).onchange = (ev) => { if (!ev.target.value) return; ids.forEach((i) => { items[i].pid = +ev.target.value; picked.delete(i); }); syncAlloc(); drawItems(); };
     });
-    const rr = $('[data-reread]', box); if (rr) rr.onclick = () => readItems(rr);
+    const rr = $('[data-reread]', box); if (rr) rr.onclick = () => (isPeppol() ? applyPdfGroups(false).then((ok) => { if (ok) drawItems(); }) : readItems(rr));
     $$('[data-it]', box).forEach((row) => {
       const i = +row.dataset.it;
       if (items[i].pid) { $('select', row).onchange = (ev) => { items[i].pid = ev.target.value ? +ev.target.value : ''; syncAlloc(); drawItems(); }; return; }
@@ -498,6 +515,8 @@ route('purchase', async (id) => {
     };
   };
   drawItems();
+  // Peppol avec PDF joint : regroupement automatique à l'ouverture (comme pour une facture PDF importée)
+  if (isPeppol() && fileId && isPdfFile() && items.length && !items.some((x) => x.grp)) applyPdfGroups(true).then((ok) => { if (ok) drawItems(); });
 
   // --- facture affichée à droite
   const view = $('[data-view]', page);
