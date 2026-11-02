@@ -20,6 +20,17 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   const inv = await p.evaluate(async () => (await db.list('invoice')).filter((i) => i.data.external && (i.number === 'REPRISE-2026-77' || !i.number)));
   check('facture d\'un autre logiciel enregistrée avec son numéro d\'origine (une seule fiche)', inv.length === 1 && inv[0].number === 'REPRISE-2026-77', JSON.stringify(inv.map((i) => i.number)) + ' ' + errs.join(' | '));
   if (inv.length) {
+    await p.goto(`${BASE}/#/invoice/${inv[0].id}`); await p.waitForTimeout(1200);
+    const pg = await p.textContent('#page');
+    check('fiche : « Reprise » et bandeau « pas envoyée au comptable », sans bouton Envoyer', (await p.$$eval('.badge', (l) => l.map((x) => x.textContent))).includes('Reprise') && pg.includes('Facture reprise d\'un autre logiciel') && !(await p.$('[data-send]')));
+    await p.goto(`${BASE}/#/invoices`); await p.waitForTimeout(1200);
+    check('liste des factures : étiquette « Reprise »', (await p.$$eval('.badge', (l) => l.map((x) => x.textContent))).includes('Reprise'));
+    const exp = await p.evaluate(async () => (await persist('expense', { data: { date: today(), category: 'mat', source: 'reprise', status: 'validee', external: true, desc: 'Reprise ancien logiciel – Matériaux', ref: 'REPRISE-ACHAT-9', amount: 321, vat: 0, ttc: 321, paid: true } })).id);
+    await p.goto(`${BASE}/#/purchase/${exp}`); await p.waitForTimeout(1200);
+    check('fiche achat repris : « Reprise » et bandeau', (await p.textContent('#page')).includes('Dépense reprise d\'un autre logiciel'));
+    await p.goto(`${BASE}/#/export`); await p.waitForTimeout(1500);
+    const ex = await p.textContent('#page');
+    check('export comptable : facture et achat repris absents', !ex.includes('REPRISE-2026-77') && !ex.includes('REPRISE-ACHAT-9'));
     await p.evaluate((it) => deleteMany('invoice', [it]), inv[0]);
     await p.waitForTimeout(1200);
     const left = await p.evaluate(async (id) => (await db.list('invoice')).some((i) => i.id === id), inv[0].id);

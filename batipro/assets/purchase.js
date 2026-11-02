@@ -75,7 +75,7 @@ function expensesTable(el, rows, contacts, projects, showProject, pid) {
       { l: 'Date', v: (e) => fmtDate(e.data.date), sort: (e) => e.data.date || '' },
       { l: 'Type', v: (e) => `<span class="nowrap"><i class="tdot" style="--c:${TYPE_COLORS[cat(e)] || '#999'}"></i>${esc(TYPES[cat(e)] || '')}</span>` },
       { l: 'Fournisseur', v: (e) => `<b>${esc(contactName(byId(contacts, e.data.supplierId)))}</b>`, sort: (e) => contactName(byId(contacts, e.data.supplierId)) },
-      { l: 'Référence', v: (e) => `${esc(e.data.ref || '—')}${e.data.desc && e.data.desc !== `Facture ${e.data.ref}` ? `<br><small class="muted">${esc(e.data.desc.slice(0, 60))}</small>` : ''}` },
+      { l: 'Référence', v: (e) => `${esc(e.data.ref || '—')}${e.data.external ? ` ${repriseBadge('achat')}` : ''}${e.data.desc && e.data.desc !== `Facture ${e.data.ref}` ? `<br><small class="muted">${esc(e.data.desc.slice(0, 60))}</small>` : ''}` },
       ...(showProject ? [{ l: 'Chantier', v: where }] : []),
       { l: pid ? 'HT (part du chantier)' : 'Montant HT', cls: 'r', v: (e) => `<b>${money(amt(e))}</b>${pid && Array.isArray(e.data.alloc) && e.data.alloc.length ? `<br><small class="muted">sur ${money(e.data.amount)}</small>` : ''}`, sort: amt },
       { l: 'Statut', v: purchStatusHtml, sort: (e) => Object.keys(PURCH_ST).indexOf(purchState(e)) },
@@ -256,10 +256,10 @@ route('purchase', async (id) => {
   const st = isNew ? 'avalider' : purchState(e);
   const page = layout({ active: 'finances', icon: 'coins', back: '#/expenses',
     title: `${isNew ? 'Nouvelle facture fournisseur' : 'Facture fournisseur'}${d.ref ? ' – ' + d.ref : ''}`,
-    sub: `${badge(PURCH_ST[st][0], PURCH_ST[st][1])}${d.source || d.peppol ? ` <span class="muted">${esc(PURCH_SRC[d.source] || 'Peppol')}</span>` : ''}` });
+    sub: `${badge(PURCH_ST[st][0], PURCH_ST[st][1])}${d.external ? ` ${repriseBadge('achat')}` : ''}${d.source || d.peppol ? ` <span class="muted">${esc(PURCH_SRC[d.source] || 'Peppol')}</span>` : ''}` });
   const supOpts = contacts.filter((c) => ['fournisseur', 'soustraitant', 'autre'].includes(c.data.kind) || c.id === +d.supplierId);
   const vatOpts = (r) => [...new Set([...vatList(), num(r)])].sort((a, b) => b - a).map((x) => `<option value="${x}" ${num(r) === x ? 'selected' : ''}>${fnum(x)} %</option>`).join('');
-  page.innerHTML = `<div class="pi">
+  page.innerHTML = `${d.external ? '<div class="alert info"><b>Dépense reprise d\'un autre logiciel.</b> Elle sert uniquement au suivi du chantier (rentabilité) : elle n\'est pas envoyée au comptable (export comptable).</div>' : ''}<div class="pi">
     <section class="card"><div class="card-h"><h3>Informations générales</h3></div>
       ${d.refused ? `<div class="hint-box warn">Facture refusée${d.refuseReason ? ' : ' + esc(d.refuseReason) : ''}.</div>` : ''}
       ${d.readNote && st === 'avalider' ? `<div class="hint-box">${esc(d.readNote)}${/\.pdf$/i.test(d.fileName || '') ? ` <button type="button" class="link-btn" data-reread>Relire la facture</button>` : ''}</div>` : ''}

@@ -73,7 +73,7 @@ route('invoices', async () => {
     search: (i) => [i.number, i.data.title, i.data.ref, contactName(byId(contacts, i.data.clientId)), (byId(projects, i.project_id) || { data: {} }).data.name, fnum(i.st.t.total)].join(' '),
     filters: { def: '', options: [['', 'Toutes'], ['brouillon', 'Brouillons', '#868e96'], ['aenvoyer', 'À envoyer', '#f08c00'], ['envoye', 'Envoyées', '#3b5bdb'], ['partielle', 'Part. payées', '#e8a10c'], ['payee', 'Payées', '#2f9e44'], ['retard', 'En retard', '#e5484d'], ['avoir', 'Notes de crédit', '#adb5bd'], ['proforma', 'Pro forma', '#7048e8']], match: (i, f) => invDisp(i).k === f },
     columns: [
-      { l: 'N°', v: (i) => `<b class="nowrap">${esc(i.number || '—')}</b>${i.data.external ? '<br><small class="muted" title="Facture émise dans l\'ancien logiciel">reprise</small>' : ''}`, sort: (i) => i.number || '' },
+      { l: 'N°', v: (i) => `<b class="nowrap">${esc(i.number || '—')}</b>${i.data.external ? `<br>${repriseBadge()}` : ''}`, sort: (i) => i.number || '' },
       { l: 'Date', v: (i) => fmtDate(i.data.date), sort: (i) => `${i.data.date || ''}${String(i.id).padStart(8, '0')}` },
       { l: 'Type', v: (i) => esc(INV_TYPE[i.data.kind] || 'Facture') },
       { l: 'Client', v: (i) => esc(contactName(byId(contacts, i.data.clientId))), sort: (i) => contactName(byId(contacts, i.data.clientId)) },
@@ -217,7 +217,7 @@ function invMenu(it) {
     ...(locked ? [{ label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/invoice/${it.id}?mail=1`) },
       { label: 'Peppol – facture électronique', icon: 'file', run: () => peppolInvoice(it) },
       ...(d.kind !== 'avoir' && invState(it).rest > 0.005 ? [{ label: 'Ajouter un paiement', icon: 'coins', run: () => invPayment(it, null) }] : []),
-      ...(!isEA(it) && !(d.sent || []).length && !(d.peppol && d.peppol.sentAt) ? [{ label: 'Marquer comme envoyée (envoi manuel)…', icon: 'check', run: () => invMarkSent([it]) }] : []),
+      ...(!isEA(it) && !d.external && !(d.sent || []).length && !(d.peppol && d.peppol.sentAt) ? [{ label: 'Marquer comme envoyée (envoi manuel)…', icon: 'check', run: () => invMarkSent([it]) }] : []),
       ...((d.sent || []).some((x) => x.manual) ? [{ label: 'Annuler « envoyée manuellement »', icon: 'x', run: () => invUnmarkSent(it) }] : [])] : []),
     { label: 'Commentaires', icon: 'chat', run: () => invComments(it) },
     ...(locked ? [{ sep: true }, { label: 'Modifier / supprimer la facture validée…', icon: 'edit', run: () => invChangeValidated(it) }] : []),
@@ -265,10 +265,10 @@ route('invoice', async (id, tab = 'informations') => {
   const changed = () => { const el = $('[data-saved]'); if (el) el.textContent = 'Modification…'; save(); };
   const page = layout({ active: 'finances', icon: 'coins', back: '#/invoices',
     title: isEA(it) ? `État d'avancement EA${d.situationNo || ''}${d.title ? ` – ${d.title}` : ''}` : `${locked ? type : `Modifier une ${type.toLowerCase()}`}${it.number ? ` ${it.number}` : ''}${d.title ? ` – ${d.title}` : ''}`,
-    sub: `${badge(disp.l, disp.c)}${d.peppol && d.peppol.sentAt ? ` ${badge('Peppol ✓', '#0c8599')}` : ''} <span class="muted" data-saved></span>`,
+    sub: `${badge(disp.l, disp.c)}${d.external ? ` ${repriseBadge()}` : ''}${d.peppol && d.peppol.sentAt ? ` ${badge('Peppol ✓', '#0c8599')}` : ''} <span class="muted" data-saved></span>`,
     tabs: TABS.map(([k, l, ic]) => `<a href="#/invoice/${it.id}/${k}" class="${k === tab ? 'on' : ''}">${I[ic] || ''} ${l}</a>`).join('') });
-  page.innerHTML = `${isEA(it) ? '<div data-ea></div>' : ''}<div class="inv-page" data-body></div>
-    <div class="pi-bar">${locked ? `<button class="btn" data-back>Retour</button><span class="grow"></span><a class="btn" href="#/print/invoice/${it.id}">${I.print} PDF</a><span class="btn-split"><button class="btn primary" data-send>${I.mail} Envoyer</button><button class="btn primary" data-more aria-label="Autres actions">${I.chevron}</button></span>`
+  page.innerHTML = `${d.external ? '<div class="alert info"><b>Facture reprise d\'un autre logiciel.</b> Elle sert uniquement au suivi du chantier (rentabilité, encaissé) : elle n\'est pas envoyée au comptable (export comptable) ni au client, et ne se transmet pas par Peppol.</div>' : ''}${isEA(it) ? '<div data-ea></div>' : ''}<div class="inv-page" data-body></div>
+    <div class="pi-bar">${locked ? `<button class="btn" data-back>Retour</button><span class="grow"></span><a class="btn" href="#/print/invoice/${it.id}">${I.print} PDF</a>${d.external ? `<button class="btn primary" data-more>Actions ${I.chevron}</button>` : `<span class="btn-split"><button class="btn primary" data-send>${I.mail} Envoyer</button><button class="btn primary" data-more aria-label="Autres actions">${I.chevron}</button></span>`}`
       : `<span class="grow"></span><button class="btn" data-back>Annuler</button><span class="btn-split"><button class="btn primary" data-submit>${isEA(it) ? 'Facturer' : 'Soumettre'}</button><button class="btn primary" data-more aria-label="Autres actions">${I.chevron}</button></span>`}</div>`;
   const body = $('[data-body]', page);
   const dis = locked ? 'disabled' : '';
@@ -450,8 +450,8 @@ route('invoice', async (id, tab = 'informations') => {
   const sub = $('[data-submit]', page); if (sub) sub.onclick = () => emit();
   const snd = $('[data-send]', page); if (snd) snd.onclick = () => go(`#/print/invoice/${it.id}?mail=1`);
   $('[data-more]', page).onclick = () => (d.kind === 'proforma' && locked ? menuSheet('Facture pro forma', proformaActions(it)) : menuSheet(locked ? 'Facture' : 'Soumettre', locked ? [
-    { label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/invoice/${it.id}?mail=1`) },
-    { label: 'Peppol – facture électronique', icon: 'file', primary: true, run: () => peppolInvoice(it) },
+    ...(d.external ? [] : [{ label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/invoice/${it.id}?mail=1`) },
+      { label: 'Peppol – facture électronique', icon: 'file', primary: true, run: () => peppolInvoice(it) }]),
     ...(d.kind !== 'avoir' && invState(it).rest > 0.005 ? [{ label: 'Ajouter un paiement', icon: 'coins', run: () => invPayment(it, null) }] : []),
     ...(!isEA(it) && !(d.sent || []).length && !(d.peppol && d.peppol.sentAt) ? [{ label: 'Marquer comme envoyée (envoi manuel)…', icon: 'check', run: () => invMarkSent([it]) }] : []),
     ...((d.sent || []).some((x) => x.manual) ? [{ label: 'Annuler « envoyée manuellement »', icon: 'x', run: () => invUnmarkSent(it) }] : []),

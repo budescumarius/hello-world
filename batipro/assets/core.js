@@ -660,6 +660,8 @@ function dataTable(el, { columns, rows, onRow, empty: emptyMsg = 'Aucun élémen
   draw();
 }
 const badge = (label, color) => `<span class="badge" style="--c:${color}">${esc(label)}</span>`;
+// document repris d'un autre logiciel : pour le suivi du chantier (rentabilité) uniquement, jamais envoyé au comptable ni au client
+const repriseBadge = (kind = 'facture') => `<span class="badge" style="--c:#7048e8" title="${kind === 'achat' ? 'Dépense reprise' : 'Facture reprise'} d'un autre logiciel : suivi du chantier uniquement, pas envoyée au comptable">Reprise</span>`;
 const empty = (title, text = '', action = '') => `<div class="empty-big"><h3>${esc(title)}</h3><p>${esc(text)}</p>${action}</div>`;
 const kpi = (label, value, opt = {}) => `<div class="kpi ${opt.cls || ''}" ${opt.href ? `data-href="${opt.href}"` : ''}><small>${esc(label)}</small><b>${value}</b>${opt.sub ? `<span class="muted">${opt.sub}</span>` : ''}${opt.meter != null ? `<div class="meter"><i style="width:${Math.max(0, Math.min(100, opt.meter))}%;${opt.meterColor ? `--c:${opt.meterColor}` : ''}"></i></div>` : ''}</div>`;
 function bindKpis(root) { $$('[data-href]', root).forEach((k) => { k.onclick = () => { location.hash = k.dataset.href; }; }); }

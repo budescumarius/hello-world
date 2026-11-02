@@ -295,7 +295,7 @@ async function tabPInvoices(p, el, contacts) {
   el.innerHTML = `<div class="toolbar"><span class="grow"></span>${acc.length ? '<button class="btn" data-act="fq">Facturer un devis…</button>' : ''}<button class="btn" data-act="ext">${I.download} Facture d'un autre logiciel</button><button class="btn primary" data-act="ni">${I.plus} Facture libre</button></div><div id="tbl"></div>`;
   dataTable($('#tbl', el), {
     rows: invoices.map((i) => ({ ...i, st: invState(i) })), select: { actions: (x) => multiActions('invoice', x) },
-    columns: [{ l: 'N°', v: (i) => `<b>${esc(i.number || (i.data.status === 'emise' ? 'Sans numéro' : 'Brouillon'))}</b>` }, { l: 'Type', v: (i) => esc(IKIND[i.data.kind]) }, { l: 'Date', v: (i) => fmtDate(i.data.date) }, { l: 'Échéance', v: (i) => fmtDate(i.data.due) },
+    columns: [{ l: 'N°', v: (i) => `<b>${esc(i.number || (i.data.status === 'emise' ? 'Sans numéro' : 'Brouillon'))}</b>${i.data.external ? ` ${repriseBadge()}` : ''}` }, { l: 'Type', v: (i) => esc(IKIND[i.data.kind]) }, { l: 'Date', v: (i) => fmtDate(i.data.date) }, { l: 'Échéance', v: (i) => fmtDate(i.data.due) },
       { l: 'Statut', v: (i) => (i.data.kind === 'proforma' ? badge(i.data.convertedTo ? 'Pro forma → facturée' : 'Pro forma', '#7048e8') : st(IST, i.st.s)) }, { l: 'Total HT', cls: 'r', v: (i) => money(i.st.t.base) }, { l: 'Total TVAC', cls: 'r', v: (i) => `<b>${money(i.st.t.total)}</b>` }, { l: 'Reste', cls: 'r', v: (i) => (['brouillon', 'avoir'].includes(i.st.s) || i.data.kind === 'proforma' ? '' : money(i.st.rest)) }],
     onRow: (i) => go(`#/invoice/${i.id}`), empty: 'Aucune facture',
   });
