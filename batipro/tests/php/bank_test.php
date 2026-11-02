@@ -247,7 +247,10 @@ T::test('annulation d\'un import : mouvements retirés, journal et original cons
     $cl = (int)db()->query("SELECT id FROM pil_bank_tx WHERE account_id = {$acc['bnp']} AND amount = 1060000")->fetchColumn();
     [$c] = $admin->req('PUT', "pilot/tx/$cl", ['match' => ['type' => 'invoice', 'id' => $inv['id'], 'pay' => true]]); T::eq(200, $c);
     $imp = db()->query("SELECT * FROM pil_bank_imports WHERE account_id = {$acc['bnp']} AND status = 'importe'")->fetch();
-    [$c] = $admin->req('DELETE', "pilot/imports/{$imp['id']}"); T::eq(200, $c);
+    // annulation = demande d'approbation (étape 5), approuvée puis exécutée
+    [$c, $r] = $admin->req('DELETE', "pilot/imports/{$imp['id']}", ['justification' => 'test']); T::eq(202, $c); T::eq(1, (int)db()->query("SELECT COUNT(*) FROM pil_bank_tx WHERE import_id = {$imp['id']} LIMIT 1")->fetchColumn() > 0 ? 1 : 0, 'rien n\'est annulé avant approbation');
+    [$c] = $admin->req('POST', "pilot/approvals/{$r['approval']['id']}/approve", ['note' => 'ok']); T::eq(200, $c);
+    [$c] = $admin->req('POST', "pilot/approvals/{$r['approval']['id']}/execute"); T::eq(200, $c);
     T::eq(0, (int)db()->query("SELECT COUNT(*) FROM pil_bank_tx WHERE import_id = {$imp['id']}")->fetchColumn());
     [, $f] = $admin->req('GET', "items/invoice/{$inv['id']}"); T::eq([], $f['data']['payments'] ?? [], 'paiement retiré de la facture avec l\'import');
     T::eq('annule', db()->query("SELECT status FROM pil_bank_imports WHERE id = {$imp['id']}")->fetchColumn());

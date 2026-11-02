@@ -326,6 +326,9 @@ function pil_report_run(string $today, string $source, ?array $me = null, bool $
         if ($cur && $cur['hash'] === $hash) $msg = 'Rapport inchangé (mêmes données) : non régénéré.';
         else {
             [$comment, $check] = $withAi ? pil_ai_comment($data) : [null, null];
+            if ($comment !== null) pil_audit('commentaire_ia', 'report', null, null, ['date' => $today, 'verification' => $check], 'ia');
+            // ancre du journal d'audit recopiée dans le rapport du jour (détection d'une suppression des dernières entrées)
+            $data['audit_anchor'] = setting('pilotage_audit_anchor', null);
             if ($cur) q('UPDATE pil_reports SET data = ?, hash = ?, ai_comment = ?, ai_check = ?, source = ?, version = version + 1, updated_at = ? WHERE id = ?', [json_encode($data, JSON_UNESCAPED_UNICODE), $hash, $comment, $check ? json_encode($check, JSON_UNESCAPED_UNICODE) : null, $source, now(), $cur['id']]);
             else q('INSERT INTO pil_reports (company_id, rdate, data, hash, ai_comment, ai_check, source, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)', [cid(), $today, json_encode($data, JSON_UNESCAPED_UNICODE), $hash, $comment, $check ? json_encode($check, JSON_UNESCAPED_UNICODE) : null, $source, now(), now()]);
             $msg = $cur ? 'Rapport mis à jour (données modifiées).' : 'Rapport créé.';
@@ -333,6 +336,7 @@ function pil_report_run(string $today, string $source, ?array $me = null, bool $
         $s = $data['alerts']['sync'];
         $msg .= " Alertes : {$s['new']} nouvelle(s), {$s['updated']} mise(s) à jour, {$s['resolved']} résolue(s).";
         q("UPDATE pil_runs SET finished_at = ?, status = 'ok', message = ? WHERE id = ?", [now(), $msg, $run]);
+        pil_audit('rapport_quotidien', 'report', $run, null, ['date' => $today, 'message' => $msg], $source === 'cron' ? 'cron' : 'utilisateur', $me['id'] ?? null);
         if ($me) log_activity($me['id'], 'create', 'pilot_report', null, null, 'Rapport financier du ' . pil_d($today));
         return ['ok' => true, 'message' => $msg];
     } catch (Throwable $e) {
@@ -432,6 +436,9 @@ function pil_ai_tools(): array {
         ['name' => 'totaux_achats', 'description' => 'Factures fournisseurs enregistrées dans BâtiPro sur une période, par type de fournisseur (fournisseur / soustraitant) : total TTC, payé, reste.', 'inputSchema' => $o(['type_fournisseur' => ['type' => 'string', 'enum' => ['tous', 'fournisseur', 'soustraitant']], 'du' => $date, 'au' => $date], ['du', 'au'])],
         ['name' => 'alertes', 'description' => 'Alertes de direction ouvertes (ou toutes) : titre, gravité, montant, données utilisées, calcul, action, responsable, date limite, statut.', 'inputSchema' => $o(['toutes' => ['type' => 'boolean']])],
         ['name' => 'comparer_mois', 'description' => 'Compare deux mois (AAAA-MM) : banque, facturation, achats, situation des rapports.', 'inputSchema' => $o(['mois1' => ['type' => 'string'], 'mois2' => ['type' => 'string']], ['mois1', 'mois2'])],
+        ['name' => 'proposer_action', 'description' => 'PROPOSE une action sensible à la direction : elle est placée dans le centre d\'approbation et ne sera JAMAIS exécutée sans approbation humaine. Types : relance_client (e-mail préparé au client d\'une facture en retard), paiement_rapprochement (enregistrer dans une facture ou un achat le paiement d\'un mouvement bancaire).',
+            'inputSchema' => $o(['type' => ['type' => 'string', 'enum' => ['relance_client', 'paiement_rapprochement']], 'facture_id' => ['type' => 'integer'], 'mouvement_id' => ['type' => 'integer'], 'document_type' => ['type' => 'string', 'enum' => ['invoice', 'expense']], 'document_id' => ['type' => 'integer'], 'justification' => ['type' => 'string'], 'texte_email' => ['type' => 'string']], ['type', 'justification'])],
+        ['name' => 'creer_tache_interne', 'description' => 'Crée une tâche interne BâtiPro (action autorisée sans approbation : aucune conséquence externe ni financière).', 'inputSchema' => $o(['titre' => ['type' => 'string'], 'details' => ['type' => 'string'], 'echeance' => $date], ['titre'])],
         ['name' => 'revue_prevision', 'description' => 'Explique pourquoi la prévision d\'un rapport passé (date) a différé de la réalité bancaire N jours plus tard.', 'inputSchema' => $o(['date_rapport' => $date, 'jours' => ['type' => 'integer']], ['date_rapport'])],
     ];
 }
@@ -482,6 +489,35 @@ function pil_run_tool(string $name, array $in, string $today): array {
         case 'comparer_mois':
             if (!preg_match('/^\d{4}-\d{2}$/', (string)($in['mois1'] ?? '')) || !preg_match('/^\d{4}-\d{2}$/', (string)($in['mois2'] ?? ''))) return ['error' => 'Mois invalides (AAAA-MM).'];
             return $src(pil_compare_months($in['mois1'], $in['mois2']), 'Extraits, factures, achats et rapports quotidiens', $in['mois1'] . ' et ' . $in['mois2']);
+        case 'proposer_action':
+            $me = current_user(); $just = mb_substr(trim((string)($in['justification'] ?? '')), 0, 2000);
+            if (($in['type'] ?? '') === 'relance_client') {
+                $inv = q("SELECT id, number, data FROM items WHERE id = ? AND company_id = ? AND type = 'invoice'", [(int)($in['facture_id'] ?? 0), cid()])->fetch();
+                if (!$inv) return ['error' => 'Facture introuvable.'];
+                $d = json_decode($inv['data'], true) ?: []; $s = pil_inv_state(['data' => $d], $today);
+                $cl = q("SELECT data FROM items WHERE id = ? AND company_id = ? AND type = 'contact'", [(int)($d['clientId'] ?? 0), cid()])->fetch(); $cd = $cl ? (json_decode($cl['data'], true) ?: []) : [];
+                if (empty($cd['email'])) return ['error' => 'Le client n\'a pas d\'adresse e-mail dans BâtiPro : relance impossible à préparer.', '_manquant' => ['e-mail du client']];
+                $co = setting('company', []) ?: [];
+                $body = trim((string)($in['texte_email'] ?? '')) ?: "Madame, Monsieur,\n\nSauf erreur de notre part, la facture n° {$inv['number']} du " . pil_d($d['date'] ?? null) . ' (échéance ' . pil_d($d['due'] ?? null) . ') présente un solde impayé de ' . pil_fmt(pil_c($s['rest'])) . ".\nNous vous remercions de bien vouloir procéder au règlement.\n\nCordialement,\n" . ($co['name'] ?? '');
+                $a = pil_approval_request(['type' => 'email_externe', 'origin' => 'ia', 'description' => 'Relance de la facture ' . $inv['number'] . ' (' . pil_contact_label(['data' => $cd]) . ')', 'amount' => pil_c($s['rest']), 'justification' => $just,
+                    'payload' => ['to' => $cd['email'], 'to_name' => pil_contact_label(['data' => $cd]), 'subject' => 'Rappel – facture ' . $inv['number'], 'body' => $body, 'invoice_id' => (int)$inv['id']], 'risks' => ['E-mail externe envoyé au client au nom de l\'entreprise'], 'documents' => [['type' => 'invoice', 'id' => (int)$inv['id'], 'name' => $inv['number']]]], $me);
+                return ['proposition_creee' => true, 'demande' => $a['id'], 'statut' => 'en attente d\'approbation', '_source' => 'Centre d\'approbation'];
+            }
+            if (($in['type'] ?? '') === 'paiement_rapprochement') {
+                $t = q('SELECT * FROM pil_bank_tx WHERE id = ? AND company_id = ?', [(int)($in['mouvement_id'] ?? 0), cid()])->fetch(); if (!$t) return ['error' => 'Mouvement introuvable.'];
+                $type = in_array($in['document_type'] ?? '', ['invoice', 'expense'], true) ? $in['document_type'] : ''; $doc = $type ? q('SELECT id, number FROM items WHERE id = ? AND company_id = ? AND type = ?', [(int)($in['document_id'] ?? 0), cid(), $type])->fetch() : null;
+                if (!$doc) return ['error' => 'Document introuvable.'];
+                $a = pil_approval_request(['type' => 'paiement_rapprochement', 'origin' => 'ia', 'description' => 'Proposition IA : enregistrer le paiement de ' . pil_fmt(abs((int)$t['amount'])) . ' du ' . pil_d($t['booking_date']) . ' dans ' . ($type === 'invoice' ? 'la facture ' : 'l\'achat ') . ($doc['number'] ?: '#' . $doc['id']),
+                    'payload' => ['tx_id' => (int)$t['id'], 'type' => $type, 'id' => (int)$doc['id']], 'amount' => abs((int)$t['amount']), 'justification' => $just, 'risks' => ['Modifie l\'état de paiement du document dans BâtiPro.']], $me);
+                return ['proposition_creee' => true, 'demande' => $a['id'], 'statut' => 'en attente d\'approbation', '_source' => 'Centre d\'approbation'];
+            }
+            return ['error' => 'Type d\'action non autorisé.'];
+        case 'creer_tache_interne':
+            $title = mb_substr(trim((string)($in['titre'] ?? '')), 0, 190); if ($title === '') return ['error' => 'Titre vide.'];
+            $data = ['title' => $title, 'notes' => mb_substr((string)($in['details'] ?? ''), 0, 2000), 'due' => $dateOk($in['echeance'] ?? null) ? $in['echeance'] : null, 'status' => 'todo', 'priority' => 'normal', 'source' => 'Pilotage (assistant IA)'];
+            q('INSERT INTO items (company_id, type, project_id, parent_id, number, data, lite, version, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,1,?,?,?,?)', [cid(), 'task', null, null, null, json_encode($data, JSON_UNESCAPED_UNICODE), null, current_user()['id'] ?? null, current_user()['id'] ?? null, now(), now()]);
+            $tid = (int)db()->lastInsertId(); pil_audit('tache_ia', 'task', $tid, null, $data, 'ia');
+            return ['tache_creee' => $tid, 'titre' => $title, '_source' => 'Tâches BâtiPro'];
         case 'revue_prevision':
             if (!$dateOk($in['date_rapport'] ?? null)) return ['error' => 'Date invalide (AAAA-MM-JJ).'];
             return $src(pil_forecast_review($in['date_rapport'], max(1, min(90, (int)($in['jours'] ?? 30)))), 'Rapport quotidien enregistré + extraits bancaires + paiements BâtiPro');
@@ -531,7 +567,7 @@ function pil_ai_system(): string {
         . "- Tu ne fais pas de nouveaux calculs financiers : les montants sont calculés par BâtiPro ; recopie-les tels quels (format 1.234,56 €). Les montants des données sont en CENTIMES : 123456 = 1.234,56 €.\n"
         . "- Pour chaque réponse, indique la période, la source et les hypothèses (champs _periode, _source, _hypotheses).\n"
         . "- Si une information manque (champ _manquant, extraits non couverts, donnée absente de BâtiPro), dis-le explicitement au lieu de deviner.\n"
-        . "- Tu ne peux exécuter aucun paiement ni modifier aucune donnée : tu recommandes, la direction décide.\n"
+        . "- Tu ne peux exécuter aucun paiement, signer, accepter un contrat, envoyer un e-mail ou une commande, ni modifier une donnée financière : pour une action sensible, utilise proposer_action (elle va au centre d'approbation, la direction décide). Tu peux créer une tâche interne.\n"
         . "- Réponds dans la langue de la question (souvent roumain ou français), de façon concise et structurée.";
 }
 /** Commentaire du rapport quotidien par l'IA (facultatif) ; les montants cités sont vérifiés contre le rapport. */
@@ -579,6 +615,7 @@ function pil_ask(array $me, string $question, ?int $convId, string $today): arra
     $answer = ''; foreach ($resp->content as $b) if ($b->type === 'text') $answer .= $b->text;
     $answer = trim($answer) ?: 'Je n\'ai pas pu formuler de réponse fiable à partir des données disponibles.';
     $check = pil_ai_verify($answer, $data);
+    pil_audit('question_ia', 'ai_conv', $convId, null, ['question' => $question, 'outils' => $used, 'verification' => $check], 'ia', (int)$me['id']);
     $turns[] = ['q' => $question, 'a' => $answer, 'tools' => $used, 'check' => $check, 'at' => now(), 'pinned' => false];
     if ($conv) q('UPDATE pil_ai_convs SET turns = ?, updated_at = ? WHERE id = ?', [json_encode($turns, JSON_UNESCAPED_UNICODE), now(), $conv['id']]);
     else { q('INSERT INTO pil_ai_convs (company_id, user_id, title, turns, created_at, updated_at) VALUES (?,?,?,?,?,?)', [cid(), $me['id'], mb_substr($question, 0, 190), json_encode($turns, JSON_UNESCAPED_UNICODE), now(), now()]); $convId = (int)db()->lastInsertId(); }
@@ -596,6 +633,7 @@ function pil_cron(): array {
         try {
             pil_director_schema();
             $today = date('Y-m-d');
+            pil_security_schema(); pil_approvals_expire(); // demandes d'approbation dépassées → « expirée »
             if (q("SELECT id FROM pil_runs WHERE company_id = ? AND rdate = ? AND source = 'cron' AND status = 'ok'", [cid(), $today])->fetch()) continue; // déjà fait aujourd'hui
             $done[cid()] = pil_report_run($today, 'cron')['message'];
         } catch (Throwable $e) { error_log('[pilotage cron] firme ' . cid() . ' : ' . $e->getMessage()); $done[cid()] = 'erreur : ' . $e->getMessage(); }
@@ -609,7 +647,16 @@ function pil_director_route(string $method, array $seg, array $me): void {
     $sub = $seg[1]; $id = isset($seg[2]) ? (int)$seg[2] : 0;
     $today = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($_GET['today'] ?? '')) ? $_GET['today'] : date('Y-m-d');
     switch ($sub) {
-        case 'projects': if ($method === 'GET') out(pil_projects_analysis($today)); break;
+        case 'projects':
+            if ($method === 'GET') {
+                $l = pil_projects_analysis($today);
+                if (pil_role($me) === 'project_manager') { // ses chantiers uniquement (responsable ou membre de l'équipe)
+                    $mine = []; foreach (pil_items(['project'])['project'] as $p) if ((int)($p['data']['managerId'] ?? 0) === (int)$me['id'] || in_array((int)$me['id'], array_map('intval', (array)($p['data']['team'] ?? [])), true)) $mine[$p['id']] = true;
+                    $l = array_values(array_filter($l, fn($p) => isset($mine[$p['id']])));
+                }
+                out($l);
+            }
+            break;
         case 'alerts':
             if ($method === 'GET') out(pil_alerts_list(!empty($_GET['all']) ? null : ['nouvelle', 'en_cours']));
             if ($method === 'PUT' && $id) {
@@ -621,6 +668,7 @@ function pil_director_route(string $method, array $seg, array $me): void {
                 $hist[] = ['at' => now(), 'by' => $me['id'], 'event' => 'modifiée par l\'utilisateur', 'to' => array_intersect_key($b, ['status' => 1, 'owner' => 1, 'due' => 1]), 'note' => mb_substr(trim((string)($b['note'] ?? '')), 0, 500)];
                 $set[] = 'history = ?'; $args[] = json_encode($hist, JSON_UNESCAPED_UNICODE); $set[] = 'updated_at = ?'; $args[] = now();
                 q('UPDATE pil_alerts SET ' . implode(', ', $set) . ' WHERE id = ?', array_merge($args, [$id]));
+                pil_audit('alerte_modifiee', 'alert', $id, array_intersect_key($a, ['status' => 1, 'owner' => 1, 'due' => 1]), array_intersect_key($b, ['status' => 1, 'owner' => 1, 'due' => 1, 'note' => 1]));
                 if (trim((string)($b['note'] ?? '')) !== '') q('INSERT INTO pil_decisions (company_id, rdate, alert_id, text, kind, status, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)', [cid(), $today, $id, mb_substr(trim((string)$b['note']), 0, 2000), 'decision', ($b['status'] ?? '') === 'resolue' ? 'realisee' : 'decidee', $me['id'], now()]);
                 out(pil_alert_out(q('SELECT * FROM pil_alerts WHERE id = ?', [$id])->fetch()));
             }
@@ -634,9 +682,10 @@ function pil_director_route(string $method, array $seg, array $me): void {
             if ($method === 'GET') out(array_map(fn($x) => $x + ['id' => (int)$x['id']], q('SELECT id, rdate, alert_id, text, kind, status, created_by, created_at, done_at FROM pil_decisions WHERE company_id = ? ORDER BY id DESC LIMIT 500', [cid()])->fetchAll()));
             if ($method === 'POST') { $b = body(); $t = trim((string)($b['text'] ?? '')); if ($t === '') fail(400, 'Texte vide');
                 q('INSERT INTO pil_decisions (company_id, rdate, alert_id, text, kind, status, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)', [cid(), $today, !empty($b['alert_id']) ? (int)$b['alert_id'] : null, mb_substr($t, 0, 2000), in_array($b['kind'] ?? '', ['decision', 'action', 'recommandation'], true) ? $b['kind'] : 'decision', 'decidee', $me['id'], now()]);
-                out(['ok' => true, 'id' => (int)db()->lastInsertId()]); }
+                $did = (int)db()->lastInsertId(); pil_audit('decision', 'decision', $did, null, ['texte' => $t, 'alerte' => $b['alert_id'] ?? null]);
+                out(['ok' => true, 'id' => $did]); }
             if ($method === 'PUT' && $id) { $st = (string)(body()['status'] ?? ''); if (!in_array($st, ['decidee', 'realisee', 'abandonnee'], true)) fail(400, 'Statut inconnu');
-                q('UPDATE pil_decisions SET status = ?, done_by = ?, done_at = ? WHERE id = ? AND company_id = ?', [$st, $me['id'], $st === 'decidee' ? null : now(), $id, cid()]); out(['ok' => true]); }
+                q('UPDATE pil_decisions SET status = ?, done_by = ?, done_at = ? WHERE id = ? AND company_id = ?', [$st, $me['id'], $st === 'decidee' ? null : now(), $id, cid()]); pil_audit('decision_statut', 'decision', $id, null, ['status' => $st]); out(['ok' => true]); }
             break;
         case 'compare': if ($method === 'GET') { foreach (['m1', 'm2'] as $k) if (!preg_match('/^\d{4}-\d{2}$/', (string)($_GET[$k] ?? ''))) fail(400, 'Mois invalide'); out(pil_compare_months($_GET['m1'], $_GET['m2'])); } break;
         case 'review': if ($method === 'GET') { if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($_GET['date'] ?? ''))) fail(400, 'Date invalide'); out(pil_forecast_review($_GET['date'], max(1, min(90, (int)($_GET['days'] ?? 30))))); } break;

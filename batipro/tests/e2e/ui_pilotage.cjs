@@ -20,14 +20,14 @@ const shots = process.argv[2];
   await p.waitForFunction('typeof S !== "undefined" && S.ready', null, { timeout: 20000 });
 
   // l'espace « Pilotage » apparaît dans la barre (module activé par bank_test.php)
-  await p.goto(BASE + '/#/pilotage'); await p.waitForSelector('.kpis', { timeout: 15000 });
+  await p.goto(BASE + '/#/pilotage/controle'); await p.waitForSelector('.pil-cov', { timeout: 15000 });
   check('espace « Pilotage » visible pour l\'administrateur', await p.$$eval('.dock-tab', (t) => t.some((x) => x.textContent.includes('Pilotage'))));
   check('tableau de contrôle : une carte par compte', (await p.$$('.pil-cov')).length === 3);
   await shot('pilotage-controle');
 
   // l'import Belfius est annulé puis refait par l'interface : le PDF est lu par pdf.js dans le navigateur
   const imp = await p.evaluate(async () => (await api('GET', 'pilot/imports')).find((i) => i.filename === 'belfius-fictif.pdf' && i.status === 'importe'));
-  await p.evaluate(async (id) => api('DELETE', `pilot/imports/${id}`), imp.id);
+  await p.evaluate(async (id) => { const r = await api('DELETE', `pilot/imports/${id}`, { justification: 'test UI' }); await api('POST', `pilot/approvals/${r.approval.id}/approve`, {}); await api('POST', `pilot/approvals/${r.approval.id}/execute`, {}); }, imp.id);
   await p.goto(BASE + '/#/pilotage/import'); await p.waitForSelector('[data-file]');
   await p.setInputFiles('[data-file]', FX + 'belfius-fictif.pdf');
   await p.waitForSelector('[data-out] .info, [data-out] .alert', { timeout: 20000 });
@@ -58,7 +58,7 @@ const shots = process.argv[2];
   await shot('pilotage-mouvements');
   // rapprochement avec enregistrement du paiement, depuis la fiche du mouvement
   const tx = await p.evaluate(async () => { const t = (await api('GET', 'pilot/tx')).find((x) => x.amount === 242000 && x.booking_date === '2026-01-25'); if (t.match_id) await api('PUT', `pilot/tx/${t.id}`, { match: null }); return t; });
-  await p.evaluate(() => { ui.pilTx = { status: '' }; }); await p.goto(BASE + '/#/pilotage'); await p.goto(BASE + '/#/pilotage/mouvements');
+  await p.evaluate(() => { ui.pilTx = { status: '' }; }); await p.goto(BASE + '/#/pilotage/controle'); await p.goto(BASE + '/#/pilotage/mouvements');
   await p.waitForFunction(() => (document.querySelector('.top h1') || {}).textContent === 'Mouvements bancaires');
   await p.fill('.search input', 'CLIENT FICTIF SA'); await p.waitForTimeout(300);
   const rows = await p.$$('.dt tbody tr');
@@ -126,6 +126,35 @@ const shots = process.argv[2];
   await p.click('.dt tbody tr:has-text("Rénovation Directeur")'); await p.waitForSelector('.modal .pil-kv');
   check('fiche : coûts facturé / engagé / payé / restant', ['Coût facturé', 'Coût engagé', 'Coût payé', 'Coût estimé restant', 'Rentabilité finale prévue'].every((w) => p.$('.modal') && true) && (await p.textContent('.modal')).includes('Coût estimé restant'));
   await shot('pilotage-chantiers'); await p.keyboard.press('Escape');
+  // étape 5 : Excel lu dans le navigateur, centre d'approbation, audit, rôles
+  await p.goto(BASE + '/#/pilotage/import'); await waitTitle('Importer un extrait');
+  await p.setInputFiles('[data-file]', FX + 'belfius-fictif-2026-02.xlsx');
+  await p.waitForSelector('[data-tm="balance"]', { timeout: 20000 });
+  const mapped = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll('[data-tm]')].map((s) => [s.dataset.tm, s.value])));
+  check('Excel : colonnes reconnues d\'après leurs titres', mapped.date === '1' && mapped.amount === '7' && mapped.balance === '10' && mapped.communication === '9', JSON.stringify(mapped));
+  await p.selectOption('[data-tacc]', { label: await p.evaluate(() => [...document.querySelectorAll('[data-tacc] option')].find((o) => o.textContent.includes('Belfius')).textContent) });
+  await p.click('[data-tgo]'); await p.waitForSelector('[data-out] .info, [data-out] .alert', { timeout: 20000 });
+  const xp = await p.textContent('[data-out]');
+  check('Excel lu par le navigateur = mêmes lignes que le serveur (contrôle exact, doublons reconnus)', xp.includes('✓ contrôle exact') && xp.includes('déjà enregistrées'), xp.slice(0, 200).replace(/\s+/g, ' '));
+  await shot('pilotage-excel');
+  const apId = await p.evaluate(async () => (await api('POST', 'pilot/approvals', { type: 'email_externe', payload: { to: 'x@exemple.invalid', subject: 'Test UI', body: 'Bonjour' } })).id);
+  await p.goto(BASE + '/#/pilotage/approbations'); await waitTitle('Centre d\'approbation');
+  await p.click(`.dt tbody tr:has-text("Test UI")`); await p.waitForSelector('.modal [data-ap="approve"]');
+  await shot('pilotage-approbation'); await p.click('.modal [data-ap="approve"]'); await p.waitForTimeout(1200);
+  const st1 = await p.evaluate(async (id) => (await api('GET', 'pilot/approvals')).find((a) => a.id === id).status, apId);
+  check('approbation depuis l\'écran : approuvée, pas encore exécutée', st1 === 'approuvee', st1);
+  await p.goto(BASE + '/#/pilotage/audit'); await waitTitle('Journal d\'audit');
+  check('journal d\'audit : intégrité vérifiée et affichée', (await p.textContent('.page')).includes('Intégrité vérifiée'));
+  await shot('pilotage-audit');
+  await p.goto(BASE + '/#/pilotage/parametres'); await waitTitle('Paramètres du Pilotage');
+  check('paramètres : rôles des utilisateurs', (await p.textContent('.page')).includes('Finance Fictif'));
+  await shot('pilotage-parametres');
+  const p2 = await b.newPage({ viewport: { width: 1280, height: 900 }, bypassCSP: true }); p2.on('pageerror', (e) => errs.push('finance: ' + e.message));
+  await p2.goto(BASE + '/'); await p2.fill('input[name=email]', 'finance@test.madibu.local'); await p2.fill('input[name=password]', 'Role-Test-2026'); await p2.click('button[type=submit]');
+  await p2.waitForFunction('typeof S !== "undefined" && S.ready', null, { timeout: 20000 });
+  await p2.goto(BASE + '/#/pilotage'); await p2.waitForSelector('.secbar', { timeout: 20000 }); await p2.waitForTimeout(800);
+  const secs = await p2.$$eval('.secbar a', (l) => l.map((x) => x.textContent));
+  check('rôle « finance » : menu limité à ses droits (ni audit ni paramètres)', secs.includes('Mouvements') && secs.includes('Approbations') && !secs.includes('Journal d\'audit') && !secs.includes('Paramètres'), secs.join(', '));
   check('aucune erreur JavaScript dans la page', errs.length === 0, errs.join(' | '));
   await b.close();
   console.log(failed ? `\n${failed} échec(s)` : '\npilotage dans le navigateur : tout est conforme');

@@ -67,6 +67,7 @@ switch ($seg[0] ?? '') {
             if (password_needs_rehash($u['pass'], PASSWORD_DEFAULT)) q('UPDATE users SET pass = ? WHERE id = ?', [password_hash((string)$b['password'], PASSWORD_DEFAULT), $u['id']]);
             q('UPDATE users SET last_login = ? WHERE id = ?', [now(), $u['id']]);
             q('DELETE FROM logins WHERE ip IN (?, ?)', [$ip, $acc]);
+            require_once __DIR__ . '/pilotage/security.php'; pil_audit_login(isset($u['company_id']) ? $u : q('SELECT * FROM users WHERE id = ?', [$uid ?? 0])->fetch()); // PILOTAGE : connexion journalisée
             out(['ok' => true]);
         }
         // 2e étape de la connexion : code à 6 chiffres de l'application d'authentification
@@ -86,6 +87,7 @@ switch ($seg[0] ?? '') {
             $_SESSION = ['uid' => $uid, 'pv' => pass_version((string)$u['pass']), 'seen' => time()];
             if ($rem) { remember_issue($uid, (string)$u['pass']); $_SESSION['remember'] = 1; }
             q('DELETE FROM logins WHERE ip IN (?, ?)', [$ip, $acc]);
+            require_once __DIR__ . '/pilotage/security.php'; pil_audit_login(isset($u['company_id']) ? $u : q('SELECT * FROM users WHERE id = ?', [$uid ?? 0])->fetch()); // PILOTAGE : connexion journalisée
             out(['ok' => true]);
         }
         // activer / désactiver la validation en deux étapes sur son propre compte

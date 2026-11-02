@@ -261,6 +261,89 @@ function pil_extract_counterparty(array &$t, string $ownIban): void {
     if ($s) $t['structured'] = $s;
 }
 
+// ===================================================================== Tableur : CSV (lu par le serveur) ou Excel (lignes lues par SheetJS dans le navigateur)
+/** CSV → lignes (séparateur ; , ou tabulation détecté ; Windows-1252 converti). */
+function pil_csv_rows(string $raw): array {
+    if (str_starts_with($raw, "\xEF\xBB\xBF")) $raw = substr($raw, 3);
+    if (!mb_check_encoding($raw, 'UTF-8')) $raw = mb_convert_encoding($raw, 'UTF-8', 'Windows-1252');
+    $lines = preg_split('/\r\n|\r|\n/', $raw);
+    $sample = implode("\n", array_slice($lines, 0, 30)); $best = ';'; $n = -1;
+    foreach ([';', ',', "\t"] as $d) { $c = substr_count($sample, $d); if ($c > $n) { $n = $c; $best = $d; } }
+    $rows = [];
+    foreach ($lines as $l) { if (trim($l) === '') { $rows[] = []; continue; } $rows[] = array_map(fn($x) => trim((string)$x), str_getcsv($l, $best, '"', '')); }
+    return $rows;
+}
+/** Montant d'un tableur : « 1.234,56 », « -1234,56 », « 1 234,56 », « +12,00 », « 1234.56 » (selon le séparateur décimal choisi). */
+function pil_parse_amount_flex(string $s, string $dec = ','): ?int {
+    $s = str_replace(["\u{00a0}", "\u{202f}", ' ', '€', 'EUR'], '', trim($s));
+    if ($s === '') return null;
+    $neg = false;
+    if (preg_match('/^\((.*)\)$/', $s, $m)) { $neg = true; $s = $m[1]; }
+    if (preg_match('/^(.*)-$/', $s, $m)) { $neg = true; $s = $m[1]; }
+    if (str_starts_with($s, '-')) { $neg = !$neg; $s = substr($s, 1); } elseif (str_starts_with($s, '+')) $s = substr($s, 1);
+    $th = $dec === ',' ? '.' : ',';
+    if (!preg_match('/^\d{1,3}(?:' . preg_quote($th, '/') . '\d{3})*(?:' . preg_quote($dec, '/') . '\d{1,2})?$|^\d+(?:' . preg_quote($dec, '/') . '\d{1,2})?$/', $s)) return null;
+    [$int, $frac] = array_pad(explode($dec, str_replace($th, '', $s)), 2, '0');
+    $c = (int)$int * 100 + (int)str_pad(substr($frac, 0, 2), 2, '0');
+    return $neg ? -$c : $c;
+}
+/** Date d'un tableur : jj/mm/aaaa, jj-mm-aaaa, jj.mm.aaaa, jj/mm/aa, aaaa-mm-jj. */
+function pil_parse_date_flex(string $s): ?string {
+    $s = trim(preg_replace('/\s.*$/', '', trim($s)));
+    if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $s, $m)) return checkdate((int)$m[2], (int)$m[3], (int)$m[1]) ? "$m[1]-$m[2]-$m[3]" : null;
+    if (preg_match('/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2}|\d{4})$/', $s, $m)) { $y = strlen($m[3]) === 2 ? 2000 + (int)$m[3] : (int)$m[3];
+        return checkdate((int)$m[2], (int)$m[1], $y) ? sprintf('%04d-%02d-%02d', $y, $m[2], $m[1]) : null; }
+    return null;
+}
+/**
+ * Lignes d'un tableur → relevé, avec les colonnes choisies par l'utilisateur (aucun format bancaire deviné).
+ * $t = ['rows' => [[...]], 'map' => [date, value_date, amount | debit + credit, cp_name, cp_iban, communication, balance, seq] (index de colonne),
+ *       'meta' => [header_row, decimal, opening (centimes|null), closing (centimes|null), iban, bank, format]]
+ */
+function pil_parse_table(array $t): array {
+    $map = array_map(fn($v) => $v === null || $v === '' ? null : (int)$v, (array)($t['map'] ?? [])); $meta = (array)($t['meta'] ?? []);
+    $dec = ($meta['decimal'] ?? ',') === '.' ? '.' : ',';
+    $st = ['bank' => (string)($meta['bank'] ?? ''), 'format' => (string)($meta['format'] ?? 'csv'), 'iban' => (string)($meta['iban'] ?? ''), 'currency' => 'EUR', 'number' => null,
+        'opening' => null, 'closing' => null, 'transactions' => [], 'warnings' => [], 'errors' => []];
+    if (!isset($map['date']) || (!isset($map['amount']) && !isset($map['debit']) && !isset($map['credit']))) { $st['errors'][] = 'Colonnes obligatoires : date et montant (ou débit / crédit).'; return [$st]; }
+    $cell = fn(array $r, ?int $i) => $i === null ? '' : trim((string)($r[$i] ?? ''));
+    $rows = array_slice((array)($t['rows'] ?? []), (int)($meta['header_row'] ?? 0) + 1, 20000, true);
+    $list = [];
+    foreach ($rows as $k => $r) {
+        $r = (array)$r; if (!array_filter($r, fn($x) => trim((string)$x) !== '')) continue;
+        $line = $k + 1;
+        $date = pil_parse_date_flex($cell($r, $map['date']));
+        if (isset($map['amount'])) $amt = pil_parse_amount_flex($cell($r, $map['amount']), $dec);
+        else { $d = pil_parse_amount_flex($cell($r, $map['debit'] ?? null), $dec); $c = pil_parse_amount_flex($cell($r, $map['credit'] ?? null), $dec);
+            $amt = $d === null && $c === null ? null : (int)($c ?? 0) - abs((int)($d ?? 0)); }
+        if ($date === null) { $st['errors'][] = "Ligne $line : date illisible « " . $cell($r, $map['date']) . ' ».'; continue; }
+        if ($amt === null) { $st['errors'][] = "Ligne $line : montant illisible."; continue; }
+        $bal = isset($map['balance']) ? pil_parse_amount_flex($cell($r, $map['balance']), $dec) : null;
+        $comm = $cell($r, $map['communication'] ?? null); $iban = pil_norm_iban($cell($r, $map['cp_iban'] ?? null));
+        $list[] = ['seq' => isset($map['seq']) && ctype_digit(ltrim($cell($r, $map['seq']), '0') ?: '0') ? (int)$cell($r, $map['seq']) : $line, 'date' => $date,
+            'value_date' => pil_parse_date_flex($cell($r, $map['value_date'] ?? null)) ?? $date, 'amount' => $amt, 'counterparty_name' => mb_substr($cell($r, $map['cp_name'] ?? null), 0, 190),
+            'counterparty_iban' => $iban !== '' && pil_iban_valid($iban) ? $iban : '', 'communication' => pil_structured($comm) ? '' : $comm, 'structured' => pil_structured($comm), 'bank_ref' => '', 'type_code' => '',
+            'raw' => mb_substr(implode(' | ', array_map('strval', $r)), 0, 2000), '_bal' => $bal, '_line' => $line];
+    }
+    if (!$list) { $st['errors'][] = 'Aucune opération lue (vérifiez la ligne d\'en-tête et les colonnes).'; return [$st]; }
+    // fichier du plus récent au plus ancien : remis dans l'ordre chronologique
+    if (count($list) > 1 && $list[0]['date'] > end($list)['date']) $list = array_reverse($list);
+    if (isset($map['balance']) && $list[0]['_bal'] !== null && end($list)['_bal'] !== null) {
+        $st['opening'] = ['date' => $list[0]['date'], 'amount' => $list[0]['_bal'] - $list[0]['amount']];
+        $st['closing'] = ['date' => end($list)['date'], 'amount' => end($list)['_bal']];
+        // chaque ligne : solde précédent + montant = solde de la ligne
+        $prev = $st['opening']['amount'];
+        foreach ($list as $x) { if ($x['_bal'] !== null && $prev + $x['amount'] !== $x['_bal']) { $st['warnings'][] = "Ligne {$x['_line']} : le solde du fichier ne suit pas les montants."; break; } $prev = $x['_bal'] ?? $prev + $x['amount']; }
+    } else {
+        $st['opening'] = isset($meta['opening']) && $meta['opening'] !== null && $meta['opening'] !== '' ? ['date' => $list[0]['date'], 'amount' => (int)$meta['opening']] : null;
+        $st['closing'] = isset($meta['closing']) && $meta['closing'] !== null && $meta['closing'] !== '' ? ['date' => end($list)['date'], 'amount' => (int)$meta['closing']] : null;
+        if ($st['closing'] === null) $st['errors'][] = 'Indiquez le solde final de la période (affiché par votre banque en ligne) : sans lui, le contrôle des soldes est impossible.';
+    }
+    foreach ($list as &$x) unset($x['_bal'], $x['_line']); unset($x);
+    $st['transactions'] = $list;
+    return [$st];
+}
+
 /** Détection du format et lecture. $layout : mise en page pdf.js (PDF) ; $raw : contenu brut (CODA). */
 function pil_parse_statement(string $filename, ?string $raw, ?array $layout): array {
     if ($raw !== null && preg_match('/^0000\d/', ltrim($raw)) && str_contains($raw, "\n1")) return pil_parse_coda($raw);

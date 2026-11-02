@@ -6,6 +6,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/bank_parse.php';
 require_once __DIR__ . '/finance.php';
+require_once __DIR__ . '/security.php';
 
 // Catégories : [libellé, sens] – sens 'in' entrée, 'out' sortie, 'int' neutre (transfert entre nos comptes : ni recette ni dépense)
 const PIL_CATS = [
@@ -81,10 +82,11 @@ class PilError extends RuntimeException {}
 function pil_enabled(): bool { $s = setting('pilotage', []); return is_array($s) && !empty($s['enabled']); }
 
 /** Accès au module : administrateur de la firme (ou super-administrateur), module activé pour cette firme. */
-function pil_require(): array {
-    $me = require_admin();
+function pil_require(?string $perm = null): array {
+    $me = require_user();
     if (!pil_enabled()) fail(403, 'Le module Pilotage n\'est pas activé pour cette entreprise.');
-    pil_bank_schema();
+    pil_bank_schema(); pil_security_schema();
+    if ($perm) pil_need($me, $perm);
     return $me;
 }
 
@@ -160,20 +162,37 @@ function pil_learn_key(string $iban, string $name): string {
 function pil_analyse(array $file, ?int $forceAccount = null): array {
     $sha = hash('sha256', $file['bytes']);
     $isPdf = str_starts_with($file['bytes'], '%PDF');
-    try {
-        $sts = pil_parse_statement($file['name'], $isPdf ? null : $file['bytes'], $isPdf ? $file['layout'] : null);
-    } catch (RuntimeException $e) { return ['sha256' => $sha, 'errors' => [$e->getMessage()], 'statements' => []]; }
-    if ($isPdf && !$file['layout']) return ['sha256' => $sha, 'errors' => ['PDF reçu sans sa mise en page : rechargez la page et réessayez.'], 'statements' => []];
     $accounts = pil_accounts();
+    $table = $file['table'] ?? null; $fmt = $isPdf ? 'pdf' : 'coda';
+    if ($table) { // tableur : compte imposé ; CSV relu par le serveur, Excel lu par le navigateur (fichier original conservé)
+        $acc = $forceAccount ? (array_column($accounts, null, 'id')[$forceAccount] ?? null) : null;
+        if (!$acc) return ['sha256' => $sha, 'format' => 'tableur', 'errors' => ['Choisissez le compte bancaire concerné (un tableur ne contient pas toujours l\'IBAN).'], 'warnings' => [], 'statements' => []];
+        $isXlsx = str_starts_with($file['bytes'], "PK\x03\x04") || str_starts_with($file['bytes'], "\xD0\xCF\x11\xE0");
+        $fmt = $isXlsx ? 'xlsx' : 'csv';
+        if (!$isXlsx) $table['rows'] = pil_csv_rows($file['bytes']);
+        $meta = (array)($table['meta'] ?? []);
+        if ((!isset($meta['opening']) || $meta['opening'] === '' || $meta['opening'] === null)) { // solde de départ = solde final de l'extrait précédent
+            $prev = q("SELECT closing FROM pil_bank_imports WHERE company_id = ? AND account_id = ? AND status = 'importe' ORDER BY period_to DESC, id DESC LIMIT 1", [cid(), $acc['id']])->fetchColumn();
+            if ($prev !== false) $meta['opening'] = (int)$prev;
+        }
+        $table['meta'] = ['iban' => $acc['iban'], 'bank' => $acc['bank'], 'format' => $fmt] + $meta;
+        $sts = pil_parse_table($table);
+        if ($sts[0]['opening'] === null && !$sts[0]['errors']) $sts[0]['errors'][] = 'Solde de départ inconnu : indiquez-le (premier import de ce compte).';
+    } else {
+        try {
+            $sts = pil_parse_statement($file['name'], $isPdf ? null : $file['bytes'], $isPdf ? $file['layout'] : null);
+        } catch (RuntimeException $e) { return ['sha256' => $sha, 'errors' => [$e->getMessage()], 'statements' => []]; }
+        if ($isPdf && !$file['layout']) return ['sha256' => $sha, 'errors' => ['PDF reçu sans sa mise en page : rechargez la page et réessayez.'], 'statements' => []];
+    }
     $byIban = array_column($accounts, null, 'iban');
     $own = array_column($accounts, 'id', 'iban');
     $contacts = pil_contacts_by_iban(); $learned = pil_learned();
     $already = q("SELECT id, filename, created_at FROM pil_bank_imports WHERE company_id = ? AND sha256 = ? AND status = 'importe'", [cid(), $sha])->fetch();
-    $res = ['sha256' => $sha, 'format' => $isPdf ? 'pdf' : 'coda', 'errors' => [], 'warnings' => [], 'statements' => []];
+    $res = ['sha256' => $sha, 'format' => $fmt, 'errors' => [], 'warnings' => [], 'statements' => []];
     if ($already) $res['errors'][] = "Ce fichier a déjà été importé le " . date('d/m/Y H:i', strtotime($already['created_at'])) . " (« {$already['filename']} »).";
     if (count($sts) > 1) $res['warnings'][] = count($sts) . ' extraits dans ce fichier.';
     foreach ($sts as $s) {
-        $errs = []; $warn = $s['warnings'];
+        $errs = $s['errors'] ?? []; $warn = $s['warnings'];
         $acc = $byIban[$s['iban']] ?? null;
         if ($forceAccount && (!$acc || $acc['id'] !== $forceAccount)) $errs[] = "L'extrait concerne le compte {$s['iban']}, pas le compte choisi.";
         if (!$acc) $errs[] = "Compte {$s['iban']} inconnu : ajoutez-le d'abord dans « Comptes bancaires ».";
@@ -259,7 +278,7 @@ function pil_store_original(string $sha, string $ext, string $bytes): string {
 function pil_import(array $file, array $me, ?int $forceAccount = null): array {
     $an = pil_analyse($file, $forceAccount);
     if ($an['errors']) return ['ok' => false] + $an;
-    $ext = $an['format'] === 'pdf' ? 'pdf' : 'cod';
+    $ext = ['pdf' => 'pdf', 'csv' => 'csv', 'xlsx' => (str_starts_with($file['bytes'], 'PK') ? 'xlsx' : 'xls')][$an['format']] ?? 'cod';
     $stored = pil_store_original($an['sha256'], $ext, $file['bytes']);
     $pdo = db(); $ids = [];
     $pdo->beginTransaction();
@@ -280,6 +299,8 @@ function pil_import(array $file, array $me, ?int $forceAccount = null): array {
     } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
     pil_pair_transfers();
     log_activity($me['id'], 'create', 'bank_import', $ids[0] ?? null, null, 'Import extrait ' . $file['name']);
+    foreach ($an['statements'] as $k => $s) pil_audit('import_bancaire', 'bank_import', $ids[$k] ?? null, null, ['fichier' => $file['name'], 'sha256' => $an['sha256'], 'format' => $an['format'], 'compte' => $s['iban'],
+        'periode' => [$s['opening']['date'], $s['closing']['date']], 'soldes' => [$s['opening']['amount'], $s['closing']['amount']], 'mouvements' => count($s['transactions']), 'doublons_ignores' => $s['duplicates']]);
     return ['ok' => true, 'imports' => $ids] + $an;
 }
 
@@ -316,6 +337,7 @@ function pil_cancel_import(int $id, array $me): void {
         $pdo->commit();
     } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
     log_activity($me['id'], 'delete', 'bank_import', $id, null, 'Annulation import ' . $imp['filename']);
+    pil_audit('import_annule', 'bank_import', $id, ['status' => 'importe', 'fichier' => $imp['filename'], 'mouvements' => count($ids)], ['status' => 'annule']);
 }
 
 // ------------------------------------------------------------------ Mouvements : lecture et corrections
@@ -396,6 +418,9 @@ function pil_tx_update(int $id, array $b, array $me): array {
         $set[] = 'updated_by = ?'; $args[] = $me['id']; $set[] = 'updated_at = ?'; $args[] = now();
         $args[] = $id; $args[] = cid();
         q('UPDATE pil_bank_tx SET ' . implode(', ', $set) . ' WHERE id = ? AND company_id = ?', $args);
+        $changes = array_slice($hist, count(json_decode((string)($t['history'] ?? '[]'), true) ?: []));
+        if ($changes) pil_audit(array_key_exists('match', $b) ? 'rapprochement' : (array_intersect(array_column($changes, 'field'), ['category']) ? 'classification' : 'correction_mouvement'), 'bank_tx', $id,
+            array_combine(array_column($changes, 'field'), array_column($changes, 'from')), array_combine(array_column($changes, 'field'), array_column($changes, 'to')));
     }
     return pil_tx_out(q('SELECT * FROM pil_bank_tx WHERE id = ? AND company_id = ?', [$id, cid()])->fetch());
 }
@@ -424,6 +449,7 @@ function pil_doc_save(string $type, array $row, array $d, array $me, string $lab
     q('UPDATE items SET data = ?, lite = ?, version = version + 1, updated_by = ?, updated_at = ? WHERE id = ? AND company_id = ?',
         [json_encode($d, JSON_UNESCAPED_UNICODE), lite_json($type, $d), $me['id'], now(), (int)$row['id'], cid()]);
     log_activity($me['id'], 'update', $type, (int)$row['id'], $row['project_id'] !== null ? (int)$row['project_id'] : null, $label);
+    pil_audit('paiement_document', $type, (int)$row['id'], ['paiements' => (json_decode((string)$row['data'], true) ?: [])['payments'] ?? []], ['paiements' => $d['payments'] ?? [], 'libelle' => $label]);
 }
 /** = purchSyncPaid() de purchase.js : « paid » / « paidDate » recalculés. */
 function pil_purch_sync(array &$d): void {
@@ -597,14 +623,21 @@ function pil_route(string $method, array $seg): void {
     // activation par firme (administrateur) : seule route ouverte quand le module est éteint
     if ($sub === 'enable' && $method === 'POST') {
         $me = require_admin();
+        if (pil_enabled()) { pil_bank_schema(); pil_security_schema(); pil_need($me, 'settings.write'); }
         $on = !empty(body()['enabled']);
         set_setting('pilotage', ['enabled' => $on, 'by' => $me['id'], 'at' => now()] + (setting('pilotage', []) ?: []));
         log_activity($me['id'], 'update', 'settings', null, null, 'Module Pilotage ' . ($on ? 'activé' : 'désactivé'));
+        pil_bank_schema(); pil_security_schema(); pil_audit($on ? 'module_active' : 'module_desactive', 'settings', null, null, ['enabled' => $on]);
         out(['ok' => true, 'enabled' => $on]);
     }
     $me = pil_require();
+    if (pil_role($me) === 'none' && $sub !== 'me') fail(403, 'Vous n\'avez pas accès au module Pilotage.');
+    $perm = pil_route_perm($sub, $method, $seg);
+    if ($perm) pil_need($me, $perm);
     $id = isset($seg[2]) ? (int)$seg[2] : 0;
     switch ($sub) {
+        case 'me': case 'approvals': case 'audit': case 'roles': case 'export': case 'settings':
+            pil_security_route($method, $seg, $me);
         case 'accounts':
             if ($method === 'GET') out(pil_accounts());
             if ($method === 'POST') {
@@ -615,11 +648,16 @@ function pil_route(string $method, array $seg): void {
                 if (q('SELECT id FROM pil_bank_accounts WHERE company_id = ? AND iban = ?', [cid(), $iban])->fetch()) fail(400, 'Ce compte existe déjà.');
                 q('INSERT INTO pil_bank_accounts (company_id, bank, iban, label, currency, active, created_by, created_at) VALUES (?,?,?,?,?,1,?,?)',
                     [cid(), mb_substr($bank, 0, 60), $iban, mb_substr(trim((string)($b['label'] ?? '')), 0, 120), 'EUR', $me['id'], now()]);
-                log_activity($me['id'], 'create', 'bank_account', (int)db()->lastInsertId(), null, "Compte bancaire $bank $iban");
+                $nid = (int)db()->lastInsertId();
+                log_activity($me['id'], 'create', 'bank_account', $nid, null, "Compte bancaire $bank $iban");
+                pil_audit('compte_ajoute', 'bank_account', $nid, null, ['banque' => $bank, 'iban' => $iban]);
                 out(pil_accounts());
             }
             if ($method === 'PUT' && $id) {
                 $b = body();
+                $old = q('SELECT bank, label, active FROM pil_bank_accounts WHERE id = ? AND company_id = ?', [$id, cid()])->fetch();
+                if (!$old) fail(404, 'Compte introuvable');
+                pil_audit('compte_modifie', 'bank_account', $id, $old, ['bank' => $b['bank'] ?? '', 'label' => $b['label'] ?? '', 'active' => empty($b['active']) ? 0 : 1]);
                 q('UPDATE pil_bank_accounts SET label = ?, bank = ?, active = ? WHERE id = ? AND company_id = ?', [mb_substr(trim((string)($b['label'] ?? '')), 0, 120), mb_substr(trim((string)($b['bank'] ?? '')), 0, 60), empty($b['active']) ? 0 : 1, $id, cid()]);
                 out(pil_accounts());
             }
@@ -631,7 +669,7 @@ function pil_route(string $method, array $seg): void {
             if ($bytes === false || $bytes === '') fail(400, 'Fichier vide ou illisible.');
             if (strlen($bytes) > 20 * 1024 * 1024) fail(400, 'Fichier trop volumineux (max. 20 Mo).');
             $name = preg_replace('/[\x00-\x1f\/\\\\]/', '_', (string)($b['name'] ?? 'extrait'));
-            $file = ['name' => $name, 'bytes' => $bytes, 'layout' => is_array($b['layout'] ?? null) ? $b['layout'] : null];
+            $file = ['name' => $name, 'bytes' => $bytes, 'layout' => is_array($b['layout'] ?? null) ? $b['layout'] : null, 'table' => is_array($b['table'] ?? null) ? $b['table'] : null];
             $acc = !empty($b['account']) ? (int)$b['account'] : null;
             if ($sub === 'preview') out(pil_analyse($file, $acc));
             $r = pil_import($file, $me, $acc);
@@ -642,12 +680,20 @@ function pil_route(string $method, array $seg): void {
                 $imp = q('SELECT * FROM pil_bank_imports WHERE id = ? AND company_id = ?', [$id, cid()])->fetch();
                 $path = $imp ? dirname(__DIR__) . '/uploads/' . $imp['stored'] : '';
                 if (!$imp || !is_file($path)) fail(404, 'Fichier introuvable');
-                header('Content-Type: ' . ($imp['format'] === 'pdf' ? 'application/pdf' : 'application/octet-stream'));
+                pil_audit('telechargement_extrait', 'bank_import', $id, null, ['fichier' => $imp['filename']]);
+                header('Content-Type: ' . ($imp['format'] === 'pdf' ? 'application/pdf' : ($imp['format'] === 'csv' ? 'text/csv' : 'application/octet-stream')));
                 header('Content-Disposition: attachment; filename="' . str_replace('"', '', $imp['filename']) . '"');
                 header('X-Content-Type-Options: nosniff');
                 readfile($path); exit;
             }
-            if ($method === 'DELETE' && $id) { pil_cancel_import($id, $me); out(['ok' => true]); }
+            if ($method === 'DELETE' && $id) {
+                $imp = q("SELECT * FROM pil_bank_imports WHERE id = ? AND company_id = ? AND status = 'importe'", [$id, cid()])->fetch();
+                if (!$imp) fail(404, 'Import introuvable ou déjà annulé.');
+                $paid = (int)q('SELECT COUNT(*) FROM pil_bank_tx WHERE company_id = ? AND import_id = ? AND match_paid = 1', [cid(), $id])->fetchColumn();
+                out(['done' => false, 'approval' => pil_approval_request(['type' => 'annulation_import', 'description' => 'Annuler l\'import « ' . $imp['filename'] . ' » (' . pil_d($imp['period_from']) . ' – ' . pil_d($imp['period_to']) . ', ' . $imp['tx_new'] . ' mouvements)',
+                    'payload' => ['import_id' => $id], 'justification' => trim((string)(body()['justification'] ?? '')) ?: null,
+                    'risks' => array_values(array_filter(['Les mouvements, classements et rapprochements de cet import seront retirés.', $paid ? "$paid paiement(s) enregistré(s) dans des factures ou achats seront retirés." : null])), 'documents' => [['type' => 'bank_import', 'id' => $id, 'name' => $imp['filename']]]], $me)], 202);
+            }
             break;
         case 'tx':
             if ($method === 'GET' && !$id) out(pil_tx_list($_GET));
@@ -656,10 +702,23 @@ function pil_route(string $method, array $seg): void {
                 if (!$t) fail(404, 'Mouvement introuvable');
                 out(pil_match_suggestions($t));
             }
-            if ($method === 'PUT' && $id) { try { out(pil_tx_update($id, body(), $me)); } catch (PilError $e) { fail($e->getCode() ?: 400, $e->getMessage()); } }
+            if ($method === 'PUT' && $id) {
+                $b = body();
+                if (!empty($b['match']['pay']) && !pil_can($me, 'bank.pay')) {
+                    $t = q('SELECT * FROM pil_bank_tx WHERE id = ? AND company_id = ?', [$id, cid()])->fetch(); if (!$t) fail(404, 'Mouvement introuvable');
+                    $type = (string)($b['match']['type'] ?? ''); $mid = (int)($b['match']['id'] ?? 0);
+                    $doc = q('SELECT number, data FROM items WHERE id = ? AND company_id = ? AND type = ?', [$mid, cid(), $type])->fetch(); if (!$doc || !in_array($type, ['invoice', 'expense'], true)) fail(404, 'Document introuvable');
+                    $dd = json_decode($doc['data'], true) ?: [];
+                    out(['done' => false, 'approval' => pil_approval_request(['type' => 'paiement_rapprochement', 'description' => 'Enregistrer le paiement de ' . pil_fmt(abs((int)$t['amount'])) . ' du ' . pil_d($t['booking_date']) . ' dans ' . ($type === 'invoice' ? 'la facture ' . ($doc['number'] ?: '#' . $mid) : 'l\'achat ' . (($dd['ref'] ?? '') ?: '#' . $mid)),
+                        'payload' => ['tx_id' => $id, 'type' => $type, 'id' => $mid], 'amount' => abs((int)$t['amount']), 'justification' => trim((string)($b['justification'] ?? '')) ?: null,
+                        'risks' => ['Modifie l\'état de paiement du document dans BâtiPro.'], 'documents' => [['type' => $type, 'id' => $mid, 'name' => $doc['number'] ?: ($dd['ref'] ?? '')]]], $me)], 202);
+                }
+                try { out(pil_tx_update($id, $b, $me)); } catch (PilError $e) { fail($e->getCode() ?: 400, $e->getMessage()); }
+            }
             if ($method === 'POST' && $id === 0 && ($seg[2] ?? '') === 'bulk') {
                 $b = body(); $done = 0; $errors = [];
-                foreach (array_slice((array)($b['ids'] ?? []), 0, 2000) as $tid) { try { pil_tx_update((int)$tid, (array)($b['set'] ?? []), $me); $done++; } catch (PilError $e) { $errors[$e->getMessage()] = ($errors[$e->getMessage()] ?? 0) + 1; } }
+                $set = array_intersect_key((array)($b['set'] ?? []), ['category' => 1, 'status' => 1]); // en lot : classement et validation seulement (jamais de paiement)
+                foreach (array_slice((array)($b['ids'] ?? []), 0, 2000) as $tid) { try { pil_tx_update((int)$tid, $set, $me); $done++; } catch (PilError $e) { $errors[$e->getMessage()] = ($errors[$e->getMessage()] ?? 0) + 1; } }
                 out(['ok' => true, 'done' => $done, 'refused' => $errors]);
             }
             break;

@@ -23,6 +23,7 @@ $reply = function (array $content, string $stop) {
     exit;
 };
 if (!empty($req['tools']) && !$hasResult) {
+    if (preg_match('/PROPOSE.*facture (\d+)/', $firstQ, $mm)) $reply([['type' => 'tool_use', 'id' => 'toolu_mock_p', 'name' => 'proposer_action', 'input' => ['type' => 'relance_client', 'facture_id' => (int)$mm[1], 'justification' => 'Facture en retard de paiement']]], 'tool_use');
     $tool = str_contains(mb_strtolower($firstQ), 'sous-traitant') ? ['totaux_achats', ['type_fournisseur' => 'soustraitant', 'du' => '2026-01-01', 'au' => '2026-12-31']]
         : (str_contains(mb_strtolower($firstQ), 'chantier') ? ['chantiers', []] : ['tresorerie', []]);
     $reply([['type' => 'tool_use', 'id' => 'toolu_mock_1', 'name' => $tool[0], 'input' => (object)$tool[1]]], 'tool_use');
@@ -32,7 +33,7 @@ if ($hasResult) {
     $amount = null;
     array_walk_recursive($res, function ($v, $k) use (&$amount) { if ($amount === null && is_int($v) && abs($v) >= 100 && in_array($k, ['total', 'total_ttc', 'end', 'contract'], true)) $amount = $v; });
     $a = str_contains($firstQ, 'INVENTE') ? 99999999 : ($amount ?? 0);
-    $reply([['type' => 'text', 'text' => "Selon les données de BâtiPro (source : {$res['_source']}, {$res['_periode']}), le montant est de {$fmt($a)} €."]], 'end_turn');
+    $reply([['type' => 'text', 'text' => "Selon les données de BâtiPro (source : " . ($res['_source'] ?? '?') . ', ' . ($res['_periode'] ?? '?') . "), le montant est de {$fmt($a)} €."]], 'end_turn');
 }
 // commentaire du rapport quotidien
 preg_match('/\{.*\}/s', $firstQ, $m); $rep = json_decode($m[0] ?? '{}', true) ?: [];

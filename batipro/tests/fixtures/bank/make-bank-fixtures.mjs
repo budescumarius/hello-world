@@ -149,7 +149,34 @@ bnpPages.push([...BNP_HEAD(3, 3), [75.9, 614, 'AVIS DE DEBIT'], [232.5, 614, 'DE
   [75.9, 585, 'Compte bénéficiaire'], [165.8, 585, `: ${ACC.belfius} EUR`]]);
 writeFileSync(join(DIR, 'bnp-fictif.pdf'), pdf(bnpPages));
 
-writeFileSync(join(DIR, 'expected.json'), JSON.stringify({ ACC, CP, COMM,
+// ---------------------------------------------------------------- Tableurs (fictifs) : CSV façon export BNP, Excel façon export Belfius
+// mêmes lignes « normalisées » que celles produites par le navigateur (assets/pilotage.js : pilSheetRows)
+import { createRequire } from 'node:module';
+const XLSX = createRequire(import.meta.url)('../../../assets/vendor/xlsx-0.18.5.full.min.js');
+export const normCell = (v) => (v instanceof Date ? `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}` : typeof v === 'number' ? v.toFixed(2).replace('.', ',') : String(v ?? '').trim());
+const bnpCsvTx = [ // du plus récent au plus ancien, comme l'export de la banque en ligne
+  ['0036', '27/02/2026', '27/02/2026', '-1.200,00', 'EUR', ACC.bnp, 'Virement en euros', sp(CP.salarie), 'OUVRIER FICTIF', 'Salaire février', 'Accepté'],
+  ['0035', '20/02/2026', '20/02/2026', '4.840,00', 'EUR', ACC.bnp, 'Virement en euros', sp(CP.client), 'CLIENT FICTIF SA', COMM.invoice, 'Accepté'],
+  ['0034', '05/02/2026', '05/02/2026', '-782,36', 'EUR', ACC.bnp, 'Remboursement crédit', '', '', 'Remboursement crédit 245-0000000-01', 'Accepté'],
+];
+const csvHead = ['Numéro de séquence', "Date d'exécution", 'Date valeur', 'Montant', 'Devise du compte', 'Numéro de compte', 'Type de transaction', 'Contrepartie', 'Nom de la contrepartie', 'Communication', 'Statut'];
+writeFileSync(join(DIR, 'bnp-fictif-2026-02.csv'), Buffer.from([csvHead, ...bnpCsvTx].map((r) => r.map((c) => (/[;"]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(';')).join('\r\n') + '\r\n', 'latin1'));
+const bnpFeb = { opening: bnpClose, closing: bnpClose - 120000 + 484000 - 78236, n: 3 };
+const belfX = [['Compte', 'Date de comptabilisation', 'Numéro de transaction', 'Compte contrepartie', 'Nom contrepartie contient', 'Transaction', 'Date valeur', 'Montant', 'Devise', 'Communications', 'Solde']];
+let solde = belfClose;
+for (const [d, n, cp, name, label, amt, comm] of [
+  [new Date(2026, 0, 26), 17, CP.fournisseur, 'FOURNISSEUR FICTIF SRL', 'VIREMENT', -605, COMM.expense],
+  [new Date(2026, 1, 3), 18, CP.client, 'CLIENT FICTIF SA', 'VERSEMENT', 1815, 'Acompte chantier rue du Test'],
+  [new Date(2026, 1, 12), 19, '', '', 'FRAIS', -12.5, 'FRAIS DE TENUE DE COMPTE'],
+]) { solde += Math.round(amt * 100); belfX.push([sp(ACC.belfius), d, n, cp ? sp(cp) : '', name, label, d, amt, 'EUR', comm, solde / 100]); }
+const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(belfX, { cellDates: true }), 'Mouvements');
+const xbuf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+writeFileSync(join(DIR, 'belfius-fictif-2026-02.xlsx'), xbuf);
+const rb = XLSX.read(xbuf, { type: 'buffer', cellDates: true });
+writeFileSync(join(DIR, 'belfius-fictif-2026-02.rows.json'), JSON.stringify(XLSX.utils.sheet_to_json(rb.Sheets[rb.SheetNames[0]], { header: 1, raw: true, defval: '' }).map((r) => r.map(normCell))));
+const belfFeb = { opening: belfClose, closing: solde, n: 3 };
+
+writeFileSync(join(DIR, 'expected.json'), JSON.stringify({ ACC, CP, COMM, bnpFeb, belfFeb,
   europabank: { jan: { opening: 100000, closing: jan.closing, n: 5 }, feb: { opening: jan.closing, closing: feb.closing, n: 2 }, mar: { opening: feb.closing, closing: mar.closing, n: 1 } },
   belfius: { number: 12, opening: belfOpen, closing: belfClose, n: belfTx.length },
   bnp: { number: 3, opening: bnpOpen, closing: bnpClose, n: bnpTx.length } }, null, 2) + '\n');

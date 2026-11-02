@@ -464,6 +464,7 @@ function pil_treasury_route(string $method, array $seg, array $me): void {
                         'useProbability' => !empty($v['useProbability']), 'excludeOverdueAfter' => ($v['excludeOverdueAfter'] ?? null) === null || $v['excludeOverdueAfter'] === '' ? null : max(0, (int)$v['excludeOverdueAfter']),
                         'includeEaSent' => !empty($v['includeEaSent']), 'includeEaApproved' => !empty($v['includeEaApproved']), 'prudencePct' => max(0, min(50, (float)($v['prudencePct'] ?? 0)))];
                 }
+                pil_audit('hypotheses_prevision', 'settings', null, pil_hypotheses(), $new);
                 set_setting('pilotage_hyp', $new);
                 log_activity($me['id'], 'update', 'settings', null, null, 'Hypothèses des prévisions de trésorerie');
                 out(pil_hypotheses());
@@ -477,6 +478,7 @@ function pil_treasury_route(string $method, array $seg, array $me): void {
                 elseif ($flag === 'conteste') q('REPLACE INTO pil_doc_flags (company_id, item_id, flag, note, flagged_by, flagged_at) VALUES (?,?,?,?,?,?)', [cid(), $id, $flag, mb_substr(trim((string)($b['note'] ?? '')), 0, 255), $me['id'], now()]);
                 else fail(400, 'Statut inconnu');
                 log_activity($me['id'], 'update', 'invoice', $id, null, $flag ? 'Facture marquée contestée (Pilotage)' : 'Contestation retirée (Pilotage)');
+                pil_audit('facture_contestation', 'invoice', $id, null, ['flag' => $flag ?: null, 'note' => $b['note'] ?? null]);
                 out(['ok' => true]);
             }
             break;
@@ -517,16 +519,17 @@ function pil_treasury_route(string $method, array $seg, array $me): void {
                 $docs = json_decode((string)$r['docs'], true) ?: [];
                 $docs[] = ['name' => preg_replace('/[\x00-\x1f\/\\\\"]/', '_', (string)$f['name']), 'stored' => $rel, 'mime' => class_exists('finfo') ? ((new finfo(FILEINFO_MIME_TYPE))->file(dirname(__DIR__) . "/uploads/$rel") ?: 'application/octet-stream') : 'application/octet-stream', 'size' => (int)$f['size'], 'at' => now(), 'by' => $me['id']];
                 q('UPDATE pil_commitments SET docs = ?, updated_by = ?, updated_at = ? WHERE id = ? AND company_id = ?', [json_encode($docs, JSON_UNESCAPED_UNICODE), $me['id'], now(), $id, cid()]);
+                pil_audit('engagement_document', 'commitment', $id, null, ['document' => end($docs)['name']]);
                 out(pil_commitment_out(q('SELECT * FROM pil_commitments WHERE id = ?', [$id])->fetch()));
             }
             if ($method === 'POST' && !$id) out(pil_commitment_save(null, body(), $me));
             if ($method === 'PUT' && $id) out(pil_commitment_save($id, body(), $me));
-            if ($method === 'DELETE' && $id) {
-                $r = q('SELECT label FROM pil_commitments WHERE id = ? AND company_id = ?', [$id, cid()])->fetch();
+            if ($method === 'DELETE' && $id) { // suppression : demande d'approbation (le registre alimente les prévisions)
+                $r = q('SELECT * FROM pil_commitments WHERE id = ? AND company_id = ?', [$id, cid()])->fetch();
                 if (!$r) fail(404, 'Engagement introuvable');
-                q('DELETE FROM pil_commitments WHERE id = ? AND company_id = ?', [$id, cid()]);
-                log_activity($me['id'], 'delete', 'commitment', $id, null, 'Engagement supprimé : ' . $r['label']);
-                out(['ok' => true]);
+                out(['done' => false, 'approval' => pil_approval_request(['type' => 'suppression_engagement', 'description' => 'Supprimer « ' . $r['label'] . ' » du registre des engagements',
+                    'payload' => ['commitment_id' => $id], 'amount' => $r['amount'] !== null ? (int)$r['amount'] : null, 'justification' => trim((string)(body()['justification'] ?? '')) ?: null,
+                    'risks' => ['Les échéances de cet engagement disparaissent des prévisions.'], 'documents' => array_map(fn($d) => ['name' => $d['name']], json_decode((string)$r['docs'], true) ?: [])], $me)], 202);
             }
             break;
     }
@@ -559,6 +562,7 @@ function pil_commitment_save(?int $id, array $b, array $me): array {
         $cur = q('SELECT * FROM pil_commitments WHERE id = ? AND company_id = ?', [$id, cid()])->fetch();
         if (!$cur) fail(404, 'Engagement introuvable');
         $conf = $status === 'confirme' && $cur['status'] !== 'confirme';
+        pil_audit($conf ? 'engagement_confirme' : 'engagement_modifie', 'commitment', $id, array_intersect_key($cur, $v), $v);
         $set = implode(', ', array_map(fn($k) => "$k = ?", array_keys($v))) . ', updated_by = ?, updated_at = ?' . ($conf ? ', confirmed_by = ?, confirmed_at = ?' : '');
         q("UPDATE pil_commitments SET $set WHERE id = ? AND company_id = ?", array_merge(array_values($v), [$me['id'], now()], $conf ? [$me['id'], now()] : [], [$id, cid()]));
         log_activity($me['id'], 'update', 'commitment', $id, null, ($conf ? 'Engagement confirmé : ' : 'Engagement modifié : ') . $v['label']);
@@ -569,6 +573,7 @@ function pil_commitment_save(?int $id, array $b, array $me): array {
         q('INSERT INTO pil_commitments (company_id, ' . implode(', ', array_keys($v)) . ') VALUES (?' . str_repeat(',?', count($v)) . ')', array_merge([cid()], array_values($v)));
         $id = (int)db()->lastInsertId();
         log_activity($me['id'], 'create', 'commitment', $id, null, 'Engagement ajouté : ' . $v['label']);
+        pil_audit('engagement_ajoute', 'commitment', $id, null, $v);
     }
     return pil_commitment_out(q('SELECT * FROM pil_commitments WHERE id = ?', [$id])->fetch());
 }

@@ -1,0 +1,4 @@
+Numéro de séquence;Date d'exécution;Date valeur;Montant;Devise du compte;Numéro de compte;Type de transaction;Contrepartie;Nom de la contrepartie;Communication;Statut
+0036;27/02/2026;27/02/2026;-1.200,00;EUR;BE56001000030388;Virement en euros;BE80 0014 4444 4477;OUVRIER FICTIF;Salaire février;Accepté
+0035;20/02/2026;20/02/2026;4.840,00;EUR;BE56001000030388;Virement en euros;BE30 0631 1111 1111;CLIENT FICTIF SA;+++000/0012/02695+++;Accepté
+0034;05/02/2026;05/02/2026;-782,36;EUR;BE56001000030388;Remboursement crédit;;;Remboursement crédit 245-0000000-01;Accepté

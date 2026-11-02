@@ -3,9 +3,30 @@
    Aucune connexion à une banque, aucun paiement possible depuis ce module. Réservé aux administrateurs, activé par firme.
    Les montants arrivent du serveur en CENTIMES entiers. */
 
-const pilOn = () => isAdmin() && !!(S.settings.pilotage && S.settings.pilotage.enabled);
-SPACES.push({ k: 'pilot', l: 'Pilotage', i: 'chart', h: '#/pilotage/directeur', show: pilOn,
-  sec: [['Directeur', '#/pilotage/directeur'], ['Assistant', '#/pilotage/assistant'], ['Chantiers', '#/pilotage/chantiers'], ['Trésorerie', '#/pilotage/tresorerie'], ['Engagements', '#/pilotage/engagements'], ['Factures et échéances', '#/pilotage/echeances'], ['Contrôle bancaire', '#/pilotage'], ['Mouvements', '#/pilotage/mouvements'], ['Historique 24 mois', '#/pilotage/historique'], ['Importer un extrait', '#/pilotage/import'], ['Journal des imports', '#/pilotage/imports'], ['Comptes', '#/pilotage/comptes']] });
+// Rôle et permissions de l'utilisateur sur le module (le serveur contrôle chaque action ; l'interface ne fait que masquer)
+const pilEnabled = () => !!(S.settings.pilotage && S.settings.pilotage.enabled);
+const pilOn = () => pilEnabled() && (S.pilMe ? S.pilMe.role !== 'none' : isAdmin());
+const pilCan = (p) => !!(S.pilMe && S.pilMe.perms.includes(p));
+const PIL_SECS = [['Directeur', '#/pilotage/directeur', 'director.read'], ['Assistant', '#/pilotage/assistant', 'ai.ask'], ['Chantiers', '#/pilotage/chantiers', 'projects.read'], ['Trésorerie', '#/pilotage/tresorerie', 'treasury.read'],
+  ['Engagements', '#/pilotage/engagements', 'treasury.read'], ['Factures et échéances', '#/pilotage/echeances', 'treasury.read'], ['Contrôle bancaire', '#/pilotage/controle', 'bank.read'], ['Mouvements', '#/pilotage/mouvements', 'bank.read'],
+  ['Historique 24 mois', '#/pilotage/historique', 'bank.read'], ['Importer un extrait', '#/pilotage/import', 'bank.write'], ['Journal des imports', '#/pilotage/imports', 'bank.read'], ['Comptes', '#/pilotage/comptes', 'bank.read'],
+  ['Approbations', '#/pilotage/approbations', 'approvals.request'], ['Journal d\'audit', '#/pilotage/audit', 'audit.read'], ['Paramètres', '#/pilotage/parametres', 'audit.read']];
+const pilSecs = () => PIL_SECS.filter(([, , p]) => !S.pilMe || pilCan(p)).map(([l, h]) => [l, h]);
+const PIL_SPACE = { k: 'pilot', l: 'Pilotage', i: 'chart', show: pilOn };
+Object.defineProperty(PIL_SPACE, 'sec', { get: pilSecs });
+Object.defineProperty(PIL_SPACE, 'h', { get: () => (pilSecs()[0] || ['', '#/pilotage'])[1] });
+SPACES.push(PIL_SPACE);
+// rôle chargé dès que l'application est prête (menu juste pour les rôles qui ne sont pas administrateurs BatiPro)
+let pilMeP = null;
+const pilLoadMe = () => (pilMeP = pilMeP || api('GET', 'pilot/me').then((m) => { S.pilMe = m; return m; }).catch(() => { S.pilMe = { role: 'none', perms: [] }; return S.pilMe; }));
+(function pilBoot() { if (typeof S === 'undefined' || !S.ready) return setTimeout(pilBoot, 500); if (pilEnabled() && !S.pilMe) pilLoadMe(); })(); // menu à jour dès la navigation suivante
+// réponse 202 : l'action sensible a créé une demande d'approbation (rien n'est exécuté)
+function pilApproval(r) {
+  if (!(r && r.done === false && r.approval)) return false;
+  toast(`Demande d'approbation n° ${r.approval.id} créée : l'action sera exécutée seulement après approbation.`, 6000);
+  if (pilCan('approvals.decide') && confirm('Demande créée. Vous êtes propriétaire : ouvrir le centre d\'approbation pour la décider ?')) go('#/pilotage/approbations');
+  return true;
+}
 
 const pilMoney = (c) => (c == null ? '—' : money(c / 100));
 const PIL_ST = { a_verifier: ['À vérifier', '#f08c00'], valide: ['Validé', '#2f9e44'] };
@@ -48,10 +69,12 @@ async function pilReadFile(f) {
 
 // ---------------------------------------------------------------- Pages
 route('pilotage', async (sub, arg) => {
-  if (!isAdmin()) { layout({ icon: 'chart', title: 'Pilotage' }).innerHTML = empty('Réservé aux administrateurs', 'Le pilotage financier est accessible aux administrateurs de l\'entreprise.'); return; }
-  if (!pilOn()) return pilEnablePage();
-  const pages = { directeur: pilDirectorPage, assistant: pilAssistantPage, chantiers: pilProjectsPage, tresorerie: pilTreasuryPage, engagements: pilCommitmentsPage, echeances: pilDuePage, mouvements: pilTxPage, historique: pilHistPage, import: pilImportPage, imports: pilImportsPage, comptes: pilAccountsPage };
-  return (pages[sub] || pilDashPage)(arg);
+  if (!pilEnabled()) { if (isAdmin()) return pilEnablePage(); layout({ icon: 'chart', title: 'Pilotage' }).innerHTML = empty('Module non activé', 'Un administrateur doit activer le module Pilotage.'); return; }
+  pilMeP = null; await pilLoadMe();
+  if (S.pilMe.role === 'none') { layout({ icon: 'chart', title: 'Pilotage' }).innerHTML = empty('Accès non autorisé', 'Votre rôle ne donne pas accès au Pilotage. Le propriétaire peut vous attribuer un rôle.'); return; }
+  if (!sub) { location.replace(PIL_SPACE.h); return; }
+  const pages = { approbations: pilApprovalsPage, audit: pilAuditPage, parametres: pilSettingsPage, controle: pilDashPage, directeur: pilDirectorPage, assistant: pilAssistantPage, chantiers: pilProjectsPage, tresorerie: pilTreasuryPage, engagements: pilCommitmentsPage, echeances: pilDuePage, mouvements: pilTxPage, historique: pilHistPage, import: pilImportPage, imports: pilImportsPage, comptes: pilAccountsPage };
+  return (pages[sub] || (() => location.replace(PIL_SPACE.h)))(arg);
 });
 
 function pilEnablePage() {
@@ -115,10 +138,10 @@ async function pilAccountsPage() {
 // ---------- Import
 async function pilImportPage() {
   const accs = await api('GET', 'pilot/accounts');
-  const page = layout({ icon: 'chart', title: 'Importer un extrait', sub: 'CODA (.cod) pour Europabank · PDF pour Belfius et BNP Paribas Fortis' });
+  const page = layout({ icon: 'chart', title: 'Importer un extrait', sub: 'CODA (.cod) · PDF Belfius et BNP Paribas Fortis · CSV et Excel (colonnes à choisir) – toutes banques' });
   page.innerHTML = `<div class="card"><div class="grid-form">
       <label class="field"><span>Compte</span><select data-acc><option value="">Détection automatique (IBAN de l'extrait)</option>${accs.filter((a) => a.active).map((a) => `<option value="${a.id}">${esc(pilAccName(a))} · ${esc(ibanFmt(a.iban))}</option>`).join('')}</select></label>
-      <label class="field"><span>Extrait(s)</span><input type="file" data-file multiple accept=".cod,.coda,.txt,.cod2,.pdf,application/pdf"></label></div>
+      <label class="field"><span>Extrait(s)</span><input type="file" data-file multiple accept=".cod,.coda,.txt,.cod2,.pdf,application/pdf,.csv,.xlsx,.xls"></label></div>
       <p class="muted">Étapes : lecture → contrôle des soldes (solde initial + mouvements = solde final) → recherche des doublons et des périodes manquantes → aperçu → votre confirmation. Rien n'est enregistré avant la confirmation.</p></div>
     <div data-out></div>`;
   if (!accs.length) $('[data-out]', page).innerHTML = `<div class="alert">Aucun compte bancaire. <a href="#/pilotage/comptes">Ajoutez vos comptes</a> avant d'importer.</div>`;
@@ -127,6 +150,7 @@ async function pilImportPage() {
     for (const f of e.target.files) {
       const box = document.createElement('div'); box.className = 'card'; box.innerHTML = `<div class="card-h"><h3>${esc(f.name)}</h3></div><p class="muted">Lecture…</p>`; out.appendChild(box);
       try {
+        if (/\.(csv|xlsx|xls)$/i.test(f.name)) { await pilTableFlow(box, f, accs, $('[data-acc]', page).value); continue; }
         const payload = { ...(await pilReadFile(f)), account: $('[data-acc]', page).value || null };
         const pv = await api('POST', 'pilot/preview', payload);
         pilPreview(box, f.name, pv, payload);
@@ -192,9 +216,10 @@ async function pilImportsPage() {
       ...(i.warnings || []).length ? [{ label: `Remarques : ${i.warnings.join(' · ')}`, run: () => {} }] : [],
       { label: 'Télécharger l\'extrait original', icon: 'download', run: () => { location.href = `api.php?r=pilot/imports/${i.id}/file`; } },
       { label: 'Voir les mouvements', icon: 'eye', run: () => { ui.pilTx = { ...(ui.pilTx || {}), import: i.id }; go('#/pilotage/mouvements'); } },
-      ...(i.status === 'importe' ? [{ sep: true }, { label: 'Annuler cet import…', icon: 'trash', danger: true, run: async () => {
-        if (!confirm(`Annuler l'import « ${i.filename} » ?\n\nSes ${i.tx_new} mouvement(s) seront retirés (avec leurs classements et rapprochements), ainsi que les paiements qu\'ils ont ajoutés aux factures et achats. Le journal et le fichier original sont conservés.`)) return;
-        await api('DELETE', `pilot/imports/${i.id}`); pilCatsP = null; toast('Import annulé'); render();
+      ...(i.status === 'importe' && pilCan('approvals.request') ? [{ sep: true }, { label: 'Demander l\'annulation de cet import…', icon: 'trash', danger: true, run: async () => {
+        const v = await ask(`Annuler l'import « ${i.filename} »`, [{ name: 'justification', label: 'Justification (obligatoire)', type: 'textarea', required: true, hint: `Ses ${i.tx_new} mouvement(s) seront retirés avec leurs classements, rapprochements et les paiements ajoutés aux factures et achats. Le journal et le fichier original restent conservés. L'annulation n'aura lieu qu'après approbation par le propriétaire.` }]);
+        if (!v) return;
+        pilApproval(await api('DELETE', `pilot/imports/${i.id}`, { justification: v.justification })); render();
       } }] : []),
     ]),
     empty: 'Aucun extrait importé',
@@ -207,7 +232,7 @@ async function pilTxPage() {
   const qs = new URLSearchParams(Object.entries({ account: f.account || '', category: f.category || '', import: f.import || '', from: f.month ? f.month + '-01' : '', to: f.month ? f.month + '-31' : '' }).filter(([, v]) => v)).toString();
   const [rows, accs, cats] = await Promise.all([api('GET', 'pilot/tx' + (qs ? '&' + qs : '')), api('GET', 'pilot/accounts'), pilCats()]);
   const acc = (id) => accs.find((a) => a.id === id);
-  const page = layout({ icon: 'chart', title: 'Mouvements bancaires' });
+  const page = layout({ icon: 'chart', title: 'Mouvements bancaires', actions: pilCan('export') ? `<a class="btn" href="api.php?r=pilot/export/tx${qs ? '&' + qs : ''}">Exporter (CSV)</a>` : '' });
   page.innerHTML = `<div class="card"><div class="grid-form">
       <label class="field"><span>Compte</span><select data-k="account"><option value="">Tous les comptes</option>${accs.map((a) => `<option value="${a.id}" ${String(f.account) === String(a.id) ? 'selected' : ''}>${esc(pilAccName(a))}</option>`).join('')}</select></label>
       <label class="field"><span>Catégorie</span><select data-k="category"><option value="">Toutes</option>${Object.entries(cats).map(([k, [l]]) => `<option value="${k}" ${f.category === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
@@ -295,12 +320,12 @@ async function pilTxModal(t, cats, accs) {
     const amt = Math.abs(t.amount);
     box.innerHTML = sug.length ? `<div class="rows">${sug.map((x, i) => `<div class="row static"><span class="grow"><a href="${href(x)}">${x.type === 'invoice' ? 'Facture' : 'Achat'} ${esc(x.ref || '#' + x.id)}</a> · ${fmtDate(x.date)} · total ${pilMoney(x.total)} · reste ${pilMoney(x.rest)}<br><small class="muted">${badge(x.level, x.level === 'sûr' ? '#2f9e44' : '#f08c00')} ${esc(x.why.join(', '))}</small>
         ${x.existing_payment ? `<br><small>Paiement de ce montant déjà enregistré le ${fmtDate(x.existing_payment)} : il ne sera pas ajouté une seconde fois.</small>` : !x.can_pay && amt > x.rest ? `<br><small class="late">Le mouvement (${pilMoney(amt)}) dépasse le reste à payer : rapprochement sans paiement.</small>` : ''}</span>
-        <span class="btns">${x.can_pay ? `<button class="btn sm primary" data-m="${i}" data-pay="1">Rapprocher et enregistrer le paiement</button>` : ''}<button class="btn sm" data-m="${i}" data-pay="0">Rapprocher seulement</button></span></div>`).join('')}</div>
+        <span class="btns">${x.can_pay ? `<button class="btn sm primary" data-m="${i}" data-pay="1">${pilCan('bank.pay') ? 'Rapprocher et enregistrer le paiement' : 'Demander l\'enregistrement du paiement'}</button>` : ''}<button class="btn sm" data-m="${i}" data-pay="0">Rapprocher seulement</button></span></div>`).join('')}</div>
       <small class="muted">« Enregistrer le paiement » ajoute ${pilMoney(amt)} à la date du ${fmtDate(t.booking_date)} dans la facture ou l'achat (retiré si vous annulez le rapprochement ou l'import).</small>`
       : '<p class="muted">Aucune facture ni aucun achat correspondant (communication structurée, montant, IBAN).</p>';
     $$('[data-m]', box).forEach((b) => { b.onclick = async () => {
       const x = sug[+b.dataset.m]; const pay = b.dataset.pay === '1';
-      try { await api('PUT', `pilot/tx/${t.id}`, { match: { type: x.type, id: x.id, pay } }); m.close(); toast(pay ? 'Rapprochement et paiement enregistrés' : 'Rapprochement enregistré'); render(); } catch (e) { toast('Erreur : ' + e.message, 6000); }
+      try { const r = await api('PUT', `pilot/tx/${t.id}`, { match: { type: x.type, id: x.id, pay } }); m.close(); if (!pilApproval(r)) toast(pay ? 'Rapprochement et paiement enregistrés' : 'Rapprochement enregistré'); render(); } catch (e) { toast('Erreur : ' + e.message, 6000); }
     }; });
   } catch (e) { box.innerHTML = `<div class="alert">${esc(e.message)}</div>`; }
 }
@@ -485,7 +510,7 @@ function pilCommitmentForm(kind, c, accs) {
       if (c) await api('PUT', `pilot/commitments/${c.id}`, body); else await api('POST', 'pilot/commitments', body);
       toast('Enregistré'); render();
     },
-    onDelete: c ? async () => { await api('DELETE', `pilot/commitments/${c.id}`); render(); } : null,
+    onDelete: c ? async () => { pilApproval(await api('DELETE', `pilot/commitments/${c.id}`)); render(); } : null,
   });
 }
 
@@ -695,4 +720,143 @@ async function pilProjectsPage() {
       ${p.avenants_pending.length ? `<h4>Avenants en attente</h4><div class="rows">${p.avenants_pending.map((v) => `<a class="row" href="#/quote/${v.id}"><span class="grow">Avenant ${esc(v.number || '#' + v.id)} – ${v.status === 'envoye' ? 'envoyé' : 'à envoyer'}${v.age != null ? ` depuis ${v.age} j` : ''}</span><b>${pilMoney(v.amount)}</b></a>`).join('')}</div>` : ''}</div>`, { wide: true }),
     empty: 'Aucun chantier en cours',
   });
+}
+
+// ================================================================ Étape 5 : tableurs, approbations, audit, rôles
+// ---------- Import CSV / Excel : colonnes choisies par l'utilisateur (aucun format bancaire deviné)
+// lecteur Excel : celui de BatiPro (assets/import.js, loadXLSX)
+// même normalisation que tests/fixtures/bank/make-bank-fixtures.mjs (normCell)
+const pilNormCell = (v) => (v instanceof Date ? `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}` : typeof v === 'number' ? v.toFixed(2).replace('.', ',') : String(v ?? '').trim());
+function pilCsvRows(text) {
+  const lines = text.replace(/^﻿/, '').split(/\r\n|\r|\n/);
+  const sample = lines.slice(0, 30).join('\n'); const d = [';', ',', '\t'].reduce((b, c) => (sample.split(c).length > sample.split(b).length ? c : b), ';');
+  return lines.map((l) => { if (!l.trim()) return []; const out = []; let cur = ''; let q = false;
+    for (let i = 0; i < l.length; i++) { const ch = l[i]; if (q) { if (ch === '"' && l[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; } else if (ch === '"') q = true; else if (ch === d) { out.push(cur.trim()); cur = ''; } else cur += ch; }
+    out.push(cur.trim()); return out; });
+}
+async function pilSheetRows(f) {
+  const buf = await f.arrayBuffer();
+  if (/\.csv$/i.test(f.name)) { let t = new TextDecoder('utf-8').decode(buf); if (t.includes('�')) t = new TextDecoder('windows-1252').decode(buf); return { buf, rows: pilCsvRows(t), csv: true }; }
+  const X = await loadXLSX(); const wb = X.read(new Uint8Array(buf), { type: 'array', cellDates: true });
+  return { buf, rows: X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' }).map((r) => r.map(pilNormCell)), csv: false };
+}
+const PIL_TF = [['date', 'Date (comptabilisation / exécution) *', /^(date( de)? ?(comptabilisation|d'?ex[ée]cution|op[ée]ration)?|boekingsdatum|uitvoeringsdatum|booking date|date)$/i],
+  ['amount', 'Montant (signé)', /^(montant|bedrag|amount)/i], ['debit', 'ou : Débit', /^(d[ée]bit|debet)/i], ['credit', 'et : Crédit', /^cr[ée]dit/i], ['value_date', 'Date valeur', /valeur|valuta|value date/i],
+  ['cp_name', 'Nom de la contrepartie', /nom.*contrepartie|naam.*tegenpartij|counterparty name/i], ['cp_iban', 'Compte de la contrepartie', /^(compte contrepartie|contrepartie|rekening tegenpartij|tegenrekening|counterparty account)$/i],
+  ['communication', 'Communication', /communication|mededeling|description|libell[ée]|d[ée]tails/i], ['balance', 'Solde après opération', /^(solde|saldo|balance)/i], ['seq', 'N° d\'opération', /s[ée]quence|transaction n|volgnummer|num[ée]ro de transaction/i]];
+async function pilTableFlow(box, f, accs, accId) {
+  const { buf, rows, csv } = await pilSheetRows(f);
+  const hdr = Math.max(0, rows.findIndex((r) => r.filter((c) => String(c).trim()).length >= 3 && r.some((c) => PIL_TF[0][2].test(String(c).trim()))));
+  const ncol = Math.max(...rows.slice(0, 50).map((r) => r.length));
+  const guess = (h) => { const m = {}; PIL_TF.forEach(([k, , re]) => { const i = (rows[h] || []).findIndex((c) => re.test(String(c).trim())); if (i >= 0 && !Object.values(m).includes(i)) m[k] = i; }); if (m.amount != null) { delete m.debit; delete m.credit; } return m; };
+  let map = guess(hdr);
+  const colOpts = (h) => `<option value="">—</option>${Array.from({ length: ncol }, (_, i) => `<option value="${i}">${i + 1}. ${esc(String((rows[h] || [])[i] ?? '').slice(0, 30))}</option>`).join('')}`;
+  box.innerHTML = `<div class="card-h"><h3>${esc(f.name)}</h3><span class="muted">${csv ? 'CSV' : 'Excel'} · ${rows.length} lignes</span></div>
+    <p class="muted">Indiquez quelles colonnes contiennent quoi : rien n'est deviné. Les colonnes reconnues d'après leur titre sont présélectionnées ; vérifiez-les.</p>
+    <div class="grid-form">
+      <label class="field"><span>Compte bancaire *</span><select data-tacc><option value="">—</option>${accs.filter((a) => a.active).map((a) => `<option value="${a.id}" ${String(a.id) === String(accId) ? 'selected' : ''}>${esc(pilAccName(a))} · ${esc(ibanFmt(a.iban))}</option>`).join('')}</select></label>
+      <label class="field"><span>Ligne des titres</span><select data-thdr>${rows.slice(0, 30).map((r, i) => `<option value="${i}" ${i === hdr ? 'selected' : ''}>${i + 1}. ${esc(r.filter(Boolean).slice(0, 4).join(' | ').slice(0, 60))}</option>`).join('')}</select></label>
+      ${PIL_TF.map(([k, l]) => `<label class="field"><span>${esc(l)}</span><select data-tm="${k}"></select></label>`).join('')}
+      <label class="field"><span>Séparateur décimal</span><select data-tdec><option value=",">virgule (1.234,56)</option><option value=".">point (1,234.56)</option></select></label>
+      <label class="field"><span>Solde de départ (€)</span><input data-topen inputmode="decimal" placeholder="vide = solde final de l'extrait précédent"></label>
+      <label class="field"><span>Solde final de la période (€)</span><input data-tclose inputmode="decimal" placeholder="obligatoire sans colonne « Solde »"></label></div>
+    <div class="pil-tx-wrap" data-tprev></div><div class="btns"><button class="btn primary" data-tgo>Aperçu et contrôles</button></div>`;
+  const fill = () => { const h = +$('[data-thdr]', box).value; $$('[data-tm]', box).forEach((s) => { s.innerHTML = colOpts(h); s.value = map[s.dataset.tm] ?? ''; });
+    $('[data-tprev]', box).innerHTML = `<table class="dt"><tbody>${rows.slice(h, h + 6).map((r, i) => `<tr>${Array.from({ length: ncol }, (_, c) => `<td><small>${i === 0 ? '<b>' : ''}${esc(String(r[c] ?? '').slice(0, 28))}</small></td>`).join('')}</tr>`).join('')}</tbody></table>`; };
+  $('[data-thdr]', box).onchange = () => { map = guess(+$('[data-thdr]', box).value); fill(); };
+  fill();
+  $('[data-tgo]', box).onclick = async () => {
+    const m = {}; $$('[data-tm]', box).forEach((s) => { if (s.value !== '') m[s.dataset.tm] = +s.value; });
+    const acc = $('[data-tacc]', box).value; if (!acc) return toast('Choisissez le compte bancaire');
+    const cents = (v) => (String(v).trim() === '' ? null : Math.round(num(v) * 100));
+    const payload = { name: f.name, content: pilB64(buf), account: +acc, table: { map: m, rows: csv ? undefined : rows, meta: { header_row: +$('[data-thdr]', box).value, decimal: $('[data-tdec]', box).value, opening: cents($('[data-topen]', box).value), closing: cents($('[data-tclose]', box).value) } } };
+    try { const pv = await api('POST', 'pilot/preview', payload); pilPreview(box, f.name, pv, payload); } catch (e) { toast('Erreur : ' + e.message, 5000); }
+  };
+}
+
+// ---------- Centre d'approbation
+const PIL_APST = { en_attente: ['En attente', '#f08c00'], approuvee: ['Approuvée – à exécuter', '#3b5bdb'], refusee: ['Refusée', '#e5484d'], annulee: ['Annulée', '#adb5bd'], expiree: ['Expirée', '#868e96'], executee: ['Exécutée', '#2f9e44'] };
+async function pilApprovalsPage() {
+  const list = await api('GET', 'pilot/approvals');
+  const page = layout({ icon: 'check', title: 'Centre d\'approbation', sub: 'Actions sensibles : préparées par un utilisateur ou par l\'IA, décidées par le propriétaire, puis exécutées par un processus contrôlé et journalisé',
+    actions: pilCan('approvals.request') ? '<button class="btn" data-mail>Préparer un e-mail externe</button>' : '' });
+  const f = ui.pilAp = ui.pilAp || 'en_attente';
+  page.innerHTML = `<div class="alert info">Approuver n'est pas exécuter : une demande approuvée reste en attente d'exécution, faite ensuite par le bouton « Exécuter » (journalisé avec son résultat). L'IA ne peut que proposer.</div><div id="tbl"></div>`;
+  dataTable($('#tbl'), {
+    rows: list, state: { sort: -1 }, search: (a) => [a.description, a.type_label].join(' '),
+    filters: { def: f, options: [['en_attente', 'En attente', '#f08c00'], ['approuvee', 'À exécuter', '#3b5bdb'], ['executee', 'Exécutées', '#2f9e44'], ['', 'Toutes']], match: (a, k) => a.status === k },
+    columns: [{ l: 'N°', v: (a) => a.id, sort: (a) => a.id }, { l: 'Créée le', v: (a) => fmtDT(a.created_at), sort: (a) => a.created_at },
+      { l: 'Action', v: (a) => `<b>${esc(a.type_label)}</b><br><small>${esc(a.description)}</small>` },
+      { l: 'Origine', v: (a) => (a.origin === 'ia' ? badge('IA', '#7048e8') : esc(userName(a.requested_by))) },
+      { l: 'Montant', cls: 'r', v: (a) => (a.amount != null ? pilMoney(a.amount) : '—') },
+      { l: 'Statut', v: (a) => st(PIL_APST, a.status) + (a.last_error ? `<br><small class="late">${esc(a.last_error)}</small>` : '') }],
+    onRow: (a) => pilApprovalModal(a),
+    empty: 'Aucune demande',
+  });
+  $$('[data-f]', page).forEach((b) => b.addEventListener('click', () => { ui.pilAp = b.dataset.f; saveUi(); }));
+  const mb = $('[data-mail]'); if (mb) mb.onclick = async () => {
+    const v = await ask('E-mail externe (envoyé seulement après approbation)', [{ name: 'to', label: 'Destinataire (e-mail)', required: true }, { name: 'subject', label: 'Objet', required: true }, { name: 'body', label: 'Message', type: 'textarea', rows: 8, required: true, cls: 'full' }, { name: 'justification', label: 'Justification', cls: 'full' }]);
+    if (v) { const r = await api('POST', 'pilot/approvals', { type: 'email_externe', payload: { to: v.to, subject: v.subject, body: v.body }, justification: v.justification }); toast(`Demande n° ${r.id} créée`); render(); }
+  };
+}
+function pilApprovalModal(a) {
+  const pay = a.payload || {};
+  const m = modal(`${mhead(`Demande n° ${a.id} – ${a.type_label}`)}<div class="m-body">
+    <div class="info"><div class="kv"><span>Statut</span><span>${st(PIL_APST, a.status)}</span></div><div class="kv"><span>Description</span><span>${esc(a.description)}</span></div>
+      <div class="kv"><span>Origine</span><span>${a.origin === 'ia' ? 'Assistant IA (proposition)' : 'Utilisateur'} · ${esc(userName(a.requested_by))} · ${fmtDT(a.created_at)}</span></div>
+      ${a.amount != null ? `<div class="kv"><span>Montant</span><b>${pilMoney(a.amount)}</b></div>` : ''}
+      <div class="kv"><span>Justification</span><span>${esc(a.justification || '—')}</span></div>
+      <div class="kv"><span>Risques</span><span>${(a.risks || []).map(esc).join('<br>') || '—'}</span></div>
+      <div class="kv"><span>Documents</span><span>${(a.documents || []).map((d) => (d.type === 'invoice' ? `<a href="#/invoice/${d.id}">Facture ${esc(d.name || d.id)}</a>` : d.type === 'expense' ? `<a href="#/purchase/${d.id}">Achat ${esc(d.name || d.id)}</a>` : esc(d.name || ''))).join(', ') || '—'}</span></div>
+      <div class="kv"><span>Données</span><span><small class="pil-raw">${esc(a.type === 'email_externe' ? `À : ${pay.to}\nObjet : ${pay.subject}\n\n${pay.body}` : JSON.stringify(pay, null, 1))}</small></span></div>
+      <div class="kv"><span>Expire le</span><span>${fmtDT(a.expires_at)}</span></div>
+      ${a.decided_by ? `<div class="kv"><span>Décision</span><span>${esc(userName(a.decided_by))} · ${fmtDT(a.decided_at)}${a.decision_note ? ' – ' + esc(a.decision_note) : ''}</span></div>` : ''}
+      ${a.executed_at ? `<div class="kv"><span>Exécution</span><span>${esc(userName(a.executed_by))} · ${fmtDT(a.executed_at)} · <small>${esc(JSON.stringify(a.result))}</small></span></div>` : ''}</div>
+    ${a.status === 'en_attente' && pilCan('approvals.decide') ? '<label class="field full"><span>Note de décision</span><input name="note"></label>' : ''}</div>
+    <div class="m-foot"><button class="btn" data-close>Fermer</button><span class="grow"></span>
+      ${['en_attente', 'approuvee'].includes(a.status) && (a.requested_by === S.me.id || pilCan('approvals.decide')) ? '<button class="btn ghost" data-ap="cancel">Annuler la demande</button>' : ''}
+      ${a.status === 'en_attente' && pilCan('approvals.decide') ? '<button class="btn danger" data-ap="refuse">Refuser</button><button class="btn primary" data-ap="approve">Approuver</button>' : ''}
+      ${a.status === 'approuvee' && pilCan('approvals.execute') ? '<button class="btn primary" data-ap="execute">Exécuter maintenant</button>' : ''}</div>`, { wide: true });
+  $$('[data-ap]', m.el).forEach((b) => { b.onclick = async () => {
+    const act = b.dataset.ap;
+    if (act === 'execute' && !confirm(`Exécuter maintenant : ${a.description} ?`)) return;
+    try { const r = await api('POST', `pilot/approvals/${a.id}/${act}`, { note: ($('[name=note]', m.el) || {}).value || '' }); m.close(); toast(`Demande n° ${a.id} : ${PIL_APST[r.status][0].toLowerCase()}`); render(); } catch (e) { toast('Erreur : ' + e.message, 7000); }
+  }; });
+}
+
+// ---------- Journal d'audit (lecture seule)
+async function pilAuditPage() {
+  const [rows, ver] = await Promise.all([api('GET', 'pilot/audit'), api('GET', 'pilot/audit/verify')]);
+  const page = layout({ icon: 'key', title: 'Journal d\'audit', sub: 'Connexions, imports, corrections, rapprochements, engagements, prévisions, IA, approbations, exécutions' });
+  page.innerHTML = `<div class="alert ${ver.ok ? 'ok' : ''}">${ver.ok ? `✓ Intégrité vérifiée : ${ver.entries} entrées, chaîne d'empreintes intacte.` : `✗ Intégrité compromise${ver.broken_at ? ` à partir de l'entrée n° ${ver.broken_at}` : ' : des entrées ont été supprimées (ancre différente)'}.`}
+      ${ver.db_protection ? ' Protection MySQL active (modification et suppression refusées).' : ' Protection MySQL non disponible chez cet hébergeur.'}<br><small>${esc(ver.note)}</small></div><div id="tbl"></div>`;
+  dataTable($('#tbl'), {
+    rows, state: { sort: -1 }, search: (r) => [r.action, r.entity_type, JSON.stringify(r.new_value), JSON.stringify(r.old_value), userName(r.user_id)].join(' '),
+    columns: [{ l: 'N°', v: (r) => r.id, sort: (r) => r.id }, { l: 'Date et heure', v: (r) => fmtDT(r.at) }, { l: 'Par', v: (r) => (r.process === 'utilisateur' ? esc(userName(r.user_id)) : badge(r.process === 'ia' ? 'IA' : r.process === 'cron' ? 'Tâche planifiée' : 'Système', '#7048e8') + (r.user_id ? ' ' + esc(userName(r.user_id)) : '')) },
+      { l: 'Action', v: (r) => `<b>${esc(r.action.replace(/_/g, ' '))}</b><br><small class="muted">${esc(r.entity_type || '')}${r.entity_id ? ' #' + r.entity_id : ''}</small>` },
+      { l: 'Ancienne valeur', v: (r) => `<small class="pil-raw">${esc(r.old_value == null ? '' : typeof r.old_value === 'string' ? r.old_value : JSON.stringify(r.old_value)).slice(0, 300)}</small>` },
+      { l: 'Nouvelle valeur', v: (r) => `<small class="pil-raw">${esc(r.new_value == null ? '' : typeof r.new_value === 'string' ? r.new_value : JSON.stringify(r.new_value)).slice(0, 300)}</small>` },
+      { l: 'Origine', v: (r) => `<small class="muted">${esc(r.origin || '')}</small>` }],
+    empty: 'Journal vide',
+  });
+}
+
+// ---------- Paramètres : rôles, propriétaire, double contrôle
+async function pilSettingsPage() {
+  const [r, cfg] = await Promise.all([api('GET', 'pilot/roles'), pilCan('settings.write') ? api('GET', 'pilot/settings') : null]);
+  const page = layout({ icon: 'gear', title: 'Paramètres du Pilotage', sub: 'Rôles et sécurité – contrôlés par le serveur' });
+  const can = pilCan('roles.manage');
+  page.innerHTML = `${cfg ? `<div class="card"><div class="card-h"><h3>Sécurité</h3></div><div class="grid-form">
+      <label class="field"><span>Propriétaire (OWNER)</span><select data-own>${r.users.filter((u) => u.batipro_role === 'admin' && u.active).map((u) => `<option value="${u.id}" ${u.id === cfg.owner_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>
+      <label class="field"><span>Durée de validité d'une demande (jours)</span><input data-days inputmode="numeric" value="${cfg.security.approvalDays}"></label>
+      <label class="field chk"><input type="checkbox" data-4e ${cfg.security.fourEyes ? 'checked' : ''}><span>Double contrôle : une demande doit être approuvée par une autre personne que le demandeur</span></label></div>
+      <button class="btn primary" data-sec>Enregistrer</button></div>` : ''}
+    <div class="card"><div class="card-h"><h3>Rôles sur le Pilotage</h3><span class="muted">${can ? 'modifiables par le propriétaire' : 'une modification crée une demande d\'approbation'}</span></div>
+      <table class="dt"><thead><tr><th>Utilisateur</th><th>Rôle BâtiPro</th><th>Rôle Pilotage</th></tr></thead><tbody>${r.users.filter((u) => u.active).map((u) => `<tr><td>${esc(u.name)}<br><small class="muted">${esc(u.email)}</small></td><td>${esc(u.batipro_role)}</td>
+        <td>${u.role === 'owner' ? badge('Propriétaire', '#1d2b53') : pilCan('approvals.request') ? `<select data-role="${u.id}">${Object.entries(r.roles).filter(([k]) => k !== 'owner').map(([k, [l]]) => `<option value="${k}" ${u.role === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>` : esc(r.roles[u.role][0])}</td></tr>`).join('')}</tbody></table></div>
+    <div class="card"><div class="card-h"><h3>Ce que permet chaque rôle</h3></div><div class="pil-tx-wrap"><table class="dt"><thead><tr><th>Permission</th>${Object.entries(r.roles).filter(([k]) => !['site_manager', 'employee', 'none'].includes(k)).map(([, [l]]) => `<th>${esc(l)}</th>`).join('')}</tr></thead><tbody>
+      ${Object.entries(r.perms).map(([p, roles]) => `<tr><td><small>${esc(p)}</small></td>${Object.keys(r.roles).filter((k) => !['site_manager', 'employee', 'none'].includes(k)).map((k) => `<td>${roles.includes(k) ? '✓' : ''}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      <small class="muted">${Object.entries(r.roles).map(([, [l, d]]) => `<b>${esc(l)}</b> : ${esc(d)}`).join('<br>')}</small></div>`;
+  $$('[data-role]', page).forEach((s) => { s.onchange = async () => { try { const x = await api('PUT', `pilot/roles/${s.dataset.role}`, { role: s.value }); if (!pilApproval(x)) toast('Rôle modifié'); render(); } catch (e) { toast('Erreur : ' + e.message, 5000); render(); } }; });
+  const sb = $('[data-sec]', page); if (sb) sb.onclick = async () => { await api('PUT', 'pilot/settings', { owner: +$('[data-own]', page).value, approvalDays: +$('[data-days]', page).value, fourEyes: $('[data-4e]', page).checked }); toast('Paramètres enregistrés'); render(); };
 }
