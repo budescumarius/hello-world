@@ -512,10 +512,13 @@ route('pv', async (id) => {
       ${att.map((c) => `<tr><td>${esc([c.data.firstname, c.data.name].filter(Boolean).join(' ') || contactName(c))}</td><td>${esc([c.data.company, CONTACT_KINDS[c.data.kind], c.data.trade].filter(Boolean).join(' · '))}</td><td>${esc([c.data.phone || c.data.mobile, c.data.email].filter(Boolean).join(', '))}</td></tr>`).join('')}</table>
     ${d.absents ? `<p><b>Absents / excusés :</b> ${esc(d.absents)}</p>` : ''}
     ${d.notes ? `<h2>Discussions et décisions</h2><div class="pre">${esc(d.notes)}</div>` : ''}
+    ${(() => { const du = d.during || {}; const L = (ids) => (ids || []).map((x) => byId(points, +x)).filter(Boolean); const cr = L(du.created); const dn = L(du.done);
+      return (cr.length || dn.length) ? `<h2>Pendant la visite</h2>${cr.length ? `<p><b>Nouveaux points (${cr.length}) :</b> ${cr.map((x) => `N° ${esc(x.number)} ${esc(x.data.title)}`).join(' · ')}</p>` : ''}${dn.length ? `<p><b>Points faits pendant la réunion (${dn.length}) :</b> ${dn.map((x) => `N° ${esc(x.number)} ${esc(x.data.title)}`).join(' · ')}</p>` : ''}` : ''; })()}
     <h2>Suivi des points (${pts.length})</h2>${pts.length ? `<table class="d-lines"><tr><th>N°</th><th>Description</th><th>Intervenant</th><th>Statut</th><th>Échéance</th><th>Dernier commentaire</th></tr>${pts.map((x) => { const lc = [...(x.data.history || [])].reverse().find((h) => h.kind === 'comment'); return `<tr><td><b>${esc(x.number)}</b></td><td><b>${esc(x.data.title)}</b>${x.data.desc ? `<br>${esc(x.data.desc)}` : ''}${byId(plans, x.data.planId) ? `<br><small>Plan : ${esc(byId(plans, x.data.planId).data.name)}</small>` : ''}</td><td>${esc(contactName(byId(contacts, x.data.companyId)))}</td><td>${st(PTS, x.data.status)}</td><td>${fmtDate(x.data.due)}</td><td>${lc ? esc(lc.text) : ''}</td></tr>`; }).join('')}</table>` : '<p>—</p>'}
     ${d.next ? `<p><b>Prochaine réunion :</b> ${fmtDate(d.next)}</p>` : ''}
     <p class="muted sm">Sans remarque écrite dans les 8 jours, le présent procès-verbal est considéré comme approuvé.</p>
-    <div class="d-sign">${att.slice(0, 6).map((c) => `<div>${esc(contactName(c))}</div>`).join('')}<div>${esc(company().name || '')}</div></div></div>`;
+    ${(d.signatures || []).length ? `<h2>Signatures</h2><div class="d-sign">${d.signatures.map((x) => `<div><img src="${fileUrl(x.fileId)}" alt="" style="max-height:70px;display:block">${esc(x.name || '')}<br><small class="muted">${fmtDT(x.at)}</small></div>`).join('')}</div>`
+      : `<div class="d-sign">${att.slice(0, 6).map((c) => `<div>${esc(contactName(c))}</div>`).join('')}<div>${esc(company().name || '')}</div></div>`}</div>`;
   const mailPv = () => {
     const client = byId(contacts, p.data.clientId);
     const attIds = att.map((c) => c.id);

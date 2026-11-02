@@ -338,7 +338,7 @@ function accountMenu() {
   if (S.firm && S.firm.own === false) items.push({ label: 'Revenir à ma firme', icon: 'back', run: () => switchFirm(0) });
   items.push({ label: 'Conditions et confidentialité', icon: 'file', run: () => window.open('legal.php', '_blank') });
   items.push({ label: `Version de l'application : ${appVersion()}`, icon: 'check', run: () => toast(`BâtiPro version ${appVersion()} – si ce n'est pas la dernière, fermez et rouvrez l'application`, 5000) });
-  items.push({ sep: true }, { label: 'Se déconnecter', icon: 'logout', danger: true, run: async () => { await api('POST', 'auth/logout').catch(() => {}); S.ready = false; showLogin(); } });
+  items.push({ sep: true }, { label: 'Se déconnecter', icon: 'logout', danger: true, run: async () => { await api('POST', 'auth/logout').catch(() => {}); try { localStorage.removeItem('bp-boot'); } catch (e) { /* */ } S.ready = false; showLogin(); } });
   menuSheet(S.me.name || 'Mon compte', items);
 }
 
@@ -781,6 +781,7 @@ async function boot() {
   try {
     const b = await api('GET', 'bootstrap');
     S.testMode = !!b.testMode;
+    if (typeof siteBootSave === 'function') siteBootSave(b);
     Object.assign(S, { me: b.user, users: b.users, settings: b.settings || {}, firm: b.firm || {}, edition: b.edition || 'avance', ai: !!b.ai, translate: !!b.translate, field: b.field || null, sub: b.sub || { status: 'free' }, ready: true });
     document.title = (S.settings.company || {}).appName || (S.settings.company || {}).name || 'BâtiPro';
     if (!location.hash) location.hash = isField() ? '#/t' : '#/dashboard';
@@ -790,6 +791,7 @@ async function boot() {
     if (typeof aiMount === 'function') aiMount();
     notifRefresh();
   } catch (e) {
+    if (!e.status && typeof siteBootOffline === 'function' && siteBootOffline()) return;
     if (e.status === 401) (location.hash.startsWith('#/inscription') && typeof showSignup === 'function' ? showSignup() : showLogin());
     else if (e.status === 503) app.innerHTML = `<div class="login"><div class="login-box"><h1>Installation requise</h1><p>${esc(e.message)}</p><a class="btn primary" href="install.php">Installer</a></div></div>`;
     else app.innerHTML = `<div class="login"><div class="login-box"><h1>Erreur</h1><p>${esc(e.message)}</p><button class="btn" data-reload>Réessayer</button></div></div>`;

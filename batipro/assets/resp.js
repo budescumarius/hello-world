@@ -363,6 +363,7 @@ async function respProject(pid) {
   $('.top-title h1').textContent = d.name;
   const wk = D.hours.filter((h) => h.project_id === p.id); const by = {}; wk.forEach((h) => { const n = (byId(D.m.employee, +h.data.employeeId) || { data: { name: h.data.who || '?' } }).data.name; by[n] = (by[n] || 0) + num(h.data.hours); });
   page.innerHTML = `<section class="rz">
+      <a class="btn primary site-go" href="#/site/${p.id}">📍 Sur le chantier</a>
       ${r.client !== '—' ? `<div class="rz-who">👤 <b>${esc(r.client)}</b></div>` : ''}
       ${addr ? `<a class="rz-who" href="https://maps.google.com/?q=${encodeURIComponent(addr)}" target="_blank" rel="noopener">📍 ${esc(addr)}</a>` : ''}
       ${respPlan(D, r)}

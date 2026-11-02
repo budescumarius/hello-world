@@ -107,16 +107,20 @@ function projectFinance(p, all) {
 route('project', async (id, tab = 'overview', sub) => {
   const p = await db.get('project', +id);
   if (tab === 'plan' && sub) return viewPlan(p, +sub);
+  // téléphone : Plans, Points et Réunions réunis dans « Suivi » (les listes complètes restent accessibles : …/points/liste)
+  const phoneSuivi = isPhone() && !isSimple();
+  if (phoneSuivi && ['plans', 'points', 'meetings'].includes(tab) && sub !== 'liste') tab = 'suivi';
   // responsable : sa page simple du projet ; ici seulement plans, points, rapports, documents, planning, heures
-  const CHEF_TABS = ['plans', 'points', 'reports', 'documents', 'planning', 'hours'];
+  const CHEF_TABS = ['plans', 'points', 'reports', 'documents', 'planning', 'hours', 'suivi'];
   if (isChef() && !CHEF_TABS.includes(tab)) { location.replace(`#/resp/p/${id}`); return; }
-  const tabs = isSimple() ? PTABS.filter(([k]) => ['overview', 'quotes', 'invoices', 'expenses', 'contracts', 'documents'].includes(k)) : isChef() ? PTABS.filter(([k]) => CHEF_TABS.includes(k)) : PTABS;
-  if (!tabs.some(([k]) => k === tab)) tab = 'overview';
+  let tabs = isSimple() ? PTABS.filter(([k]) => ['overview', 'quotes', 'invoices', 'expenses', 'contracts', 'documents'].includes(k)) : isChef() ? PTABS.filter(([k]) => CHEF_TABS.includes(k)) : PTABS;
+  if (phoneSuivi) { const i = tabs.findIndex(([k]) => ['points', 'plans', 'meetings'].includes(k)); tabs = tabs.filter(([k]) => !['points', 'plans', 'meetings'].includes(k)); if (i >= 0) tabs.splice(i, 0, ['suivi', 'Suivi', 'Terrain']); }
+  if (!tabs.some(([k]) => k === tab) && !(sub === 'liste' && ['plans', 'points', 'meetings'].includes(tab))) tab = 'overview';
   const contacts = await db.list('contact');
   const c = byId(contacts, p.data.clientId);
   const page = layout({ active: 'projects', icon: 'crane', title: p.data.name, back: isChef() ? `#/resp/p/${p.id}` : '#/projects',
     sub: `${esc(p.number)} · ${st(PST, p.data.status)}${c ? ` · <a href="#/contact/${c.id}">${esc(contactName(c))}</a>` : ''}${p.data.city ? ' · ' + esc(p.data.city) : ''}`,
-    actions: `<button class="btn" data-act="sum">${I.print} Résumé</button><button class="btn" data-act="edit">${I.edit} Modifier</button><button class="btn primary" data-act="padd">${I.plus} Ajouter…</button>`,
+    actions: `${isSimple() ? '' : `<a class="btn ${isPhone() ? 'primary' : ''}" href="#/site/${p.id}">📍 Sur le chantier</a>`}<button class="btn" data-act="sum">${I.print} Résumé</button><button class="btn" data-act="edit">${I.edit} Modifier</button><button class="btn primary" data-act="padd">${I.plus} Ajouter…</button>`,
     tabs: tabs.map(([k, l, g], i) => `${g && g !== (tabs[i - 1] || [])[2] ? `<span class="tab-g">${g}</span>` : ''}<a href="#/project/${p.id}/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('') });
   $('[data-act=edit]').onclick = () => editProject(p);
   $('[data-act=sum]').onclick = () => menuSheet('Résumé du chantier (PDF)', [
@@ -141,7 +145,7 @@ route('project', async (id, tab = 'overview', sub) => {
   ]);
   const T = {
     overview: tabOverview, quotes: tabPQuotes, orders: tabPOrders, invoices: tabPInvoices, expenses: tabPExpenses, hours: tabPHours,
-    planning: tabPPlanning, plans: tabPlans, points: tabPoints, meetings: tabMeetings, forms: tabForms, diary: tabDiary, documents: tabDocuments, contracts: tabContracts, reports: (pp, el) => reportsPanel(el, pp.id), progress: (pp, el) => progressList(el, pp.id),
+    planning: tabPPlanning, suivi: tabSuivi, plans: tabPlans, points: tabPoints, meetings: tabMeetings, forms: tabForms, diary: tabDiary, documents: tabDocuments, contracts: tabContracts, reports: (pp, el) => reportsPanel(el, pp.id), progress: (pp, el) => progressList(el, pp.id),
   };
   await T[tab](p, page, contacts);
 });
