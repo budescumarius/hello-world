@@ -20,6 +20,8 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
     const up = await uploadPlanImage(await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.9)), 1200, 800, 'rez', pr.id);
     const pl = await persist('plan', { project_id: pr.id, data: { name: 'Rez-de-chaussée', version: 1, ...up } });
     const pt = await persist('point', { project_id: pr.id, data: { title: 'Prise manquante cuisine', planId: pl.id, x: 0.7, y: 0.3, status: 'open', priority: 'normal', photos: [], history: [] } });
+    // beaucoup de plans (le choix doit rester rapide)
+    for (let i = 2; i <= 40; i++) await persist('plan', { project_id: pr.id, data: { ...pl.data, name: `Plan fictif ${String(i).padStart(3, '0')}`, level: i % 2 ? 'Étage 1' : 'Rez' } });
     return { pid: pr.id, plan: pl.id, sub: sub.id, pt: pt.id };
   });
   const pts = () => p.evaluate(async (pid) => (await api('GET', `items/point&project=${pid}`)), ids.pid);
@@ -35,6 +37,21 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
   await p.goto(`${BASE}/#/site/${ids.pid}`); await p.waitForSelector('.site-viewer .pin', { timeout: 15000 });
   await p.waitForTimeout(1500);
   check('plan plein écran avec le point existant et « hors ligne prêt »', (await p.$$('.site-viewer .pin')).length === 1 && /Hors ligne prêt/.test(await p.textContent('[data-net]')));
+  // choix du plan : un bouton + précédent / suivant + liste avec recherche
+  check('un seul bouton de plan (pas une longue rangée)', !(await p.$('.site-chips')) && /Rez-de-chaussée/.test(await p.textContent('.site-plansel')) && /1 \/ 40/.test(await p.textContent('.site-plansel')), (await p.textContent('.site-plansel')).trim());
+  await p.click('[data-next]'); await p.waitForTimeout(400);
+  check('plan suivant d\'un geste', /Plan fictif 002/.test(await p.textContent('.site-plansel')));
+  await p.click('[data-pick]'); await p.fill('.modal [data-q]', '037'); await p.waitForTimeout(200);
+  const found = await p.$$eval('.modal .site-prow b', (l) => l.map((x) => x.textContent));
+  check('recherche dans 40 plans', found.length === 1 && found[0] === 'Plan fictif 037', found.join(','));
+  await p.click('.modal .site-prow'); await p.waitForTimeout(400);
+  check('plan choisi depuis la liste', /Plan fictif 037/.test(await p.textContent('.site-plansel')));
+  await p.click('[data-pick]'); await p.waitForTimeout(200);
+  check('« Récents » en tête de liste', /Récents/.test(await p.textContent('.modal .site-pick')));
+  await p.check('.modal [data-todo]'); await p.waitForTimeout(200);
+  const todo = await p.$$eval('.modal .site-prow b', (l) => l.map((x) => x.textContent));
+  check('filtre « avec points à faire »', todo.length === 1 && todo[0] === 'Rez-de-chaussée', todo.join(','));
+  await p.click('.modal .site-prow'); await p.waitForSelector('.site-viewer .pin');
   // point rapide : + puis toucher le plan
   await p.click('[data-add]'); await p.waitForTimeout(200);
   const box = await p.$eval('.site-viewer', (e) => { const r = e.getBoundingClientRect(); return { x: r.left + r.width * 0.3, y: r.top + r.height * 0.5 }; });

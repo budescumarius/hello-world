@@ -2144,3 +2144,15 @@ body.loading::before { content: ''; position: fixed; top: 0; left: 0; right: 0; 
 .site-tiles { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 .btn.site-go, .site-go { color: #fff; justify-content: center; padding: 16px; font-size: 17px; font-weight: 700; background: #d99a1c; border-color: #d99a1c; }
 .rz .site-go { display: flex; margin-bottom: 12px; color: #fff; text-decoration: none; border-radius: 12px; }
+
+.site-planbar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; flex: 0 0 auto; background: var(--bg); }
+.site-planbar .icon-btn { font-size: 26px; line-height: 1; width: 44px; height: 44px; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; }
+.site-planbar .icon-btn:disabled { opacity: .35; }
+.site-plansel { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; text-align: left; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 6px 10px; cursor: pointer; min-height: 44px; }
+.site-plansel b, .site-plansel small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.site-pick { display: grid; gap: 8px; }
+.site-pick [data-list] { display: grid; gap: 6px; }
+.site-prow { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 6px 8px; cursor: pointer; }
+.site-prow.on { border-color: var(--navy); box-shadow: inset 0 0 0 1px var(--navy); }
+.site-prow img, .site-prow .site-noph { width: 64px; height: 46px; object-fit: cover; border-radius: 6px; flex: 0 0 auto; background: var(--surface-2); display: grid; place-items: center; }
+.site-prow b { display: block; overflow-wrap: anywhere; }

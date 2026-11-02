@@ -259,17 +259,18 @@ route('site', async (pid, sub) => {
   if (sub === 'sansplan') st.plan = 'none'; else if (sub) st.plan = +sub;
   if (!st.plan || (st.plan !== 'none' && !snap.plans.some((x) => x.id === st.plan))) st.plan = snap.plans.length ? (snap.plans.find((pl) => snap.points.some((x) => isOpenPt(x) && +x.data.planId === pl.id)) || snap.plans[0]).id : 'none';
   st.reload = async () => { const s2 = await siteLoad(pid).catch(() => null); if (s2 && siteState === st) { const same = s2.plans.map((x) => x.id).join() === st.snap.plans.map((x) => x.id).join(); st.snap = s2; if (same) st.soft(); else draw(); } };
-  st.redraw = () => { if (siteState === st) { opsAll().then((l) => { st.snap.pending = l.filter((o) => +o.pid === pid).length; drawHead(); drawSheet(); drawPins(); }); } };
+  st.redraw = () => { if (alive()) { opsAll().then((l) => { if (!alive()) return; st.snap.pending = l.filter((o) => +o.pid === pid).length; drawHead(); drawSheet(); drawPins(); }); } };
   const p = snap.project;
   app.innerHTML = `<div class="site-wrap">
     <header class="site-top"><a class="icon-btn" href="${S.offline ? '#/site' : isChef() ? `#/resp/p/${pid}` : `#/project/${pid}`}" aria-label="Retour">${I.back}</a><div class="grow"><b>Sur le chantier</b><small>${esc(p.data.name)}</small></div><span data-net></span><button class="btn sm" data-mt>Réunion</button></header>
     <div data-live></div>
-    <div class="chips site-chips" data-chips></div>
+    <div class="site-planbar" data-chips></div>
     <div class="site-main" data-main></div>
     <div class="site-banner" data-banner hidden><span>Touchez le plan à l'endroit du point</span><button type="button" data-cancel>Annuler</button></div>
     <button class="site-fab" data-add aria-label="Nouveau point">+</button>
     <section class="site-sheet" data-sheet></section></div>`;
-  const main = $('[data-main]'); const sheet = $('[data-sheet]');
+  const main = $('[data-main]'); const sheet = $('[data-sheet]'); const root = $('.site-wrap');
+  const alive = () => root.isConnected && siteState === st; // l'écran est toujours affiché (sinon : on ne redessine rien)
   // en-tête : réseau / modifications en attente, réunion en cours
   const drawHead = () => {
     const s = st.snap; const n = s.pending || 0;
@@ -278,10 +279,19 @@ route('site', async (pid, sub) => {
     $('[data-live]').innerHTML = live ? `<button class="site-live" data-mt><span><i></i>Réunion en cours · ${esc(live.data.title)}</span><b>Ouvrir</b></button>` : '';
     $$('[data-mt]').forEach((b) => { b.onclick = () => siteMeeting(st); });
   };
+  // choix du plan : un seul bouton (nom du plan) + précédent / suivant ; la liste complète s'ouvre avec recherche (100 plans et plus)
+  const planOrder = () => [...st.snap.plans.map((pl) => pl.id), 'none'];
+  const nbOpen = (id) => st.snap.points.filter((x) => isOpenPt(x) && (id === 'none' ? !x.data.planId || !st.snap.plans.some((pl) => pl.id === +x.data.planId) : +x.data.planId === id)).length;
+  const planName = (id) => (id === 'none' ? 'Sans plan' : (st.snap.plans.find((pl) => pl.id === id) || { data: { name: '?' } }).data.name);
+  const setPlan = (id) => { st.plan = id; st.adding = false; const r = ui.siteRecent || (ui.siteRecent = {}); r[pid] = [id, ...(r[pid] || []).filter((x) => x !== id)].slice(0, 4); saveUi(); draw(); };
   const drawChips = () => {
-    const s = st.snap; const nb = (id) => s.points.filter((x) => isOpenPt(x) && (id === 'none' ? !x.data.planId : +x.data.planId === id)).length;
-    $('[data-chips]').innerHTML = [...s.plans.map((pl) => [pl.id, pl.data.name]), ['none', 'Sans plan']].map(([id, l]) => `<button class="chip ${st.plan === id ? 'on' : ''}" data-pl="${id}">${esc(l)}${nb(id) ? ` <b>${nb(id)}</b>` : ''}</button>`).join('');
-    $$('[data-pl]').forEach((b) => { b.onclick = () => { st.plan = b.dataset.pl === 'none' ? 'none' : +b.dataset.pl; st.adding = false; draw(); }; });
+    const ord = planOrder(); const i = ord.indexOf(st.plan); const n = nbOpen(st.plan);
+    $('[data-chips]').innerHTML = `<button class="icon-btn" data-prev ${i <= 0 ? 'disabled' : ''} aria-label="Plan précédent">‹</button>
+      <button class="site-plansel" data-pick><span class="grow"><b>${esc(planName(st.plan))}</b><small class="muted">${st.plan === 'none' ? 'façade, toiture, extérieur…' : `plan ${i + 1} / ${ord.length - 1}`}${n ? ` · <span class="late">${n} à faire</span>` : ''}</small></span><span aria-hidden="true">▾</span></button>
+      <button class="icon-btn" data-next ${i >= ord.length - 1 ? 'disabled' : ''} aria-label="Plan suivant">›</button>`;
+    $('[data-prev]').onclick = () => { if (i > 0) setPlan(ord[i - 1]); };
+    $('[data-next]').onclick = () => { if (i < ord.length - 1) setPlan(ord[i + 1]); };
+    $('[data-pick]').onclick = () => sitePlanPicker(st, pid, nbOpen, setPlan);
   };
   const ptsHere = () => st.snap.points.filter((x) => (st.plan === 'none' ? !x.data.planId || !st.snap.plans.some((pl) => pl.id === +x.data.planId) : +x.data.planId === st.plan));
   const visible = (x) => { const f = siteVis(); return f === 'all' || (f === 'todo' ? isOpenPt(x) : !isOpenPt(x)); };
@@ -345,14 +355,44 @@ route('site', async (pid, sub) => {
   const setAdding = (on) => { st.adding = on; $('[data-banner]').hidden = !on; $('[data-add]').classList.toggle('on', on); };
   $('[data-add]').onclick = () => { if (st.plan === 'none') return siteNewPoint(st, {}); setAdding(!st.adding); };
   $('[data-cancel]').onclick = () => setAdding(false);
-  const draw = () => { drawHead(); drawChips(); drawMain(); drawSheet(); };
-  const onNet = () => { if (siteState === st) drawHead(); };
+  const draw = () => { if (!alive()) return; drawHead(); drawChips(); drawMain(); drawSheet(); };
+  const onNet = () => { if (alive()) drawHead(); };
   window.addEventListener('offline', onNet); window.addEventListener('online', onNet);
-  st.soft = () => { drawHead(); drawChips(); drawSheet(); drawPins(); };
+  st.soft = () => { if (!alive()) return; drawHead(); drawChips(); drawSheet(); drawPins(); };
   st.draw = draw; st.focus = (x) => { st.hl = x.id; if (view) { view.pins(); if (x.data.x != null) view.focus(x); } };
   draw();
   if (q.has('meeting')) siteMeeting(st);
 });
+
+// ---------------------------------------------------------------- Liste des plans : recherche, récents, « avec points à faire »
+function sitePlanPicker(st, pid, nbOpen, setPlan) {
+  const plans = st.snap.plans; const recent = ((ui.siteRecent || {})[pid] || []).filter((id) => id === 'none' || plans.some((pl) => pl.id === id));
+  let q = ''; let onlyTodo = false;
+  const m = modal(`${mhead(`Plans (${plans.length})`)}<div class="m-body site-pick">
+    <label class="search big">${I.search}<input type="search" placeholder="Chercher un plan (nom, niveau…)" autocomplete="off" data-q></label>
+    <label class="chk"><input type="checkbox" data-todo> Seulement les plans avec des points à faire</label>
+    <div data-list></div></div>`, { wide: true });
+  const row = (id) => {
+    const pl = id === 'none' ? null : plans.find((x) => x.id === id); const n = nbOpen(id);
+    return `<button class="site-prow ${st.plan === id ? 'on' : ''}" data-id="${id}">${pl && pl.data.thumbId ? `<img data-src="${pl.data.thumbId}" alt="">` : '<span class="site-noph">📐</span>'}
+      <span class="grow"><b>${esc(pl ? pl.data.name : 'Sans plan')}</b><small class="muted">${esc(pl ? [pl.data.level, (pl.data.version || 1) > 1 && `v${pl.data.version}`].filter(Boolean).join(' · ') : 'façade, toiture, extérieur…')}</small></span>${n ? `<span class="badge" style="--c:#e5484d">${n} à faire</span>` : ''}</button>`;
+  };
+  const norm = (t) => spNorm(t || '');
+  const draw = () => {
+    const words = norm(q).split(/\s+/).filter(Boolean);
+    const hit = (id) => { const pl = plans.find((x) => x.id === id); const t = norm(pl ? `${pl.data.name} ${pl.data.level || ''}` : 'sans plan'); return words.every((w) => t.includes(w)) && (!onlyTodo || nbOpen(id) > 0); };
+    const all = [...plans.map((pl) => pl.id), 'none'].filter(hit);
+    const rec = !q && !onlyTodo ? recent.filter(hit) : [];
+    $('[data-list]', m.el).innerHTML = (rec.length ? `<div class="section-t">Récents</div>${rec.map(row).join('')}<div class="section-t">Tous les plans</div>` : '')
+      + (all.map(row).join('') || '<p class="muted">Aucun plan ne correspond.</p>');
+    $$('[data-id]', m.el).forEach((b) => { b.onclick = () => { m.close(); setPlan(b.dataset.id === 'none' ? 'none' : +b.dataset.id); }; });
+    siteImgs(m.el);
+  };
+  $('[data-q]', m.el).oninput = (e) => { q = e.target.value; draw(); };
+  $('[data-todo]', m.el).onchange = (e) => { onlyTodo = e.target.checked; draw(); };
+  draw();
+  if (!isPhone()) $('[data-q]', m.el).focus();
+}
 
 // ---------------------------------------------------------------- Point rapide : photo, une phrase, qui, pour quand
 function siteWho(snap) {
