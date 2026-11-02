@@ -14,6 +14,7 @@ function pap_cfg(): array {
 }
 
 function pap_req(string $method, string $path, ?array $body = null): array {
+    if (test_mode()) throw new RuntimeException('Site de test : Peppol est désactivé (aucune facture envoyée ni reçue).');
     $c = pap_cfg();
     $env = $c['env'] ?? 'prod';
     $base = $env === 'test' ? 'https://api.test.peppyrus.be/v1/' : 'https://api.peppyrus.be/v1/';

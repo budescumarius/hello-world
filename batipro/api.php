@@ -167,7 +167,7 @@ switch ($seg[0] ?? '') {
             $users = array_map(fn($x) => ['id' => $x['id'], 'name' => $x['name'], 'role' => $x['role'], 'active' => $x['active'], 'color' => $x['color']], $users);
             $sc = field_scope($u);
             out(['user' => $u, 'users' => $users, 'settings' => $settings, 'version' => APP_VERSION, 'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => true],
-                'edition' => edition(), 'ai' => false, 'translate' => ai_ready(), 'sub' => ['status' => sub_state(cid())['status'], 'locked' => sub_state(cid())['locked']], 'field' => ['employeeId' => $sc['employee'], 'contactId' => $sc['contact'], 'projects' => $sc['projects']]]);
+                'edition' => edition(), 'ai' => false, 'translate' => ai_ready(), 'sub' => ['status' => sub_state(cid())['status'], 'locked' => sub_state(cid())['locked']], 'field' => ['employeeId' => $sc['employee'], 'contactId' => $sc['contact'], 'projects' => $sc['projects']], 'testMode' => test_mode()]);
         }
         if (is_chef($u)) {
             // responsable : le bureau, lui-même et les comptes de son équipe (pas les autres équipes)
@@ -178,7 +178,7 @@ switch ($seg[0] ?? '') {
         }
         out(['user' => $u, 'users' => $users, 'settings' => $settings, 'version' => APP_VERSION,
             'firm' => ['id' => (int)$firm['id'], 'name' => $firm['name'], 'own' => cid() === $u['company_id']], 'edition' => edition(), 'ai' => edition() === 'simple' || is_chef($u) ? false : ai_ready(), 'translate' => ai_ready(),
-            'sub' => sub_state(cid()) + ['super' => (bool)$u['super']]]);
+            'sub' => sub_state(cid()) + ['super' => (bool)$u['super']], 'testMode' => test_mode()]);
 
     // ------------------------------------------------------------ Utilisateurs
     case 'users':

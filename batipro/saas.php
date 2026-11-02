@@ -93,6 +93,7 @@ function app_base_url(): string {
 
 // ---------------------------------------------------------------- Mollie (API v2)
 function mollie(string $method, string $path, ?array $body = null): array {
+    if (test_mode()) throw new RuntimeException('Site de test : les paiements sont désactivés.');
     $key = trim((string)saas_cfg()['mollieKey']);
     if ($key === '') throw new RuntimeException('Paiement non configuré : clé Mollie manquante (Plateforme → Abonnements).');
     $base = defined('MOLLIE_URL') ? MOLLIE_URL : 'https://api.mollie.com/v2';

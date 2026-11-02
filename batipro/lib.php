@@ -599,7 +599,10 @@ function mail_addr(string $email, string $name = ''): string {
 }
 
 // $atts : [['name' => ..., 'mime' => ..., 'data' => contenu binaire], ...]
+// Site de TEST (config.php : 'test_mode' => true) : aucun e-mail, push, Peppol ni paiement ne part vers l'extérieur
+function test_mode(): bool { return !empty(config()['test_mode']); }
 function send_mail(array $to, array $cc, string $subject, string $text, array $atts, array $replyTo = []): void {
+    if (test_mode()) { error_log('[BatiPro mode test] e-mail NON envoyé à ' . implode(', ', array_column($to, 'email')) . ' : ' . $subject); return; }
     $cfg = setting('smtp', []) ?: [];
     if (empty($cfg['host']) && cid() !== 1 && ($pf = setting('smtp', [], 1)) && !empty($pf['host'])) $cfg = ['fromName' => ''] + $pf; // serveur de la plateforme, au nom de la firme
     $co = setting('company', []) ?: [];
@@ -878,6 +881,7 @@ function push_endpoint_ok(string $url): bool {
         || (defined('PUSH_TEST_HOST') && $p['host'] === PUSH_TEST_HOST);
 }
 function push_send(string $endpoint): int {
+    if (test_mode()) return 0; // site de test : aucune notification ne part
     if (!function_exists('curl_init') || !push_endpoint_ok($endpoint)) return 0;
     $k = vapid_keys();
     $ch = curl_init($endpoint);

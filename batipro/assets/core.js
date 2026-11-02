@@ -400,6 +400,7 @@ function layout(p) {
   app.innerHTML = `<div class="shell">
     ${dock(cur)}
     <main class="main">
+      ${S.testMode ? '<div class="firm-band test-band"><b>SITE DE TEST</b> – aucun e-mail, notification, envoi Peppol ni paiement ne part de ce site.</div>' : ''}
       ${typeof subBand === 'function' ? subBand() : ''}
       ${S.firm && S.firm.own === false ? `<div class="firm-band">Vous travaillez dans la firme <b>${esc(S.firm.name)}</b><button class="btn sm" data-act="firmback">Revenir à ma firme</button></div>` : ''}
       ${secBar(cur)}
@@ -777,6 +778,7 @@ async function switchFirm(id) {
 async function boot() {
   try {
     const b = await api('GET', 'bootstrap');
+    S.testMode = !!b.testMode;
     Object.assign(S, { me: b.user, users: b.users, settings: b.settings || {}, firm: b.firm || {}, edition: b.edition || 'avance', ai: !!b.ai, translate: !!b.translate, field: b.field || null, sub: b.sub || { status: 'free' }, ready: true });
     document.title = (S.settings.company || {}).appName || (S.settings.company || {}).name || 'BâtiPro';
     if (!location.hash) location.hash = isField() ? '#/t' : '#/dashboard';

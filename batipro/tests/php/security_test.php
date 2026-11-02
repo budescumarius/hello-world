@@ -216,4 +216,21 @@ T::test('sauvegarde complète puis restauration dans une base vierge : mêmes ta
     $root->exec('DROP DATABASE restore_test');
 });
 
+echo "\nSite de test (config.php : test_mode)\n";
+T::test('mode test : bandeau, e-mail approuvé « exécuté » sans rien envoyer (journal du serveur), Peppol et notifications bloqués', function () use ($owner) {
+    shell_exec("docker exec bp-test-web sed -i \"s/^return array (/return array (\\n  'test_mode' => true,/\" /var/www/html/config.php"); sleep(3); // opcache relit config.php toutes les 2 secondes
+    try {
+        [, $b] = $owner->req('GET', 'bootstrap'); T::eq(true, $b['testMode'] ?? null, 'indicateur envoyé à l\'interface');
+        [, $r] = $owner->req('POST', 'pilot/approvals', ['type' => 'email_externe', 'payload' => ['to' => 'client-reel@exemple.invalid', 'subject' => 'Ne doit pas partir', 'body' => 'x']]);
+        $owner->req('POST', "pilot/approvals/{$r['id']}/approve");
+        [$c, $e] = $owner->req('POST', "pilot/approvals/{$r['id']}/execute"); T::eq(200, $c, json_encode($e));
+        $log = (string)shell_exec('docker logs bp-test-web 2>&1 | grep "mode test"'); // Apache écrit les accents en \\xc3\\xa9
+        T::ok(str_contains($log, 'e-mail NON envoy') && str_contains($log, 'client-reel@exemple.invalid'), 'envoi intercepté et journalisé : ' . trim($log));
+        $php = 'require "/var/www/html/lib.php"; require "/var/www/html/peppol_ap.php"; echo push_send("https://fcm.googleapis.com/x"), "|"; try { pap_req("GET", "x"); echo "PEPPOL-PARTI"; } catch (Throwable $e) { echo $e->getMessage(); }';
+        $out = trim((string)shell_exec('docker exec bp-test-web php -r ' . escapeshellarg($php) . ' 2>&1'));
+        T::ok(str_starts_with($out, '0|Site de test : Peppol est désactivé'), $out);
+    } finally { shell_exec("docker exec bp-test-web sed -i \"/'test_mode' => true,/d\" /var/www/html/config.php"); sleep(3); }
+    [, $b] = $owner->req('GET', 'bootstrap'); T::eq(false, $b['testMode'] ?? null, 'mode normal rétabli');
+});
+
 exit(T::done());

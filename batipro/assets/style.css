@@ -2064,3 +2064,6 @@ body.loading::before { content: ''; position: fixed; top: 0; left: 0; right: 0; 
 .pil-big { font-size: 26px; font-weight: 800; margin: 4px 0; }
 .pil-ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
 @media (max-width: 760px) { .pil-kpi b { font-size: 22px; } .pil-kv { grid-template-columns: 1fr 1fr; } .pil-hbars > div { grid-template-columns: 100px 1fr 90px; } }
+
+/* site de test (config.php : test_mode) */
+.firm-band.test-band { background: #fff3bf; color: #5c3c00; border: 1.5px dashed #f08c00; }
