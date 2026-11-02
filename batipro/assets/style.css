@@ -562,6 +562,10 @@ table.lines { width: 100%; border-collapse: collapse; min-width: 760px; }
 .rcpt .chk input { margin-top: 3px; width: 20px; height: 20px; flex: 0 0 auto; }
 .rcpt small { overflow-wrap: anywhere; }
 .rcpt input[type=email] { width: 100%; }
+.mail-att .att-list { display: grid; gap: 4px; }
+.mail-att .att { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.mail-att .att .grow { min-width: 0; overflow-wrap: anywhere; }
+.mail-att .btns { margin-top: 6px; }
 .hint-box { background: #eef2fe; border: 1px solid #c5d0fa; color: #22306e; border-radius: 10px; padding: 10px 12px; font-size: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .hint-box.warn { background: #fff4e6; border-color: #ffd8a8; color: #8a4b08; margin-bottom: 14px; }
 .alloc { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }

@@ -15,9 +15,30 @@ function sendMailDialog({ subject, body, recipients = [], ref = {}, projectId, p
     <label class="field full"><span>Message</span><textarea name="body" rows="9">${esc(body)}</textarea></label>
     ${pdfName ? `<label class="field chk"><input type="checkbox" name="pdf" checked><span>Joindre le PDF (${esc(pdfName)})</span></label>` : ''}
     ${extra.map((x, i) => `<label class="field chk"><input type="checkbox" data-x="${i}" ${x.checked ? 'checked' : ''}><span>Joindre aussi : ${esc(x.label)}</span></label>`).join('')}
+    <div class="field full mail-att"><span>Autres pièces jointes</span><div class="att-list" data-atts></div>
+      <div class="btns"><label class="btn sm">${I.plus} Ajouter un fichier<input type="file" multiple hidden data-addf></label>${projectId ? '<button type="button" class="btn sm" data-docs>Documents du chantier…</button>' : ''}</div></div>
     <button type="submit" hidden></button></form>
     <div class="m-foot"><small class="muted" data-cnt></small><span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-send>${I.mail} Envoyer</button></div>`, { wide: true });
   const form = $('form', m.el);
+  // pièces jointes ajoutées à la main : fichiers du téléphone / de l'ordinateur, ou documents du chantier (max. 20 Mo au total, limite du serveur)
+  const MAX_ATT = 20 * 1024 * 1024; const atts = [];
+  const kb = (n) => (n >= 1048576 ? `${fnum(n / 1048576, 1)} Mo` : `${Math.max(1, Math.round(n / 1024))} Ko`);
+  const drawAtts = () => {
+    const tot = atts.reduce((a, x) => a + (x.size || 0), 0);
+    $('[data-atts]', form).innerHTML = atts.map((x, i) => `<div class="att"><span class="grow">${esc(x.name)}</span><small class="muted">${x.size ? kb(x.size) : ''}</small><button type="button" class="icon-btn sm" data-rmatt="${i}" title="Retirer">✕</button></div>`).join('')
+      + (tot > MAX_ATT ? `<small class="late">Total ${kb(tot)} : maximum 20 Mo par email.</small>` : '');
+    $$('[data-rmatt]', form).forEach((b) => { b.onclick = () => { atts.splice(+b.dataset.rmatt, 1); drawAtts(); }; });
+  };
+  $('[data-addf]', form).onchange = (e) => { for (const f of e.target.files) atts.push({ name: f.name, size: f.size, file: f }); e.target.value = ''; drawAtts(); };
+  const docsBtn = $('[data-docs]', form);
+  if (docsBtn) docsBtn.onclick = async () => {
+    const docs = (await db.list('document', { project: projectId })).filter((x) => x.data.fileId).sort((a, b) => b.id - a.id);
+    if (!docs.length) return toast('Aucun document dans ce chantier (onglet Documents).', 3500);
+    const dm = modal(`${mhead('Documents du chantier')}<div class="m-body">${docs.map((x) => `<label class="chk"><input type="checkbox" value="${x.id}" ${atts.some((a) => a.fileId === x.data.fileId) ? 'checked disabled' : ''}><span class="grow">${esc(x.data.name)} <small class="muted">${esc(x.data.folder || '')}${x.data.size ? ` · ${kb(x.data.size)}` : ''}</small></span></label>`).join('')}</div>
+      <div class="m-foot"><span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-ok>Joindre</button></div>`);
+    $$('[data-close]', dm.el).forEach((b) => { b.onclick = () => dm.close(); });
+    $('[data-ok]', dm.el).onclick = () => { $$('input:checked:not(:disabled)', dm.el).forEach((cb) => { const x = docs.find((d) => d.id === +cb.value); atts.push({ name: x.data.name, size: x.data.size || 0, fileId: x.data.fileId, mime: x.data.mime }); }); dm.close(); drawAtts(); };
+  };
   const isMail = (s) => /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]{2,}$/.test(s);
   const collect = () => {
     const to = [];
@@ -40,6 +61,7 @@ function sendMailDialog({ subject, body, recipients = [], ref = {}, projectId, p
     if (!to.length) return toast('Choisissez au moins un destinataire');
     const subj = form.subject.value.trim();
     if (!subj) return toast('Objet manquant');
+    if (atts.reduce((a, x) => a + (x.size || 0), 0) > MAX_ATT) return toast('Pièces jointes trop lourdes : 20 Mo maximum par email. Retirez un fichier.', 5000);
     const btn = $('[data-send]', m.el); btn.disabled = true; btn.textContent = 'Envoi…';
     try {
       const fd = new FormData();
@@ -51,6 +73,12 @@ function sendMailDialog({ subject, body, recipients = [], ref = {}, projectId, p
       if (projectId) fd.append('project_id', projectId);
       if (pdfName && form.pdf.checked) fd.append('att[]', new File([await makePdf(undefined, { light: true })], pdfName, { type: 'application/pdf' }));
       for (const [i, x] of extra.entries()) if ($(`[data-x="${i}"]`, form).checked) fd.append('att[]', new File([await x.make()], x.name, { type: 'application/pdf' }));
+      for (const x of atts) {
+        if (x.file) { fd.append('att[]', x.file, x.name); continue; }
+        const res = await fetch(fileUrl(x.fileId), { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`Document illisible : ${x.name}`);
+        const blob = await res.blob(); fd.append('att[]', new File([blob], x.name, { type: x.mime || blob.type || 'application/octet-stream' }));
+      }
       const r = await api('POST', 'mail', fd);
       // adresse saisie pour un contact sans email : enregistrée sur sa fiche
       for (const x of to) if (x.typed && x.r.contact) { x.r.contact.data.email = x.email; persist('contact', x.r.contact).catch(() => {}); }
