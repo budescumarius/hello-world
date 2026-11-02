@@ -319,6 +319,7 @@ function pil_report_run(string $today, string $source, ?array $me = null, bool $
     $run = (int)db()->lastInsertId();
     try {
         $data = pil_report_build($today);
+        $data['signature'] = pil_data_signature(); // pour savoir, plus tard dans la journée, si le rapport est encore à jour
         $cmp = $data; unset($cmp['alerts']['sync']);
         $hash = hash('sha256', json_encode($cmp));
         $cur = q('SELECT id, hash, version FROM pil_reports WHERE company_id = ? AND rdate = ?', [cid(), $today])->fetch();
@@ -641,12 +642,108 @@ function pil_cron(): array {
     return $done;
 }
 
+// ===================================================================== Vue générale (direction), explications, rapprochement
+/** Empreinte légère des données utilisées par les analyses : si rien n'a changé, le rapport du jour est réutilisé tel quel. */
+function pil_data_signature(): string {
+    $parts = [
+        q("SELECT CONCAT(COUNT(*), '/', COALESCE(MAX(id),0), '/', COALESCE(SUM(status = 'importe'),0)) FROM pil_bank_imports WHERE company_id = ?", [cid()])->fetchColumn(),
+        q("SELECT CONCAT(COUNT(*), '/', COALESCE(MAX(updated_at),'')) FROM pil_bank_tx WHERE company_id = ?", [cid()])->fetchColumn(),
+        q("SELECT CONCAT(COUNT(*), '/', COALESCE(MAX(updated_at),''), '/', COALESCE(MAX(id),0)) FROM items WHERE company_id = ? AND type IN ('invoice','expense','quote','project','order','timesheet','contact')", [cid()])->fetchColumn(),
+        q("SELECT CONCAT(COUNT(*), '/', COALESCE(MAX(updated_at),''), '/', COALESCE(MAX(id),0)) FROM pil_commitments WHERE company_id = ?", [cid()])->fetchColumn(),
+        json_encode(setting('pilotage_hyp', null)), q('SELECT COUNT(*) FROM pil_doc_flags WHERE company_id = ?', [cid()])->fetchColumn(),
+    ];
+    return hash('sha256', implode('|', $parts));
+}
+/** Vue générale : lue dans le rapport du jour (calculé par le cron) ; recalculée seulement si les données ont changé depuis. */
+function pil_overview(string $today): array {
+    $r = q('SELECT data, updated_at FROM pil_reports WHERE company_id = ? AND rdate = ?', [cid(), $today])->fetch();
+    $sig = pil_data_signature();
+    if (!$r || ((json_decode($r['data'], true) ?: [])['signature'] ?? '') !== $sig) { pil_report_run($today, 'manuel', null, false); $r = q('SELECT data, updated_at FROM pil_reports WHERE company_id = ? AND rdate = ?', [cid(), $today])->fetch(); }
+    $d = json_decode($r['data'], true);
+    $series = $d['snapshot']['series'] ?? [];
+    // capacité de paiement : point le plus bas du solde prévu (réaliste) sur 30 jours = ce qui peut sortir en plus sans passer sous zéro
+    $min30 = null; $minDate = null;
+    foreach ($series as [$day, $bal]) if (pil_days($today, $day) <= 30 && ($min30 === null || $bal < $min30)) { $min30 = $bal; $minDate = $day; }
+    $sup = $d['C']['to_pay'];
+    usort($sup, fn($a, $b) => strcmp((string)($a['due'] ?: '9999'), (string)($b['due'] ?: '9999')));
+    $alerts = array_slice(pil_alerts_list(['nouvelle', 'en_cours']), 0, 3);
+    $rec = pil_receivables($today);
+    $toValidate = array_sum(array_map(fn($e) => $e['rest'], array_filter($rec['expenses'], fn($e) => $e['rest'] > 0 && $e['state'] === 'a_valider')));
+    return ['date' => $today, 'computed_at' => $r['updated_at'], 'reliability' => ['score' => $d['A']['reliability'], 'level' => $d['A']['reliability_level']],
+        'kpi' => [
+            'tresorerie' => ['value' => $d['A']['total'], 'status' => 'confirme', 'date' => $d['A']['latest_statement'], 'oldest' => $d['A']['oldest_statement']],
+            'prevision30' => ['value' => $d['A']['forecast']['realiste'][30]['end'], 'status' => 'estime', 'pessimiste' => $d['A']['forecast']['pessimiste'][30]['end'], 'optimiste' => $d['A']['forecast']['optimiste'][30]['end']],
+            'creances' => ['value' => $d['B']['pending_amount'], 'status' => 'confirme', 'overdue' => $d['B']['overdue_amount'], 'count' => $d['B']['pending_count']],
+            'dettes' => ['value' => array_sum(array_map(fn($e) => $e['rest'], array_filter($rec['expenses'], fn($e) => $e['rest'] > 0))), 'status' => $toValidate ? 'a_verifier' : 'confirme', 'to_validate' => $toValidate],
+        ],
+        'decisions' => [
+            'payer_semaine' => ['capacity' => $min30 !== null ? max(0, $min30) : null, 'min' => $min30, 'min_date' => $minDate, 'due_7d' => array_sum(array_map(fn($e) => $e['rest'], array_filter($sup, fn($e) => $e['due'] && pil_days($today, $e['due']) <= 7)))],
+            'fournisseurs' => array_slice($sup, 0, 5),
+            'clients' => array_slice($d['B']['to_chase'], 0, 5),
+            'chantiers' => $d['D']['deficit'],
+            'soldes' => ['j30' => $d['A']['forecast']['realiste'][30], 'j90' => $d['A']['forecast']['realiste'][90], 'j30_pess' => $d['A']['forecast']['pessimiste'][30], 'j90_pess' => $d['A']['forecast']['pessimiste'][90]],
+            'risques' => array_map(fn($a) => ['id' => $a['id'], 'title' => $a['title'], 'severity' => $a['severity'], 'amount' => $a['amount']], $alerts),
+            'aujourdhui' => $d['E'],
+        ]];
+}
+/** Explication d'un indicateur : source, période, transactions ou documents utilisés, hypothèses, incertitudes. */
+function pil_explain(string $k, string $today): array {
+    if ($k === 'tresorerie') {
+        $bal = pil_balances($today); $rows = [];
+        foreach ($bal['accounts'] as $a) { $i = q("SELECT filename, period_from, period_to, opening, closing, tx_count FROM pil_bank_imports WHERE company_id = ? AND account_id = ? AND status = 'importe' ORDER BY period_to DESC LIMIT 1", [cid(), $a['id']])->fetch();
+            $rows[] = ['label' => "{$a['bank']}" . ($a['label'] ? " – {$a['label']}" : ''), 'amount' => $a['balance'], 'detail' => $i ? "solde final de l'extrait « {$i['filename']} » (" . pil_d($i['period_from']) . ' → ' . pil_d($i['period_to']) . ", {$i['tx_count']} mouvements)" : 'aucun extrait importé', 'link' => "#/pilotage/mouvements"]; }
+        $unval = (int)q("SELECT COUNT(*) FROM pil_bank_tx WHERE company_id = ? AND status <> 'valide'", [cid()])->fetchColumn();
+        $breaks = 0; foreach (pil_dashboard()['accounts'] as $a) $breaks += count($a['breaks']);
+        return ['title' => 'Trésorerie consolidée', 'value' => $bal['total'], 'status' => 'confirme', 'source' => 'Soldes finaux des derniers extraits bancaires importés (un par compte).',
+            'period' => $bal['oldest_date'] ? 'Extraits du ' . pil_d($bal['oldest_date']) . ' au ' . pil_d($bal['latest_date']) : 'aucun extrait', 'items' => $rows,
+            'hypotheses' => ['Aucune : montant lu sur les extraits de la banque.'],
+            'uncertainties' => array_values(array_filter(array_merge(array_map(fn($a) => $a['age_days'] > 7 ? "{$a['bank']} : extrait vieux de {$a['age_days']} jours (mouvements plus récents inconnus)." : null, $bal['accounts']),
+                [$bal['missing'] ? "{$bal['missing']} compte(s) sans extrait." : null, $breaks ? "$breaks rupture(s) de solde entre extraits." : null, $unval ? "$unval mouvement(s) pas encore validé(s) (sans effet sur le solde, seulement sur leur classement)." : null])))];
+    }
+    if ($k === 'prevision30') {
+        $f = pil_forecast($today); $h = $f['scenarios']['realiste']['horizons'][30];
+        $fl = array_values(array_filter($f['scenarios']['realiste']['flows'], fn($x) => pil_days($today, $x['date']) <= 30));
+        return ['title' => 'Prévision de trésorerie à 30 jours (scénario réaliste)', 'value' => $h['end'], 'status' => 'estime', 'source' => 'Soldes des extraits + factures clients (délais observés) + achats à payer + engagements confirmés.',
+            'period' => 'du ' . pil_d($today) . ' au ' . pil_d(pil_add_days($today, 30)),
+            'items' => array_map(fn($x) => ['label' => pil_d($x['date']) . ' – ' . $x['label'], 'amount' => $x['amount'], 'detail' => $x['certainty'] === 'confirme' ? 'confirmé' : 'estimé', 'link' => ($x['ref']['type'] ?? '') === 'invoice' ? "#/invoice/{$x['ref']['id']}" : (($x['ref']['type'] ?? '') === 'expense' ? "#/purchase/{$x['ref']['id']}" : null)], $fl),
+            'summary' => ['Solde de départ' => $h['start'], 'Entrées confirmées' => $h['in_confirmed'], 'Entrées estimées' => $h['in_estimated'], 'Sorties confirmées' => $h['out_confirmed'], 'Sorties estimées' => $h['out_estimated'], 'Solde final' => $h['end'], 'Minimum' => $h['min']],
+            'hypotheses' => ['Délai client : ' . $f['hypotheses']['realiste']['delay'] . ' observé' . ($f['stats']['global']['n'] ? " ({$f['stats']['global']['n']} factures payées)" : ' (aucun historique : échéance contractuelle)'), 'Probabilité d\'encaissement observée pour les factures en retard : ' . ($f['hypotheses']['realiste']['useProbability'] ? 'oui' : 'non'), 'Achats payés à leur échéance ; engagements confirmés à leurs dates.'],
+            'uncertainties' => array_merge(["Fiabilité de la prévision : {$f['reliability']['score']}/100 ({$f['reliability']['level']})."], array_map(fn($x) => 'Non inclus : ' . $x['label'] . ' (' . $x['reason'] . ')', array_slice($f['excluded'], 0, 10)))];
+    }
+    if ($k === 'creances' || $k === 'dettes') {
+        $rec = pil_receivables($today);
+        if ($k === 'creances') { $l = array_values(array_filter($rec['invoices'], fn($i) => $i['ea'] === null && $i['rest'] > 0));
+            return ['title' => 'Créances clients', 'value' => array_sum(array_column($l, 'rest')), 'status' => 'confirme', 'source' => 'Factures émises dans BâtiPro, moins les paiements enregistrés.', 'period' => 'au ' . pil_d($today),
+                'items' => array_map(fn($i) => ['label' => ($i['number'] ?: '#' . $i['id']) . ' – ' . $i['client_name'], 'amount' => $i['rest'], 'detail' => 'échéance ' . pil_d($i['due']) . ($i['late_days'] ? " · {$i['late_days']} j de retard" : '') . ($i['state'] === 'conteste' ? ' · contestée' : ''), 'link' => "#/invoice/{$i['id']}"], $l),
+                'hypotheses' => ['Montant dû = total TTC − paiements enregistrés (aucune estimation).'],
+                'uncertainties' => array_values(array_filter([($n = count(array_filter($l, fn($i) => $i['late_days'] > 60))) ? "$n facture(s) en retard de plus de 60 jours : encaissement incertain." : null, ($n2 = count(array_filter($l, fn($i) => $i['state'] === 'conteste'))) ? "$n2 facture(s) contestée(s)." : null]))]; }
+        $l = array_values(array_filter($rec['expenses'], fn($e) => $e['rest'] > 0));
+        return ['title' => 'Dettes fournisseurs', 'value' => array_sum(array_column($l, 'rest')), 'status' => 'confirme', 'source' => 'Factures fournisseurs et sous-traitants enregistrées dans BâtiPro (non refusées), moins les paiements.', 'period' => 'au ' . pil_d($today),
+            'items' => array_map(fn($e) => ['label' => ($e['ref'] ?: '#' . $e['id']) . ' – ' . $e['supplier_name'], 'amount' => $e['rest'], 'detail' => ($e['due'] ? 'échéance ' . pil_d($e['due']) : 'échéance non renseignée') . ($e['to_validate'] ? ' · à valider' : ''), 'link' => "#/purchase/{$e['id']}"], $l),
+            'hypotheses' => ['Montant dû = total TTC − paiements enregistrés.'],
+            'uncertainties' => array_values(array_filter([($n = count(array_filter($l, fn($e) => $e['to_validate']))) ? "$n facture(s) encore « à valider » : montants à vérifier." : null, ($n2 = count(array_filter($l, fn($e) => !$e['due']))) ? "$n2 facture(s) sans échéance." : null]))];
+    }
+    fail(404, 'Indicateur inconnu');
+}
+/** Mouvements non rapprochés (hors transferts internes), avec la meilleure proposition pour chacun. */
+function pil_reconcile_list(string $today): array {
+    $rows = q("SELECT * FROM pil_bank_tx WHERE company_id = ? AND match_id IS NULL AND category <> 'transfert_interne' AND ABS(amount) >= 100 AND booking_date >= ? ORDER BY booking_date DESC LIMIT 300", [cid(), pil_add_days($today, -400)])->fetchAll();
+    $out = []; $sure = 0;
+    foreach ($rows as $t) { $s = pil_match_suggestions($t); $best = $s[0] ?? null; if ($best && $best['level'] === 'sûr') $sure++;
+        $out[] = ['tx' => pil_tx_out($t), 'best' => $best, 'others' => count($s) - ($best ? 1 : 0)]; }
+    $matched = (int)q("SELECT COUNT(*) FROM pil_bank_tx WHERE company_id = ? AND match_id IS NOT NULL", [cid()])->fetchColumn();
+    return ['rows' => $out, 'matched' => $matched, 'with_sure' => $sure];
+}
+
 // ===================================================================== Routes
 function pil_director_route(string $method, array $seg, array $me): void {
     pil_director_schema();
     $sub = $seg[1]; $id = isset($seg[2]) ? (int)$seg[2] : 0;
     $today = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($_GET['today'] ?? '')) ? $_GET['today'] : date('Y-m-d');
     switch ($sub) {
+        case 'overview': if ($method === 'GET') out(pil_overview($today)); break;
+        case 'explain': if ($method === 'GET') out(pil_explain((string)($seg[2] ?? ''), $today)); break;
+        case 'reconcile': if ($method === 'GET') out(pil_reconcile_list($today)); break;
         case 'projects':
             if ($method === 'GET') {
                 $l = pil_projects_analysis($today);

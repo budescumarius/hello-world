@@ -323,7 +323,7 @@ function dock(cur) {
 }
 function secBar(cur) {
   if (!cur || cur.sp.sec.length < 2) return '';
-  return `<nav class="secbar" aria-label="${esc(cur.sp.l)}"><b class="secbar-t">${I[cur.sp.i]}${esc(cur.sp.l)}</b>${cur.sp.sec.map((sec) => `<a href="${sec[1]}" class="${sec === cur.sec ? 'on' : ''}">${esc(sec[0])}</a>`).join('')}</nav>`;
+  return `<nav class="secbar" aria-label="${esc(cur.sp.l)}"><b class="secbar-t">${I[cur.sp.i]}${esc(cur.sp.title || cur.sp.l)}</b>${cur.sp.sec.map((sec) => `<a href="${sec[1]}" class="${sec === cur.sec ? 'on' : ''}">${esc(sec[0])}</a>`).join('')}</nav>`;
 }
 // Menu du compte (avatar) : profil, paramètres, plateforme, déconnexion
 function accountMenu() {

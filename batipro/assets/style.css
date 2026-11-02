@@ -2055,3 +2055,12 @@ body.loading::before { content: ''; position: fixed; top: 0; left: 0; right: 0; 
 .pil-ask { display: flex; gap: 8px; margin: 12px 0 6px; }
 .pil-ask textarea { flex: 1; }
 @media (max-width: 760px) { .pil-chat-wrap { grid-template-columns: 1fr; } }
+.pil-kpis .pil-kpi { text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.pil-kpi b { font-size: 26px; }
+.pil-kpi span { display: block; margin-top: 4px; font-size: 13px; }
+.pil-why { font-size: 12px; }
+.pil-legend-cert { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.pil-h2 { font-size: 18px; margin: 18px 0 10px; }
+.pil-big { font-size: 26px; font-weight: 800; margin: 4px 0; }
+.pil-ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+@media (max-width: 760px) { .pil-kpi b { font-size: 22px; } .pil-kv { grid-template-columns: 1fr 1fr; } .pil-hbars > div { grid-template-columns: 100px 1fr 90px; } }

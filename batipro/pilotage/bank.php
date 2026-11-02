@@ -50,6 +50,7 @@ function pil_bank_schema(): void {
     $done = true;
     if (q("SHOW TABLES LIKE 'pil_bank_tx'")->fetch()) {
         if (!q("SHOW COLUMNS FROM pil_bank_tx LIKE 'match_paid'")->fetch()) db()->exec('ALTER TABLE pil_bank_tx ADD match_paid TINYINT NOT NULL DEFAULT 0 AFTER match_at');
+        if (!q("SHOW INDEX FROM pil_bank_tx WHERE Key_name = 'company_cat_date'")->fetch()) db()->exec('ALTER TABLE pil_bank_tx ADD KEY company_cat_date (company_id, category, booking_date), ADD KEY company_match (company_id, match_type, match_id), ADD KEY company_cp (company_id, cp_iban)');
         return;
     }
     $pdo = db();
@@ -70,7 +71,8 @@ function pil_bank_schema(): void {
         category VARCHAR(30) NOT NULL DEFAULT 'a_classer', cat_source VARCHAR(16) NOT NULL DEFAULT 'auto', status VARCHAR(12) NOT NULL DEFAULT 'a_verifier',
         transfer_account_id INT NULL, transfer_tx_id INT NULL, match_type VARCHAR(12) NULL, match_id INT NULL, match_by INT NULL, match_at DATETIME NULL, match_paid TINYINT NOT NULL DEFAULT 0,
         name_fix VARCHAR(190) NULL, note VARCHAR(255) NULL, history TEXT NULL, updated_by INT NULL, updated_at DATETIME NULL,
-        KEY company_account_date (company_id, account_id, booking_date), KEY company_fp (company_id, fp), KEY company_import (company_id, import_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        KEY company_account_date (company_id, account_id, booking_date), KEY company_fp (company_id, fp), KEY company_import (company_id, import_id),
+        KEY company_cat_date (company_id, category, booking_date), KEY company_match (company_id, match_type, match_id), KEY company_cp (company_id, cp_iban)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     $pdo->exec("CREATE TABLE IF NOT EXISTS pil_bank_rules (
         id INT AUTO_INCREMENT PRIMARY KEY, company_id INT NOT NULL, cp_key VARCHAR(190) NOT NULL, category VARCHAR(30) NOT NULL, created_by INT NULL, updated_at DATETIME NOT NULL,
         UNIQUE KEY company_key (company_id, cp_key)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
@@ -289,10 +291,14 @@ function pil_import(array $file, array $me, ?int $forceAccount = null): array {
                 [cid(), $s['account']['id'], mb_substr($file['name'], 0, 190), $an['sha256'], $an['format'], $stored, strlen($file['bytes']), $s['number'], $s['year'], $s['opening']['date'], $s['closing']['date'],
                  $s['opening']['amount'], $s['closing']['amount'], count($s['transactions']), count($new), $s['duplicates'], json_encode($s['warnings'], JSON_UNESCAPED_UNICODE), 'importe', $me['id'], now()]);
             $iid = (int)$pdo->lastInsertId(); $ids[] = $iid;
-            foreach ($new as $t) {
-                q('INSERT INTO pil_bank_tx (company_id, account_id, import_id, seq, booking_date, value_date, amount, cp_name, cp_iban, communication, structured, bank_ref, type_code, raw, fp, category, cat_source, status, transfer_account_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                    [cid(), $s['account']['id'], $iid, $t['seq'], $t['date'], $t['value_date'] ?: null, $t['amount'], mb_substr((string)$t['counterparty_name'], 0, 190), (string)$t['counterparty_iban'],
-                     (string)$t['communication'], $t['structured'], mb_substr((string)$t['bank_ref'], 0, 40), (string)$t['type_code'], (string)$t['raw'], $t['fp'], $t['category'], $t['cat_source'], 'a_verifier', $t['transfer_account_id']]);
+            // insertion par lots de 200 lignes (gros extraits : moins d'allers-retours avec MySQL)
+            $cols = '(company_id, account_id, import_id, seq, booking_date, value_date, amount, cp_name, cp_iban, communication, structured, bank_ref, type_code, raw, fp, category, cat_source, status, transfer_account_id)';
+            foreach (array_chunk($new, 200) as $chunk) {
+                $vals = []; $args = [];
+                foreach ($chunk as $t) { $vals[] = '(' . implode(',', array_fill(0, 19, '?')) . ')';
+                    array_push($args, cid(), $s['account']['id'], $iid, $t['seq'], $t['date'], $t['value_date'] ?: null, $t['amount'], mb_substr((string)$t['counterparty_name'], 0, 190), (string)$t['counterparty_iban'],
+                        (string)$t['communication'], $t['structured'], mb_substr((string)$t['bank_ref'], 0, 40), (string)$t['type_code'], (string)$t['raw'], $t['fp'], $t['category'], $t['cat_source'], 'a_verifier', $t['transfer_account_id']); }
+                q("INSERT INTO pil_bank_tx $cols VALUES " . implode(',', $vals), $args);
             }
         }
         $pdo->commit();
@@ -504,10 +510,12 @@ function pil_payment_remove(string $type, int $mid, array $t, array $me): void {
 function pil_match_suggestions(array $t): array {
     $amt = (int)$t['amount']; $out = [];
     $comm = $t['structured'] ? preg_replace('/\D/', '', $t['structured']) : '';
-    $contacts = pil_contacts_by_iban();
+    static $cache = []; // une seule lecture des documents par requête (rapprochement de nombreux mouvements)
+    $contacts = $cache['contacts'] ??= pil_contacts_by_iban();
     $cpContact = $t['cp_iban'] !== '' ? ($contacts[$t['cp_iban']]['id'] ?? null) : null;
     $type = $amt > 0 ? 'invoice' : 'expense';
-    foreach (q('SELECT id, project_id, number, data FROM items WHERE company_id = ? AND type = ?', [cid(), $type])->fetchAll() as $r) {
+    $cache[$type] ??= q('SELECT id, project_id, number, data FROM items WHERE company_id = ? AND type = ?', [cid(), $type])->fetchAll();
+    foreach ($cache[$type] as $r) {
         $d = json_decode($r['data'], true) ?: [];
         if ($type === 'invoice') {
             if (($d['status'] ?? '') !== 'emise' || ($d['kind'] ?? '') === 'proforma' || ($d['kind'] ?? '') === 'avoir') continue;
@@ -723,7 +731,7 @@ function pil_route(string $method, array $seg): void {
             }
             break;
         case 'dashboard': if ($method === 'GET') out(pil_dashboard()); break;
-        case 'projects': case 'alerts': case 'reports': case 'decisions': case 'compare': case 'review': case 'runs': case 'ask': case 'convs': case 'pinned':
+        case 'overview': case 'explain': case 'reconcile': case 'projects': case 'alerts': case 'reports': case 'decisions': case 'compare': case 'review': case 'runs': case 'ask': case 'convs': case 'pinned':
             require_once __DIR__ . '/director.php';
             pil_director_route($method, $seg, $me);
         case 'forecast': case 'receivables': case 'hypotheses': case 'flags': case 'commitments':

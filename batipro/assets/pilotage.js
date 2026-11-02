@@ -7,14 +7,31 @@
 const pilEnabled = () => !!(S.settings.pilotage && S.settings.pilotage.enabled);
 const pilOn = () => pilEnabled() && (S.pilMe ? S.pilMe.role !== 'none' : isAdmin());
 const pilCan = (p) => !!(S.pilMe && S.pilMe.perms.includes(p));
-const PIL_SECS = [['Directeur', '#/pilotage/directeur', 'director.read'], ['Assistant', '#/pilotage/assistant', 'ai.ask'], ['Chantiers', '#/pilotage/chantiers', 'projects.read'], ['Trésorerie', '#/pilotage/tresorerie', 'treasury.read'],
-  ['Engagements', '#/pilotage/engagements', 'treasury.read'], ['Factures et échéances', '#/pilotage/echeances', 'treasury.read'], ['Contrôle bancaire', '#/pilotage/controle', 'bank.read'], ['Mouvements', '#/pilotage/mouvements', 'bank.read'],
-  ['Historique 24 mois', '#/pilotage/historique', 'bank.read'], ['Importer un extrait', '#/pilotage/import', 'bank.write'], ['Journal des imports', '#/pilotage/imports', 'bank.read'], ['Comptes', '#/pilotage/comptes', 'bank.read'],
-  ['Approbations', '#/pilotage/approbations', 'approvals.request'], ['Journal d\'audit', '#/pilotage/audit', 'audit.read'], ['Paramètres', '#/pilotage/parametres', 'audit.read']];
-const pilSecs = () => PIL_SECS.filter(([, , p]) => !S.pilMe || pilCan(p)).map(([l, h]) => [l, h]);
-const PIL_SPACE = { k: 'pilot', l: 'Pilotage', i: 'chart', show: pilOn };
+// Les 15 pages de l'espace « Pilotage MADIBU » (ordre demandé) : [libellé, lien, permission, autres adresses de la même page]
+const PIL_SECS = [['Vue générale', '#/pilotage/vue', 'treasury.read'], ['Trésorerie', '#/pilotage/tresorerie', 'treasury.read'], ['Comptes bancaires', '#/pilotage/comptes', 'bank.read', '#/pilotage/controle'],
+  ['Import des extraits', '#/pilotage/import', 'bank.read', '#/pilotage/imports'], ['Transactions', '#/pilotage/mouvements', 'bank.read', '#/pilotage/historique'],
+  ['Rapprochement bancaire', '#/pilotage/rapprochement', 'bank.read', '#/pilotage/echeances'], ['Crédits et leasing', '#/pilotage/engagements/credit', 'treasury.read', '#/pilotage/engagements/leasing'],
+  ['Charges fixes', '#/pilotage/engagements/charge', 'treasury.read', '#/pilotage/engagements/a_confirmer', '#/pilotage/engagements'], ['Prévisions', '#/pilotage/previsions', 'treasury.read'],
+  ['Rentabilité des chantiers', '#/pilotage/chantiers', 'projects.read'], ['Alertes', '#/pilotage/alertes', 'director.read'], ['Rapports quotidiens', '#/pilotage/rapports', 'director.read', '#/pilotage/directeur'],
+  ['Assistant IA', '#/pilotage/assistant', 'ai.ask'], ['Centre d\'approbation', '#/pilotage/approbations', 'approvals.request'], ['Paramètres', '#/pilotage/parametres', 'audit.read', '#/pilotage/audit']];
+const pilSecs = () => PIL_SECS.filter(([, , p]) => !S.pilMe || pilCan(p)).map(([l, h, , ...alt]) => [l, h, ...alt]);
+const PIL_SPACE = { k: 'pilot', l: 'Pilotage', title: 'Pilotage MADIBU', i: 'chart', show: pilOn };
 Object.defineProperty(PIL_SPACE, 'sec', { get: pilSecs });
 Object.defineProperty(PIL_SPACE, 'h', { get: () => (pilSecs()[0] || ['', '#/pilotage'])[1] });
+// onglets d'une page (pages proches regroupées) : ajoutés en tête de la page
+function pilTabs(list) {
+  const page = $('#page'); if (!page) return;
+  const h = location.hash.split('?')[0];
+  const items = list.filter(([, , p]) => !p || pilCan(p));
+  const on = items.reduce((b, it) => (h.startsWith(it[1]) && (!b || it[1].length > b[1].length) ? it : b), null);
+  page.insertAdjacentHTML('afterbegin', `<div class="chips pil-tabs">${items.map((it) => `<a class="chip ${it === on ? 'on' : ''}" href="${it[1]}">${esc(it[0])}</a>`).join('')}</div>`);
+}
+const PIL_T_IMPORT = [['Importer un extrait', '#/pilotage/import', 'bank.write'], ['Journal des imports', '#/pilotage/imports']];
+const PIL_T_TX = [['Mouvements', '#/pilotage/mouvements'], ['Historique 24 mois', '#/pilotage/historique']];
+const PIL_T_ACC = [['Contrôle des soldes', '#/pilotage/comptes'], ['Liste des comptes', '#/pilotage/comptes/liste']];
+const PIL_T_REC = [['À rapprocher', '#/pilotage/rapprochement'], ['Factures clients', '#/pilotage/echeances/clients'], ['Factures fournisseurs', '#/pilotage/echeances/fournisseurs']];
+const PIL_T_SET = [['Rôles et sécurité', '#/pilotage/parametres'], ['Journal d\'audit', '#/pilotage/audit']];
+const withTabs = (fn, tabs) => async (...a) => { await fn(...a); pilTabs(tabs); };
 SPACES.push(PIL_SPACE);
 // rôle chargé dès que l'application est prête (menu juste pour les rôles qui ne sont pas administrateurs BatiPro)
 let pilMeP = null;
@@ -73,7 +90,9 @@ route('pilotage', async (sub, arg) => {
   pilMeP = null; await pilLoadMe();
   if (S.pilMe.role === 'none') { layout({ icon: 'chart', title: 'Pilotage' }).innerHTML = empty('Accès non autorisé', 'Votre rôle ne donne pas accès au Pilotage. Le propriétaire peut vous attribuer un rôle.'); return; }
   if (!sub) { location.replace(PIL_SPACE.h); return; }
-  const pages = { approbations: pilApprovalsPage, audit: pilAuditPage, parametres: pilSettingsPage, controle: pilDashPage, directeur: pilDirectorPage, assistant: pilAssistantPage, chantiers: pilProjectsPage, tresorerie: pilTreasuryPage, engagements: pilCommitmentsPage, echeances: pilDuePage, mouvements: pilTxPage, historique: pilHistPage, import: pilImportPage, imports: pilImportsPage, comptes: pilAccountsPage };
+  const pages = { vue: pilOverviewPage, tresorerie: () => pilTreasuryPage('tresorerie'), previsions: () => pilTreasuryPage('previsions'), rapprochement: withTabs(pilReconcilePage, PIL_T_REC), alertes: pilAlertsPage, rapports: pilDirectorPage,
+    comptes: (a) => (a === 'liste' ? withTabs(pilAccountsPage, PIL_T_ACC)() : withTabs(pilDashPage, PIL_T_ACC)()), controle: () => withTabs(pilDashPage, PIL_T_ACC)(),
+    approbations: pilApprovalsPage, audit: withTabs(pilAuditPage, PIL_T_SET), parametres: withTabs(pilSettingsPage, PIL_T_SET), directeur: pilDirectorPage, assistant: pilAssistantPage, chantiers: pilProjectsPage, engagements: pilCommitmentsPage, echeances: withTabs(pilDuePage, PIL_T_REC), mouvements: withTabs(pilTxPage, PIL_T_TX), historique: withTabs(pilHistPage, PIL_T_TX), import: (a) => (pilCan('bank.write') ? withTabs(pilImportPage, PIL_T_IMPORT) : withTabs(pilImportsPage, PIL_T_IMPORT))(a), imports: withTabs(pilImportsPage, PIL_T_IMPORT) };
   return (pages[sub] || (() => location.replace(PIL_SPACE.h)))(arg);
 });
 
@@ -374,11 +393,11 @@ function pilLine(series, labels, { h = 220, fmt = (v) => pilMoney(v), zero = tru
 }
 const hbars = (rows) => { const max = Math.max(1, ...rows.map((r) => Math.abs(r.v))); return `<div class="pil-hbars">${rows.map((r) => `<div><span>${esc(r.l)}</span><i style="width:${(Math.abs(r.v) / max * 100).toFixed(1)}%;background:${r.c || '#3b5bdb'}"></i><b>${pilMoney(r.v)}</b></div>`).join('') || '<div class="empty">Aucune donnée</div>'}</div>`; };
 
-async function pilTreasuryPage() {
+async function pilTreasuryPage(mode = 'tresorerie') {
   const [f, mo, coms, tx, cats] = await Promise.all([api('GET', 'pilot/forecast'), api('GET', 'pilot/monthly&months=24'), api('GET', 'pilot/commitments'), api('GET', 'pilot/tx'), pilCats()]);
   const st = ui.pilTr = ui.pilTr || { sc: 'realiste', hz: 30 };
-  const page = layout({ icon: 'chart', title: 'Trésorerie et prévisions', sub: `Calcul du ${fmtDate(f.today)} · aucun montant inventé : extraits, factures, achats et engagements confirmés`,
-    actions: '<button class="btn" data-hyp>Hypothèses des scénarios</button>' });
+  const page = layout({ icon: 'chart', title: mode === 'previsions' ? 'Prévisions' : 'Trésorerie', sub: `Calcul du ${fmtDate(f.today)} · aucun montant inventé : extraits, factures, achats et engagements confirmés`,
+    actions: mode === 'previsions' ? '<button class="btn" data-hyp>Hypothèses des scénarios</button>' : '<a class="btn" href="#/pilotage/previsions">Prévisions</a>' });
   const b = f.balances; const rel = f.reliability; const S0 = f.scenarios[st.sc]; const H = S0.horizons[st.hz];
   const relC = rel.level === 'bonne' ? '#2f9e44' : rel.level === 'moyenne' ? '#f08c00' : '#e5484d';
   const flows = S0.flows.filter((x) => (new Date(x.date) - new Date(f.today)) / 864e5 <= st.hz);
@@ -388,13 +407,13 @@ async function pilTreasuryPage() {
   const upcoming = f.scenarios.realiste.flows.filter((x) => x.amount < 0 && x.source !== 'prudence' && (new Date(x.date) - new Date(f.today)) / 864e5 <= 30);
   const fin = coms.filter((c) => ['credit', 'leasing'].includes(c.kind) && c.status === 'confirme');
   page.innerHTML = `
-    <div class="card pil-rel"><div class="card-h"><h3>Fiabilité des prévisions</h3><span class="pil-score" style="--c:${relC}">${rel.score} / 100 · ${esc(rel.level)}</span></div>
+    <div class="card pil-rel" data-m="p"><div class="card-h"><h3>Fiabilité des prévisions</h3><span class="pil-score" style="--c:${relC}">${rel.score} / 100 · ${esc(rel.level)}</span></div>
       <div class="pil-factors">${Object.values(rel.factors).map((x) => `<div><span>${esc(x.label)}</span><div class="meter"><i style="width:${Math.round(x.score * 100)}%"></i></div><small class="muted">${esc(x.detail)}</small></div>`).join('')}</div></div>
-    <div class="card"><div class="card-h"><h3>Soldes bancaires</h3><span class="muted">dernière situation connue de chaque compte – pas un solde « du jour »</span></div>
+    <div class="card" data-m="t"><div class="card-h"><h3>Soldes bancaires</h3><span class="muted">dernière situation connue de chaque compte – pas un solde « du jour »</span></div>
       <div class="kpis">${b.accounts.map((a) => kpi(`${a.bank}${a.label ? ' – ' + a.label : ''}`, pilMoney(a.balance), { sub: a.date ? `au ${fmtDate(a.date)} (dernier extrait)${a.age_days > 7 ? ` · <span class="late">il y a ${a.age_days} jours</span>` : ''}` : '<span class="late">aucun extrait</span>' })).join('')}
         ${kpi('Trésorerie bancaire consolidée', pilMoney(b.total), { cls: 'good', sub: b.oldest_date ? `extraits du ${fmtDate(b.oldest_date)} au ${fmtDate(b.latest_date)}` : '' })}
         ${b.adjustment ? kpi('Ajusté des paiements connus', pilMoney(b.total + b.adjustment), { sub: `${pilMoney(b.adjustment)} enregistrés dans BâtiPro après le dernier extrait` }) : ''}</div></div>
-    <div class="card"><div class="card-h"><h3>Prévision</h3><div class="chips">${Object.entries(PIL_SC).map(([k, [l, c]]) => `<button class="chip ${st.sc === k ? 'on' : ''}" data-sc="${k}" style="--c:${c}"><i class="dot"></i>${l}</button>`).join('')}
+    <div class="card" data-m="p"><div class="card-h"><h3>Prévision</h3><div class="chips">${Object.entries(PIL_SC).map(([k, [l, c]]) => `<button class="chip ${st.sc === k ? 'on' : ''}" data-sc="${k}" style="--c:${c}"><i class="dot"></i>${l}</button>`).join('')}
         ${[7, 30, 90].map((d) => `<button class="chip ${st.hz === d ? 'on' : ''}" data-hz="${d}">${d} jours</button>`).join('')}</div></div>
       <div class="pil-formula">
         <div><span>Solde de départ</span><b>${pilMoney(H.start)}</b></div>
@@ -406,13 +425,13 @@ async function pilTreasuryPage() {
       ${pilLine(Object.entries(PIL_SC).map(([k, [l, c]]) => ({ name: l, color: c, values: f.scenarios[k].series.map((p) => p.b) })), f.scenarios.realiste.series.map((p) => p.d.slice(8, 10) + '/' + p.d.slice(5, 7)))}
       <table class="dt"><thead><tr><th>Scénario</th>${[7, 30, 90].map((d) => `<th class="r">Fin à ${d} j</th><th class="r">Minimum ${d} j</th>`).join('')}</tr></thead><tbody>
         ${Object.entries(PIL_SC).map(([k, [l]]) => `<tr><td>${l}</td>${[7, 30, 90].map((d) => { const x = f.scenarios[k].horizons[d]; return `<td class="r ${x.end < 0 ? 'late' : ''}">${pilMoney(x.end)}</td><td class="r ${x.min < 0 ? 'late' : ''}">${pilMoney(x.min)}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div>
-    <div class="card"><div class="card-h"><h3>Alertes (${f.alerts.length})</h3></div><div class="rows">${f.alerts.map((a) => `<div class="row static pil-alert"><span class="grow">${badge(PIL_RISK[a.risk][0], PIL_RISK[a.risk][1])} <b>${esc(a.problem)}</b>
+    <div class="card" data-m="p"><div class="card-h"><h3>Alertes de trésorerie (${f.alerts.length})</h3></div><div class="rows">${f.alerts.map((a) => `<div class="row static pil-alert"><span class="grow">${badge(PIL_RISK[a.risk][0], PIL_RISK[a.risk][1])} <b>${esc(a.problem)}</b>
         <br><small>${a.amount != null ? `Montant : <b>${pilMoney(a.amount)}</b> · ` : ''}${a.date ? `Date : ${fmtDate(a.date)} · ` : ''}Impact : ${esc(a.impact)}</small><br><small class="muted">Action recommandée : ${esc(a.action)}</small></span></div>`).join('') || '<div class="empty">Aucune alerte</div>'}</div></div>
-    <div class="card"><div class="card-h"><h3>Flux prévus – ${PIL_SC[st.sc][0].toLowerCase()}, ${st.hz} jours (${flows.length})</h3></div><div class="pil-tx-wrap"><table class="dt"><thead><tr><th>Date</th><th>Origine</th><th>Libellé</th><th>Statut</th><th class="r">Montant</th></tr></thead><tbody>
+    <div class="card" data-m="p"><div class="card-h"><h3>Flux prévus – ${PIL_SC[st.sc][0].toLowerCase()}, ${st.hz} jours (${flows.length})</h3></div><div class="pil-tx-wrap"><table class="dt"><thead><tr><th>Date</th><th>Origine</th><th>Libellé</th><th>Statut</th><th class="r">Montant</th></tr></thead><tbody>
       ${flows.map((x) => `<tr><td class="nowrap">${fmtDate(x.date)}</td><td><small>${esc(PIL_SRC[x.source] || x.source)}</small></td><td>${x.ref && x.ref.type === 'invoice' ? `<a href="#/invoice/${x.ref.id}">${esc(x.label)}</a>` : x.ref && x.ref.type === 'expense' ? `<a href="#/purchase/${x.ref.id}">${esc(x.label)}</a>` : esc(x.label)}</td><td>${certBadge(x.certainty)}</td><td class="r nowrap ${x.amount > 0 ? 'good' : ''}"><b>${pilMoney(x.amount)}</b></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Aucun flux prévu</td></tr>'}</tbody></table></div>
       ${f.excluded.length ? `<details><summary class="muted">Non inclus dans la prévision (${f.excluded.length})</summary><div class="rows">${f.excluded.map((x) => `<div class="row static"><span class="grow">${esc(x.label)} <small class="muted">– ${esc(x.reason)}</small></span>${x.amount != null ? `<b>${pilMoney(x.amount)}</b>` : ''}</div>`).join('')}</div></details>` : ''}
       <small class="muted">Délais clients observés : ${f.stats.global.n ? `${f.stats.global.n} factures payées, médiane ${Math.round(f.stats.global.median)} j après l'échéance (p25 ${Math.round(f.stats.global.p25)} j, p75 ${Math.round(f.stats.global.p75)} j)` : 'aucune facture payée dans l\'historique : délais non estimés'}.</small></div>
-    <div class="cols-2">
+    <div class="cols-2" data-m="t">
       <div class="card"><div class="card-h"><h3>Trésorerie réelle sur 24 mois</h3><span class="muted">fin de mois, tous comptes</span></div>${pilLine([{ name: 'Solde consolidé', color: '#3b5bdb', values: mo.total.map((t, i) => (mo.accounts.some((a) => a.months[i].closing != null) ? t.closing : null)) }], mo.months.map((m) => m.slice(5) + '/' + m.slice(2, 4)))}</div>
       <div class="card"><div class="card-h"><h3>Dépenses par catégorie</h3><span class="muted">12 derniers mois, extraits</span></div>${hbars(Object.entries(byCat).sort((a, c) => a[1] - c[1]).slice(0, 10).map(([k, v]) => ({ l: pilCatLabel(cats, k), v, c: pilCatColor(cats, k) })))}</div>
       <div class="card"><div class="card-h"><h3>Encaissements clients par mois</h3></div>${barChart(months12.map((m) => ({ l: m.slice(5), v: txIn(m, (t) => t.category === 'encaissement_client') / 100 })), { color: '#2f9e44' })}</div>
@@ -422,7 +441,8 @@ async function pilTreasuryPage() {
     </div>`;
   $$('[data-sc]', page).forEach((x) => { x.onclick = () => { st.sc = x.dataset.sc; saveUi(); render(); }; });
   $$('[data-hz]', page).forEach((x) => { x.onclick = () => { st.hz = +x.dataset.hz; saveUi(); render(); }; });
-  $('[data-hyp]').onclick = () => pilHypModal(f.hypotheses);
+  $$('[data-m]', page).forEach((el) => { if (el.dataset.m !== mode[0]) el.remove(); }); // Trésorerie (situation et historique) / Prévisions (scénarios, flux, hypothèses)
+  if (mode === 'previsions') $('[data-hyp]').onclick = () => pilHypModal(f.hypotheses);
 }
 
 function pilHypModal(h) {
@@ -446,12 +466,13 @@ function pilHypModal(h) {
 // ---------- Engagements : crédits, leasing, charges fixes
 async function pilCommitmentsPage(tab) {
   const [list, accs] = await Promise.all([api('GET', 'pilot/commitments'), api('GET', 'pilot/accounts')]);
-  const t = ['credit', 'leasing', 'charge', 'a_confirmer'].includes(tab) ? tab : 'credit';
-  const page = layout({ icon: 'chart', title: 'Engagements', sub: 'Crédits, leasing et charges fixes – seuls les engagements confirmés entrent dans les prévisions',
+  const t = ['credit', 'leasing', 'charge', 'a_confirmer'].includes(tab) ? tab : 'charge';
+  const grp = ['credit', 'leasing'].includes(t) ? 'fin' : 'charges';
+  const page = layout({ icon: 'chart', title: grp === 'fin' ? 'Crédits et leasing' : 'Charges fixes', sub: 'Seuls les engagements confirmés entrent dans les prévisions',
     actions: `<button class="btn" data-detect>Détecter dans les extraits</button><button class="btn primary" data-add>Ajouter</button>` });
   const toConf = list.filter((c) => c.status === 'a_confirmer');
   const rows = t === 'a_confirmer' ? toConf : list.filter((c) => c.kind === t && c.status !== 'a_confirmer');
-  page.innerHTML = `<div class="chips pil-tabs">${[['credit', 'Crédits'], ['leasing', 'Leasing'], ['charge', 'Charges fixes'], ['a_confirmer', `À confirmer (${toConf.length})`]].map(([k, l]) => `<a class="chip ${k === t ? 'on' : ''}" href="#/pilotage/engagements/${k}">${l}</a>`).join('')}</div><div id="tbl"></div>`;
+  page.innerHTML = `<div class="chips pil-tabs">${(grp === 'fin' ? [['credit', 'Crédits'], ['leasing', 'Leasing']] : [['charge', 'Charges fixes'], ['a_confirmer', `À confirmer (${toConf.length})`]]).map(([k, l]) => `<a class="chip ${k === t ? 'on' : ''}" href="#/pilotage/engagements/${k}">${l}</a>`).join('')}</div><div id="tbl"></div>`;
   const accName = (id) => pilAccName(accs.find((a) => a.id === id));
   dataTable($('#tbl'), {
     rows, search: (c) => [c.label, c.lender].join(' '),
@@ -534,13 +555,13 @@ async function pilDuePage(tab) {
   const IST = { non_echu: ['Non échu', '#3b5bdb'], echu: ['Échu', '#e5484d'], partiel: ['Partiellement payé', '#e8a10c'], partiel_echu: ['Part. payé – échu', '#e8590c'], paye: ['Payé', '#2f9e44'], conteste: ['Contesté', '#7048e8'],
     attente_approbation: ['En attente d\'approbation', '#868e96'], approuve_a_facturer: ['Approuvé – à facturer', '#0c8599'], brouillon_ea: ['État à envoyer', '#adb5bd'] };
   const EST = { engage: ['Engagé – à payer', '#3b5bdb'], echu: ['Échu', '#e5484d'], partiel: ['Partiellement payé', '#e8a10c'], paye: ['Payé', '#2f9e44'], a_valider: ['À valider', '#f08c00'] };
-  const page = layout({ icon: 'chart', title: 'Factures et échéances' });
+  const page = layout({ icon: 'chart', title: 'Rapprochement bancaire', sub: t === 'clients' ? 'Factures clients : états et échéances' : 'Factures fournisseurs : engagé, payé, échéances' });
   const sum = (l, k) => l.reduce((a, x) => a + x[k], 0);
   const inv = r.invoices; const exp = r.expenses;
   page.innerHTML = `<div class="kpis">${kpi('Clients : reste à encaisser', pilMoney(sum(inv.filter((i) => i.ea === null && i.state !== 'conteste'), 'rest')), { sub: `dont échu ${pilMoney(sum(inv.filter((i) => ['echu', 'partiel_echu'].includes(i.state)), 'rest'))}` })}
       ${kpi('Contesté', pilMoney(sum(inv.filter((i) => i.state === 'conteste'), 'rest')))}${kpi('États d\'avancement pas encore facturés', pilMoney(sum(inv.filter((i) => i.ea !== null && i.ea !== 'conteste'), 'total')))}
       ${kpi('Fournisseurs : engagé à payer', pilMoney(sum(exp, 'rest')), { sub: `dont échu ${pilMoney(sum(exp.filter((e) => e.state === 'echu'), 'rest'))} · à valider ${pilMoney(sum(exp.filter((e) => e.state === 'a_valider'), 'rest'))}` })}</div>
-    <div class="chips pil-tabs"><a class="chip ${t === 'clients' ? 'on' : ''}" href="#/pilotage/echeances/clients">Factures clients</a><a class="chip ${t === 'fournisseurs' ? 'on' : ''}" href="#/pilotage/echeances/fournisseurs">Factures fournisseurs</a></div><div id="tbl"></div>`;
+    <div id="tbl"></div>`;
   if (t === 'clients') dataTable($('#tbl'), {
     rows: inv, state: { sort: 4 }, search: (i) => [i.number, i.client_name].join(' '),
     filters: { def: '', options: [['', 'Toutes'], ...Object.entries(IST).map(([k, [l, c]]) => [k, l, c])], match: (i, k) => i.state === k },
@@ -582,15 +603,13 @@ async function pilDirectorPage() {
   const list = await api('GET', 'pilot/reports');
   const date = ui.pilRep && list.some((r) => r.rdate === ui.pilRep) ? ui.pilRep : (list[0] || {}).rdate;
   const [rep, alerts] = await Promise.all([date ? api('GET', `pilot/reports/${date}`) : null, api('GET', 'pilot/alerts&all=1')]);
-  const page = layout({ icon: 'chart', title: 'Directeur', sub: 'MADIBU – DAILY FINANCIAL REPORT · analyses calculées par BâtiPro, commentaire par l\'IA',
+  const page = layout({ icon: 'chart', title: 'Rapports quotidiens', sub: 'MADIBU – DAILY FINANCIAL REPORT · analyses calculées par BâtiPro, commentaire par l\'IA',
     actions: `${list.length ? `<select data-rep>${list.map((r) => `<option value="${r.rdate}" ${r.rdate === date ? 'selected' : ''}>Rapport du ${fmtDate(r.rdate)}</option>`).join('')}</select>` : ''}<button class="btn primary" data-gen>Actualiser le rapport du jour</button>` });
   const sel = $('[data-rep]'); if (sel) sel.onchange = () => { ui.pilRep = sel.value; saveUi(); render(); };
   $('[data-gen]').onclick = async (e) => { e.target.disabled = true; e.target.textContent = 'Analyse en cours…'; try { const r = await api('POST', 'pilot/reports', {}); ui.pilRep = null; toast(r.message, 5000); render(); } catch (err) { toast('Erreur : ' + err.message, 6000); e.target.disabled = false; } };
   if (!rep) { page.innerHTML = empty('Aucun rapport', 'Le rapport est créé chaque matin par la tâche planifiée, ou maintenant avec « Actualiser le rapport du jour ».'); return; }
   const d = rep.data; const A = d.A; const B = d.B; const C = d.C; const D = d.D;
   const open = alerts.filter((a) => ['nouvelle', 'en_cours'].includes(a.status));
-  const ast = ui.pilAst = ui.pilAst || 'ouvertes';
-  const shown = alerts.filter((a) => (ast === 'ouvertes' ? ['nouvelle', 'en_cours'].includes(a.status) : ast === 'toutes' ? true : a.status === ast));
   const fc = (s, h) => A.forecast[s][h];
   page.innerHTML = `
     <div class="card pil-report-h"><div class="card-h"><h3>${esc(d.title)} – ${fmtDate(d.date)}</h3><span class="muted">version ${rep.version} · ${rep.source === 'cron' ? 'automatique' : 'manuel'} · ${fmtDT(rep.updated_at)}</span></div>
@@ -617,15 +636,11 @@ async function pilDirectorPage() {
     ${(d.not_verifiable || []).length ? `<div class="alert info">Non vérifiable avec les données actuelles : ${d.not_verifiable.map(esc).join(' ')}</div>` : ''}
     <div class="card"><div class="card-h"><h3>Décisions et actions du ${fmtDate(rep.date)}</h3><button class="btn sm" data-dec="">Ajouter</button></div><div class="rows">${rep.decisions.map((x) => `<div class="row static"><span class="grow">${esc(x.text)}<br><small class="muted">${esc(userName(x.created_by))} · ${fmtDT(x.created_at)}</small></span>
       <select data-dst="${x.id}">${[['decidee', 'Décidée'], ['realisee', 'Réalisée'], ['abandonnee', 'Abandonnée']].map(([k, l]) => `<option value="${k}" ${x.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`).join('') || '<div class="empty">Aucune décision notée</div>'}</div></div>
-    <div class="card"><div class="card-h"><h3>Alertes (${open.length} ouvertes)</h3><div class="chips">${[['ouvertes', 'Ouvertes'], ['resolue', 'Résolues'], ['ignoree', 'Ignorées'], ['toutes', 'Toutes']].map(([k, l]) => `<button class="chip ${ast === k ? 'on' : ''}" data-ast="${k}">${l}</button>`).join('')}</div></div>
-      <div class="rows">${shown.map((a) => `<div class="row static pil-alert" data-al="${a.id}"><span class="grow">${badge(PIL_SEVL[a.severity][0], PIL_SEVL[a.severity][1])} <small class="muted">${esc(PIL_CATL[a.category] || a.category)}</small> <b>${esc(a.title)}</b><br><small>${esc(a.description || '')}</small>
-        <br><small class="muted">Responsable : ${esc(a.owner || '—')} · pour le ${fmtDate(a.due)} · détectée le ${fmtDate(a.first_seen)}${a.occurrences > 1 ? ` · vue ${a.occurrences} jours` : ''}</small></span>${a.amount != null ? `<b>${pilMoney(a.amount)}</b>` : ''}${st(PIL_ASTL, a.status)}</div>`).join('') || '<div class="empty">Aucune alerte</div>'}</div></div>
+    <div class="card"><div class="card-h"><h3>Alertes</h3><a href="#/pilotage/alertes">${open.length} ouverte(s) – voir toutes les alertes</a></div></div>
     <div class="cols-2">
       <div class="card"><div class="card-h"><h3>Comparer deux mois</h3></div><div class="grid-form"><label class="field"><span>Mois 1</span><input type="month" data-m1></label><label class="field"><span>Mois 2</span><input type="month" data-m2></label></div><button class="btn" data-cmp>Comparer</button><div data-cmpout></div></div>
       <div class="card"><div class="card-h"><h3>Prévision passée vs réalité</h3></div><div class="grid-form"><label class="field"><span>Rapport du</span><select data-rvd>${list.map((r) => `<option>${r.rdate}</option>`).join('')}</select></label><label class="field"><span>Horizon (jours)</span><input data-rvh inputmode="numeric" value="30"></label></div><button class="btn" data-rv>Expliquer l'écart</button><div data-rvout></div></div>
     </div>`;
-  $$('[data-ast]', page).forEach((b) => { b.onclick = () => { ui.pilAst = b.dataset.ast; saveUi(); render(); }; });
-  $$('[data-al]', page).forEach((r) => { r.onclick = () => pilAlertModal(alerts.find((a) => a.id === +r.dataset.al)); });
   $$('[data-dec]', page).forEach((b) => { b.onclick = async () => { const v = await ask('Décision ou action', [{ name: 'text', label: 'Décision prise / action à réaliser', type: 'textarea', required: true }]); if (v) { await api('POST', 'pilot/decisions', { text: v.text, alert_id: b.dataset.dec ? +b.dataset.dec : null, kind: 'decision' }); toast('Décision enregistrée'); render(); } }; });
   $$('[data-dst]', page).forEach((s2) => { s2.onchange = async () => { await api('PUT', `pilot/decisions/${s2.dataset.dst}`, { status: s2.value }); toast('Enregistré'); }; });
   const m1 = new Date(); m1.setMonth(m1.getMonth() - 2); const m2 = new Date(); m2.setMonth(m2.getMonth() - 1);
@@ -858,5 +873,96 @@ async function pilSettingsPage() {
       ${Object.entries(r.perms).map(([p, roles]) => `<tr><td><small>${esc(p)}</small></td>${Object.keys(r.roles).filter((k) => !['site_manager', 'employee', 'none'].includes(k)).map((k) => `<td>${roles.includes(k) ? '✓' : ''}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
       <small class="muted">${Object.entries(r.roles).map(([, [l, d]]) => `<b>${esc(l)}</b> : ${esc(d)}`).join('<br>')}</small></div>`;
   $$('[data-role]', page).forEach((s) => { s.onchange = async () => { try { const x = await api('PUT', `pilot/roles/${s.dataset.role}`, { role: s.value }); if (!pilApproval(x)) toast('Rôle modifié'); render(); } catch (e) { toast('Erreur : ' + e.message, 5000); render(); } }; });
+  if (cfg) {
+    const runs = await api('GET', 'pilot/runs').catch(() => []);
+    page.insertAdjacentHTML('beforeend', `<div class="card"><div class="card-h"><h3>Module et tâche planifiée</h3></div>
+      <p class="muted">L'analyse quotidienne (alertes, prévisions, rapport) est lancée par la tâche cron existante de BâtiPro, une fois par jour après 6 h.</p>
+      <div class="rows">${runs.slice(0, 8).map((r) => `<div class="row static"><span>${fmtDT(r.started_at)}</span><span class="grow"><small>${esc(r.source === 'cron' ? 'tâche planifiée' : 'manuel')} · ${esc(r.message || '')}</small></span>${r.status === 'ok' ? badge('OK', '#2f9e44') : badge(r.status, '#e5484d')}</div>`).join('') || '<div class="empty">Aucune exécution</div>'}</div>
+      <div class="btns"><button class="btn danger ghost" data-off>Désactiver le module pour l'entreprise</button></div></div>`);
+    $('[data-off]', page).onclick = async () => { if (!confirm('Désactiver le Pilotage ? Les données sont conservées ; le module redevient invisible jusqu\'à sa réactivation.')) return; await api('POST', 'pilot/enable', { enabled: false }); S.settings.pilotage = { enabled: false }; location.hash = '#/dashboard'; };
+  }
   const sb = $('[data-sec]', page); if (sb) sb.onclick = async () => { await api('PUT', 'pilot/settings', { owner: +$('[data-own]', page).value, approvalDays: +$('[data-days]', page).value, fourEyes: $('[data-4e]', page).checked }); toast('Paramètres enregistrés'); render(); };
+}
+
+// ================================================================ Intégration finale : vue générale, rapprochement, alertes
+const PIL_CERT = { confirme: ['Confirmé', '#2f9e44'], estime: ['Estimé', '#f08c00'], a_verifier: ['À vérifier', '#e5484d'] };
+const certTag = (k) => badge(PIL_CERT[k][0], PIL_CERT[k][1]);
+
+async function pilOverviewPage() {
+  const o = await api('GET', 'pilot/overview');
+  const page = layout({ icon: 'chart', title: 'Direction générale', sub: `MADIBU – vue générale du ${fmtDate(o.date)} · calculée le ${fmtDT(o.computed_at)} (rapport du jour) · fiabilité ${o.reliability.score}/100`,
+    actions: pilCan('alerts.write') ? '<button class="btn" data-refresh>Actualiser</button>' : '' });
+  const K = o.kpi; const D = o.decisions;
+  const card = (k, label, v, sub) => `<button class="kpi pil-kpi" data-explain="${k}"><small>${esc(label)}</small><b class="${v < 0 ? 'late' : ''}">${pilMoney(v)}</b><span>${certTag(K[k].status)} ${sub}</span><span class="muted pil-why">Comment est-ce calculé ? ›</span></button>`;
+  const q = (title, body, href) => `<div class="card pil-q-card"><div class="card-h"><h3>${esc(title)}</h3>${href ? `<a href="${href}">Détail</a>` : ''}</div>${body}</div>`;
+  const list = (rows) => (rows.length ? `<div class="rows">${rows.join('')}</div>` : '<div class="empty">Rien à signaler</div>');
+  page.innerHTML = `<div class="pil-legend-cert">${Object.keys(PIL_CERT).map(certTag).join(' ')}<small class="muted">Confirmé : lu sur les extraits ou les documents · Estimé : prévision selon les hypothèses · À vérifier : données encore à valider</small></div>
+    <div class="kpis pil-kpis">
+      ${card('tresorerie', 'Trésorerie consolidée', K.tresorerie.value, K.tresorerie.date ? `extraits jusqu'au ${fmtDate(K.tresorerie.date)}` : 'aucun extrait')}
+      ${card('prevision30', 'Prévision 30 jours', K.prevision30.value, `pessimiste ${pilMoney(K.prevision30.pessimiste)}`)}
+      ${card('creances', 'Créances clients', K.creances.value, `dont échu ${pilMoney(K.creances.overdue)}`)}
+      ${card('dettes', 'Dettes fournisseurs', K.dettes.value, K.dettes.to_validate ? `dont à valider ${pilMoney(K.dettes.to_validate)}` : 'factures validées')}</div>
+    <h2 class="pil-h2">Les décisions préparées</h2>
+    <div class="cols-2">
+      ${q('Que doit faire la direction aujourd\'hui ?', `<ol class="pil-ol">${D.aujourdhui.map((p) => `<li><b>${esc(p.action)}</b><br><small class="muted">${esc(p.title)}${p.amount != null ? ' · ' + pilMoney(p.amount) : ''} · ${esc(p.who)} · pour le ${fmtDate(p.when)}</small></li>`).join('') || '<li class="muted">Aucune action prioritaire</li>'}</ol>`, '#/pilotage/rapports')}
+      ${q('Combien pouvons-nous payer cette semaine ?', D.payer_semaine.min == null ? '<p class="muted">Prévision indisponible (aucun extrait).</p>' : `<p class="pil-big ${D.payer_semaine.capacity ? '' : 'late'}">${pilMoney(D.payer_semaine.capacity)} ${certTag('estime')}</p>
+        <p><small>Point le plus bas du solde prévu sur 30 jours (scénario réaliste) : ${pilMoney(D.payer_semaine.min)} le ${fmtDate(D.payer_semaine.min_date)}. Payer davantage que ce montant, en plus de ce qui est déjà prévu, ferait passer le solde sous zéro. Factures fournisseurs échues ou à 7 jours : ${pilMoney(D.payer_semaine.due_7d)}.</small></p>`, '#/pilotage/previsions')}
+      ${q('Quels fournisseurs régler en priorité ?', list(D.fournisseurs.map((e) => `<a class="row" href="#/purchase/${e.id}"><span class="grow">${esc(e.supplier || 'fournisseur non renseigné')} <small class="muted">${esc(e.ref || '')}</small></span><span class="${e.due && e.due < o.date ? 'late' : ''}">${e.due ? fmtDate(e.due) : 'sans échéance'}</span><b>${pilMoney(e.rest)}</b></a>`)), '#/pilotage/echeances/fournisseurs')}
+      ${q('Quels clients devons-nous relancer ?', list(D.clients.map((c) => `<div class="row static"><span class="grow"><b>${esc(c.client)}</b><br><small class="muted">${c.invoices} facture(s), jusqu'à ${c.max_late} j de retard</small></span><b>${pilMoney(c.amount)}</b></div>`)), '#/pilotage/echeances/clients')}
+      ${q('Quels chantiers nous font perdre de l\'argent ?', list(D.chantiers.map((p) => `<div class="row static"><span class="grow">${esc(p.name)}</span><b class="late">${pilMoney(p.margin)}</b></div>`)), '#/pilotage/chantiers')}
+      ${q('Quel sera notre solde dans 30 et 90 jours ?', `<div class="pil-kv"><span>Dans 30 jours</span><b class="${D.soldes.j30.end < 0 ? 'late' : ''}">${pilMoney(D.soldes.j30.end)} ${certTag('estime')}</b><span>pessimiste</span><span>${pilMoney(D.soldes.j30_pess.end)}</span>
+        <span>Dans 90 jours</span><b class="${D.soldes.j90.end < 0 ? 'late' : ''}">${pilMoney(D.soldes.j90.end)} ${certTag('estime')}</b><span>pessimiste</span><span>${pilMoney(D.soldes.j90_pess.end)}</span>
+        <span>Passage en négatif</span><span class="${D.soldes.j90.negative_date ? 'late' : 'good'}">${D.soldes.j90.negative_date ? fmtDate(D.soldes.j90.negative_date) : 'non prévu (réaliste)'}</span></div>`, '#/pilotage/previsions')}
+      ${q('Quels sont les risques les plus urgents ?', list(D.risques.map((a) => `<a class="row" href="#/pilotage/alertes"><span class="grow">${badge(PIL_SEVL[a.severity][0], PIL_SEVL[a.severity][1])} ${esc(a.title)}</span>${a.amount != null ? `<b>${pilMoney(a.amount)}</b>` : ''}</a>`)), '#/pilotage/alertes')}
+    </div>`;
+  $$('[data-explain]', page).forEach((b) => { b.onclick = () => pilExplain(b.dataset.explain); });
+  const r = $('[data-refresh]'); if (r) r.onclick = async () => { r.disabled = true; r.textContent = 'Analyse…'; try { const x = await api('POST', 'pilot/reports', {}); toast(x.message, 5000); render(); } catch (e) { toast('Erreur : ' + e.message, 5000); r.disabled = false; } };
+}
+async function pilExplain(k) {
+  const m = modal(`${mhead('Explication')}<div class="m-body"><p class="muted">Calcul…</p></div>`, { wide: true });
+  try {
+    const e = await api('GET', `pilot/explain/${k}`);
+    $('.m-body', m.el).innerHTML = `<h3>${esc(e.title)} : ${pilMoney(e.value)} ${certTag(e.status)}</h3>
+      <div class="pil-kv"><span>Source</span><span>${esc(e.source)}</span><span>Période</span><span>${esc(e.period)}</span></div>
+      ${e.summary ? `<div class="pil-kv">${Object.entries(e.summary).map(([l, v]) => `<span>${esc(l)}</span><b>${pilMoney(v)}</b>`).join('')}</div>` : ''}
+      <h4>Hypothèses</h4><ul>${e.hypotheses.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+      <h4>Incertitudes</h4><ul>${e.uncertainties.map((x) => `<li>${esc(x)}</li>`).join('') || '<li class="muted">Aucune identifiée</li>'}</ul>
+      <h4>Éléments utilisés (${e.items.length})</h4><div class="rows">${e.items.map((x) => `${x.link ? `<a class="row" href="${x.link}">` : '<div class="row static">'}<span class="grow">${esc(x.label)}<br><small class="muted">${esc(x.detail || '')}</small></span><b>${pilMoney(x.amount)}</b>${x.link ? '</a>' : '</div>'}`).join('') || '<div class="empty">Aucun</div>'}</div>`;
+  } catch (err) { $('.m-body', m.el).innerHTML = `<div class="alert">${esc(err.message)}</div>`; }
+}
+
+async function pilReconcilePage() {
+  const [r, accs, cats] = await Promise.all([api('GET', 'pilot/reconcile'), api('GET', 'pilot/accounts'), pilCats()]);
+  const acc = (id) => accs.find((a) => a.id === id);
+  const page = layout({ icon: 'chart', title: 'Rapprochement bancaire', sub: 'Mouvements bancaires pas encore reliés à une facture ou un achat de BâtiPro (hors transferts internes)' });
+  page.innerHTML = `<div class="kpis">${kpi('À rapprocher', String(r.rows.length))}${kpi('Correspondance sûre trouvée', String(r.with_sure), { cls: r.with_sure ? 'good' : '' })}${kpi('Déjà rapprochés', String(r.matched))}</div><div id="tbl"></div>`;
+  dataTable($('#tbl'), {
+    rows: r.rows.map((x) => ({ ...x, id: x.tx.id })), state: { sort: -1 }, search: (x) => [x.tx.cp_name, x.tx.communication, x.tx.structured, x.best && x.best.ref].join(' '),
+    filters: { def: 'sur', options: [['sur', 'Correspondance sûre', '#2f9e44'], ['prob', 'Probable', '#f08c00'], ['aucune', 'Sans proposition', '#868e96'], ['', 'Tous']], match: (x, k) => (k === 'sur' ? x.best && x.best.level === 'sûr' : k === 'prob' ? x.best && x.best.level !== 'sûr' : !x.best) },
+    columns: [{ l: 'Date', v: (x) => fmtDate(x.tx.booking_date), sort: (x) => x.tx.booking_date }, { l: 'Compte', v: (x) => `<small>${esc((acc(x.tx.account_id) || {}).bank || '')}</small>` },
+      { l: 'Contrepartie', v: (x) => `${esc(x.tx.name_fix || x.tx.cp_name || '')}<br><small class="muted">${esc(x.tx.structured || (x.tx.communication || '').slice(0, 60))}</small>` },
+      { l: 'Montant', cls: 'r', v: (x) => `<b class="${x.tx.amount > 0 ? 'good' : ''}">${pilMoney(x.tx.amount)}</b>`, sort: (x) => x.tx.amount },
+      { l: 'Meilleure proposition', v: (x) => (x.best ? `${badge(x.best.level, x.best.level === 'sûr' ? '#2f9e44' : '#f08c00')} ${x.best.type === 'invoice' ? 'Facture' : 'Achat'} ${esc(x.best.ref || '#' + x.best.id)} · reste ${pilMoney(x.best.rest)}<br><small class="muted">${esc(x.best.why.join(', '))}${x.others ? ` · ${x.others} autre(s)` : ''}</small>` : '<small class="muted">aucune facture ni achat correspondant</small>') }],
+    onRow: (x) => pilTxModal(x.tx, cats, accs),
+    empty: 'Tous les mouvements sont rapprochés',
+  });
+}
+
+async function pilAlertsPage() {
+  const alerts = await api('GET', 'pilot/alerts&all=1');
+  const page = layout({ icon: 'bell', title: 'Alertes', sub: 'Chaque alerte : données utilisées, calcul, action, responsable, date limite – mise à jour chaque jour, jamais dupliquée' });
+  page.innerHTML = '<div id="tbl"></div>';
+  dataTable($('#tbl'), {
+    rows: alerts, state: { sort: 1 }, search: (a) => [a.title, a.description, a.entity_label, a.owner].join(' '),
+    filters: { def: 'ouvertes', options: [['ouvertes', 'Ouvertes', '#3b5bdb'], ['critique', 'Critiques', '#c92a2a'], ['resolue', 'Résolues', '#2f9e44'], ['ignoree', 'Ignorées', '#adb5bd'], ['', 'Toutes']],
+      match: (a, k) => (k === 'ouvertes' ? ['nouvelle', 'en_cours'].includes(a.status) : k === 'critique' ? a.severity === 'critique' && ['nouvelle', 'en_cours'].includes(a.status) : a.status === k) },
+    columns: [{ l: 'Gravité', v: (a) => badge(PIL_SEVL[a.severity][0], PIL_SEVL[a.severity][1]), sort: (a) => ({ critique: 0, elevee: 1, moyenne: 2, faible: 3 })[a.severity] },
+      { l: 'Alerte', v: (a) => `<b>${esc(a.title)}</b><br><small>${esc(a.description || '')}</small>` }, { l: 'Catégorie', v: (a) => `<small>${esc(PIL_CATL[a.category] || a.category)}</small>` },
+      { l: 'Montant', cls: 'r', v: (a) => (a.amount != null ? pilMoney(a.amount) : '—'), sort: (a) => a.amount || 0 },
+      { l: 'Responsable', v: (a) => `<small>${esc(a.owner || '')}<br>pour le ${fmtDate(a.due)}</small>`, sort: (a) => a.due || '' },
+      { l: 'Détectée', v: (a) => `<small>${fmtDate(a.first_seen)}${a.occurrences > 1 ? `<br>${a.occurrences} jours` : ''}</small>`, sort: (a) => a.first_seen },
+      { l: 'Statut', v: (a) => st(PIL_ASTL, a.status) }],
+    onRow: (a) => pilAlertModal(a),
+    empty: 'Aucune alerte',
+  });
 }
