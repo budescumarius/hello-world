@@ -65,13 +65,21 @@ function multiActions(kind, picked) {
   ];
 }
 async function deleteMany(kind, picked) {
-  // une facture émise ne se supprime pas : elle se corrige par une note de crédit
-  const ok = kind === 'invoice' ? picked.filter((i) => i.data.status !== 'emise') : picked;
-  const kept = picked.length - ok.length;
-  if (!ok.length) return toast('Ces factures sont validées : elles ne se suppriment pas, faites une note de crédit.', 5000);
-  if (!confirm(`Supprimer définitivement ${ok.length} ${MULTI_KIND[kind].toLowerCase()} ?${kept ? `\n\n${kept} facture(s) validée(s) seront gardées : une facture émise se corrige par une note de crédit.` : ''}`)) return;
-  for (const it of ok) await db.del(kind, it.id);
-  toast(`${ok.length} supprimé(s)${kept ? ` · ${kept} facture(s) validée(s) gardée(s)` : ''}`, 3500);
+  // une facture validée se corrige normalement par une note de crédit ; l'administrateur peut quand même la supprimer, après avertissement
+  // (le serveur en garde une copie intégrale ; une facture validée sans numéro = reprise restée incomplète : suppression sans risque)
+  const val = kind === 'invoice' ? picked.filter((i) => i.data.status === 'emise' && i.data.kind !== 'proforma') : [];
+  const numbered = val.filter((i) => i.number);
+  if (val.length && !isAdmin()) {
+    const rest = picked.filter((i) => !val.includes(i));
+    if (!rest.length) return toast('Ces factures sont validées : seul un administrateur peut les supprimer. La correction conseillée est une note de crédit.', 5000);
+    picked = rest;
+  } else if (numbered.length) {
+    if (!confirm(`⚠ ATTENTION : ${numbered.length} facture(s) validée(s) (n° ${numbered.map((i) => i.number).join(', ')}).\n\nEn Belgique, une facture validée ne doit plus être supprimée : son contenu doit être conservé et les numéros doivent se suivre sans trou. La bonne façon de corriger est une note de crédit, puis une nouvelle facture.\nVotre comptable a peut-être déjà encodé ces factures : prévenez-le.\n\nSupprimer quand même ?`)) return;
+  }
+  if (!confirm(`Supprimer définitivement ${picked.length} ${MULTI_KIND[kind].toLowerCase()} ?`)) return;
+  let n = 0;
+  for (const it of picked) { try { await db.del(kind, it.id); n++; } catch (e) { toast(`${it.number || 'Sans numéro'} : ${e.message}`, 5000); } }
+  toast(`${n} supprimé(s)`, 3500);
   render();
 }
 

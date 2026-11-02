@@ -169,6 +169,15 @@ T::test('facture validée : client, date, TVA ou numéro modifiés refusés (403
     [$c] = $admin->req('PUT', "items/invoice/{$i['id']}", ['data' => $d]); T::eq(403, $c, 'taux de TVA');
     [$c] = $admin->req('PUT', "items/invoice/{$i['id']}", ['data' => $i['data'], 'number' => 'FAC-AUTRE']); T::eq(403, $c, 'numéro');
 });
+T::test('facture reprise d\'un autre logiciel : créée validée puis numérotée avec son n° d\'origine (une seule fois)', function () use ($admin) {
+    [, $cli] = $admin->req('POST', 'items/contact', ['data' => ['name' => 'Client reprise', 'kind' => 'client']]);
+    [$c, $i] = $admin->req('POST', 'items/invoice', ['data' => ['kind' => 'facture', 'status' => 'emise', 'external' => true, 'clientId' => $cli['id'], 'date' => '2026-10-15', 'reverse' => false,
+        'lines' => [['kind' => 'item', 'desc' => 'Travaux (facture 2026-0412, émise dans l\'ancien logiciel)', 'qty' => 1, 'price' => 13817.61, 'vat' => 6]], 'payments' => [['date' => '2026-10-15', 'amount' => 14646.67]]]]);
+    T::eq(200, $c); T::eq(null, $i['number']);
+    [$c, $j] = $admin->req('PUT', "items/invoice/{$i['id']}", ['data' => $i['data'], 'project_id' => null, 'number' => '2026-0412', 'silent' => true]);
+    T::eq(200, $c, 'numéro d\'origine attribué : ' . json_encode($j)); T::eq('2026-0412', $j['number']);
+    [$c] = $admin->req('PUT', "items/invoice/{$i['id']}", ['data' => $i['data'], 'number' => '2026-9999']); T::eq(403, $c, 'numéro ensuite figé');
+});
 T::test('facture validée : paiement, envoi et commentaire restent possibles (« user »)', function () use ($user, $validated) {
     $i = $validated(); $d = $i['data'];
     $d['payments'] = [['date' => '2026-10-20', 'amount' => 605]]; $d['sent'] = [['to' => 'client@example.test', 'at' => '2026-10-02']]; $d['comments'] = [['txt' => 'Relancé']];

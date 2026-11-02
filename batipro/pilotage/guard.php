@@ -58,7 +58,7 @@ function pil_guard_update(array $me, string $type, array $cur, array $b): void {
     if (!pil_is_validated_invoice($was)) return;
     $new = array_key_exists('data', $b) && is_array($b['data']) ? $b['data'] : $was;
     $newNumber = array_key_exists('number', $b) ? (string)$b['number'] : (string)$cur['number'];
-    $label = (($was['kind'] ?? '') === 'avoir' ? 'note de crédit' : 'facture') . ' n° ' . ($cur['number'] ?: $cur['id']);
+    $label = (($was['kind'] ?? '') === 'avoir' ? 'note de crédit' : 'facture') . ' ' . ($cur['number'] ? "n° {$cur['number']}" : "sans numéro (fiche {$cur['id']})");
 
     if (!pil_is_validated_invoice($new)) {
         // réouverture (retour en brouillon) d'une facture validée
@@ -68,7 +68,9 @@ function pil_guard_update(array $me, string $type, array $cur, array $b): void {
         log_activity($me['id'], 'reopen', $type, (int)$cur['id'], $cur['project_id'] !== null ? (int)$cur['project_id'] : null, "Facture validée rouverte : {$cur['number']}");
         return;
     }
-    if (pil_fiscal_fingerprint($was, $cur['number']) !== pil_fiscal_fingerprint($new, $newNumber)) {
+    // première attribution d'un numéro (facture reprise d'un autre logiciel : créée validée, puis numérotée avec son n° d'origine) : autorisée
+    $curNumber = (string)($cur['number'] ?? '');
+    if (pil_fiscal_fingerprint($was, $curNumber === '' ? $newNumber : $curNumber) !== pil_fiscal_fingerprint($new, $newNumber)) {
         fail(403, "La $label est validée : montants, TVA, client, date et numéro ne sont plus modifiables. Corrigez-la avec une note de crédit.");
     }
 }
