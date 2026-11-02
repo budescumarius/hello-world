@@ -618,6 +618,9 @@ function dataTable(el, { columns, rows, onRow, empty: emptyMsg = 'Aucun élémen
   const draw = () => {
     const q = st.q.toLowerCase();
     let list = rows.filter((r) => (!filters || !st.f || filters.match(r, st.f)) && (!q || !search || search(r).toLowerCase().includes(q)));
+    // sélection = uniquement des lignes visibles : une recherche ou un filtre retire de la sélection ce qu'il cache
+    // (sinon une action groupée s'appliquerait à des lignes qu'on ne voit plus)
+    if (select && st.sel.size) { const vis = new Set(list.map((r) => r.id)); let gone = 0; [...st.sel].forEach((id) => { if (!vis.has(id)) { st.sel.delete(id); gone++; } }); if (gone && select.onChange) setTimeout(() => select.onChange(), 0); }
     if (st.sort != null) {
       const c = columns[Math.abs(st.sort) - 1];
       const key = c.sort || ((r) => String(c.v(r)).replace(/<[^>]+>/g, ''));
