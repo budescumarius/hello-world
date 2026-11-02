@@ -107,6 +107,7 @@ T::test('import CODA ; le même fichier une seconde fois est refusé', function 
     T::eq(5, (int)db()->query("SELECT COUNT(*) FROM pil_bank_tx WHERE status = 'a_verifier'")->fetchColumn(), 'tout est « à vérifier »');
     [$c, $r] = $admin->req('POST', 'pilot/import', $file('europabank-fictif-2026-01.cod')); T::eq(422, $c);
     T::ok(str_contains(implode(' ', $r['errors']), 'déjà été importé'), implode(' ', $r['errors']));
+    T::ok(str_starts_with($r['error'] ?? '', 'Import refusé : ') && str_contains($r['error'], 'déjà été importé'), 'motif lisible renvoyé à l\'interface : ' . ($r['error'] ?? 'aucun'));
 });
 T::test('extrait dont les soldes ne concordent pas : import bloqué', function () use ($admin, $file) {
     [$c, $r] = $admin->req('POST', 'pilot/import', $file('europabank-fictif-altere.cod')); T::eq(422, $c);

@@ -180,11 +180,11 @@ async function pilImportPage() {
   };
 }
 
-function pilPreview(box, name, pv, payload) {
+function pilPreview(box, name, pv, payload, notice = '') {
   const cats = {};
   pilCats().then((c) => Object.assign(cats, c)).catch(() => {}).finally(() => draw());
   const draw = () => {
-    box.innerHTML = `<div class="card-h"><h3>${esc(name)}</h3><span class="muted">${esc((pv.format || '').toUpperCase())}</span></div>
+    box.innerHTML = `<div class="card-h"><h3>${esc(name)}</h3><span class="muted">${esc((pv.format || '').toUpperCase())}</span></div>${notice ? `<div class="alert">${esc(notice)}</div>` : ''}
       ${pv.errors.length ? `<div class="alert"><b>Import impossible</b><ul>${pv.errors.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
       ${(pv.warnings || []).map((w) => `<div class="alert info">${esc(w)}</div>`).join('')}
       ${pv.statements.map((s) => `
@@ -213,7 +213,12 @@ function pilPreview(box, name, pv, payload) {
         const n = r.statements.reduce((a, s) => a + s.transactions.filter((t) => !t.duplicate).length, 0);
         box.innerHTML = `<div class="card-h"><h3>${esc(name)}</h3></div><div class="alert ok">✓ Import enregistré : ${n} mouvement(s). <a href="#/pilotage/mouvements">Vérifier les mouvements</a></div>`;
         pilCatsP = null;
-      } catch (err) { go.disabled = false; go.textContent = 'Confirmer l\'import'; toast('Erreur : ' + err.message, 5000); }
+      } catch (err) {
+        // refus du serveur (ex. fichier déjà importé entre-temps, doublons) : motif affiché et aperçu refait avec l'état actuel
+        toast(err.message, 8000);
+        try { const pv2 = await api('POST', 'pilot/preview', payload); pilPreview(box, name, pv2, payload, err.message); }
+        catch (e2) { box.insertAdjacentHTML('afterbegin', `<div class="alert">${esc(err.message)}</div>`); go.disabled = false; go.textContent = 'Confirmer l\'import'; }
+      }
     };
   };
 }

@@ -35,6 +35,12 @@ const shots = process.argv[2];
   check('aperçu : PDF lu dans le navigateur, contrôle des soldes exact', pv.includes('✓ contrôle exact') && pv.includes('Belfius'), pv.slice(0, 160).replace(/\s+/g, ' '));
   check('aperçu : virement vers Europabank proposé en transfert interne', pv.includes('Transfert interne'));
   await shot('pilotage-apercu');
+  // refus du serveur au moment de la confirmation : le motif doit s'afficher (pas seulement « Erreur 422 »)
+  const isImport = (u) => u.href.includes('r=pilot/import');
+  await p.route(isImport, (r) => r.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'Import refusé : motif de test', errors: ['motif de test'], statements: [] }) }));
+  await p.click('[data-go]'); await p.waitForSelector('[data-out] .alert:has-text("motif de test")', { timeout: 15000 });
+  check('import refusé : motif affiché et aperçu refait (bouton à nouveau disponible)', !!(await p.$('[data-go]')));
+  await p.unroute(isImport);
   await p.click('[data-go]'); await p.waitForSelector('[data-out] .alert.ok', { timeout: 15000 });
   check('confirmation : import enregistré', (await p.textContent('[data-out]')).includes('Import enregistré : 5 mouvement(s)'));
   const paired = await p.evaluate(async () => (await api('GET', 'pilot/tx')).filter((t) => t.category === 'transfert_interne' && t.transfer_tx_id).length);

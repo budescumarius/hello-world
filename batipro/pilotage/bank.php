@@ -681,6 +681,7 @@ function pil_route(string $method, array $seg): void {
             $acc = !empty($b['account']) ? (int)$b['account'] : null;
             if ($sub === 'preview') out(pil_analyse($file, $acc));
             $r = pil_import($file, $me, $acc);
+            if (!$r['ok']) $r['error'] = 'Import refusé : ' . implode(' ', $r['errors']); // message lisible pour l'utilisateur
             out($r, $r['ok'] ? 200 : 422);
         case 'imports':
             if ($method === 'GET' && !$id) out(array_map('pil_import_out', q('SELECT * FROM pil_bank_imports WHERE company_id = ? ORDER BY id DESC', [cid()])->fetchAll()));
