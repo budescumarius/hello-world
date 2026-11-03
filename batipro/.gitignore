@@ -3,3 +3,4 @@ uploads/*
 !uploads/.htaccess
 vendor/
 backups/
+pilotage/.mail-key.php

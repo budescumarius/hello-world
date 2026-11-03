@@ -1084,7 +1084,7 @@ function backup_db(string $file, array $skip = []): void {
 /** Copie destinée à l'e-mail hebdomadaire : sans les tables bancaires du module Pilotage. */
 function backup_mail_copy(string $dir): string {
     $f = "$dir/mail-" . bin2hex(random_bytes(6)) . '.sql.gz';
-    backup_db($f, ['pil_bank_']);
+    backup_db($f, ['pil_bank_', 'pil_mail_']); // ni extraits bancaires ni e-mails (avec leurs connexions) dans la copie envoyée par e-mail
     return $f;
 }
 // Sauvegarde du jour (une fois par 24 h) : garde 14 jours + le 1er de chaque mois pendant un an ;

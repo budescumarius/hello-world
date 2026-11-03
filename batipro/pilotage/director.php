@@ -627,7 +627,6 @@ function pil_ask(array $me, string $question, ?int $convId, string $today): arra
 /** Une analyse par firme et par jour (à partir de 6 h), seulement pour les firmes où le module est activé. */
 function pil_cron(): array {
     $done = [];
-    if ((int)date('G') < 6 && !getenv('PIL_CRON_FORCE')) return $done;
     foreach (q("SELECT company_id, v FROM settings WHERE k = 'pilotage'")->fetchAll() as $r) {
         $s = json_decode((string)$r['v'], true) ?: []; if (empty($s['enabled'])) continue;
         $GLOBALS['BP_CID'] = (int)$r['company_id'];
@@ -635,6 +634,9 @@ function pil_cron(): array {
             pil_director_schema();
             $today = date('Y-m-d');
             pil_security_schema(); pil_approvals_expire(); // demandes d'approbation dépassées → « expirée »
+            // boîtes Outlook : relève et analyse toutes les 25 min (aucun envoi), même avant 6 h et même si le rapport du jour est fait
+            try { require_once __DIR__ . '/mail.php'; pil_mail_cron(); } catch (Throwable $e) { error_log('[pilotage mail] ' . $e->getMessage()); }
+            if ((int)date('G') < 6 && !getenv('PIL_CRON_FORCE')) continue; // rapport du jour : à partir de 6 h
             if (q("SELECT id FROM pil_runs WHERE company_id = ? AND rdate = ? AND source = 'cron' AND status = 'ok'", [cid(), $today])->fetch()) continue; // déjà fait aujourd'hui
             $done[cid()] = pil_report_run($today, 'cron')['message'];
         } catch (Throwable $e) { error_log('[pilotage cron] firme ' . cid() . ' : ' . $e->getMessage()); $done[cid()] = 'erreur : ' . $e->getMessage(); }

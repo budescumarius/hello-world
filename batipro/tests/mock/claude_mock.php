@@ -22,6 +22,20 @@ $reply = function (array $content, string $stop) {
         'stop_reason' => $stop, 'stop_sequence' => null, 'usage' => ['input_tokens' => 10, 'output_tokens' => 10]]);
     exit;
 };
+// tri des e-mails (outil forcé classer_emails) : une analyse par « #id » ; journal : IBAN en clair ? PDF joint ?
+if (in_array('classer_emails', array_column($req['tools'] ?? [], 'name'), true)) {
+    $all = ''; $pdf = false; foreach ((array)($last['content'] ?? []) as $b) { if (($b['type'] ?? '') === 'text') $all .= $b['text'] . "\n"; if (($b['type'] ?? '') === 'document') $pdf = true; }
+    file_put_contents(sys_get_temp_dir() . '/claude_mock.log', json_encode(['mail' => true, 'iban_clair' => (bool)preg_match('/BE68\s?5390\s?0754\s?7034/', $all), 'pdf' => $pdf, 'cite' => str_contains($all, 'Ancien message cité')]) . "\n", FILE_APPEND);
+    preg_match_all('/\n#(\d+) · reçu le [^·]+· de : [^<]*<([^>]*)> · objet : ([^\n]*)/u', $all, $mm, PREG_SET_ORDER);
+    $out = [];
+    foreach ($mm as $x) {
+        $pub = str_contains($x[2], 'promo');
+        $out[] = ['id' => (int)$x[1], 'categorie' => $pub ? 'publicite' : 'client', 'urgence' => $pub ? 'basse' : 'haute', 'resume' => $pub ? 'Publicité.' : 'Le client demande le devis cuisine avant vendredi.',
+            'action_requise' => !$pub, 'action' => $pub ? '' : 'Envoyer le devis cuisine Dupont avant vendredi', 'echeance' => '', 'chantier_id' => 0, 'pieces' => $pub ? '' : 'Devis PDF fictif (1.250,00 €)',
+            'reponse_necessaire' => !$pub, 'brouillon' => $pub ? '' : "Bonjour,\nMerci pour votre message. Nous vous envoyons le devis avant vendredi (acompte de 1.250,00 €, total estimé 9.999,00 €).\nCordialement"];
+    }
+    $reply([['type' => 'tool_use', 'id' => 'toolu_mock_mail', 'name' => 'classer_emails', 'input' => ['emails' => $out]]], 'tool_use');
+}
 if (!empty($req['tools']) && !$hasResult) {
     if (preg_match('/PROPOSE.*facture (\d+)/', $firstQ, $mm)) $reply([['type' => 'tool_use', 'id' => 'toolu_mock_p', 'name' => 'proposer_action', 'input' => ['type' => 'relance_client', 'facture_id' => (int)$mm[1], 'justification' => 'Facture en retard de paiement']]], 'tool_use');
     $tool = str_contains(mb_strtolower($firstQ), 'sous-traitant') ? ['totaux_achats', ['type_fournisseur' => 'soustraitant', 'du' => '2026-01-01', 'au' => '2026-12-31']]

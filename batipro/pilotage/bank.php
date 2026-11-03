@@ -646,6 +646,9 @@ function pil_route(string $method, array $seg): void {
     switch ($sub) {
         case 'me': case 'approvals': case 'audit': case 'roles': case 'export': case 'settings':
             pil_security_route($method, $seg, $me);
+        case 'mail':
+            require_once __DIR__ . '/director.php'; require_once __DIR__ . '/mail.php';
+            try { pil_mail_route($method, $seg, $me); } catch (PilError $e) { fail($e->getCode() ?: 400, $e->getMessage()); }
         case 'accounts':
             if ($method === 'GET') out(pil_accounts());
             if ($method === 'POST') {

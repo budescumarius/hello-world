@@ -8,7 +8,7 @@ const pilEnabled = () => !!(S.settings.pilotage && S.settings.pilotage.enabled);
 const pilOn = () => pilEnabled() && (S.pilMe ? S.pilMe.role !== 'none' : isAdmin());
 const pilCan = (p) => !!(S.pilMe && S.pilMe.perms.includes(p));
 // Les 15 pages de l'espace « Pilotage MADIBU » (ordre demandé) : [libellé, lien, permission, autres adresses de la même page]
-const PIL_SECS = [['Vue générale', '#/pilotage/vue', 'treasury.read'], ['Trésorerie', '#/pilotage/tresorerie', 'treasury.read'], ['Comptes bancaires', '#/pilotage/comptes', 'bank.read', '#/pilotage/controle'],
+const PIL_SECS = [['Vue générale', '#/pilotage/vue', 'treasury.read'], ['Briefing e-mails', '#/pilotage/emails', 'mail.use'], ['Trésorerie', '#/pilotage/tresorerie', 'treasury.read'], ['Comptes bancaires', '#/pilotage/comptes', 'bank.read', '#/pilotage/controle'],
   ['Import des extraits', '#/pilotage/import', 'bank.read', '#/pilotage/imports'], ['Transactions', '#/pilotage/mouvements', 'bank.read', '#/pilotage/historique'],
   ['Rapprochement bancaire', '#/pilotage/rapprochement', 'bank.read', '#/pilotage/echeances'], ['Crédits et leasing', '#/pilotage/engagements/credit', 'treasury.read', '#/pilotage/engagements/leasing'],
   ['Charges fixes', '#/pilotage/engagements/charge', 'treasury.read', '#/pilotage/engagements/a_confirmer', '#/pilotage/engagements'], ['Prévisions', '#/pilotage/previsions', 'treasury.read'],
@@ -90,7 +90,7 @@ route('pilotage', async (sub, arg) => {
   pilMeP = null; await pilLoadMe();
   if (S.pilMe.role === 'none') { layout({ icon: 'chart', title: 'Pilotage' }).innerHTML = empty('Accès non autorisé', 'Votre rôle ne donne pas accès au Pilotage. Le propriétaire peut vous attribuer un rôle.'); return; }
   if (!sub) { location.replace(PIL_SPACE.h); return; }
-  const pages = { vue: pilOverviewPage, tresorerie: () => pilTreasuryPage('tresorerie'), previsions: () => pilTreasuryPage('previsions'), rapprochement: withTabs(pilReconcilePage, PIL_T_REC), alertes: pilAlertsPage, rapports: pilDirectorPage,
+  const pages = { vue: pilOverviewPage, emails: () => pilMailPage(), tresorerie: () => pilTreasuryPage('tresorerie'), previsions: () => pilTreasuryPage('previsions'), rapprochement: withTabs(pilReconcilePage, PIL_T_REC), alertes: pilAlertsPage, rapports: pilDirectorPage,
     comptes: (a) => (a === 'liste' ? withTabs(pilAccountsPage, PIL_T_ACC)() : withTabs(pilDashPage, PIL_T_ACC)()), controle: () => withTabs(pilDashPage, PIL_T_ACC)(),
     approbations: pilApprovalsPage, audit: withTabs(pilAuditPage, PIL_T_SET), parametres: withTabs(pilSettingsPage, PIL_T_SET), directeur: pilDirectorPage, assistant: pilAssistantPage, chantiers: pilProjectsPage, engagements: pilCommitmentsPage, echeances: withTabs(pilDuePage, PIL_T_REC), mouvements: withTabs(pilTxPage, PIL_T_TX), historique: withTabs(pilHistPage, PIL_T_TX), import: (a) => (pilCan('bank.write') ? withTabs(pilImportPage, PIL_T_IMPORT) : withTabs(pilImportsPage, PIL_T_IMPORT))(a), imports: withTabs(pilImportsPage, PIL_T_IMPORT) };
   return (pages[sub] || (() => location.replace(PIL_SPACE.h)))(arg);

@@ -1,0 +1,43 @@
+// Briefing e-mails (Pilotage) : configuration Outlook, briefing, relecture d'une réponse préparée et envoi SEULEMENT après « Oui, envoyer ».
+// L'envoi est intercepté (rien ne part). Données 100 % fictives.
+const { chromium } = require('playwright');
+const { execFileSync } = require('child_process');
+const path = require('path');
+const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
+(async () => {
+  let failed = 0; const check = (l, ok, d) => { console.log(`  ${ok ? '✔' : '✘'} ${l}${d ? ` – ${d}` : ''}`); if (!ok) failed++; };
+  const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1280, height: 900 }, bypassCSP: true });
+  const errs = []; p.on('pageerror', (e) => errs.push(e.message)); p.on('dialog', (d) => d.accept());
+  await p.goto(BASE + '/'); await p.fill('input[name=email]', 'admin@test.madibu.local'); await p.fill('input[name=password]', 'Admin-Test-2026'); await p.click('button[type=submit]');
+  await p.waitForFunction('typeof S !== "undefined" && S.ready', null, { timeout: 30000 });
+  await p.evaluate(async () => { await api('PUT', 'pilot/mail/config', { clientId: '', tenant: '', secret: '' }).catch(() => {}); });
+  execFileSync('php', ['-r', '$p=new PDO("mysql:host=127.0.0.1;port=3307;dbname=batipro_test","batipro","batipro-test"); $p->exec("DELETE FROM settings WHERE k=\'pilotage_mail\'");']);
+  await p.goto(`${BASE}/#/pilotage/emails`); await p.waitForTimeout(1500);
+  check('menu : « Briefing e-mails » juste après la vue générale', await p.evaluate(() => PIL_SPACE.sec.map((x) => x[0]).slice(0, 2).join('|')) === 'Vue générale|Briefing e-mails');
+  const txt = await p.textContent('#page');
+  check('propriétaire : marche à suivre Microsoft + adresse de redirection à copier', /Configurer la connexion Outlook/.test(txt) && /api\.php\?r=pilot\/mail\/callback/.test(txt) && /Mail\.Send/.test(txt));
+  execFileSync('php', [path.join(__dirname, 'seed_mail.php')]);
+  await p.goto(`${BASE}/#/pilotage/vue`); await p.goto(`${BASE}/#/pilotage/emails`); await p.waitForSelector('.pil-mail');
+  const page = await p.textContent('#page');
+  check('briefing : à faire, urgent, pièce jointe, réponse préparée, pour info', /Demande de devis cuisine Dupont/.test(page) && /Envoyer le devis cuisine Dupont/.test(page) && /Plan PDF fictif/.test(page) && /Réponses préparées/.test(page) && /Préparé par l'IA/.test(page) && /Pour info \(1\)/.test(page));
+  let sent = null;
+  await p.route((u) => /r=pilot\/mail\/drafts\/\d+\/send/.test(u.toString()), async (route) => { sent = JSON.parse(route.request().postData() || '{}'); await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 1, status: 'envoye', note: null }) }); });
+  await p.click('[data-edit]'); await p.waitForSelector('.modal textarea[name=body]');
+  check('relecture : avertissement IA et montant à vérifier', /Relisez et corrigez/.test(await p.textContent('.modal')) && /9\.999,00/.test(await p.textContent('.modal')));
+  await p.fill('.modal textarea[name=body]', 'Bonjour,\nTexte relu par la direction.\nCordialement');
+  await p.click('.modal [data-send]'); await p.waitForTimeout(400);
+  check('« Envoyer… » demande d\'abord une confirmation (rien n\'est parti)', sent === null && /Envoyer maintenant/.test(await p.textContent('.modal [data-conf]')));
+  await p.click('.modal [data-yes]'); await p.waitForTimeout(800);
+  check('« Oui, envoyer » : part avec le texte relu et la confirmation', sent && sent.confirm === true && /Texte relu par la direction/.test(sent.body), JSON.stringify(sent));
+  const m = await b.newPage({ viewport: { width: 390, height: 844 }, bypassCSP: true }); m.on('pageerror', (e) => errs.push('mobile: ' + e.message));
+  await m.goto(BASE + '/'); await m.fill('input[name=email]', 'admin@test.madibu.local'); await m.fill('input[name=password]', 'Admin-Test-2026'); await m.click('button[type=submit]');
+  await m.waitForFunction('typeof S !== "undefined" && S.ready', null, { timeout: 30000 }).catch(() => {});
+  await m.goto(`${BASE}/#/pilotage/emails`); await m.waitForTimeout(2000);
+  const over = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  check('téléphone (390 px) : briefing sans défilement horizontal', over <= 2, `${over}px`);
+  execFileSync('php', ['-r', '$p=new PDO("mysql:host=127.0.0.1;port=3307;dbname=batipro_test","batipro","batipro-test"); $p->exec("DELETE FROM pil_mail_drafts; DELETE FROM pil_mail_msgs; DELETE FROM pil_mail_accounts; DELETE FROM settings WHERE k=\'pilotage_mail\'");']);
+  check('aucune erreur JavaScript', errs.length === 0, errs.join(' | '));
+  await b.close();
+  console.log(failed ? `\n${failed} échec(s)` : '\nBriefing e-mails : conforme');
+  process.exit(failed ? 1 : 0);
+})().catch((e) => { console.error(e); process.exit(1); });

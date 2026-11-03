@@ -38,7 +38,8 @@ php tests/php/bank_test.php || exit 1
 php tests/php/treasury_test.php || exit 1
 php tests/php/director_test.php || exit 1
 php tests/php/security_test.php || exit 1
+php tests/php/mail_test.php || exit 1
 echo "== 3. Tâche planifiée"
 docker exec -u www-data "$WEB" php /var/www/html/cron.php > /tmp/bp-cron.log 2>&1 && echo "   cron.php : exécution OK" || { echo "   cron.php : ÉCHEC"; cat /tmp/bp-cron.log; exit 1; }
 echo "== 4. Interface réelle dans un navigateur (facultatif)"
-if node -e "require('playwright')" 2>/dev/null; then node tests/e2e/ui_invoice.cjs || exit 1; node tests/e2e/ui_pilotage.cjs || exit 1; node tests/e2e/ui_peppol_groupes.cjs || exit 1; node tests/e2e/ui_factures_validees.cjs || exit 1; node tests/e2e/ui_mail_pj.cjs || exit 1; node tests/e2e/ui_site.cjs || exit 1; node tests/e2e/ui_smoke.cjs || exit 1; else echo "   Playwright absent : étape ignorée"; fi
+if node -e "require('playwright')" 2>/dev/null; then node tests/e2e/ui_invoice.cjs || exit 1; node tests/e2e/ui_pilotage.cjs || exit 1; node tests/e2e/ui_peppol_groupes.cjs || exit 1; node tests/e2e/ui_factures_validees.cjs || exit 1; node tests/e2e/ui_mail_pj.cjs || exit 1; node tests/e2e/ui_site.cjs || exit 1; node tests/e2e/ui_mail.cjs || exit 1; node tests/e2e/ui_smoke.cjs || exit 1; else echo "   Playwright absent : étape ignorée"; fi
