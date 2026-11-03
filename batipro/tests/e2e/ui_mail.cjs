@@ -24,6 +24,7 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   check('Microsoft 365 en option (repliée) : marche à suivre + adresse de redirection', /Configurer la connexion Outlook/.test(t2) && /\/outlook-callback\.php/.test(t2) && /Mail\.Send/.test(t2));
   execFileSync('php', [path.join(__dirname, 'seed_mail.php')]);
   await p.goto(`${BASE}/#/pilotage/vue`); await p.goto(`${BASE}/#/pilotage/emails`); await p.waitForSelector('.pil-mail');
+  check('Microsoft 365 configuré : « + Connecter une boîte Microsoft 365 » en premier (bouton principal)', /Connecter une boîte Microsoft 365/.test(await p.textContent('[data-connect]')) && await p.$eval('[data-connect]', (b) => b.classList.contains('primary')));
   const page = await p.textContent('#page');
   check('briefing : à faire, urgent, pièce jointe, réponse préparée, pour info', /Demande de devis cuisine Dupont/.test(page) && /Envoyer le devis cuisine Dupont/.test(page) && /Plan PDF fictif/.test(page) && /Réponses préparées/.test(page) && /Préparé par l'IA/.test(page) && /Pour info \(1\)/.test(page));
   await p.click('details.card summary'); await p.waitForTimeout(300);

@@ -38,8 +38,8 @@ async function pilMailPage() {
     return [...groups].sort((x, y) => y[1].length - x[1].length || x[0].localeCompare(y[0])).map(([k, l]) => `<div class="pil-mgrp"><b>${esc(k)}</b> <span class="muted">${l.length}</span></div>${l.map(card).join('')}`).join('');
   };
   const accs = b.accounts.map((a) => `<span class="chip ${a.status === 'ok' ? '' : 'bad'}" title="${esc(a.last_error || '')}">✉ ${esc(a.email)}${a.status !== 'ok' ? ' · à reconnecter' : a.last_sync ? ` · ${fmtDT(a.last_sync)}` : ''} <button class="icon-btn sm" data-acc="${a.id}" aria-label="Options">${I.more}</button></span>`).join('');
-  page.innerHTML = `<div class="card"><div class="card-h"><h3>Boîtes connectées</h3><span class="btns"><button class="btn sm primary" data-imap>+ Connecter une boîte (Hostico / cPanel)</button>${b.configured ? '<button class="btn sm" data-connect>+ Boîte Microsoft 365</button>' : ''}</span></div>
-      <div class="chips">${accs || '<span class="muted">Aucune boîte : connectez vos boîtes une par une (adresse et mot de passe de la boîte, comme dans Outlook). Chacune n\'est visible que par vous.</span>'}</div>
+  page.innerHTML = `<div class="card"><div class="card-h"><h3>Boîtes connectées</h3><span class="btns">${b.configured ? '<button class="btn sm primary" data-connect>+ Connecter une boîte Microsoft 365</button><button class="btn sm" data-imap>+ Boîte Hostico / cPanel</button>' : '<button class="btn sm primary" data-imap>+ Connecter une boîte (Hostico / cPanel)</button>'}</span></div>
+      <div class="chips">${accs || `<span class="muted">${b.configured ? 'Aucune boîte : cliquez « + Connecter une boîte Microsoft 365 », puis choisissez « Compte professionnel ou scolaire » (une fois par adresse). Chacune n\'est visible que par vous.' : 'Aucune boîte : connectez vos boîtes une par une (adresse et mot de passe de la boîte, comme dans Outlook). Chacune n\'est visible que par vous.'}</span>`}</div>
       ${!b.ai && b.accounts.length ? '<p class="muted">Assistant IA non configuré : les e-mails sont relevés mais pas triés (Paramètres → Assistant IA).</p>' : ''}</div>
     ${b.accounts.length ? `<div class="kpis">${kpi('À faire', c.todo, { cls: c.urgent ? 'bad' : '', sub: c.urgent ? `dont ${c.urgent} urgent(s)` : '' })}${kpi('Sans réponse > 2 jours', c.waiting, { cls: c.waiting ? 'bad' : '' })}${kpi('Réponses préparées', c.drafts, { sub: 'à relire avant envoi' })}${kpi('Pour info', c.info)}</div>
     <div class="card"><div class="card-h"><h3>À faire</h3><label class="pil-grp">Regrouper <select data-grp>${[['', 'urgent d\'abord'], ['cat', 'par catégorie'], ['proj', 'par chantier'], ['from', 'par expéditeur']].map(([k, l]) => `<option value="${k}" ${(ui.pilMailGrp || '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div><div class="pil-mails">${grouped(b.todo) || '<p class="muted">Rien à faire. 👍</p>'}</div></div>
@@ -133,7 +133,11 @@ async function pilMailConfig(box) {
     <div class="btns"><button class="btn primary" data-saveconf>Enregistrer</button></div>
     <p class="muted">Le secret est chiffré. Chaque utilisateur connecte ensuite ses propres boîtes avec « Se connecter avec Microsoft » (aucun mot de passe n'est donné à BatiPro).</p></div>`;
   const cp = $('[data-copy]', box); cp.onclick = () => { navigator.clipboard.writeText(c.redirect).then(() => toast('Adresse copiée')).catch(() => {}); };
-  $('[data-saveconf]', box).onclick = async () => { await api('PUT', 'pilot/mail/config', { clientId: $('[name=clientId]', box).value, tenant: $('[name=tenant]', box).value, secret: $('[name=secret]', box).value }); toast('Connexion Outlook configurée'); render(); };
+  $('[data-saveconf]', box).onclick = async (e) => {
+    const btn = e.target; btn.disabled = true;
+    try { await api('PUT', 'pilot/mail/config', { clientId: $('[name=clientId]', box).value, tenant: $('[name=tenant]', box).value, secret: $('[name=secret]', box).value }); }
+    catch (err) { btn.disabled = false; return toast(err.message, 8000); }
+    toast('Microsoft 365 configuré ✓ – cliquez maintenant « + Connecter une boîte Microsoft 365 » (en haut)', 7000); window.scrollTo({ top: 0, behavior: 'smooth' }); render(); };
 }
 
 // boîte hébergée (Hostico / cPanel) : adresse + mot de passe de la boîte ; serveurs proposés d'après le domaine
