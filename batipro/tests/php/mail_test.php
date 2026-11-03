@@ -27,7 +27,7 @@ T::test('configuration réservée au propriétaire ; identifiants vérifiés ; s
     [$c] = $admin->req('PUT', 'pilot/mail/config', ['clientId' => 'pas-un-id', 'secret' => 'x']); T::eq(400, $c);
     [$c] = $admin->req('PUT', 'pilot/mail/config', ['clientId' => '11111111-2222-3333-4444-555555555555', 'tenant' => 'madibu-fictif.be', 'secret' => 'secret-fictif']); T::eq(200, $c);
     [, $g, $raw] = $admin->req('GET', 'pilot/mail/config');
-    T::eq(true, $g['hasSecret']); T::ok(!str_contains($raw, 'secret-fictif'), 'secret absent de la réponse'); T::ok(str_contains($g['redirect'], 'api.php?r=pilot/mail/callback'), $g['redirect']);
+    T::eq(true, $g['hasSecret']); T::ok(!str_contains($raw, 'secret-fictif'), 'secret absent de la réponse'); T::ok(str_ends_with($g['redirect'], '/outlook-callback.php') && !str_contains($g['redirect'], '?'), $g['redirect']);
     T::ok(!str_contains((string)db()->query("SELECT v FROM settings WHERE k = 'pilotage_mail'")->fetchColumn(), 'secret-fictif'), 'secret chiffré en base');
 });
 T::test('connexion : adresse Microsoft avec PKCE et « state » ; un « state » falsifié est refusé', function () use ($admin) {
@@ -40,7 +40,7 @@ T::test('connexion : adresse Microsoft avec PKCE et « state » ; un « state »
 });
 T::test('connexion acceptée : boîte enregistrée, jetons chiffrés (jamais en clair en base)', function () use ($admin) {
     [, $r] = $admin->req('POST', 'pilot/mail/connect'); parse_str((string)parse_url($r['url'], PHP_URL_QUERY), $q);
-    [$c] = $admin->req('GET', 'pilot/mail/callback&code=code-fictif&state=' . $q['state'], null, ['noCsrf' => true]); T::eq(302, $c);
+    [$c, , $raw] = $admin->req('GET', '', null, ['noCsrf' => true, 'raw' => 'outlook-callback.php?code=code-fictif&state=' . $q['state']]); T::eq(302, $c, $raw); // adresse déclarée chez Microsoft
     $a = db()->query('SELECT * FROM pil_mail_accounts')->fetch();
     T::eq('direction@madibu-fictif.be', $a['email'] ?? null); T::ok(!str_contains($a['token_enc'], 'rafraichi') && !str_contains($a['token_enc'], 'acces-1'), 'jetons chiffrés');
     [, $l] = $admin->req('GET', 'pilot/mail/accounts'); T::eq(1, count($l)); T::ok(!isset($l[0]['token_enc']), 'jetons jamais envoyés au navigateur');

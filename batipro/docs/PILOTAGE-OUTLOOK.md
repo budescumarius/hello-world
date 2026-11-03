@@ -25,7 +25,7 @@
 
 ## Microsoft 365 (facultatif : seulement pour des boîtes hébergées chez Microsoft)
 1. entra.microsoft.com → Applications → Inscriptions d'applications → Nouvelle inscription : nom « BatiPro », « Comptes dans cet annuaire d'organisation uniquement ».
-2. URI de redirection (Web) : celle affichée dans Pilotage → Briefing e-mails (`https://VOTRE-SITE/api.php?r=pilot/mail/callback`).
+2. URI de redirection (Web) : celle affichée dans Pilotage → Briefing e-mails (`https://VOTRE-SITE/outlook-callback.php` – sans « ? », exigé par Microsoft).
 3. Copier l'ID d'application (client) et l'ID de l'annuaire (locataire).
 4. Certificats et secrets → Nouveau secret client → copier la **Valeur**.
 5. Autorisations des API → Microsoft Graph → déléguées : Mail.ReadWrite, Mail.Send, User.Read, offline_access → Accorder le consentement administrateur.

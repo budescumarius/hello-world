@@ -77,7 +77,7 @@ function pil_ms_graph(): string { return rtrim((string)(config()['ms_graph_base'
 function pil_mail_redirect(): string {
     $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
     $dir = rtrim(str_replace('\\', '/', dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/api.php'))), '/');
-    return ($https ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . $dir . '/api.php?r=pilot/mail/callback';
+    return ($https ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . $dir . '/outlook-callback.php'; // sans « ? » (exigé par Microsoft)
 }
 function pil_http(string $method, string $url, array $headers, $body = null, bool $form = false): array {
     $ch = curl_init($url);

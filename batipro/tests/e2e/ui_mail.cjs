@@ -21,7 +21,7 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   await p.evaluate(() => closeModals());
   await p.click('details.card:last-of-type summary'); await p.waitForTimeout(800);
   const t2 = await p.textContent('#page');
-  check('Microsoft 365 en option (repliée) : marche à suivre + adresse de redirection', /Configurer la connexion Outlook/.test(t2) && /api\.php\?r=pilot\/mail\/callback/.test(t2) && /Mail\.Send/.test(t2));
+  check('Microsoft 365 en option (repliée) : marche à suivre + adresse de redirection', /Configurer la connexion Outlook/.test(t2) && /\/outlook-callback\.php/.test(t2) && /Mail\.Send/.test(t2));
   execFileSync('php', [path.join(__dirname, 'seed_mail.php')]);
   await p.goto(`${BASE}/#/pilotage/vue`); await p.goto(`${BASE}/#/pilotage/emails`); await p.waitForSelector('.pil-mail');
   const page = await p.textContent('#page');
