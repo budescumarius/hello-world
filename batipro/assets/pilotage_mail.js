@@ -12,7 +12,7 @@ async function pilMailPage() {
   if (q.get('connected')) { toast(`Boîte ${q.get('connected')} connectée : première relève en cours…`, 4000); history.replaceState(null, '', '#/pilotage/emails'); setTimeout(() => pilMailSync(), 300); }
   if (q.get('err')) { toast(q.get('err'), 8000); history.replaceState(null, '', '#/pilotage/emails'); }
   const [b, projects] = await Promise.all([api('GET', 'pilot/mail/brief'), db.list('project').catch(() => [])]);
-  const page = layout({ icon: 'mail', title: 'Briefing e-mails', sub: 'Vos boîtes Outlook triées chaque 25 minutes · rien ne part sans votre relecture',
+  const page = layout({ icon: 'mail', title: 'Briefing e-mails', sub: 'Vos boîtes e-mail triées toutes les 25 minutes · rien ne part sans votre relecture',
     actions: b.accounts.length ? '<button class="btn" data-sync>Relever maintenant</button>' : '' });
   const pname = (id) => { const p = byId(projects, id); return p ? p.data.name : ''; };
   const c = b.counts;
@@ -30,20 +30,20 @@ async function pilMailPage() {
       ${(d.check.non_verifie || []).length ? `<div class="late">⚠ Montant à vérifier : ${d.check.non_verifie.map(esc).join(', ')}</div>` : ''}
       <div class="btns"><button class="btn sm primary" data-edit="${d.id}">Relire et envoyer…</button><button class="btn sm ghost" data-rej="${d.id}">Supprimer</button></div></div>`;
   const accs = b.accounts.map((a) => `<span class="chip ${a.status === 'ok' ? '' : 'bad'}" title="${esc(a.last_error || '')}">✉ ${esc(a.email)}${a.status !== 'ok' ? ' · à reconnecter' : a.last_sync ? ` · ${fmtDT(a.last_sync)}` : ''} <button class="icon-btn sm" data-acc="${a.id}" aria-label="Options">${I.more}</button></span>`).join('');
-  page.innerHTML = `${!b.configured ? (pilCan('settings.write') ? '<div data-conf></div>' : '<div class="alert warn">La connexion Outlook n\'est pas encore configurée : le propriétaire doit enregistrer l\'application Microsoft (cette page, en étant propriétaire).</div>') : ''}
-    <div class="card"><div class="card-h"><h3>Boîtes connectées</h3>${b.configured ? '<button class="btn sm primary" data-connect>+ Connecter une boîte Outlook</button>' : ''}</div>
-      <div class="chips">${accs || '<span class="muted">Aucune boîte : connectez vos boîtes Outlook (une par une, avec « Se connecter avec Microsoft »). Chacune n\'est visible que par vous.</span>'}</div>
+  page.innerHTML = `<div class="card"><div class="card-h"><h3>Boîtes connectées</h3><span class="btns"><button class="btn sm primary" data-imap>+ Connecter une boîte (Hostico / cPanel)</button>${b.configured ? '<button class="btn sm" data-connect>+ Boîte Microsoft 365</button>' : ''}</span></div>
+      <div class="chips">${accs || '<span class="muted">Aucune boîte : connectez vos boîtes une par une (adresse et mot de passe de la boîte, comme dans Outlook). Chacune n\'est visible que par vous.</span>'}</div>
       ${!b.ai && b.accounts.length ? '<p class="muted">Assistant IA non configuré : les e-mails sont relevés mais pas triés (Paramètres → Assistant IA).</p>' : ''}</div>
     ${b.accounts.length ? `<div class="kpis">${kpi('À faire', c.todo, { cls: c.urgent ? 'bad' : '', sub: c.urgent ? `dont ${c.urgent} urgent(s)` : '' })}${kpi('Sans réponse > 2 jours', c.waiting, { cls: c.waiting ? 'bad' : '' })}${kpi('Réponses préparées', c.drafts, { sub: 'à relire avant envoi' })}${kpi('Pour info', c.info)}</div>
     <div class="card"><div class="card-h"><h3>À faire</h3><span class="muted">urgent d'abord, puis par échéance</span></div><div class="pil-mails">${b.todo.map(card).join('') || '<p class="muted">Rien à faire. 👍</p>'}</div></div>
     <div class="card"><div class="card-h"><h3>Réponses préparées – à relire</h3><span class="muted">rien ne part sans votre clic « Envoyer »</span></div><div class="pil-mails">${b.drafts.map(draftCard).join('') || '<p class="muted">Aucune réponse en attente.</p>'}</div></div>
     ${(b.new || []).length ? `<div class="card"><div class="card-h"><h3>Pas encore triés (${b.new.length})</h3></div><div class="pil-mails">${b.new.map(card).join('')}</div></div>` : ''}
     <details class="card"><summary><b>Pour info (${c.info})</b> <span class="muted">publicités, notifications, informations sans action</span></summary><div class="pil-mails">${b.info.map(card).join('')}</div></details>` : ''}`;
-  const conf = $('[data-conf]', page); if (conf) pilMailConfig(conf);
+  if (pilCan('settings.write')) { page.insertAdjacentHTML('beforeend', `<details class="card" ${b.configured ? '' : ''}><summary><b>Microsoft 365 (facultatif)</b> <span class="muted">seulement pour des boîtes hébergées chez Microsoft (Exchange Online) ${b.configured ? '· configuré' : ''}</span></summary><div data-conf></div></details>`); const d = $('details:last-of-type [data-conf]', page); $('details:last-of-type', page).addEventListener('toggle', () => { if (!d.childElementCount) pilMailConfig(d); }, { once: true }); }
+  $('[data-imap]', page).onclick = () => pilImapConnect();
   const sy = $('[data-sync]', page); if (sy) sy.onclick = () => pilMailSync(sy);
   const cn = $('[data-connect]', page); if (cn) cn.onclick = async () => { const r = await api('POST', 'pilot/mail/connect'); location.href = r.url; };
   $$('[data-acc]', page).forEach((x) => { x.onclick = () => { const a = b.accounts.find((y) => y.id === +x.dataset.acc); menuSheet(a.email, [
-    { label: 'Reconnecter (Microsoft)', icon: 'key', run: async () => { const r = await api('POST', 'pilot/mail/connect'); location.href = r.url; } },
+    a.kind === 'imap' ? { label: 'Reconnecter (nouveau mot de passe…)', icon: 'key', run: () => pilImapConnect(a.email) } : { label: 'Reconnecter (Microsoft)', icon: 'key', run: async () => { const r = await api('POST', 'pilot/mail/connect'); location.href = r.url; } },
     { label: 'Relire les 14 derniers jours', icon: 'download', run: () => pilMailSync(null, true) },
     { label: 'Déconnecter cette boîte', icon: 'trash', danger: true, run: async () => { if (!confirm(`Déconnecter ${a.email} ? Les e-mails relevés et les brouillons de cette boîte sont effacés de BatiPro (rien n'est effacé dans Outlook).`)) return; await api('DELETE', `pilot/mail/accounts/${a.id}`); toast('Boîte déconnectée'); render(); } },
   ]); }; });
@@ -123,4 +123,28 @@ async function pilMailConfig(box) {
     <p class="muted">Le secret est chiffré. Chaque utilisateur connecte ensuite ses propres boîtes avec « Se connecter avec Microsoft » (aucun mot de passe n'est donné à BatiPro).</p></div>`;
   const cp = $('[data-copy]', box); cp.onclick = () => { navigator.clipboard.writeText(c.redirect).then(() => toast('Adresse copiée')).catch(() => {}); };
   $('[data-saveconf]', box).onclick = async () => { await api('PUT', 'pilot/mail/config', { clientId: $('[name=clientId]', box).value, tenant: $('[name=tenant]', box).value, secret: $('[name=secret]', box).value }); toast('Connexion Outlook configurée'); render(); };
+}
+
+// boîte hébergée (Hostico / cPanel) : adresse + mot de passe de la boîte ; serveurs proposés d'après le domaine
+function pilImapConnect(email = '') {
+  const md = modal(`${mhead('Connecter une boîte e-mail')}<form class="m-body">
+    <p class="muted">Les mêmes informations que dans Outlook (compte IMAP). BatiPro vérifie la connexion avant de l'enregistrer ; le mot de passe est chiffré et n'est jamais affiché.</p>
+    <label class="field full"><span>Adresse e-mail</span><input name="email" type="email" value="${esc(email)}" placeholder="marius@madibugroup.be" autocomplete="off"></label>
+    <label class="field full"><span>Mot de passe de la boîte</span><input name="password" type="password" autocomplete="new-password"></label>
+    <details><summary class="muted">Serveurs (si l'hébergeur donne d'autres réglages)</summary><div class="grid-form">
+      <label class="field"><span>Serveur de réception (IMAP)</span><input name="imap_host" placeholder="mail.votredomaine.be"></label><label class="field"><span>Port</span><select name="imap_port"><option>993</option><option>143</option></select></label>
+      <label class="field"><span>Serveur d'envoi (SMTP)</span><input name="smtp_host" placeholder="mail.votredomaine.be"></label><label class="field"><span>Port</span><select name="smtp_port"><option>465</option><option>587</option></select></label></div>
+      <small class="muted">Hostico / cPanel : « Comptes de messagerie » → « Connecter les appareils » donne ces réglages (en général mail.votredomaine.be, 993 et 465, SSL).</small></details>
+  </form><div class="m-foot"><span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-go>Vérifier et connecter</button></div>`);
+  const f = $('form', md.el);
+  const dom = () => (f.email.value.split('@')[1] || '').trim();
+  f.email.oninput = () => { const d = dom(); f.imap_host.placeholder = d ? `mail.${d}` : 'mail.votredomaine.be'; f.smtp_host.placeholder = f.imap_host.placeholder; };
+  f.email.oninput();
+  $('[data-go]', md.el).onclick = async (e) => {
+    const btn = e.target; btn.disabled = true; btn.textContent = 'Vérification…';
+    try {
+      const r = await api('POST', 'pilot/mail/imap', { email: f.email.value, password: f.password.value, imap_host: f.imap_host.value, imap_port: +f.imap_port.value, smtp_host: f.smtp_host.value, smtp_port: +f.smtp_port.value });
+      md.close(); toast(`Boîte ${r.email} connectée${r.sent_folder ? '' : ' (dossier « Envoyés » introuvable : les réponses partent quand même)'} – première relève…`, 4000); pilMailSync();
+    } catch (err) { btn.disabled = false; btn.textContent = 'Vérifier et connecter'; toast(err.message, 8000); }
+  };
 }

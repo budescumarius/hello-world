@@ -16,7 +16,7 @@ const PIL_MAIL_KEEP_DAYS = 60;
 
 function pil_mail_schema(): void {
     static $done = false; if ($done) return; $done = true;
-    if (q("SHOW TABLES LIKE 'pil_mail_drafts'")->fetch()) return;
+    if (q("SHOW TABLES LIKE 'pil_mail_drafts'")->fetch()) { pil_mail_migrate(); return; }
     $pdo = db();
     $pdo->exec("CREATE TABLE IF NOT EXISTS pil_mail_accounts (
         id INT AUTO_INCREMENT PRIMARY KEY, company_id INT NOT NULL, user_id INT NOT NULL, email VARCHAR(190) NOT NULL, name VARCHAR(190) NULL,
@@ -32,6 +32,12 @@ function pil_mail_schema(): void {
         id INT AUTO_INCREMENT PRIMARY KEY, company_id INT NOT NULL, account_id INT NOT NULL, msg_id INT NULL, to_json TEXT NOT NULL, cc_json TEXT NULL, subject VARCHAR(500) NOT NULL,
         body MEDIUMTEXT NOT NULL, origin VARCHAR(12) NOT NULL, status VARCHAR(10) NOT NULL DEFAULT 'brouillon', check_json TEXT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
         sent_at DATETIME NULL, sent_by INT NULL, note VARCHAR(500) NULL, KEY company_account (company_id, account_id, status)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    pil_mail_migrate();
+}
+// boîtes hébergées (IMAP) : colonnes ajoutées sans toucher aux données existantes
+function pil_mail_migrate(): void {
+    if (!q("SHOW COLUMNS FROM pil_mail_accounts LIKE 'kind'")->fetch()) db()->exec("ALTER TABLE pil_mail_accounts ADD kind VARCHAR(8) NOT NULL DEFAULT 'graph' AFTER user_id");
+    if (!q("SHOW COLUMNS FROM pil_mail_msgs LIKE 'msg_ref'")->fetch()) db()->exec('ALTER TABLE pil_mail_msgs ADD msg_ref TEXT NULL AFTER conv_id');
 }
 
 // --------------------------------------------------------------------- Chiffrement des jetons (clé hors base de données)
@@ -136,7 +142,7 @@ function pil_mail_callback(array $me): void {
     } catch (Throwable $e) { $back('err=' . rawurlencode($e->getMessage())); }
 }
 function pil_mail_accounts(array $me): array {
-    return array_map(fn($a) => ['id' => (int)$a['id'], 'email' => $a['email'], 'name' => $a['name'], 'status' => $a['status'], 'last_sync' => $a['last_sync'], 'last_error' => $a['last_error']],
+    return array_map(fn($a) => ['id' => (int)$a['id'], 'kind' => $a['kind'] ?? 'graph', 'email' => $a['email'], 'name' => $a['name'], 'status' => $a['status'], 'last_sync' => $a['last_sync'], 'last_error' => $a['last_error']],
         q('SELECT * FROM pil_mail_accounts WHERE company_id = ? AND user_id = ? ORDER BY id', [cid(), $me['id']])->fetchAll());
 }
 function pil_mail_account(array $me, int $id): array {
@@ -161,6 +167,7 @@ function pil_mail_mask(string $t): string {
     return preg_replace('/\b(?:\d[ -]?){13,19}\b/', '[numéro masqué]', $t);
 }
 function pil_mail_sync(array $acc, bool $deep = false): array {
+    if (($acc['kind'] ?? 'graph') === 'imap') { require_once __DIR__ . '/imap.php'; return pil_imap_sync($acc, $deep); }
     $since = $acc['last_sync'] && !$deep ? date('Y-m-d\TH:i:s\Z', strtotime($acc['last_sync']) - 3600) : gmdate('Y-m-d\TH:i:s\Z', time() - 14 * 86400);
     $new = 0;
     foreach (['inbox' => 'receivedDateTime', 'sentitems' => 'sentDateTime'] as $folder => $dt) {
@@ -219,7 +226,10 @@ function pil_mail_analyze(array $acc, array $me, int $max = 10): array {
     $budget = 2; // PDF joints : au plus 2 par e-mail, 3 Mo chacun
     foreach ($rows as $r) {
         $content[] = ['type' => 'text', 'text' => "\n#{$r['id']} · reçu le {$r['at']} · de : {$r['from_name']} <{$r['from_email']}> · objet : {$r['subject']}\n" . pil_mail_mask(mb_substr((string)$r['body'], 0, 5000))];
-        if ($r['atts'] !== null) {
+        if ($r['atts'] !== null && ($acc['kind'] ?? 'graph') === 'imap') {
+            try { foreach (pil_imap_pdfs($acc, $r, $budget) as $pdf) { $content[] = ['type' => 'text', 'text' => "Pièce jointe PDF de l'e-mail #{$r['id']} : {$pdf['name']}"]; $content[] = ['type' => 'document', 'source' => ['type' => 'base64', 'mediaType' => 'application/pdf', 'data' => base64_encode($pdf['data'])]]; } }
+            catch (Throwable $e) { error_log('[pilotage mail] pièces jointes IMAP : ' . $e->getMessage()); }
+        } elseif ($r['atts'] !== null) {
             try {
                 $att = pil_graph($acc, 'GET', '/me/messages/' . rawurlencode($r['graph_id']) . '/attachments?$select=id,name,contentType,size,isInline');
                 $list = []; $n = 0;
@@ -314,6 +324,7 @@ function pil_mail_send(array $me, int $draftId, array $b): array {
     $rc = fn($l) => array_map(fn($r) => ['emailAddress' => ['address' => $r['email'], 'name' => $r['name'] ?? '']], $l);
     $note = null;
     if (test_mode()) { $note = 'Site de test : e-mail NON envoyé (simulation).'; error_log('[BatiPro mode test] e-mail Outlook NON envoyé : ' . $subject); }
+    elseif (($acc['kind'] ?? 'graph') === 'imap') { require_once __DIR__ . '/imap.php'; $note = pil_imap_send($acc, $me, $to, $cc, $subject, $body, $msg); }
     elseif ($msg) pil_graph($acc, 'POST', '/me/messages/' . rawurlencode($msg['graph_id']) . '/reply', ['message' => ['toRecipients' => $rc($to), 'ccRecipients' => $rc($cc)], 'comment' => $body]);
     else pil_graph($acc, 'POST', '/me/sendMail', ['message' => ['subject' => $subject, 'body' => ['contentType' => 'Text', 'content' => $body], 'toRecipients' => $rc($to), 'ccRecipients' => $rc($cc)], 'saveToSentItems' => true]);
     q("UPDATE pil_mail_drafts SET status = 'envoye', sent_at = ?, sent_by = ?, note = ? WHERE id = ?", [now(), $me['id'], $note, $draftId]);
@@ -361,6 +372,7 @@ function pil_mail_route(string $method, array $seg, array $me): void {
         }
     }
     if ($a === 'connect' && $method === 'POST') out(['url' => pil_mail_connect_url($me)]);
+    if ($a === 'imap' && $method === 'POST') { require_once __DIR__ . '/imap.php'; out(pil_imap_connect($me, body())); }
     if ($a === 'accounts' && $method === 'GET') out(pil_mail_accounts($me));
     if ($a === 'accounts' && $method === 'DELETE' && $id) {
         $acc = pil_mail_account($me, $id);

@@ -109,5 +109,50 @@ T::test('déconnexion : boîte, e-mails relevés et brouillons effacés de BatiP
     [$c] = $admin->req('DELETE', "pilot/mail/accounts/$id"); T::eq(200, $c);
     T::eq(0, (int)db()->query('SELECT (SELECT COUNT(*) FROM pil_mail_accounts) + (SELECT COUNT(*) FROM pil_mail_msgs) + (SELECT COUNT(*) FROM pil_mail_drafts)')->fetchColumn());
 });
+
+echo "\nBoîtes hébergées (Hostico / cPanel : IMAP + SMTP)\n";
+shell_exec("docker cp " . escapeshellarg(__DIR__ . '/../mock/imap_mock.php') . " $W:/tmp/imap_mock.php && docker exec -d $W php /tmp/imap_mock.php");
+shell_exec("docker exec $W sed -i \"s#^return array (#return array (\\n  'mail_allow_plain' => true,#\" /var/www/html/config.php"); sleep(3);
+$ilog = fn($f) => array_map(fn($l) => json_decode($l, true), array_filter(explode("\n", (string)shell_exec("docker exec $W cat /tmp/$f 2>/dev/null"))));
+$box = ['email' => 'direction@madibu-fictif.be', 'imap_host' => '127.0.0.1', 'imap_port' => 9143, 'smtp_host' => '127.0.0.1', 'smtp_port' => 9025, 'secure' => 'none'];
+T::test('connexion refusée : mauvais mot de passe ou serveur invalide, rien n\'est enregistré', function () use ($admin, $box) {
+    [$c, $r] = $admin->req('POST', 'pilot/mail/imap', $box + ['password' => 'faux']); T::eq(401, $c); T::ok(str_contains($r['error'], 'mot de passe refusé'), $r['error']);
+    [$c] = $admin->req('POST', 'pilot/mail/imap', ['imap_host' => 'serveur invalide;rm'] + $box + ['password' => 'x']); T::eq(400, $c);
+    T::eq(0, (int)db()->query('SELECT COUNT(*) FROM pil_mail_accounts')->fetchColumn());
+});
+T::test('connexion vérifiée (réception + envoi) ; dossier « Envoyés » trouvé ; mot de passe chiffré', function () use ($admin, $box) {
+    [$c, $r] = $admin->req('POST', 'pilot/mail/imap', $box + ['password' => 'Boite-Test-1']); T::eq(200, $c, json_encode($r, JSON_UNESCAPED_UNICODE)); T::eq('INBOX.Sent', $r['sent_folder']);
+    $a = db()->query('SELECT * FROM pil_mail_accounts')->fetch(); T::eq('imap', $a['kind']); T::ok(!str_contains((string)$a['token_enc'], 'Boite-Test-1'), 'mot de passe chiffré');
+    [, $l, $raw] = $admin->req('GET', 'pilot/mail/accounts'); T::eq('imap', $l[0]['kind']); T::ok(!str_contains($raw, 'Boite-Test-1'), 'jamais renvoyé');
+});
+T::test('relève : encodages (ISO-8859-1, € , sujet encodé), historique cité retiré, PDF joint ; répondu reconnu ; tri IA', function () use ($admin, &$S) {
+    [$c, $r] = $admin->req('POST', 'pilot/mail/sync'); T::eq(200, $c, json_encode($r, JSON_UNESCAPED_UNICODE)); T::eq([], $r['errors']);
+    T::eq(4, $r['results'][0]['new']); T::eq(2, $r['results'][0]['analyzed']);
+    $m = db()->query("SELECT * FROM pil_mail_msgs WHERE from_email = 'client@exemple-fictif.be'")->fetch();
+    T::eq('Demande de devis cuisine Dupont', $m['subject']); T::eq('François Client', $m['from_name']);
+    T::ok(str_contains($m['body'], 'prévu de 1.250,00 €') && !str_contains($m['body'], 'Ancien message'), $m['body']);
+    T::ok(str_contains((string)$m['atts'], 'devis-fictif.pdf'), 'pièce jointe listée');
+    T::eq('repondu', db()->query("SELECT state FROM pil_mail_msgs WHERE from_email = 'archi@bureau-fictif.be'")->fetchColumn(), 'répondu (Envoyés)');
+    $log = array_map(fn($l) => json_decode($l, true), array_filter(explode("\n", (string)shell_exec('docker exec bp-test-web cat /tmp/claude_mock.log'))));
+    $mm = array_values(array_filter($log, fn($x) => !empty($x['mail']))); $last = end($mm);
+    T::eq(false, $last['iban_clair'], 'IBAN masqué'); T::eq(true, $last['pdf'], 'PDF lu'); T::eq(false, $last['cite'], 'historique non transmis');
+    $S['idraft'] = $r['brief']['drafts'][0]['id'] ?? null; T::ok($S['idraft'], 'réponse préparée');
+    [, $r2] = $admin->req('POST', 'pilot/mail/sync'); T::eq(0, $r2['results'][0]['new'], 'pas de doublon');
+});
+T::test('envoi : seulement confirmé ; part par le SMTP de la boîte, en réponse au bon e-mail ; copie dans « Envoyés »', function () use ($admin, $ilog, &$S) {
+    T::eq([], $ilog('smtp_mock.log'), 'rien envoyé avant confirmation');
+    [$c] = $admin->req('POST', "pilot/mail/drafts/{$S['idraft']}/send", []); T::eq(400, $c);
+    [$c, $d] = $admin->req('POST', "pilot/mail/drafts/{$S['idraft']}/send", ['confirm' => true, 'to' => [['email' => 'client@exemple-fictif.be']], 'subject' => 'RE: Demande de devis cuisine Dupont', 'body' => "Bonjour,\nDevis envoyé demain, relu par la direction.\nCordialement"]);
+    T::eq(200, $c, json_encode($d, JSON_UNESCAPED_UNICODE)); T::eq(null, $d['note'], (string)$d['note']);
+    $sm = $ilog('smtp_mock.log'); T::eq(1, count($sm)); T::eq(['client@exemple-fictif.be'], $sm[0]['rcpt']);
+    T::ok(str_contains($sm[0]['data'], 'In-Reply-To: <q1@exemple-fictif.be>'), 'réponse au bon e-mail');
+    preg_match("/\n\n(.+)$/s", $sm[0]['data'], $mm); T::ok(str_contains((string)base64_decode(preg_replace('/\s+/', '', $mm[1] ?? '')), 'relu par la direction'), 'texte relu');
+    T::ok((bool)array_filter($ilog('imap_mock.log'), fn($x) => !empty($x['append'])), 'copie dans INBOX.Sent');
+});
+T::test('déconnexion de la boîte hébergée', function () use ($admin) {
+    $id = (int)db()->query('SELECT id FROM pil_mail_accounts')->fetchColumn(); [$c] = $admin->req('DELETE', "pilot/mail/accounts/$id"); T::eq(200, $c);
+    T::eq(0, (int)db()->query('SELECT COUNT(*) FROM pil_mail_accounts')->fetchColumn());
+});
+shell_exec("docker exec $W sed -i \"/'mail_allow_plain'/d\" /var/www/html/config.php");
 shell_exec("docker exec $W sed -i \"/'ms_login_base'/d; /'ms_graph_base'/d\" /var/www/html/config.php");
 exit(T::done());

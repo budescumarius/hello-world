@@ -1,4 +1,4 @@
-# Pilotage – Briefing e-mails (Outlook / Microsoft 365)
+# Pilotage – Briefing e-mails (boîtes Hostico / cPanel ou Microsoft 365)
 
 ## Ce que fait le module
 - Relève les boîtes Outlook connectées (réception + éléments envoyés, 14 jours au départ, puis toutes les 25 minutes par la tâche cron existante).
@@ -16,7 +16,14 @@
 - Copie de sauvegarde envoyée par e-mail : sans les tables `pil_mail_*`.
 - Site de test (`test_mode`) : envoi simulé, rien ne part.
 
-## Mise en place (une fois, propriétaire + administrateur Microsoft 365)
+## Boîtes hébergées chez Hostico / cPanel (cas de MADIBU)
+- Pilotage → Briefing e-mails → « + Connecter une boîte (Hostico / cPanel) » : adresse + mot de passe de la boîte (les mêmes que dans Outlook).
+- Serveurs proposés : mail.<domaine>, réception IMAP 993 (SSL), envoi SMTP 465 (SSL) ; autres réglages possibles (143 / 587 en STARTTLS). Connexion en clair refusée.
+- BatiPro vérifie la réception ET l'envoi avant d'enregistrer ; mot de passe chiffré. Relève en lecture seule (les e-mails restent « non lus » dans Outlook).
+- Réponse envoyée par le SMTP de la boîte, en réponse au bon e-mail (In-Reply-To / References), puis copiée dans le dossier « Envoyés » : Outlook l'affiche comme un envoi normal.
+- Mot de passe changé dans cPanel : menu de la boîte → « Reconnecter (nouveau mot de passe…) ».
+
+## Microsoft 365 (facultatif : seulement pour des boîtes hébergées chez Microsoft)
 1. entra.microsoft.com → Applications → Inscriptions d'applications → Nouvelle inscription : nom « BatiPro », « Comptes dans cet annuaire d'organisation uniquement ».
 2. URI de redirection (Web) : celle affichée dans Pilotage → Briefing e-mails (`https://VOTRE-SITE/api.php?r=pilot/mail/callback`).
 3. Copier l'ID d'application (client) et l'ID de l'annuaire (locataire).
