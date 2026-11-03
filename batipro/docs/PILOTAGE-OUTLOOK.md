@@ -28,6 +28,13 @@
 2. URI de redirection (Web) : celle affichée dans Pilotage → Briefing e-mails (`https://VOTRE-SITE/api.php?r=pilot/mail/callback`).
 3. Copier l'ID d'application (client) et l'ID de l'annuaire (locataire).
 4. Certificats et secrets → Nouveau secret client → copier la **Valeur**.
-5. Autorisations des API → Microsoft Graph → déléguées : Mail.Read, Mail.Send, User.Read, offline_access → Accorder le consentement administrateur.
+5. Autorisations des API → Microsoft Graph → déléguées : Mail.ReadWrite, Mail.Send, User.Read, offline_access → Accorder le consentement administrateur.
 6. Dans BatiPro (propriétaire) : coller les trois valeurs → Enregistrer. Puis chaque utilisateur : « + Connecter une boîte Outlook », une fois par boîte.
 7. Le secret client expire (24 mois max) : en créer un nouveau et le recoller avant l'échéance.
+
+## Rangement automatique (publicités)
+- À chaque relève, les publicités et newsletters (catégorie « Publicité » donnée par l'IA) sont déplacées dans le dossier **« Publicité »** de la boîte (créé au besoin ; chez cPanel : INBOX.Publicité). Rien n'est supprimé.
+- Jamais rangé : un expéditeur présent dans les contacts BatiPro, un e-mail avec une action ou une réponse attendue, un e-mail remis à la main dans la boîte de réception.
+- « Remettre dans la boîte de réception » (BatiPro) ou un déplacement à la main dans Outlook : l'e-mail n'est plus jamais rangé, sans doublon.
+- Désactivable par boîte (menu ⋯ de la boîte). Microsoft 365 : autorisation Mail.ReadWrite nécessaire.
+- Briefing : « Regrouper » par catégorie, chantier ou expéditeur.

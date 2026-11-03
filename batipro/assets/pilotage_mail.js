@@ -24,20 +24,28 @@ async function pilMailPage() {
       ${a.pieces ? `<div class="pil-mail-p">📎 ${esc(a.pieces)}</div>` : (m.atts || []).length ? `<div class="pil-mail-p">📎 ${m.atts.map((x) => esc(x.name)).join(', ')}</div>` : ''}
       ${m.project_id ? `<div><a href="#/project/${m.project_id}">🏗 ${esc(pname(m.project_id))}</a></div>` : ''}
       ${(a.non_verifie || []).length ? `<div class="late">⚠ Montant à vérifier : ${a.non_verifie.map(esc).join(', ')}</div>` : ''}
+      ${m.moved ? `<div class="pil-mail-p">📁 Rangé automatiquement dans « ${esc(m.moved)} » <button class="btn sm ghost" data-unmove="${m.id}">Remettre dans la boîte de réception</button></div>` : ''}
       <div class="btns"><button class="btn sm" data-open="${m.id}">Lire</button>${m.state === 'a_faire' || m.state === 'nouveau' ? `<button class="btn sm" data-reply="${m.id}">Répondre</button><button class="btn sm good" data-done="${m.id}">✓ Fait</button><button class="btn sm ghost" data-ign="${m.id}">Ignorer</button>` : ''}${m.web_link ? `<a class="btn sm ghost" href="${esc(m.web_link)}" target="_blank" rel="noopener">Outlook ↗</a>` : ''}</div></div>`; };
   const draftCard = (d) => `<div class="pil-mail draft" data-d="${d.id}"><div class="pil-mail-h"><b class="grow">À : ${esc(pilRcptTxt(d.to))}</b>${d.origin === 'ia' ? badge('Préparé par l\'IA', '#7048e8') : badge('Votre brouillon', '#3b5bdb')}</div>
       <div class="pil-mail-s">${esc(d.subject)}</div><div class="muted pil-mail-body">${esc((d.body || '').slice(0, 240))}${(d.body || '').length > 240 ? '…' : ''}</div>
       ${(d.check.non_verifie || []).length ? `<div class="late">⚠ Montant à vérifier : ${d.check.non_verifie.map(esc).join(', ')}</div>` : ''}
       <div class="btns"><button class="btn sm primary" data-edit="${d.id}">Relire et envoyer…</button><button class="btn sm ghost" data-rej="${d.id}">Supprimer</button></div></div>`;
+  // regroupement choisi (gardé pour la prochaine visite)
+  const grouped = (list) => {
+    const g = ui.pilMailGrp || ''; if (!g) return list.map(card).join('');
+    const key = (m) => (g === 'cat' ? (PIL_MCAT[(m.analysis || {}).categorie] || PIL_MCAT.autre)[0] : g === 'proj' ? (m.project_id ? pname(m.project_id) || 'Chantier' : 'Sans chantier') : (m.from_name || m.from_email || '?'));
+    const groups = new Map(); list.forEach((m) => { const k = key(m); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(m); });
+    return [...groups].sort((x, y) => y[1].length - x[1].length || x[0].localeCompare(y[0])).map(([k, l]) => `<div class="pil-mgrp"><b>${esc(k)}</b> <span class="muted">${l.length}</span></div>${l.map(card).join('')}`).join('');
+  };
   const accs = b.accounts.map((a) => `<span class="chip ${a.status === 'ok' ? '' : 'bad'}" title="${esc(a.last_error || '')}">✉ ${esc(a.email)}${a.status !== 'ok' ? ' · à reconnecter' : a.last_sync ? ` · ${fmtDT(a.last_sync)}` : ''} <button class="icon-btn sm" data-acc="${a.id}" aria-label="Options">${I.more}</button></span>`).join('');
   page.innerHTML = `<div class="card"><div class="card-h"><h3>Boîtes connectées</h3><span class="btns"><button class="btn sm primary" data-imap>+ Connecter une boîte (Hostico / cPanel)</button>${b.configured ? '<button class="btn sm" data-connect>+ Boîte Microsoft 365</button>' : ''}</span></div>
       <div class="chips">${accs || '<span class="muted">Aucune boîte : connectez vos boîtes une par une (adresse et mot de passe de la boîte, comme dans Outlook). Chacune n\'est visible que par vous.</span>'}</div>
       ${!b.ai && b.accounts.length ? '<p class="muted">Assistant IA non configuré : les e-mails sont relevés mais pas triés (Paramètres → Assistant IA).</p>' : ''}</div>
     ${b.accounts.length ? `<div class="kpis">${kpi('À faire', c.todo, { cls: c.urgent ? 'bad' : '', sub: c.urgent ? `dont ${c.urgent} urgent(s)` : '' })}${kpi('Sans réponse > 2 jours', c.waiting, { cls: c.waiting ? 'bad' : '' })}${kpi('Réponses préparées', c.drafts, { sub: 'à relire avant envoi' })}${kpi('Pour info', c.info)}</div>
-    <div class="card"><div class="card-h"><h3>À faire</h3><span class="muted">urgent d'abord, puis par échéance</span></div><div class="pil-mails">${b.todo.map(card).join('') || '<p class="muted">Rien à faire. 👍</p>'}</div></div>
+    <div class="card"><div class="card-h"><h3>À faire</h3><label class="pil-grp">Regrouper <select data-grp>${[['', 'urgent d\'abord'], ['cat', 'par catégorie'], ['proj', 'par chantier'], ['from', 'par expéditeur']].map(([k, l]) => `<option value="${k}" ${(ui.pilMailGrp || '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div><div class="pil-mails">${grouped(b.todo) || '<p class="muted">Rien à faire. 👍</p>'}</div></div>
     <div class="card"><div class="card-h"><h3>Réponses préparées – à relire</h3><span class="muted">rien ne part sans votre clic « Envoyer »</span></div><div class="pil-mails">${b.drafts.map(draftCard).join('') || '<p class="muted">Aucune réponse en attente.</p>'}</div></div>
     ${(b.new || []).length ? `<div class="card"><div class="card-h"><h3>Pas encore triés (${b.new.length})</h3></div><div class="pil-mails">${b.new.map(card).join('')}</div></div>` : ''}
-    <details class="card"><summary><b>Pour info (${c.info})</b> <span class="muted">publicités, notifications, informations sans action</span></summary><div class="pil-mails">${b.info.map(card).join('')}</div></details>` : ''}`;
+    <details class="card"><summary><b>Pour info (${c.info})</b> <span class="muted">publicités (rangées dans « Publicité »), notifications, informations sans action</span></summary><div class="pil-mails">${grouped(b.info)}</div></details>` : ''}`;
   if (pilCan('settings.write')) { page.insertAdjacentHTML('beforeend', `<details class="card" ${b.configured ? '' : ''}><summary><b>Microsoft 365 (facultatif)</b> <span class="muted">seulement pour des boîtes hébergées chez Microsoft (Exchange Online) ${b.configured ? '· configuré' : ''}</span></summary><div data-conf></div></details>`); const d = $('details:last-of-type [data-conf]', page); $('details:last-of-type', page).addEventListener('toggle', () => { if (!d.childElementCount) pilMailConfig(d); }, { once: true }); }
   $('[data-imap]', page).onclick = () => pilImapConnect();
   const sy = $('[data-sync]', page); if (sy) sy.onclick = () => pilMailSync(sy);
@@ -45,11 +53,14 @@ async function pilMailPage() {
   $$('[data-acc]', page).forEach((x) => { x.onclick = () => { const a = b.accounts.find((y) => y.id === +x.dataset.acc); menuSheet(a.email, [
     a.kind === 'imap' ? { label: 'Reconnecter (nouveau mot de passe…)', icon: 'key', run: () => pilImapConnect(a.email) } : { label: 'Reconnecter (Microsoft)', icon: 'key', run: async () => { const r = await api('POST', 'pilot/mail/connect'); location.href = r.url; } },
     { label: 'Relire les 14 derniers jours', icon: 'download', run: () => pilMailSync(null, true) },
+    { label: a.autoPub ? '✓ Ranger les publicités dans « Publicité » (activé – désactiver)' : 'Ranger les publicités dans « Publicité » (désactivé – activer)', icon: 'check', run: async () => { await api('PUT', `pilot/mail/accounts/${a.id}`, { autoPub: !a.autoPub }); toast(a.autoPub ? 'Rangement automatique désactivé' : 'Rangement automatique activé'); render(); } },
     { label: 'Déconnecter cette boîte', icon: 'trash', danger: true, run: async () => { if (!confirm(`Déconnecter ${a.email} ? Les e-mails relevés et les brouillons de cette boîte sont effacés de BatiPro (rien n'est effacé dans Outlook).`)) return; await api('DELETE', `pilot/mail/accounts/${a.id}`); toast('Boîte déconnectée'); render(); } },
   ]); }; });
   const all = [...b.todo, ...(b.new || []), ...b.info];
   $$('[data-open]', page).forEach((x) => { x.onclick = () => pilMailOpen(+x.dataset.open, projects); });
   $$('[data-done]', page).forEach((x) => { x.onclick = async () => { await api('PUT', `pilot/mail/msgs/${x.dataset.done}`, { state: 'fait' }); toast('Marqué fait'); render(); }; });
+  const gs = $('[data-grp]', page); if (gs) gs.onchange = () => { ui.pilMailGrp = gs.value; saveUi(); render(); };
+  $$('[data-unmove]', page).forEach((x) => { x.onclick = async () => { x.disabled = true; try { await api('POST', `pilot/mail/msgs/${x.dataset.unmove}/unmove`); toast('Remis dans la boîte de réception (il ne sera plus rangé)'); render(); } catch (e) { x.disabled = false; toast(e.message, 6000); } }; });
   $$('[data-ign]', page).forEach((x) => { x.onclick = async () => { await api('PUT', `pilot/mail/msgs/${x.dataset.ign}`, { state: 'ignore' }); render(); }; });
   $$('[data-reply]', page).forEach((x) => { x.onclick = async () => { const d = await api('POST', `pilot/mail/msgs/${x.dataset.reply}/draft`); pilDraftEdit(d, all.find((m) => m.id === +x.dataset.reply), b.accounts); }; });
   $$('[data-edit]', page).forEach((x) => { x.onclick = () => { const d = b.drafts.find((y) => y.id === +x.dataset.edit); pilDraftEdit(d, all.find((m) => m.id === d.msg_id), b.accounts); }; });
@@ -58,7 +69,7 @@ async function pilMailPage() {
 async function pilMailSync(btn, deep = false) {
   if (btn) { btn.disabled = true; btn.textContent = 'Relève en cours…'; }
   toast('Relève et tri des e-mails… (jusqu\'à une minute)', 60000);
-  try { const r = await api('POST', 'pilot/mail/sync', { deep }); const n = r.results.reduce((a, x) => a + x.new, 0); toast(`${n} nouvel(s) e-mail(s)${r.results.some((x) => x.analyzed) ? ` · ${r.results.reduce((a, x) => a + (x.analyzed || 0), 0)} trié(s) par l'IA` : ''}${r.errors.length ? ` · ${r.errors.join(' · ')}` : ''}`, r.errors.length ? 8000 : 3500); }
+  try { const r = await api('POST', 'pilot/mail/sync', { deep }); const n = r.results.reduce((a, x) => a + x.new, 0); const rg = r.results.reduce((a, x) => a + (x.ranges || 0), 0); toast(`${n} nouvel(s) e-mail(s)${rg ? ` · ${rg} publicité(s) rangée(s)` : ''}${r.results.some((x) => x.analyzed) ? ` · ${r.results.reduce((a, x) => a + (x.analyzed || 0), 0)} trié(s) par l'IA` : ''}${r.errors.length ? ` · ${r.errors.join(' · ')}` : ''}`, r.errors.length ? 8000 : 3500); }
   catch (e) { toast(e.message, 7000); }
   render();
 }
@@ -115,7 +126,7 @@ async function pilMailConfig(box) {
       <li>URI de redirection : <b>Web</b> → collez exactement : <code class="pil-copy" data-copy>${esc(c.redirect)}</code></li>
       <li>Après création : copiez <b>ID d'application (client)</b> et <b>ID de l'annuaire (locataire)</b> ci-dessous.</li>
       <li><b>Certificats et secrets</b> → <b>Nouveau secret client</b> (24 mois) → copiez la <b>Valeur</b> ci-dessous.</li>
-      <li><b>Autorisations des API</b> → Microsoft Graph → <b>Autorisations déléguées</b> : <b>Mail.Read</b>, <b>Mail.Send</b>, <b>User.Read</b>, <b>offline_access</b> → <b>Accorder un consentement d'administrateur</b>.</li></ol>
+      <li><b>Autorisations des API</b> → Microsoft Graph → <b>Autorisations déléguées</b> : <b>Mail.ReadWrite</b>, <b>Mail.Send</b>, <b>User.Read</b>, <b>offline_access</b> → <b>Accorder un consentement d'administrateur</b>.</li></ol>
     <div class="grid-form"><label class="field"><span>ID d'application (client)</span><input name="clientId" value="${esc(c.clientId)}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></label>
       <label class="field"><span>ID de l'annuaire (locataire)</span><input name="tenant" value="${esc(c.tenant)}" placeholder="xxxxxxxx-… ou madibugroup.be"></label>
       <label class="field full"><span>Secret client (valeur)</span><input name="secret" type="password" placeholder="${c.hasSecret ? '•••••••• (enregistré – laisser vide pour le garder)' : ''}" autocomplete="off"></label></div>

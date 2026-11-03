@@ -16,16 +16,21 @@ if (str_ends_with($path, '/oauth2/v2.0/token')) {
 }
 if (!preg_match('/^Bearer acces-\d$/', $auth)) $json(['error' => ['message' => 'jeton absent']], 401);
 $g = '/v1.0';
+$stf = sys_get_temp_dir() . '/graph_state.json'; $state = is_file($stf) ? json_decode((string)file_get_contents($stf), true) : ['moved' => [], 'folder' => null];
+$save = function () use (&$state, $stf) { file_put_contents($stf, json_encode($state)); };
+if ($path === "$g/me/mailFolders" && $_SERVER['REQUEST_METHOD'] === 'GET') $json(['value' => $state['folder'] ? [['id' => 'F-PUB', 'displayName' => 'Publicité']] : []]);
+if ($path === "$g/me/mailFolders" && $_SERVER['REQUEST_METHOD'] === 'POST') { $state['folder'] = json_decode($raw, true)['displayName'] ?? ''; $save(); $json(['id' => 'F-PUB', 'displayName' => $state['folder']], 201); }
+if (preg_match("#^$g/me/messages/([^/]+)/move$#", $path, $mv) && $_SERVER['REQUEST_METHOD'] === 'POST') { $to = json_decode($raw, true)['destinationId'] ?? ''; if ($to === 'F-PUB') $state['moved'][] = $mv[1]; else $state['moved'] = array_values(array_diff($state['moved'], [preg_replace('/^MOVED-/', '', $mv[1])])); $save(); $json(['id' => $to === 'F-PUB' ? 'MOVED-' . $mv[1] : preg_replace('/^MOVED-/', '', $mv[1])], 201); }
 if ($path === "$g/me") $json(['displayName' => 'Direction Fictive', 'mail' => 'direction@madibu-fictif.be', 'userPrincipalName' => 'direction@madibu-fictif.be']);
 $now = time();
 $msg = fn($id, $conv, $from, $name, $subj, $body, $ago, $att = false) => ['id' => $id, 'conversationId' => $conv, 'subject' => $subj, 'from' => ['emailAddress' => ['address' => $from, 'name' => $name]],
     'toRecipients' => [['emailAddress' => ['address' => 'direction@madibu-fictif.be', 'name' => 'Direction']]], 'ccRecipients' => [], 'receivedDateTime' => gmdate('Y-m-d\TH:i:s\Z', $now - $ago),
     'bodyPreview' => mb_substr($body, 0, 120), 'body' => ['contentType' => 'text', 'content' => $body], 'hasAttachments' => $att, 'isRead' => false, 'webLink' => "https://outlook.office.com/mail/fictif/$id"];
-if ($path === "$g/me/mailFolders/inbox/messages") $json(['value' => [
+if ($path === "$g/me/mailFolders/inbox/messages") $json(['value' => array_values(array_filter([
     $msg('AAA1', 'C1', 'client@exemple-fictif.be', 'Client Fictif', 'Demande de devis cuisine Dupont', "Bonjour,\nPouvez-vous nous envoyer le devis pour la cuisine avant vendredi ? Acompte prévu de 1.250,00 €.\nVirement depuis BE68 5390 0754 7034.\n\nDe : MADIBU\nEnvoyé : lundi\nAncien message cité", 3600 * 5, true),
     $msg('AAA2', 'C2', 'promo@pub-fictif.be', 'Promo Fictive', 'Soldes -30 % sur l\'outillage', 'Profitez de nos promotions.', 3600 * 30),
     $msg('AAA3', 'C3', 'archi@bureau-fictif.be', 'Architecte Fictif', 'Plans modifiés', 'Voici les plans modifiés.', 3600 * 72),
-]]);
+], fn($m) => !in_array($m['id'], $state['moved'], true)))]);
 if ($path === "$g/me/mailFolders/sentitems/messages") $json(['value' => [['id' => 'SSS3', 'conversationId' => 'C3', 'subject' => 'RE: Plans modifiés', 'toRecipients' => [['emailAddress' => ['address' => 'archi@bureau-fictif.be']]], 'sentDateTime' => gmdate('Y-m-d\TH:i:s\Z', $now - 3600 * 48)]]]);
 if ($path === "$g/me/messages/AAA1/attachments") $json(['value' => [['id' => 'P1', 'name' => 'devis-fictif.pdf', 'contentType' => 'application/pdf', 'size' => 400, 'isInline' => false]]]);
 if ($path === "$g/me/messages/AAA1/attachments/P1") $json(['id' => 'P1', 'name' => 'devis-fictif.pdf', 'contentBytes' => base64_encode("%PDF-1.4\n% devis fictif 1.250,00\n%%EOF")]);

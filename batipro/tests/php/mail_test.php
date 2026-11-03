@@ -9,6 +9,7 @@ $W = 'bp-test-web';
 shell_exec("docker cp " . escapeshellarg(__DIR__ . '/../mock/graph_mock.php') . " $W:/tmp/graph_mock.php && docker exec -d $W php -S 127.0.0.1:9091 -t /tmp /tmp/graph_mock.php");
 shell_exec("docker cp " . escapeshellarg(__DIR__ . '/../mock/claude_mock.php') . " $W:/tmp/claude_mock.php; docker exec -d $W php -S 127.0.0.1:9090 -t /tmp /tmp/claude_mock.php 2>/dev/null");
 shell_exec("docker exec $W sed -i \"s#^return array (#return array (\\n  'ms_login_base' => 'http://127.0.0.1:9091/login',\\n  'ms_graph_base' => 'http://127.0.0.1:9091/v1.0',#\" /var/www/html/config.php"); sleep(3);
+shell_exec("docker exec $W rm -f /tmp/graph_state.json /tmp/graph_mock.log /tmp/imap_mock.log /tmp/smtp_mock.log");
 $glog = fn() => array_map(fn($l) => json_decode($l, true), array_filter(explode("\n", (string)shell_exec("docker exec $W cat /tmp/graph_mock.log 2>/dev/null"))));
 $sent = fn() => array_values(array_filter($glog(), fn($r) => $r['m'] === 'POST' && (str_ends_with($r['p'], '/reply') || str_ends_with($r['p'], '/sendMail'))));
 
@@ -65,6 +66,15 @@ T::test('briefing : à faire (urgent, action, pièce jointe), info, réponse pr�
     T::eq(['9.999,00 €'], $b['drafts'][0]['check']['non_verifie'], 'montant absent de l\'e-mail signalé (1.250,00 € reconnu)');
     T::eq('client@exemple-fictif.be', $b['drafts'][0]['to'][0]['email']); T::eq('ia', $b['drafts'][0]['origin']);
     $S['draft'] = $b['drafts'][0]['id'];
+});
+T::test('rangement : la publicité va dans « Publicité » (dossier créé) ; le reste reste dans la boîte de réception', function () use ($admin, $glog) {
+    T::eq('Publicité', db()->query("SELECT moved FROM pil_mail_msgs WHERE from_email = 'promo@pub-fictif.be'")->fetchColumn());
+    T::eq(null, db()->query("SELECT moved FROM pil_mail_msgs WHERE from_email = 'client@exemple-fictif.be'")->fetchColumn(), 'client non rangé');
+    $l = $glog(); T::ok((bool)array_filter($l, fn($x) => $x['m'] === 'POST' && $x['p'] === '/v1.0/me/mailFolders'), 'dossier créé');
+    T::ok((bool)array_filter($l, fn($x) => $x['p'] === '/v1.0/me/messages/AAA2/move'), 'déplacé');
+    $id = (int)db()->query("SELECT id FROM pil_mail_msgs WHERE from_email = 'promo@pub-fictif.be'")->fetchColumn();
+    [$c, $m] = $admin->req('POST', "pilot/mail/msgs/$id/unmove"); T::eq(200, $c, json_encode($m)); T::eq(null, $m['moved']);
+    T::eq(1, (int)db()->query("SELECT keep_in FROM pil_mail_msgs WHERE id = $id")->fetchColumn(), 'ne sera plus rangé');
 });
 T::test('RIEN n\'est envoyé sans confirmation ; un autre utilisateur ne voit ni n\'envoie rien', function () use ($admin, $user, $sent, &$S) {
     T::eq([], $sent(), 'aucun envoi après relève et tri');
@@ -126,8 +136,9 @@ T::test('connexion vérifiée (réception + envoi) ; dossier « Envoyés » trou
     [, $l, $raw] = $admin->req('GET', 'pilot/mail/accounts'); T::eq('imap', $l[0]['kind']); T::ok(!str_contains($raw, 'Boite-Test-1'), 'jamais renvoyé');
 });
 T::test('relève : encodages (ISO-8859-1, € , sujet encodé), historique cité retiré, PDF joint ; répondu reconnu ; tri IA', function () use ($admin, &$S) {
+    $admin->req('POST', 'items/contact', ['data' => ['kind' => 'fournisseur', 'company' => 'Fournisseur Fictif', 'email' => 'newsletter@fournisseur-fictif.be']]);
     [$c, $r] = $admin->req('POST', 'pilot/mail/sync'); T::eq(200, $c, json_encode($r, JSON_UNESCAPED_UNICODE)); T::eq([], $r['errors']);
-    T::eq(4, $r['results'][0]['new']); T::eq(2, $r['results'][0]['analyzed']);
+    T::eq(5, $r['results'][0]['new']); T::eq(3, $r['results'][0]['analyzed']); T::eq(1, $r['results'][0]['ranges'], 'une publicité rangée');
     $m = db()->query("SELECT * FROM pil_mail_msgs WHERE from_email = 'client@exemple-fictif.be'")->fetch();
     T::eq('Demande de devis cuisine Dupont', $m['subject']); T::eq('François Client', $m['from_name']);
     T::ok(str_contains($m['body'], 'prévu de 1.250,00 €') && !str_contains($m['body'], 'Ancien message'), $m['body']);
@@ -138,6 +149,19 @@ T::test('relève : encodages (ISO-8859-1, € , sujet encodé), historique cité
     T::eq(false, $last['iban_clair'], 'IBAN masqué'); T::eq(true, $last['pdf'], 'PDF lu'); T::eq(false, $last['cite'], 'historique non transmis');
     $S['idraft'] = $r['brief']['drafts'][0]['id'] ?? null; T::ok($S['idraft'], 'réponse préparée');
     [, $r2] = $admin->req('POST', 'pilot/mail/sync'); T::eq(0, $r2['results'][0]['new'], 'pas de doublon');
+});
+T::test('rangement IMAP : publicité → « Publicité » (UTF-7, dossier créé) ; expéditeur connu jamais rangé ; remise sans doublon ni nouveau rangement', function () use ($admin, $ilog) {
+    $l = $ilog('imap_mock.log');
+    T::ok((bool)array_filter($l, fn($x) => ($x['create'] ?? '') === 'INBOX.Publicit&AOk-'), 'dossier INBOX.Publicité créé (nom IMAP encodé)');
+    $moves = array_values(array_filter(array_column($l, 'move'))); T::eq(1, count($moves), implode(' ; ', $moves));
+    $p = db()->query("SELECT * FROM pil_mail_msgs WHERE from_email = 'promo@pub-fictif.be'")->fetch();
+    T::eq('Publicité', $p['moved']); T::ok(str_starts_with($p['graph_id'], 'imap:pub:778:'), $p['graph_id']);
+    T::eq(null, db()->query("SELECT moved FROM pil_mail_msgs WHERE from_email = 'newsletter@fournisseur-fictif.be'")->fetchColumn(), 'contact BatiPro : jamais rangé');
+    [$c, $m] = $admin->req('POST', "pilot/mail/msgs/{$p['id']}/unmove"); T::eq(200, $c, json_encode($m, JSON_UNESCAPED_UNICODE)); T::eq(null, $m['moved']);
+    db()->exec('UPDATE pil_mail_accounts SET last_sync = NULL');
+    [, $r] = $admin->req('POST', 'pilot/mail/sync'); T::eq(0, $r['results'][0]['new'], 'pas de doublon'); T::eq(0, $r['results'][0]['ranges'], 'pas rangé à nouveau');
+    T::eq(1, (int)db()->query("SELECT COUNT(*) FROM pil_mail_msgs WHERE from_email = 'promo@pub-fictif.be'")->fetchColumn());
+    T::eq(2, count(array_filter(array_column($ilog('imap_mock.log'), 'move'))), 'un seul aller-retour');
 });
 T::test('envoi : seulement confirmé ; part par le SMTP de la boîte, en réponse au bon e-mail ; copie dans « Envoyés »', function () use ($admin, $ilog, &$S) {
     T::eq([], $ilog('smtp_mock.log'), 'rien envoyé avant confirmation');

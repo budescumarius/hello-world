@@ -98,6 +98,30 @@ final class PilImap {
         }
         return $meta;
     }
+    public function caps(): array { [, $r] = $this->cmd('CAPABILITY'); $c = []; foreach ($r as $x) if (preg_match('/^\* CAPABILITY (.*)$/i', $x['t'], $m)) foreach (explode(' ', strtoupper($m[1])) as $k) $c[$k] = true; return $c; }
+    /** Dossiers : [nom => attributs], et séparateur. */
+    public function folders(): array {
+        [, $r] = $this->cmd('LIST "" "*"'); $out = []; $delim = '.';
+        foreach ($r as $x) if (preg_match('/^\* LIST \(([^)]*)\) (?:"((?:[^"\\\\]|\\\\.)*)"|NIL) (?:"((?:[^"\\\\]|\\\\.)*)"|(\S+))$/i', $x['t'], $m)) { $delim = $m[2] !== '' ? stripcslashes($m[2]) : $delim; $out[($m[3] ?? '') !== '' ? stripcslashes($m[3]) : ($m[4] ?? '')] = $m[1]; }
+        return [$out, $delim];
+    }
+    /** Ouvre un dossier en lecture-écriture ; renvoie son UIDVALIDITY. */
+    public function select(string $folder): int {
+        [$st, $r] = $this->cmd('SELECT ' . self::q($folder));
+        if ($st !== 'OK') throw new PilError("Dossier « $folder » introuvable sur le serveur.", 502);
+        foreach ($r as $x) if (preg_match('/UIDVALIDITY (\d+)/i', $x['t'], $m)) return (int)$m[1];
+        return 0;
+    }
+    public function create(string $folder): bool { [$st] = $this->cmd('CREATE ' . self::q($folder)); $this->cmd('SUBSCRIBE ' . self::q($folder)); return $st === 'OK'; }
+    /** Déplace un message (MOVE, ou COPY + suppression de ce seul message) ; renvoie [uidvalidity, nouvel UID] si le serveur les donne. */
+    public function move(int $uid, string $dest, array $caps): ?array {
+        $parse = function (array $r, string $txt) { foreach (array_merge(array_column($r, 't'), [$txt]) as $t) if (preg_match('/COPYUID (\d+) \S+ (\d+)/i', $t, $m)) return [(int)$m[1], (int)$m[2]]; return [0, 0]; };
+        if (isset($caps['MOVE'])) { [$st, $r, $txt] = $this->cmd("UID MOVE $uid " . self::q($dest)); return $st === 'OK' ? $parse($r, $txt) : null; }
+        if (!isset($caps['UIDPLUS'])) return null; // sans UIDPLUS, on ne supprime rien (EXPUNGE effacerait aussi d'autres messages)
+        [$st, $r, $txt] = $this->cmd("UID COPY $uid " . self::q($dest)); if ($st !== 'OK') return null;
+        $this->cmd("UID STORE $uid +FLAGS.SILENT (\\Deleted)"); $this->cmd("UID EXPUNGE $uid");
+        return $parse($r, $txt);
+    }
     public function append(string $folder, string $msg): bool {
         [$st] = $this->cmd('APPEND ' . self::q($folder) . ' (\\Seen) {' . strlen($msg) . '}', $msg);
         return $st === 'OK';
@@ -280,8 +304,9 @@ function pil_imap_sync(array $acc, bool $deep): array {
             $isIn = $kind === 'in';
             $atts = array_values(array_map(fn($x) => ['name' => $x['name'], 'size' => $x['size'], 'type' => $x['type']], $p['atts']));
             $text = $isIn ? pil_mail_clean($p['text']) : null;
+            if ($isIn && pil_mail_back_in($acc, (string)$p['mid'], "imap:in:$uv:{$m['uid']}")) continue;
             $r = q('INSERT IGNORE INTO pil_mail_msgs (company_id, account_id, graph_id, conv_id, msg_ref, folder, from_email, from_name, to_json, subject, at, preview, body, atts, web_link, is_read, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                [cid(), $acc['id'], "imap:$kind:$uv:{$m['uid']}", mb_substr((string)$p['root'], 0, 255), json_encode(['mid' => $p['mid'], 'refs' => array_slice($p['refs'], -10)]), $isIn ? 'in' : 'sent',
+                [cid(), $acc['id'], "imap:$kind:$uv:{$m['uid']}", mb_substr((string)$p['root'], 0, 255), json_encode(['mid' => $p['mid'], 'refs' => array_slice($p['refs'], -10)], JSON_UNESCAPED_SLASHES), $isIn ? 'in' : 'sent',
                  $isIn ? $p['from'][0] : $acc['email'], mb_substr($isIn ? $p['from'][1] : (string)$acc['name'], 0, 190), json_encode(array_map(fn($x) => ['email' => $x[0], 'name' => $x[1]], $p['to']), JSON_UNESCAPED_UNICODE),
                  mb_substr($p['subject'], 0, 500), $p['date'] ?? $m['date'] ?? now(), $isIn ? mb_substr(preg_replace('/\s+/', ' ', (string)$text), 0, 400) : null, $text,
                  $isIn && $atts ? json_encode($atts, JSON_UNESCAPED_UNICODE) : null, null, str_contains($m['flags'], '\\Seen') ? 1 : 0, now()]);
@@ -326,4 +351,42 @@ function pil_imap_send(array $acc, array $me, array $to, array $cc, string $subj
     try { if (!empty($t['sent'])) { $c = pil_imap_open($t); if (!$c->append($t['sent'], $raw)) return 'Envoyé ; copie dans « Envoyés » refusée par le serveur.'; } }
     catch (Throwable $e) { return 'Envoyé ; copie dans « Envoyés » impossible : ' . mb_substr($e->getMessage(), 0, 150); }
     return null;
+}
+
+// --------------------------------------------------------------------- Rangement (dossier « Publicité »)
+/** Nom de dossier IMAP (UTF-7 modifié, RFC 3501) : « Publicité » → « Publicit&AOk- ». */
+function pil_imap_utf7(string $s): string {
+    return preg_replace_callback('/[^\x20-\x7e]+|&/u', function ($m) {
+        if ($m[0] === '&') return '&-';
+        return '&' . str_replace('/', ',', rtrim(base64_encode(mb_convert_encoding($m[0], 'UTF-16BE', 'UTF-8')), '=')) . '-';
+    }, $s);
+}
+/** Dossier « Publicité » de la boîte (même niveau que « Envoyés » : INBOX.Publicité chez cPanel), créé si besoin. */
+function pil_imap_pub_folder(PilImap $c, array $t): string {
+    [$list, $delim] = $c->folders();
+    $prefix = !empty($t['sent']) && preg_match('/^INBOX' . preg_quote($delim, '/') . '/i', $t['sent']) ? 'INBOX' . $delim : '';
+    $name = $prefix . pil_imap_utf7(PIL_MAIL_PUB);
+    if (!isset($list[$name]) && !$c->create($name)) throw new PilError('Impossible de créer le dossier « ' . PIL_MAIL_PUB . ' » sur le serveur.', 502);
+    return $name;
+}
+function pil_imap_tidy(array $acc, array $rows): int {
+    $t = pil_imap_conf($acc); $c = pil_imap_open($t); $caps = $c->caps();
+    $dest = pil_imap_pub_folder($c, $t);
+    $uv = $c->select('INBOX'); $n = 0;
+    foreach ($rows as $r) {
+        if (!preg_match('/^imap:in:(\d+):(\d+)$/', (string)$r['graph_id'], $g) || (int)$g[1] !== $uv) continue;
+        $res = $c->move((int)$g[2], $dest, $caps);
+        if ($res === null) break; // serveur sans déplacement sûr : on s'arrête, rien n'est supprimé
+        q('UPDATE pil_mail_msgs SET graph_id = ?, moved = ? WHERE id = ?', [$res[1] ? "imap:pub:{$res[0]}:{$res[1]}" : 'imap:pub:0:0:' . $r['id'], PIL_MAIL_PUB, $r['id']]);
+        $n++;
+    }
+    return $n;
+}
+function pil_imap_unmove(array $acc, array $row): string {
+    if (!preg_match('/^imap:pub:(\d+):(\d+)$/', (string)$row['graph_id'], $g) || !(int)$g[2]) throw new PilError('Déplacez ce message à la main dans Outlook (dossier « ' . PIL_MAIL_PUB . ' »).', 409);
+    $t = pil_imap_conf($acc); $c = pil_imap_open($t); $caps = $c->caps();
+    $c->select(pil_imap_pub_folder($c, $t));
+    $res = $c->move((int)$g[2], 'INBOX', $caps);
+    if ($res === null) throw new PilError('Le serveur n\'a pas pu remettre le message dans la boîte de réception.', 502);
+    return $res[1] ? "imap:in:{$res[0]}:{$res[1]}" : (string)$row['graph_id'];
 }

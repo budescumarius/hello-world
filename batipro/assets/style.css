@@ -2171,3 +2171,7 @@ body.loading::before { content: ''; position: fixed; top: 0; left: 0; right: 0; 
 .pil-copy { cursor: pointer; user-select: all; overflow-wrap: anywhere; background: var(--surface-2); padding: 2px 6px; border-radius: 6px; }
 .chip.bad { border-color: var(--danger); color: var(--danger); }
 details.card > summary { cursor: pointer; padding: 4px 0; }
+
+.pil-grp { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.pil-grp select { font-size: 13px; padding: 4px 6px; }
+.pil-mgrp { margin-top: 6px; padding: 2px 2px 0; border-bottom: 1px solid var(--border); }

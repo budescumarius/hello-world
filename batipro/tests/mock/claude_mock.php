@@ -29,7 +29,7 @@ if (in_array('classer_emails', array_column($req['tools'] ?? [], 'name'), true))
     preg_match_all('/\n#(\d+) · reçu le [^·]+· de : [^<]*<([^>]*)> · objet : ([^\n]*)/u', $all, $mm, PREG_SET_ORDER);
     $out = [];
     foreach ($mm as $x) {
-        $pub = str_contains($x[2], 'promo');
+        $pub = str_contains($x[2], 'promo') || str_contains($x[2], 'newsletter');
         $out[] = ['id' => (int)$x[1], 'categorie' => $pub ? 'publicite' : 'client', 'urgence' => $pub ? 'basse' : 'haute', 'resume' => $pub ? 'Publicité.' : 'Le client demande le devis cuisine avant vendredi.',
             'action_requise' => !$pub, 'action' => $pub ? '' : 'Envoyer le devis cuisine Dupont avant vendredi', 'echeance' => '', 'chantier_id' => 0, 'pieces' => $pub ? '' : 'Devis PDF fictif (1.250,00 €)',
             'reponse_necessaire' => !$pub, 'brouillon' => $pub ? '' : "Bonjour,\nMerci pour votre message. Nous vous envoyons le devis avant vendredi (acompte de 1.250,00 €, total estimé 9.999,00 €).\nCordialement"];

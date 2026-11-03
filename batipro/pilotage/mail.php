@@ -9,7 +9,8 @@
 //  - site de test (config.php : test_mode) : rien ne part (envoi simulé).
 declare(strict_types=1);
 
-const PIL_MAIL_SCOPES = 'offline_access openid profile email User.Read Mail.Read Mail.Send';
+const PIL_MAIL_SCOPES = 'offline_access openid profile email User.Read Mail.ReadWrite Mail.Send'; // ReadWrite : ranger (déplacer) les publicités
+const PIL_MAIL_PUB = 'Publicité'; // dossier où sont rangées automatiquement les publicités et newsletters
 const PIL_MAIL_CATS = ['client' => 'Client', 'fournisseur' => 'Fournisseur / sous-traitant', 'architecte' => 'Architecte / bureau d\'études', 'administration' => 'Administration / social / fiscal',
     'banque' => 'Banque / assurance / leasing', 'interne' => 'Interne (équipe)', 'publicite' => 'Publicité / newsletter', 'autre' => 'Autre'];
 const PIL_MAIL_KEEP_DAYS = 60;
@@ -38,6 +39,8 @@ function pil_mail_schema(): void {
 function pil_mail_migrate(): void {
     if (!q("SHOW COLUMNS FROM pil_mail_accounts LIKE 'kind'")->fetch()) db()->exec("ALTER TABLE pil_mail_accounts ADD kind VARCHAR(8) NOT NULL DEFAULT 'graph' AFTER user_id");
     if (!q("SHOW COLUMNS FROM pil_mail_msgs LIKE 'msg_ref'")->fetch()) db()->exec('ALTER TABLE pil_mail_msgs ADD msg_ref TEXT NULL AFTER conv_id');
+    if (!q("SHOW COLUMNS FROM pil_mail_msgs LIKE 'moved'")->fetch()) db()->exec('ALTER TABLE pil_mail_msgs ADD moved VARCHAR(120) NULL, ADD keep_in TINYINT NOT NULL DEFAULT 0');
+    if (!q("SHOW COLUMNS FROM pil_mail_accounts LIKE 'opts'")->fetch()) db()->exec('ALTER TABLE pil_mail_accounts ADD opts TEXT NULL');
 }
 
 // --------------------------------------------------------------------- Chiffrement des jetons (clé hors base de données)
@@ -142,7 +145,7 @@ function pil_mail_callback(array $me): void {
     } catch (Throwable $e) { $back('err=' . rawurlencode($e->getMessage())); }
 }
 function pil_mail_accounts(array $me): array {
-    return array_map(fn($a) => ['id' => (int)$a['id'], 'kind' => $a['kind'] ?? 'graph', 'email' => $a['email'], 'name' => $a['name'], 'status' => $a['status'], 'last_sync' => $a['last_sync'], 'last_error' => $a['last_error']],
+    return array_map(fn($a) => ['id' => (int)$a['id'], 'kind' => $a['kind'] ?? 'graph', 'autoPub' => pil_mail_opts($a)['autoPub'], 'email' => $a['email'], 'name' => $a['name'], 'status' => $a['status'], 'last_sync' => $a['last_sync'], 'last_error' => $a['last_error']],
         q('SELECT * FROM pil_mail_accounts WHERE company_id = ? AND user_id = ? ORDER BY id', [cid(), $me['id']])->fetchAll());
 }
 function pil_mail_account(array $me, int $id): array {
@@ -166,12 +169,20 @@ function pil_mail_mask(string $t): string {
     $t = preg_replace_callback('/\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}(?:[ ]?[A-Z0-9]{1,3})?\b/', fn($m) => substr(preg_replace('/\s/', '', $m[0]), 0, 4) . ' **** **** ' . substr(preg_replace('/\s/', '', $m[0]), -2), $t);
     return preg_replace('/\b(?:\d[ -]?){13,19}\b/', '[numéro masqué]', $t);
 }
+/** E-mail déjà connu (même Message-ID) revenu dans la boîte de réception : nouvelle adresse, et on ne le range plus. */
+function pil_mail_back_in(array $acc, string $mid, string $graphId): bool {
+    if ($mid === '') return false;
+    $id = q("SELECT id FROM pil_mail_msgs WHERE account_id = ? AND folder = 'in' AND msg_ref LIKE ? LIMIT 1", [$acc['id'], '%"mid":' . addcslashes(json_encode($mid, JSON_UNESCAPED_SLASHES), '%_\\') . '%'])->fetchColumn();
+    if (!$id) return false;
+    q('UPDATE pil_mail_msgs SET keep_in = IF(moved IS NULL, keep_in, 1), moved = NULL, graph_id = ? WHERE id = ? AND graph_id <> ?', [$graphId, $id, $graphId]); // MySQL : affectations dans l'ordre (keep_in lit l'ancien « moved »)
+    return true;
+}
 function pil_mail_sync(array $acc, bool $deep = false): array {
     if (($acc['kind'] ?? 'graph') === 'imap') { require_once __DIR__ . '/imap.php'; return pil_imap_sync($acc, $deep); }
     $since = $acc['last_sync'] && !$deep ? date('Y-m-d\TH:i:s\Z', strtotime($acc['last_sync']) - 3600) : gmdate('Y-m-d\TH:i:s\Z', time() - 14 * 86400);
     $new = 0;
     foreach (['inbox' => 'receivedDateTime', 'sentitems' => 'sentDateTime'] as $folder => $dt) {
-        $sel = $folder === 'inbox' ? 'id,conversationId,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,hasAttachments,isRead,webLink' : 'id,conversationId,subject,toRecipients,sentDateTime';
+        $sel = $folder === 'inbox' ? 'id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,hasAttachments,isRead,webLink' : 'id,conversationId,subject,toRecipients,sentDateTime';
         $url = "/me/mailFolders/$folder/messages?" . http_build_query(['$top' => 50, '$orderby' => "$dt desc", '$filter' => "$dt ge $since", '$select' => $sel]);
         for ($page = 0; $page < 6 && $url; $page++) {
             $j = pil_graph($acc, 'GET', $url);
@@ -180,8 +191,10 @@ function pil_mail_sync(array $acc, bool $deep = false): array {
                 $isIn = $folder === 'inbox';
                 $from = $isIn ? ($m['from']['emailAddress'] ?? []) : ['address' => $acc['email'], 'name' => $acc['name']];
                 $to = array_map(fn($r) => ['email' => mb_strtolower((string)($r['emailAddress']['address'] ?? '')), 'name' => (string)($r['emailAddress']['name'] ?? '')], array_merge($m['toRecipients'] ?? [], $m['ccRecipients'] ?? []));
-                $r = q('INSERT IGNORE INTO pil_mail_msgs (company_id, account_id, graph_id, conv_id, folder, from_email, from_name, to_json, subject, at, preview, body, atts, web_link, is_read, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                    [cid(), $acc['id'], (string)$m['id'], (string)($m['conversationId'] ?? ''), $isIn ? 'in' : 'sent', mb_strtolower((string)($from['address'] ?? '')), mb_substr((string)($from['name'] ?? ''), 0, 190),
+                $mid = (string)($m['internetMessageId'] ?? '');
+                if ($isIn && !q('SELECT id FROM pil_mail_msgs WHERE account_id = ? AND graph_id = ?', [$acc['id'], (string)$m['id']])->fetch() && pil_mail_back_in($acc, $mid, (string)$m['id'])) continue;
+                $r = q('INSERT IGNORE INTO pil_mail_msgs (company_id, account_id, graph_id, conv_id, msg_ref, folder, from_email, from_name, to_json, subject, at, preview, body, atts, web_link, is_read, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    [cid(), $acc['id'], (string)$m['id'], (string)($m['conversationId'] ?? ''), json_encode(['mid' => $mid], JSON_UNESCAPED_SLASHES), $isIn ? 'in' : 'sent', mb_strtolower((string)($from['address'] ?? '')), mb_substr((string)($from['name'] ?? ''), 0, 190),
                      json_encode($to, JSON_UNESCAPED_UNICODE), mb_substr((string)($m['subject'] ?? ''), 0, 500), $at, $isIn ? mb_substr((string)($m['bodyPreview'] ?? ''), 0, 400) : null,
                      $isIn ? pil_mail_clean((string)($m['body']['content'] ?? '')) : null, !empty($m['hasAttachments']) ? '[]' : null, $isIn ? mb_substr((string)($m['webLink'] ?? ''), 0, 1000) : null, !empty($m['isRead']) ? 1 : 0, now()]);
                 if ($r->rowCount()) $new++;
@@ -284,7 +297,7 @@ function pil_mail_analyze(array $acc, array $me, int $max = 10): array {
 function pil_mail_msg_out(array $r): array {
     return ['id' => (int)$r['id'], 'account_id' => (int)$r['account_id'], 'from_email' => $r['from_email'], 'from_name' => $r['from_name'], 'subject' => $r['subject'], 'at' => $r['at'],
         'preview' => $r['preview'], 'atts' => $r['atts'] ? (json_decode($r['atts'], true) ?: []) : [], 'web_link' => $r['web_link'], 'is_read' => (bool)$r['is_read'],
-        'analysis' => $r['analysis'] ? json_decode($r['analysis'], true) : null, 'state' => $r['state'], 'project_id' => $r['project_id'] !== null ? (int)$r['project_id'] : null];
+        'analysis' => $r['analysis'] ? json_decode($r['analysis'], true) : null, 'state' => $r['state'], 'project_id' => $r['project_id'] !== null ? (int)$r['project_id'] : null, 'moved' => $r['moved'] ?? null];
 }
 function pil_mail_draft_out(array $d): array {
     return ['id' => (int)$d['id'], 'account_id' => (int)$d['account_id'], 'msg_id' => $d['msg_id'] !== null ? (int)$d['msg_id'] : null, 'to' => json_decode($d['to_json'], true) ?: [], 'cc' => json_decode((string)$d['cc_json'], true) ?: [],
@@ -339,6 +352,44 @@ function pil_mail_rcpts($l): array {
     return array_values($out);
 }
 
+// --------------------------------------------------------------------- Rangement automatique : publicités et newsletters → dossier « Publicité »
+// Jamais : un expéditeur présent dans les contacts BatiPro, un e-mail avec une action ou une réponse attendue, un e-mail remis à la main dans la boîte de réception.
+function pil_mail_opts(array $acc): array { return (json_decode((string)($acc['opts'] ?? ''), true) ?: []) + ['autoPub' => true]; }
+function pil_mail_tidy(array $acc): int {
+    if (!pil_mail_opts($acc)['autoPub']) return 0;
+    $known = [];
+    foreach (pil_items(['contact'])['contact'] ?? [] as $c) foreach (['email', 'email2', 'invoiceEmail'] as $k) if (!empty($c['data'][$k])) $known[mb_strtolower(trim((string)$c['data'][$k]))] = true;
+    $rows = q("SELECT * FROM pil_mail_msgs WHERE account_id = ? AND folder = 'in' AND moved IS NULL AND keep_in = 0 AND state = 'info' AND analysis IS NOT NULL ORDER BY at DESC LIMIT 60", [$acc['id']])->fetchAll();
+    $todo = array_values(array_filter($rows, function ($r) use ($known) { $a = json_decode((string)$r['analysis'], true) ?: [];
+        return ($a['categorie'] ?? '') === 'publicite' && empty($a['action_requise']) && empty($a['reponse_necessaire']) && !isset($known[(string)$r['from_email']]); }));
+    if (!$todo) return 0;
+    $n = 0;
+    if (($acc['kind'] ?? 'graph') === 'imap') { require_once __DIR__ . '/imap.php'; $n = pil_imap_tidy($acc, $todo); }
+    else {
+        $dest = pil_graph_folder($acc, PIL_MAIL_PUB);
+        foreach ($todo as $r) {
+            try { $j = pil_graph($acc, 'POST', '/me/messages/' . rawurlencode($r['graph_id']) . '/move', ['destinationId' => $dest]); q('UPDATE pil_mail_msgs SET graph_id = ?, moved = ? WHERE id = ?', [(string)($j['id'] ?? $r['graph_id']), PIL_MAIL_PUB, $r['id']]); $n++; }
+            catch (Throwable $e) { error_log('[pilotage mail] rangement : ' . $e->getMessage()); break; }
+        }
+    }
+    if ($n) pil_audit('emails_ranges', 'mail_account', (int)$acc['id'], null, ['dossier' => PIL_MAIL_PUB, 'nombre' => $n], 'systeme');
+    return $n;
+}
+/** Dossier Outlook (Microsoft 365) : trouvé ou créé. */
+function pil_graph_folder(array $acc, string $name): string {
+    $j = pil_graph($acc, 'GET', '/me/mailFolders?' . http_build_query(['$filter' => "displayName eq '" . str_replace("'", "''", $name) . "'", '$select' => 'id,displayName']));
+    if (!empty($j['value'][0]['id'])) return (string)$j['value'][0]['id'];
+    $c = pil_graph($acc, 'POST', '/me/mailFolders', ['displayName' => $name]);
+    return (string)$c['id'];
+}
+/** Remettre un e-mail rangé dans la boîte de réception (il n'est plus rangé ensuite). */
+function pil_mail_unmove(array $acc, array $row): void {
+    if (!$row['moved']) return;
+    if (($acc['kind'] ?? 'graph') === 'imap') { require_once __DIR__ . '/imap.php'; $gid = pil_imap_unmove($acc, $row); }
+    else { $j = pil_graph($acc, 'POST', '/me/messages/' . rawurlencode($row['graph_id']) . '/move', ['destinationId' => 'inbox']); $gid = (string)($j['id'] ?? $row['graph_id']); }
+    q('UPDATE pil_mail_msgs SET graph_id = ?, moved = NULL, keep_in = 1 WHERE id = ?', [$gid, $row['id']]);
+}
+
 // --------------------------------------------------------------------- Tâche planifiée : relève et analyse (aucun envoi)
 function pil_mail_cron(): void {
     pil_mail_schema();
@@ -346,7 +397,7 @@ function pil_mail_cron(): void {
         try {
             pil_mail_sync($acc);
             $u = q('SELECT * FROM users WHERE id = ? AND company_id = ? AND active = 1', [(int)$acc['user_id'], cid()])->fetch();
-            if ($u) pil_mail_analyze(q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$acc['id']])->fetch(), $u, 15);
+            if ($u) { pil_mail_analyze(q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$acc['id']])->fetch(), $u, 15); pil_mail_tidy(q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$acc['id']])->fetch()); }
         } catch (Throwable $e) { q('UPDATE pil_mail_accounts SET last_error = ? WHERE id = ?', [mb_substr($e->getMessage(), 0, 500), $acc['id']]); error_log('[pilotage mail cron] ' . $acc['email'] . ' : ' . $e->getMessage()); }
     }
 }
@@ -374,6 +425,12 @@ function pil_mail_route(string $method, array $seg, array $me): void {
     if ($a === 'connect' && $method === 'POST') out(['url' => pil_mail_connect_url($me)]);
     if ($a === 'imap' && $method === 'POST') { require_once __DIR__ . '/imap.php'; out(pil_imap_connect($me, body())); }
     if ($a === 'accounts' && $method === 'GET') out(pil_mail_accounts($me));
+    if ($a === 'accounts' && $method === 'PUT' && $id) {
+        $acc = pil_mail_account($me, $id); $b = body();
+        $o = pil_mail_opts($acc); if (array_key_exists('autoPub', $b)) $o['autoPub'] = !empty($b['autoPub']);
+        q('UPDATE pil_mail_accounts SET opts = ? WHERE id = ?', [json_encode($o), $id]);
+        out(pil_mail_accounts($me));
+    }
     if ($a === 'accounts' && $method === 'DELETE' && $id) {
         $acc = pil_mail_account($me, $id);
         q('DELETE FROM pil_mail_drafts WHERE account_id = ?', [$id]); q('DELETE FROM pil_mail_msgs WHERE account_id = ?', [$id]); q('DELETE FROM pil_mail_accounts WHERE id = ?', [$id]);
@@ -384,7 +441,9 @@ function pil_mail_route(string $method, array $seg, array $me): void {
         @set_time_limit(300);
         $res = []; $errs = [];
         foreach (q('SELECT * FROM pil_mail_accounts WHERE company_id = ? AND user_id = ?', [cid(), $me['id']])->fetchAll() as $acc) {
-            try { $s = pil_mail_sync($acc, !empty(body()['deep'])); $an = pil_mail_analyze(q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$acc['id']])->fetch(), $me, 15); $res[] = ['email' => $acc['email']] + $s + $an; }
+            try { $s = pil_mail_sync($acc, !empty(body()['deep'])); $an = pil_mail_analyze(q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$acc['id']])->fetch(), $me, 15);
+                $t = 0; try { $t = pil_mail_tidy(q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$acc['id']])->fetch()); } catch (Throwable $e) { $errs[] = $acc['email'] . ' : rangement – ' . $e->getMessage(); }
+                $res[] = ['email' => $acc['email']] + $s + $an + ['ranges' => $t]; }
             catch (Throwable $e) { $errs[] = $acc['email'] . ' : ' . $e->getMessage(); q('UPDATE pil_mail_accounts SET last_error = ? WHERE id = ?', [mb_substr($e->getMessage(), 0, 500), $acc['id']]); }
         }
         out(['results' => $res, 'errors' => $errs, 'brief' => pil_mail_brief($me, date('Y-m-d'))]);
@@ -401,6 +460,7 @@ function pil_mail_route(string $method, array $seg, array $me): void {
             q('UPDATE pil_mail_msgs SET state = ?, done_by = ?, done_at = ?, project_id = ? WHERE id = ?', [$st, $me['id'], now(), array_key_exists('project_id', $b) ? ($b['project_id'] ? (int)$b['project_id'] : null) : $m['project_id'], $id]);
             out(pil_mail_msg_out(q('SELECT * FROM pil_mail_msgs WHERE id = ?', [$id])->fetch()));
         }
+        if ($method === 'POST' && ($seg[4] ?? '') === 'unmove') { pil_mail_unmove(pil_mail_account($me, (int)$m['account_id']), $m); out(pil_mail_msg_out(q('SELECT * FROM pil_mail_msgs WHERE id = ?', [$id])->fetch())); }
         if ($method === 'POST' && ($seg[4] ?? '') === 'draft') { // brouillon écrit à la main pour cet e-mail
             $d = q('SELECT id FROM pil_mail_drafts WHERE msg_id = ? AND status = ?', [$id, 'brouillon'])->fetch();
             if ($d) out(pil_mail_draft_out(q('SELECT * FROM pil_mail_drafts WHERE id = ?', [$d['id']])->fetch()));

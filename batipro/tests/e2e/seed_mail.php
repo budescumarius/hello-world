@@ -14,4 +14,5 @@ $m1 = (int)$pdo->lastInsertId();
 $ins->execute([$acc, 'G2', 'C2', 'promo@pub-fictif.be', 'Promo Fictive', 'Soldes outillage', 30, 'Promotions', 'Promotions', null, json_encode(['categorie' => 'publicite', 'urgence' => 'basse', 'resume' => 'Publicité.', 'action_requise' => false, 'action' => '', 'echeance' => '', 'pieces' => '', 'reponse_necessaire' => false, 'non_verifie' => []]), 'info']);
 $pdo->prepare("INSERT INTO pil_mail_drafts (company_id, account_id, msg_id, to_json, subject, body, origin, status, check_json, created_at, updated_at) VALUES (1, ?, ?, ?, 'RE: Demande de devis cuisine Dupont', ?, 'ia', 'brouillon', ?, NOW(), NOW())")
   ->execute([$acc, $m1, json_encode([['email' => 'client@exemple-fictif.be', 'name' => 'Client Fictif']]), "Bonjour,\nNous vous envoyons le devis avant vendredi.\nCordialement", json_encode(['non_verifie' => ['9.999,00 €']])]);
+$pdo->exec("UPDATE pil_mail_msgs SET moved = 'Publicité' WHERE from_email = 'promo@pub-fictif.be'");
 echo "ok\n";

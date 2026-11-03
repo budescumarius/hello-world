@@ -9,9 +9,11 @@ $pdf = chunk_split(base64_encode("%PDF-1.4\n% devis fictif 1.250,00\n%%EOF"));
 $INBOX = [
  11 => "From: =?iso-8859-1?Q?Fran=E7ois_Client?= <client@exemple-fictif.be>\r\nTo: direction@madibu-fictif.be\r\nSubject: =?UTF-8?B?RGVtYW5kZSBkZSBkZXZpcyBjdWlzaW5lIER1cG9udA==?=\r\nDate: {$d(5)}\r\nMessage-ID: <q1@exemple-fictif.be>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"B1\"\r\n\r\n--B1\r\nContent-Type: text/plain; charset=iso-8859-1\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\nBonjour,\r\nPouvez-vous nous envoyer le devis pour la cuisine avant vendredi ? Acompte pr=E9vu de 1.250,00 =80.\r\nVirement depuis BE68 5390 0754 7034.\r\n\r\nLe lun. 2 nov. 2026, MADIBU a =E9crit :\r\n> Ancien message cit=E9\r\n--B1\r\nContent-Type: application/pdf; name=\"devis-fictif.pdf\"\r\nContent-Disposition: attachment; filename=\"devis-fictif.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\n$pdf--B1--\r\n",
  12 => "From: Promo Fictive <promo@pub-fictif.be>\r\nTo: direction@madibu-fictif.be\r\nSubject: Soldes -30 % sur l'outillage\r\nDate: {$d(30)}\r\nMessage-ID: <p1@pub-fictif.be>\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body><p>Profitez de nos promotions.</p></body></html>\r\n",
+ 14 => "From: Fournisseur Fictif <newsletter@fournisseur-fictif.be>\r\nTo: direction@madibu-fictif.be\r\nSubject: Nouveautés du mois\r\nDate: {$d(20)}\r\nMessage-ID: <n1@fournisseur-fictif.be>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nNos nouveautés.\r\n",
  13 => "From: Architecte Fictif <archi@bureau-fictif.be>\r\nTo: direction@madibu-fictif.be\r\nSubject: Plans modifiés\r\nDate: {$d(72)}\r\nMessage-ID: <a1@bureau-fictif.be>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nVoici les plans modifiés.\r\n",
 ];
 $SENT = [21 => "From: direction@madibu-fictif.be\r\nTo: archi@bureau-fictif.be\r\nSubject: RE: Plans modifiés\r\nDate: {$d(48)}\r\nMessage-ID: <r1@madibu-fictif.be>\r\nIn-Reply-To: <a1@bureau-fictif.be>\r\nReferences: <a1@bureau-fictif.be>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nMerci.\r\n"];
+$PUB = []; $PUBNAME = 'INBOX.Publicit&AOk-'; $created = false; $next = 100;
 $imap = stream_socket_server('tcp://127.0.0.1:9143'); $smtp = stream_socket_server('tcp://127.0.0.1:9025');
 while (true) {
     $r = [$imap, $smtp]; $w = $e = null;
@@ -42,11 +44,21 @@ while (true) {
             $l = rtrim($l, "\r\n"); [$tag, $rest] = array_pad(explode(' ', $l, 2), 2, ''); $U = strtoupper($rest);
             if (str_starts_with($U, 'LOGIN ')) { preg_match_all('/"((?:[^"\\\\]|\\\\.)*)"/', $rest, $m); $ok = stripcslashes($m[1][0] ?? '') === $USER && stripcslashes($m[1][1] ?? '') === $PASS; $authed = $ok; $log('imap_mock.log', ['login' => $ok]); $put($ok ? "$tag OK" : "$tag NO [AUTHENTICATIONFAILED] refusé"); continue; }
             if (!$authed && !str_starts_with($U, 'LOGOUT')) { $put("$tag NO login"); continue; }
-            if (str_starts_with($U, 'LIST')) { $put('* LIST (\\HasNoChildren) "." "INBOX"'); $put('* LIST (\\HasNoChildren \\Sent) "." "INBOX.Sent"'); $put("$tag OK"); }
-            elseif (str_starts_with($U, 'EXAMINE') || str_starts_with($U, 'SELECT')) { $sel = str_contains($rest, 'Sent') ? 'sent' : 'in'; $put('* OK [UIDVALIDITY 777] ok'); $put("$tag OK"); }
-            elseif (str_starts_with($U, 'UID SEARCH')) { $put('* SEARCH ' . implode(' ', array_keys($sel === 'sent' ? $SENT : $INBOX))); $put("$tag OK"); }
+            if (str_starts_with($U, 'CAPABILITY')) { $put('* CAPABILITY IMAP4rev1 MOVE UIDPLUS'); $put("$tag OK"); }
+            elseif (str_starts_with($U, 'LIST')) { $put('* LIST (\\HasNoChildren) "." "INBOX"'); $put('* LIST (\\HasNoChildren \\Sent) "." "INBOX.Sent"'); if ($created) $put('* LIST (\\HasNoChildren) "." "' . $PUBNAME . '"'); $put("$tag OK"); }
+            elseif (str_starts_with($U, 'CREATE')) { $created = str_contains($rest, $PUBNAME); $log('imap_mock.log', ['create' => trim(substr($rest, 7), '"')]); $put($created ? "$tag OK" : "$tag NO nom"); }
+            elseif (str_starts_with($U, 'SUBSCRIBE')) $put("$tag OK");
+            elseif (str_starts_with($U, 'EXAMINE') || str_starts_with($U, 'SELECT')) { $sel = str_contains($rest, 'Sent') ? 'sent' : (str_contains($rest, 'Publicit') ? 'pub' : 'in'); $put('* OK [UIDVALIDITY ' . ($sel === 'pub' ? 778 : 777) . '] ok'); $put("$tag OK"); }
+            elseif (str_starts_with($U, 'UID SEARCH')) { $put('* SEARCH ' . implode(' ', array_keys($sel === 'sent' ? $SENT : ($sel === 'pub' ? $PUB : $INBOX)))); $put("$tag OK"); }
+            elseif (str_starts_with($U, 'UID MOVE')) {
+                preg_match('/UID MOVE (\d+) "(.*)"$/i', $rest, $m); $uid = (int)$m[1]; $to = $m[2]; $nu = ++$next;
+                if ($sel === 'in' && $to === $PUBNAME && isset($INBOX[$uid])) { $PUB[$nu] = $INBOX[$uid]; unset($INBOX[$uid]); $put("* OK [COPYUID 778 $uid $nu] moved"); $log('imap_mock.log', ['move' => "INBOX:$uid->pub:$nu"]); }
+                elseif ($sel === 'pub' && $to === 'INBOX' && isset($PUB[$uid])) { $INBOX[$nu] = $PUB[$uid]; unset($PUB[$uid]); $put("* OK [COPYUID 777 $uid $nu] moved"); $log('imap_mock.log', ['move' => "pub:$uid->INBOX:$nu"]); }
+                else { $put("$tag NO introuvable"); continue; }
+                $put("$tag OK");
+            }
             elseif (str_starts_with($U, 'UID FETCH')) {
-                preg_match('/UID FETCH ([\d,]+) \((.*)\)$/i', $rest, $m); $box = $sel === 'sent' ? $SENT : $INBOX;
+                preg_match('/UID FETCH ([\d,]+) \((.*)\)$/i', $rest, $m); $box = $sel === 'sent' ? $SENT : ($sel === 'pub' ? $PUB : $INBOX);
                 foreach (explode(',', $m[1]) as $i => $uid) { $msg = $box[(int)$uid] ?? null; if (!$msg) continue;
                     if (stripos($m[2], 'BODY.PEEK[]') !== false) { fwrite($c, "* " . ($i + 1) . " FETCH (UID $uid BODY[] {" . strlen($msg) . "}\r\n" . $msg . ")\r\n"); }
                     elseif (stripos($m[2], 'BODY.PEEK[HEADER]') !== false) { $h = substr($msg, 0, strpos($msg, "\r\n\r\n") + 4); fwrite($c, "* " . ($i + 1) . " FETCH (UID $uid BODY[HEADER] {" . strlen($h) . "}\r\n" . $h . ")\r\n"); }
