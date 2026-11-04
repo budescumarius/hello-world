@@ -417,7 +417,7 @@ route('purchase', async (id) => {
       $('[data-rm]', row).onclick = () => { alloc.splice(i, 1); drawAlloc(); };
       $('[data-rest]', row).onclick = () => { alloc[i].amount = r2(ht() - alloc.reduce((s, a, j) => s + (j === i ? 0 : num(a.amount)), 0)); drawAlloc(); };
     });
-    $('[data-add]', box).onclick = () => { alloc.push({ pid: '', amount: r2(Math.max(0, ht() - linked())), category: F('category').value }); drawAlloc(); };
+    $('[data-add]', box).onclick = () => { alloc.push({ pid: '', amount: r2(ht() >= 0 ? Math.max(0, ht() - linked()) : Math.min(0, ht() - linked())), category: F('category').value }); drawAlloc(); };
     drawAllocSummary();
   };
 
@@ -563,7 +563,8 @@ route('purchase', async (id) => {
     }
     const rows = alloc.filter((a) => num(a.amount) !== 0);
     if (rows.some((a) => !a.pid)) return toast('Choisissez le chantier de chaque liaison', 4000);
-    if (linked() - ht() > 0.01) return toast(`Les liaisons (${money(linked())}) dépassent le montant HT (${money(ht())})`, 5000);
+    // note de crédit (montant négatif) : aucune liaison obligatoire ; si liée, même signe et pas plus que le montant
+    if (Math.abs(linked()) - Math.abs(ht()) > 0.01 || (Math.abs(linked()) > 0.005 && Math.sign(linked()) !== Math.sign(ht()))) return toast(`Les liaisons (${money(linked())}) dépassent le montant HT (${money(ht())})`, 5000);
     await resolveContact(v, 'supplierId', 'fournisseur');
     const lines = vat.filter((x) => num(x.amount) !== 0 || vat.length === 1).map((x) => ({ rate: num(x.rate), amount: r2(num(x.amount)) }));
     const main = [...lines].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))[0] || { rate: defVat() };
