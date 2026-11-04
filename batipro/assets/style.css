@@ -2238,3 +2238,12 @@ details.card > summary { cursor: pointer; padding: 4px 0; }
 .pm-conns { display: grid; gap: 10px; }
 .pm-conn { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
 .pm-conn .grow { min-width: 220px; overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------- « Où est passé l'argent ? » */
+.pt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+.pt-bar { position: relative; display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; overflow: hidden; }
+.pt-bar > * { position: relative; z-index: 1; }
+.pt-bar i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--w); background: rgba(59, 91, 219, .12); border-radius: 8px; z-index: 0; }
+.pt-bar .grow { min-width: 0; overflow-wrap: anywhere; }
+.pt-acts { margin: 10px 0; }
+.pt-mail { display: block; border: 0; background: none; color: var(--primary); cursor: pointer; text-align: left; padding: 2px 0; font-size: 12.5px; }

@@ -79,7 +79,7 @@ const sql = (s) => execFileSync('php', ['-r', `$p=new PDO("mysql:host=127.0.0.1;
   await m.goto(BASE + '/'); await m.fill('input[name=email]', 'admin@test.madibu.local'); await m.fill('input[name=password]', 'Admin-Test-2026'); await m.click('button[type=submit]');
   await m.waitForFunction('typeof S !== "undefined" && S.ready', null, { timeout: 45000 });
   await m.goto(`${BASE}/#/pilotage/emails`); await m.waitForSelector('.pm', { timeout: 30000 });
-  await m.evaluate(() => { ui.pm = { box: 'all', folder: 'in' }; saveUi(); render(); }); await m.waitForSelector('.pm-row', { timeout: 30000 });
+  await m.evaluate(() => { ui.pm = { box: 'all', folder: 'in' }; saveUi(); render(); }); await m.waitForSelector('.pm-row', { timeout: 30000 }); await m.waitForTimeout(1200); // page redessinée : laisser finir
   check('téléphone : liste avec choix du dossier, sans défilement horizontal', await m.isVisible('.pm-sel') && (await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 2);
   await m.click('.pm-row'); await m.waitForSelector('.pm-read .pm-body');
   check('téléphone : e-mail en plein écran avec « ← Retour »', await m.isVisible('.pm-back') && !(await m.isVisible('.pm-rows')));

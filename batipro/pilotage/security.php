@@ -114,6 +114,7 @@ function pil_route_perm(string $sub, string $method, array $seg): ?string {
         'approvals' => $method === 'GET' || ($method === 'POST' && ($seg[2] ?? '') === '') ? 'approvals.request' : null, // décider / exécuter : contrôlé dans la route
         'roles' => $w ? 'approvals.request' : 'audit.read',
         'mail' => 'mail.use',
+        'trail' => 'treasury.read', // « Où est passé l'argent ? » (lecture seule)
         'me' => null,
         default => 'settings.write',
     };

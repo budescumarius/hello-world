@@ -646,6 +646,13 @@ function pil_route(string $method, array $seg): void {
     switch ($sub) {
         case 'me': case 'approvals': case 'audit': case 'roles': case 'export': case 'settings':
             pil_security_route($method, $seg, $me);
+        case 'trail':
+            require_once __DIR__ . '/director.php'; require_once __DIR__ . '/trail.php'; require_once __DIR__ . '/mail.php'; pil_mail_schema();
+            try {
+                if ($method === 'GET') out(pil_trail($me, $_GET));
+                if ($method === 'POST' && ($seg[2] ?? '') === 'ai') { pil_need($me, 'ai.ask'); @set_time_limit(120); out(pil_trail_ai(pil_trail($me, body()))); }
+            } catch (PilError $e) { fail($e->getCode() ?: 400, $e->getMessage()); }
+            break;
         case 'mail':
             require_once __DIR__ . '/director.php'; require_once __DIR__ . '/mail.php';
             try { pil_mail_route($method, $seg, $me); } catch (PilError $e) { fail($e->getCode() ?: 400, $e->getMessage()); }
