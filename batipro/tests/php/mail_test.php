@@ -95,6 +95,15 @@ T::test('envoi après relecture : le texte corrigé part en réponse au bon e-ma
     T::ok((bool)db()->query("SELECT id FROM pil_audit WHERE action = 'email_envoye'")->fetch(), 'journal d\'audit');
     [$c] = $admin->req('POST', "pilot/mail/drafts/{$S['draft']}/send", ['confirm' => true]); T::eq(409, $c, 'pas deux fois');
 });
+T::test('relève suivante : demande à Microsoft les e-mails depuis la dernière relève en heure UTC (rien de sauté, quel que soit le fuseau du serveur)', function () use ($admin, $glog) {
+    db()->exec("UPDATE pil_mail_accounts SET last_sync = '" . date('Y-m-d H:i:s', time() - 600) . "'"); // heure du serveur (Belgique)
+    $admin->req('POST', 'pilot/mail/sync');
+    $urls = array_values(array_filter(array_column($glog(), 'p'), fn($p) => str_contains($p, 'inbox/messages')));
+    $l = array_values(array_filter($glog(), fn($x) => str_contains($x['p'], '/inbox/messages'))); $last = end($l);
+    $all = (string)shell_exec('docker exec bp-test-web cat /tmp/graph_mock.log');
+    preg_match_all('/receivedDateTime(?:\+|%20)ge(?:\+|%20)([0-9T:%A-Z-]+?Z)/', $all, $m); $ge = urldecode((string)end($m[1]));
+    T::ok($ge !== '' && strtotime($ge) <= time() - 600 && strtotime($ge) >= time() - 600 - 7 * 3600, "depuis $ge (dernière relève il y a 10 min)");
+});
 T::test('jeton expiré : renouvelé automatiquement', function () use ($admin, $glog) {
     db()->exec('UPDATE pil_mail_accounts SET expires_at = 0, last_sync = NULL');
     [$c, $r] = $admin->req('POST', 'pilot/mail/sync'); T::eq(200, $c); T::eq([], $r['errors'], json_encode($r['errors']));

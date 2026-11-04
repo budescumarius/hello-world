@@ -5,7 +5,7 @@
 $u = parse_url($_SERVER['REQUEST_URI']); $path = $u['path']; parse_str($u['query'] ?? '', $qs);
 $raw = (string)file_get_contents('php://input');
 $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-file_put_contents(sys_get_temp_dir() . '/graph_mock.log', json_encode(['m' => $_SERVER['REQUEST_METHOD'], 'p' => $path, 'auth' => $auth !== '', 'body' => $raw]) . "\n", FILE_APPEND);
+file_put_contents(sys_get_temp_dir() . '/graph_mock.log', json_encode(['m' => $_SERVER['REQUEST_METHOD'], 'p' => $path, 'q' => $u['query'] ?? '', 'auth' => $auth !== '', 'body' => $raw]) . "\n", FILE_APPEND);
 $json = function ($v, int $code = 200) { http_response_code($code); header('Content-Type: application/json'); echo json_encode($v); exit; };
 if (str_ends_with($path, '/oauth2/v2.0/token')) {
     parse_str($raw, $f);

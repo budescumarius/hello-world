@@ -181,7 +181,12 @@ function pil_mail_back_in(array $acc, string $mid, string $graphId): bool {
 }
 function pil_mail_sync(array $acc, bool $deep = false): array {
     if (($acc['kind'] ?? 'graph') === 'imap') { require_once __DIR__ . '/imap.php'; return pil_imap_sync($acc, $deep); }
-    $since = $acc['last_sync'] && !$deep ? date('Y-m-d\TH:i:s\Z', strtotime($acc['last_sync']) - 3600) : gmdate('Y-m-d\TH:i:s\Z', time() - 14 * 86400);
+    // l'heure envoyée à Microsoft doit être en UTC (gmdate) : avec date(), un hébergeur réglé sur un autre fuseau (ex. Bucarest)
+    // demandait les e-mails « depuis » une heure trop tardive, et ceux arrivés entre-temps étaient sautés.
+    // Marge de 6 h (les doublons sont ignorés) ; une fois, après cette correction, relecture des 14 derniers jours pour rattraper ce qui a été sauté.
+    $o = pil_mail_opts($acc);
+    if (empty($o['since_utc'])) { $deep = true; $o['since_utc'] = 1; q('UPDATE pil_mail_accounts SET opts = ? WHERE id = ?', [json_encode($o), $acc['id']]); }
+    $since = $acc['last_sync'] && !$deep ? gmdate('Y-m-d\TH:i:s\Z', strtotime($acc['last_sync']) - 6 * 3600) : gmdate('Y-m-d\TH:i:s\Z', time() - 14 * 86400);
     $new = 0;
     foreach (['inbox' => 'receivedDateTime', 'sentitems' => 'sentDateTime'] as $folder => $dt) {
         $sel = $folder === 'inbox' ? 'id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,hasAttachments,isRead,webLink' : 'id,conversationId,subject,toRecipients,ccRecipients,sentDateTime,bodyPreview,body,hasAttachments,webLink';
