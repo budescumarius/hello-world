@@ -104,6 +104,12 @@ T::test('relève suivante : demande à Microsoft les e-mails depuis la dernière
     preg_match_all('/receivedDateTime(?:\+|%20)ge(?:\+|%20)([0-9T:%A-Z-]+?Z)/', $all, $m); $ge = urldecode((string)end($m[1]));
     T::ok($ge !== '' && strtotime($ge) <= time() - 600 && strtotime($ge) >= time() - 600 - 7 * 3600, "depuis $ge (dernière relève il y a 10 min)");
 });
+T::test('diagnostic : derniers e-mails de la boîte comparés à BatiPro (lecture seule)', function () use ($admin) {
+    $id = (int)db()->query('SELECT id FROM pil_mail_accounts')->fetchColumn();
+    [$c, $r] = $admin->req('GET', "pilot/mail/accounts/$id/check"); T::eq(200, $c, json_encode($r, JSON_UNESCAPED_UNICODE));
+    T::eq(null, $r['error']); T::ok(count($r['server']) >= 2 && !array_filter($r['server'], fn($x) => !$x['in_batipro']), json_encode($r['server'], JSON_UNESCAPED_UNICODE));
+    T::eq('Europe/Brussels', $r['php_tz']);
+});
 T::test('jeton expiré : renouvelé automatiquement', function () use ($admin, $glog) {
     db()->exec('UPDATE pil_mail_accounts SET expires_at = 0, last_sync = NULL');
     [$c, $r] = $admin->req('POST', 'pilot/mail/sync'); T::eq(200, $c); T::eq([], $r['errors'], json_encode($r['errors']));

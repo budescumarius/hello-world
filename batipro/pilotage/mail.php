@@ -516,7 +516,25 @@ function pil_mail_route(string $method, array $seg, array $me): void {
     }
     if ($a === 'connect' && $method === 'POST') out(['url' => pil_mail_connect_url($me)]);
     if ($a === 'imap' && $method === 'POST') { require_once __DIR__ . '/imap.php'; out(pil_imap_connect($me, body())); }
-    if ($a === 'accounts' && $method === 'GET') out(pil_mail_accounts($me));
+    if ($a === 'accounts' && $method === 'GET' && !$id) out(pil_mail_accounts($me));
+    // diagnostic : ce que le serveur de messagerie a vraiment, comparé à ce que BatiPro a relevé (lecture seule)
+    if ($a === 'accounts' && $method === 'GET' && $id && ($seg[4] ?? '') === 'check') {
+        $acc = pil_mail_account($me, $id); $out = ['email' => $acc['email'], 'kind' => $acc['kind'] ?? 'graph', 'status' => $acc['status'], 'last_sync' => $acc['last_sync'], 'last_error' => $acc['last_error'],
+            'server_time' => date('Y-m-d H:i:s T'), 'utc' => gmdate('Y-m-d H:i:s'), 'php_tz' => date_default_timezone_get(), 'version' => basename((string)(glob(dirname(__DIR__) . '/index.html') ? (preg_match('/core\.js\?v=(\d+)/', (string)file_get_contents(dirname(__DIR__) . '/index.html'), $vm) ? $vm[1] : '?') : '?')),
+            'in_batipro' => (int)q("SELECT COUNT(*) FROM pil_mail_msgs WHERE account_id = ? AND folder = 'in'", [$id])->fetchColumn(), 'newest_batipro' => q("SELECT MAX(at) FROM pil_mail_msgs WHERE account_id = ? AND folder = 'in'", [$id])->fetchColumn(),
+            'cron_last' => q("SELECT MAX(last_sync) FROM pil_mail_accounts WHERE company_id = ?", [cid()])->fetchColumn(), 'opts' => array_intersect_key(pil_mail_opts($acc), array_flip(['autoPub', 'sub_exp', 'since_utc'])), 'server' => [], 'error' => null];
+        try {
+            if (($acc['kind'] ?? 'graph') === 'graph') {
+                $j = pil_graph($acc, 'GET', '/me/mailFolders/inbox/messages?' . http_build_query(['$top' => 10, '$orderby' => 'receivedDateTime desc', '$select' => 'id,subject,from,receivedDateTime']));
+                foreach ($j['value'] ?? [] as $m) $out['server'][] = ['at' => date('Y-m-d H:i:s', strtotime((string)$m['receivedDateTime'])), 'from' => (string)($m['from']['emailAddress']['address'] ?? ''), 'subject' => mb_substr((string)($m['subject'] ?? ''), 0, 90),
+                    'in_batipro' => (bool)q('SELECT id FROM pil_mail_msgs WHERE account_id = ? AND graph_id = ?', [$id, (string)$m['id']])->fetch()];
+            } else {
+                require_once __DIR__ . '/imap.php'; $c = pil_imap_open(pil_imap_conf($acc)); $uv = $c->examine('INBOX'); $u = $c->since(date('Y-m-d', time() - 3 * 86400)); rsort($u);
+                foreach ($c->fetch(array_slice($u, 0, 10), false) as $m) { $p = pil_mime_parse((string)$m['raw']); $out['server'][] = ['at' => $p['date'] ?? $m['date'], 'from' => $p['from'][0], 'subject' => mb_substr($p['subject'], 0, 90), 'in_batipro' => (bool)q('SELECT id FROM pil_mail_msgs WHERE account_id = ? AND (graph_id = ? OR msg_ref LIKE ?)', [$id, "imap:in:$uv:{$m['uid']}", '%' . addcslashes((string)$p['mid'], '%_\\') . '%'])->fetch()]; }
+            }
+        } catch (Throwable $e) { $out['error'] = $e->getMessage(); }
+        out($out);
+    }
     if ($a === 'accounts' && $method === 'PUT' && $id) {
         $acc = pil_mail_account($me, $id); $b = body();
         $o = pil_mail_opts($acc); if (array_key_exists('autoPub', $b)) $o['autoPub'] = !empty($b['autoPub']);

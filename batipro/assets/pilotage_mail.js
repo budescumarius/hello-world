@@ -69,6 +69,7 @@ async function pilMailPage() {
   $$('[data-acc]', page).forEach((x) => { x.onclick = (e) => { e.stopPropagation(); const a = b.accounts.find((y) => y.id === +x.dataset.acc); menuSheet(a.email, [
     { label: `Dernière relève : ${a.last_sync ? fmtDT(a.last_sync) : 'jamais'}${a.last_error ? ` – ${a.last_error}` : ''}`, icon: 'clock', run: () => {} },
     a.kind === 'imap' ? { label: 'Reconnecter (nouveau mot de passe…)', icon: 'key', run: () => pilImapConnect(a.email) } : { label: 'Reconnecter (Microsoft)', icon: 'key', run: async () => { const r = await api('POST', 'pilot/mail/connect'); location.href = r.url; } },
+    { label: 'Diagnostic (comparer avec la boîte)', icon: 'search', run: () => pilMailCheck(a.id) },
     { label: 'Relire les 14 derniers jours', icon: 'download', run: () => pilMailSync(null, true) },
     { label: a.autoPub ? '✓ Ranger les publicités dans « Publicité » (activé – désactiver)' : 'Ranger les publicités dans « Publicité » (désactivé – activer)', icon: 'check', run: async () => { await api('PUT', `pilot/mail/accounts/${a.id}`, { autoPub: !a.autoPub }); toast(a.autoPub ? 'Rangement automatique désactivé' : 'Rangement automatique activé'); render(); } },
     { label: 'Déconnecter cette boîte', icon: 'trash', danger: true, run: async () => { if (!confirm(`Déconnecter ${a.email} ? Les e-mails relevés et les brouillons de cette boîte sont effacés de BatiPro (rien n'est effacé dans Outlook).`)) return; await api('DELETE', `pilot/mail/accounts/${a.id}`); toast('Boîte déconnectée'); render(); } },
@@ -234,4 +235,19 @@ function pilImapConnect(email = '') {
       md.close(); toast(`Boîte ${r.email} connectée${r.sent_folder ? '' : ' (dossier « Envoyés » introuvable : les réponses partent quand même)'} – première relève…`, 4000); pilMailSync();
     } catch (err) { btn.disabled = false; btn.textContent = 'Vérifier et connecter'; toast(err.message, 8000); }
   };
+}
+
+// diagnostic d'une boîte : derniers e-mails du serveur (Microsoft / IMAP) et présence dans BatiPro
+async function pilMailCheck(id) {
+  const md = modal(`${mhead('Diagnostic de la boîte')}<div class="m-body"><p class="muted">Lecture des 10 derniers e-mails directement sur le serveur de messagerie…</p></div>`, { wide: true });
+  let r; try { r = await api('GET', `pilot/mail/accounts/${id}/check`); } catch (e) { $('.m-body', md.el).innerHTML = `<div class="alert warn">${esc(e.message)}</div>`; return; }
+  const missing = r.server.filter((x) => !x.in_batipro).length;
+  $('.m-body', md.el).innerHTML = `<p><b>${esc(r.email)}</b> (${r.kind === 'imap' ? 'IMAP' : 'Microsoft 365'}) · version ${esc(r.version)}<br>
+    <small class="muted">Dernière relève : ${esc(r.last_sync || 'jamais')} · statut ${esc(r.status)} · heure du serveur ${esc(r.server_time)} (UTC ${esc(r.utc)}, ${esc(r.php_tz)})</small></p>
+    ${r.last_error ? `<div class="alert warn"><b>Dernière erreur :</b> ${esc(r.last_error)}</div>` : ''}
+    ${r.error ? `<div class="alert warn"><b>Lecture du serveur impossible :</b> ${esc(r.error)}</div>` : ''}
+    <p>${missing ? `<b class="late">${missing} e-mail(s) récent(s) pas encore dans BatiPro</b>` : '<b class="good">✓ Les 10 derniers e-mails sont dans BatiPro</b>'} · BatiPro : ${r.in_batipro} e-mail(s) relevé(s), le plus récent du ${esc(r.newest_batipro || '—')}</p>
+    <table class="dt"><thead><tr><th>Reçu</th><th>De</th><th>Objet</th><th>Dans BatiPro</th></tr></thead><tbody>${r.server.map((x) => `<tr><td class="nowrap">${esc(x.at || '')}</td><td>${esc(x.from)}</td><td>${esc(x.subject)}</td><td>${x.in_batipro ? '✓' : '<b class="late">non</b>'}</td></tr>`).join('')}</tbody></table>
+    <div class="btns" style="margin-top:10px"><button class="btn primary" data-now>Relever maintenant</button></div>`;
+  $('[data-now]', md.el).onclick = () => { md.close(); pilMailSync(null, false); };
 }
