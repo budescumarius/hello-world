@@ -2198,8 +2198,18 @@ details.card > summary { cursor: pointer; padding: 4px 0; }
 .pm-row { display: grid; gap: 2px; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--border); background: var(--surface); padding: 9px 12px; cursor: pointer; font-size: 13.5px; color: var(--text); min-width: 0; }
 .pm-row:hover { background: var(--surface-2); }
 .pm-row.on { background: rgba(59, 91, 219, .10); box-shadow: inset 3px 0 0 var(--primary); }
-.pm-row.unread .pm-r1 b, .pm-row.unread .pm-r2 { font-weight: 700; color: var(--primary); }
-.pm-row.unread { box-shadow: inset 3px 0 0 var(--primary); }
+/* lu : texte normal ; non lu : fond teinté, texte en gras, pastille (comme Outlook) */
+.pm-row .pm-r1 b { font-weight: 500; }
+.pm-row.unread { background: rgba(59, 91, 219, .08); box-shadow: inset 4px 0 0 var(--primary); }
+.pm-row.unread:hover { background: rgba(59, 91, 219, .13); }
+.pm-row.unread .pm-r1 b, .pm-row.unread .pm-r2 { font-weight: 800; color: var(--text); }
+.pm-row.unread .pm-r1 b::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--primary); margin-right: 6px; vertical-align: 1px; }
+.pm-row.unread.on { background: rgba(59, 91, 219, .16); }
+.pm-atts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.pm-att { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); overflow: hidden; max-width: 100%; }
+.pm-att a { padding: 6px 10px; color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-att a:hover { background: var(--surface); }
+.pm-att .pm-att-dl { border-left: 1px solid var(--border); padding: 6px 9px; color: var(--muted); }
 .pm-r1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .pm-r1 b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pm-r2, .pm-r3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

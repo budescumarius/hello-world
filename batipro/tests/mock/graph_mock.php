@@ -43,4 +43,5 @@ if ($path === "$g/me/messages/AAA1/attachments/P1") $json(['id' => 'P1', 'name' 
 if (preg_match("#^$g/me/messages/[^/]+/attachments$#", $path)) $json(['value' => []]);
 if (preg_match("#^$g/me/messages/([^/]+)/reply$#", $path) && $_SERVER['REQUEST_METHOD'] === 'POST') { http_response_code(202); exit; }
 if ($path === "$g/me/sendMail" && $_SERVER['REQUEST_METHOD'] === 'POST') { http_response_code(202); exit; }
+if (preg_match("#^$g/me/messages/([^/]+)$#", $path, $pm) && $_SERVER['REQUEST_METHOD'] === 'PATCH') $json(['id' => $pm[1]] + (json_decode($raw, true) ?: []));
 $json(['error' => ['message' => "route fictive inconnue $path"]], 404);

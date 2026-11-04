@@ -4,6 +4,9 @@
 
 const PIL_MCAT = { client: ['Client', '#3b5bdb'], fournisseur: ['Fournisseur', '#0c8599'], architecte: ['Architecte / BE', '#7048e8'], administration: ['Administration', '#e8590c'], banque: ['Banque / assurance', '#5c940d'], interne: ['Interne', '#868e96'], publicite: ['Publicité', '#adb5bd'], autre: ['Autre', '#868e96'] };
 const PIL_MURG = { haute: ['Urgent', '#e5484d'], normale: ['Normal', '#f08c00'], basse: ['Faible', '#868e96'] };
+// pièces jointes : ouvertes dans BatiPro (PDF, photos) ou téléchargées ; relues à la demande sur la boîte, rien n'est copié
+const pilAttSize = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1).replace('.', ',')} Mo` : `${Math.max(1, Math.round(n / 1024))} Ko`);
+const pilAttsHtml = (m) => ((m.atts || []).length ? `<div class="pm-atts">${m.atts.map((x, i) => `<span class="pm-att"><a href="api.php?r=pilot/mail/msgs/${m.id}/att/${i}" target="_blank" rel="noopener" title="Ouvrir">📎 ${esc(x.name || 'pièce jointe')}${x.size ? ` <small class="muted">${pilAttSize(x.size)}</small>` : ''}</a><a href="api.php?r=pilot/mail/msgs/${m.id}/att/${i}&download=1" class="pm-att-dl" title="Télécharger" aria-label="Télécharger ${esc(x.name || '')}">⬇</a></span>`).join('')}</div>` : '');
 const pilRcptTxt = (l) => (l || []).map((r) => r.email).join(', ');
 const pilRcptParse = (s) => String(s || '').split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean).map((email) => ({ email }));
 
@@ -126,20 +129,28 @@ async function pilMailPage() {
     $$('.pm-row', rowsEl).forEach((x) => x.classList.toggle('on', +x.dataset.id === id));
     readEl.innerHTML = '<p class="muted pm-pad">Chargement…</p>';
     let m; try { m = await api('GET', `pilot/mail/msgs/${id}`); } catch (e) { st.sel = null; saveUi(); readEl.innerHTML = `<p class="muted pm-pad">${esc(e.message)}</p>`; return; }
-    const a = m.analysis || {}; const acc = b.accounts.find((x) => x.id === m.account_id) || {}; const sent = (items.find((x) => x.id === id) || {}).folder === 'sent';
+    const a = m.analysis || {}; const acc = b.accounts.find((x) => x.id === m.account_id) || {}; const it = items.find((x) => x.id === id) || {}; const sent = it.folder === 'sent';
+    const setRead = (read) => {
+      if (sent || !!it.is_read === read) return; it.is_read = read;
+      const r = $(`.pm-row[data-id="${id}"]`, rowsEl); if (r) r.classList.toggle('unread', !read);
+      [`.pm-f[data-box="all"][data-folder="in"]`, `.pm-f[data-box="${m.account_id}"][data-folder="in"]`].forEach((sel) => { const f = $(sel, page); if (!f) return; let n = $('.pm-n', f);
+        const v = Math.max(0, (n ? +n.textContent : 0) + (read ? -1 : 1)); if (!n && v) { f.insertAdjacentHTML('beforeend', '<span class="pm-n"></span>'); n = $('.pm-n', f); } if (n) { if (v) n.textContent = v; else n.remove(); } });
+    };
+    setRead(true);
     const draft = (m.drafts || []).find((x) => x.status === 'brouillon');
     readEl.innerHTML = `<div class="pm-rh"><button type="button" class="btn sm pm-back" data-back>← Retour</button>
         <h2>${esc(m.subject || '(sans objet)')}</h2>
         <div class="pm-meta"><b>${esc(sent ? (acc.email || '') : (m.from_name || m.from_email || ''))}</b> ${sent ? '' : `&lt;${esc(m.from_email || '')}&gt;`}<br><small class="muted">À : ${esc(pilRcptTxt(m.to))} · ${fmtDT(m.at)}</small><br>
           <small>${sent ? 'Envoyé depuis' : 'Reçu sur'} <span class="pm-acc" style="--c:${accColor(m.account_id)}">${esc(acc.email || '')}</span></small></div>
-        <div class="btns">${sent ? '' : `<button class="btn sm primary" data-reply>${draft ? 'Relire la réponse préparée…' : 'Répondre'}</button>`}${m.state === 'a_faire' || m.state === 'nouveau' ? '<button class="btn sm good" data-done>✓ Fait</button><button class="btn sm ghost" data-ign>Ignorer</button>' : ''}${m.moved ? '<button class="btn sm" data-unmove>Remettre dans la boîte de réception</button>' : ''}${m.web_link ? `<a class="btn sm ghost" href="${esc(m.web_link)}" target="_blank" rel="noopener">Ouvrir dans Outlook ↗</a>` : ''}</div></div>
+        <div class="btns">${sent ? '' : `<button class="btn sm primary" data-reply>${draft ? 'Relire la réponse préparée…' : 'Répondre'}</button>`}${m.state === 'a_faire' || m.state === 'nouveau' ? '<button class="btn sm good" data-done>✓ Fait</button><button class="btn sm ghost" data-ign>Ignorer</button>' : ''}${sent ? '' : '<button class="btn sm ghost" data-unread>Marquer comme non lu</button>'}${m.moved ? '<button class="btn sm" data-unmove>Remettre dans la boîte de réception</button>' : ''}${m.web_link ? `<a class="btn sm ghost" href="${esc(m.web_link)}" target="_blank" rel="noopener">Ouvrir dans Outlook ↗</a>` : ''}</div></div>
       ${a.resume || a.action ? `<div class="alert info">${a.resume ? `<b>Résumé :</b> ${esc(a.resume)}` : ''}${a.action ? `<br><b>À faire :</b> ${esc(a.action)}${a.echeance ? ` (avant le ${fmtDate(a.echeance)})` : ''}` : ''}${a.pieces ? `<br><b>Pièces jointes :</b> ${esc(a.pieces)}` : ''}${(a.non_verifie || []).length ? `<br><span class="late">⚠ Montant à vérifier : ${a.non_verifie.map(esc).join(', ')}</span>` : ''}</div>` : ''}
-      ${(m.atts || []).length ? `<p>📎 ${m.atts.map((x) => esc(x.name)).join(' · ')} <small class="muted">(à ouvrir dans Outlook)</small></p>` : ''}
+      ${pilAttsHtml(m)}
       <div class="pre pm-body">${esc(m.body || m.preview || '')}</div>
       ${sent ? '' : `<label class="field"><span>Chantier</span><select data-p><option value="">—</option>${projects.map((p) => `<option value="${p.id}" ${p.id === m.project_id ? 'selected' : ''}>${esc(p.data.name)}</option>`).join('')}</select></label>`}`;
     $('[data-back]', readEl).onclick = () => { st.sel = null; saveUi(); wrap.classList.remove('reading'); $$('.pm-row', rowsEl).forEach((x) => x.classList.remove('on')); };
     const done = async (state) => { await api('PUT', `pilot/mail/msgs/${id}`, { state }); toast(state === 'fait' ? 'Marqué fait' : 'Ignoré'); render(); };
     const d1 = $('[data-done]', readEl); if (d1) d1.onclick = () => done('fait');
+    const ur = $('[data-unread]', readEl); if (ur) ur.onclick = async () => { await api('POST', `pilot/mail/msgs/${id}/unread`, {}); setRead(false); toast('Marqué comme non lu'); st.sel = null; saveUi(); wrap.classList.remove('reading'); readEl.innerHTML = '<div class="pm-empty muted">Sélectionnez un e-mail pour le lire.</div>'; $$('.pm-row', rowsEl).forEach((x) => x.classList.remove('on')); };
     const d2 = $('[data-ign]', readEl); if (d2) d2.onclick = () => done('ignore');
     const um = $('[data-unmove]', readEl); if (um) um.onclick = async () => { um.disabled = true; try { await api('POST', `pilot/mail/msgs/${id}/unmove`); toast('Remis dans la boîte de réception (il ne sera plus rangé)'); render(); } catch (e) { um.disabled = false; toast(e.message, 6000); } };
     const rp = $('[data-reply]', readEl); if (rp) rp.onclick = async () => { const d = draft || await api('POST', `pilot/mail/msgs/${id}/draft`); pilDraftEdit(d, m, b.accounts); };
@@ -168,7 +179,7 @@ async function pilMailOpen(id, projects) {
   const md = modal(`${mhead(m.subject || '(sans objet)')}<div class="m-body">
     <p><b>${esc(m.from_name || '')}</b> &lt;${esc(m.from_email || '')}&gt; · ${fmtDT(m.at)}<br><small class="muted">À : ${esc(pilRcptTxt(m.to))}</small></p>
     ${a.resume ? `<div class="alert info"><b>Résumé :</b> ${esc(a.resume)}${a.action ? `<br><b>À faire :</b> ${esc(a.action)}` : ''}${a.pieces ? `<br><b>Pièces jointes :</b> ${esc(a.pieces)}` : ''}</div>` : ''}
-    ${(m.atts || []).length ? `<p>📎 ${m.atts.map((x) => esc(x.name)).join(' · ')} <small class="muted">(à ouvrir dans Outlook)</small></p>` : ''}
+    ${pilAttsHtml(m)}
     <div class="pre pil-mail-full">${esc(m.body || m.preview || '')}</div>
     <label class="field"><span>Chantier</span><select data-p><option value="">—</option>${projects.map((p) => `<option value="${p.id}" ${p.id === m.project_id ? 'selected' : ''}>${esc(p.data.name)}</option>`).join('')}</select></label></div>
     <div class="m-foot">${m.web_link ? `<a class="btn ghost" href="${esc(m.web_link)}" target="_blank" rel="noopener">Ouvrir dans Outlook ↗</a>` : ''}<span class="grow"></span><button class="btn" data-done>✓ Fait</button><button class="btn primary" data-reply>Répondre</button></div>`, { wide: true });

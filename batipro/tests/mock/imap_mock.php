@@ -65,6 +65,7 @@ while (true) {
                     else $put("* " . ($i + 1) . " FETCH (UID $uid FLAGS () INTERNALDATE \"" . date('d-M-Y H:i:s O') . "\" RFC822.SIZE " . strlen($msg) . ")"); }
                 $put("$tag OK");
             }
+            elseif (str_starts_with($U, 'UID STORE')) { $log('imap_mock.log', ['store' => $rest, 'sel' => $sel]); $put("$tag OK"); }
             elseif (str_starts_with($U, 'APPEND')) { preg_match('/\{(\d+)\}$/', $rest, $m); $put('+ go'); $data = ''; while (strlen($data) < (int)$m[1]) $data .= fread($c, (int)$m[1] - strlen($data)); fgets($c); $log('imap_mock.log', ['append' => str_contains($rest, 'INBOX.Sent'), 'data' => $data]); $put("$tag OK"); }
             elseif (str_starts_with($U, 'LOGOUT')) { $put('* BYE'); $put("$tag OK"); break; }
             else $put("$tag OK");

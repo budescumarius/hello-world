@@ -249,10 +249,10 @@ function pil_mail_sync(array $acc, bool $deep = false): array {
                 $r = q('INSERT IGNORE INTO pil_mail_msgs (company_id, account_id, graph_id, conv_id, msg_ref, folder, from_email, from_name, to_json, subject, at, preview, body, atts, web_link, is_read, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     [cid(), $acc['id'], (string)$m['id'], (string)($m['conversationId'] ?? ''), json_encode(['mid' => $mid], JSON_UNESCAPED_SLASHES), $isIn ? 'in' : 'sent', mb_strtolower((string)($from['address'] ?? '')), mb_substr((string)($from['name'] ?? ''), 0, 190),
                      json_encode($to, JSON_UNESCAPED_UNICODE), mb_substr((string)($m['subject'] ?? ''), 0, 500), $at, mb_substr((string)($m['bodyPreview'] ?? ''), 0, 400),
-                     pil_mail_clean((string)($m['body']['content'] ?? '')), $isIn && !empty($m['hasAttachments']) ? '[]' : null, mb_substr((string)($m['webLink'] ?? ''), 0, 1000) ?: null, $isIn ? (!empty($m['isRead']) ? 1 : 0) : 1, now()]);
+                     pil_mail_clean((string)($m['body']['content'] ?? '')), !empty($m['hasAttachments']) ? '[]' : null, mb_substr((string)($m['webLink'] ?? ''), 0, 1000) ?: null, $isIn ? (!empty($m['isRead']) ? 1 : 0) : 1, now()]);
                 if ($r->rowCount()) $new++;
                 // déjà relevé : lu/non lu, et la date et l'objet de Microsoft font foi (corrige une ligne enregistrée de travers)
-                elseif ($isIn) q("UPDATE pil_mail_msgs SET is_read = ?, at = ?, folder = 'in', subject = ? WHERE account_id = ? AND graph_id = ?", [!empty($m['isRead']) ? 1 : 0, $at, mb_substr((string)($m['subject'] ?? ''), 0, 500), $acc['id'], (string)$m['id']]);
+                elseif ($isIn) q("UPDATE pil_mail_msgs SET is_read = GREATEST(is_read, ?), at = ?, folder = 'in', subject = ? WHERE account_id = ? AND graph_id = ?", [!empty($m['isRead']) ? 1 : 0, $at, mb_substr((string)($m['subject'] ?? ''), 0, 500), $acc['id'], (string)$m['id']]);
             }
             $url = $j['@odata.nextLink'] ?? null;
         }
@@ -540,6 +540,51 @@ function pil_mail_cron(): void {
     }
 }
 
+// --------------------------------------------------------------------- Lu / non lu et pièces jointes (comme dans Outlook)
+/** Marque lu / non lu dans BatiPro ET sur le serveur (Outlook / Hostico) ; une erreur du serveur n'empêche pas l'affichage. */
+function pil_mail_mark(array $acc, array $m, bool $read): void {
+    q('UPDATE pil_mail_msgs SET is_read = ? WHERE id = ?', [$read ? 1 : 0, $m['id']]);
+    try {
+        if (($acc['kind'] ?? 'graph') === 'imap') {
+            if (!preg_match('/^imap:in:(\d+):(\d+)$/', (string)$m['graph_id'], $g)) return;
+            require_once __DIR__ . '/imap.php'; $c = pil_imap_open(pil_imap_conf($acc));
+            if ($c->select('INBOX') === (int)$g[1]) $c->cmd('UID STORE ' . (int)$g[2] . ($read ? ' +' : ' -') . 'FLAGS.SILENT (\\Seen)');
+        } else pil_graph($acc, 'PATCH', '/me/messages/' . rawurlencode((string)$m['graph_id']), ['isRead' => $read]);
+    } catch (Throwable $e) { error_log('[pilotage mail] lu/non lu : ' . $e->getMessage()); }
+}
+/** Liste des pièces jointes (relue chez Microsoft si elle n'est pas encore connue). */
+function pil_mail_atts(array $acc, array $m): array {
+    if ($m['atts'] === null) return [];
+    $l = json_decode((string)$m['atts'], true) ?: [];
+    if ($l && isset($l[0]['id']) || ($acc['kind'] ?? 'graph') === 'imap') return $l;
+    try {
+        $j = pil_graph($acc, 'GET', '/me/messages/' . rawurlencode((string)$m['graph_id']) . '/attachments?$select=id,name,contentType,size,isInline');
+        $new = [];
+        foreach ($j['value'] ?? [] as $a) if (empty($a['isInline'])) $new[] = ['id' => (string)$a['id'], 'name' => (string)($a['name'] ?? 'piece-jointe'), 'size' => (int)($a['size'] ?? 0), 'type' => (string)($a['contentType'] ?? '')];
+        if (!$new && $l) return $l; // rien de plus chez Microsoft : la liste connue reste affichée
+        $l = $new;
+        q('UPDATE pil_mail_msgs SET atts = ? WHERE id = ?', [json_encode($l, JSON_UNESCAPED_UNICODE), $m['id']]);
+    } catch (Throwable $e) { error_log('[pilotage mail] pièces jointes : ' . $e->getMessage()); }
+    return $l;
+}
+/** Contenu d'une pièce jointe (n = position dans la liste), relu sur le serveur à la demande : rien n'est gardé dans BatiPro. */
+function pil_mail_att_get(array $acc, array $m, int $n): array {
+    $l = pil_mail_atts($acc, $m); $a = $l[$n] ?? null;
+    if (!$a) fail(404, 'Pièce jointe introuvable');
+    if (($acc['kind'] ?? 'graph') === 'imap') {
+        if (!preg_match('/^imap:(in|sent):(\d+):(\d+)$/', (string)$m['graph_id'], $g)) fail(404, 'Pièce jointe introuvable');
+        require_once __DIR__ . '/imap.php'; $t = pil_imap_conf($acc); $c = pil_imap_open($t);
+        if ($c->examine($g[1] === 'in' ? 'INBOX' : (string)($t['sent'] ?? '')) !== (int)$g[2]) fail(410, 'E-mail déplacé sur le serveur : ouvrez-le dans votre messagerie.');
+        $raw = $c->fetch([(int)$g[3]], true, 40 * 1024 * 1024)[(int)$g[3]] ?? null;
+        if (!$raw || $raw['raw'] === null) fail(410, 'E-mail introuvable sur le serveur.');
+        $p = pil_mime_parse($raw['raw'])['atts'][$n] ?? null; if (!$p) fail(404, 'Pièce jointe introuvable');
+        return ['name' => $p['name'], 'type' => $p['type'] ?: 'application/octet-stream', 'data' => $p['data']];
+    }
+    $j = pil_graph($acc, 'GET', '/me/messages/' . rawurlencode((string)$m['graph_id']) . '/attachments/' . rawurlencode((string)$a['id']));
+    if (empty($j['contentBytes'])) fail(415, 'Cette pièce jointe (e-mail ou élément Outlook joint) s\'ouvre dans Outlook.');
+    return ['name' => (string)($j['name'] ?? $a['name']), 'type' => (string)($j['contentType'] ?? $a['type']) ?: 'application/octet-stream', 'data' => (string)base64_decode((string)$j['contentBytes'])];
+}
+
 // --------------------------------------------------------------------- Routes : pilot/mail/…
 function pil_mail_route(string $method, array $seg, array $me): void {
     pil_mail_schema();
@@ -625,7 +670,17 @@ function pil_mail_route(string $method, array $seg, array $me): void {
     if ($a === 'msgs' && $id) {
         $m = q('SELECT m.* FROM pil_mail_msgs m JOIN pil_mail_accounts a ON a.id = m.account_id WHERE m.id = ? AND m.company_id = ? AND a.user_id = ?', [$id, cid(), $me['id']])->fetch();
         if (!$m) fail(404, 'E-mail introuvable');
-        if ($method === 'GET') out(pil_mail_msg_out($m) + ['body' => $m['body'], 'to' => json_decode((string)$m['to_json'], true) ?: [],
+        $macc = pil_mail_account($me, (int)$m['account_id']);
+        if ($method === 'GET' && ($seg[4] ?? '') === 'att') { // pièce jointe : affichée (PDF, image) ou téléchargée
+            $f = pil_mail_att_get($macc, $m, (int)($seg[5] ?? -1));
+            $safe = preg_replace('/[\x00-\x1f"\\\\]/', '_', $f['name']); $inline = preg_match('#^(application/pdf|image/(png|jpe?g|gif|webp)|text/plain)#i', $f['type']) && empty($_GET['download']);
+            header('Content-Type: ' . ($inline ? $f['type'] : 'application/octet-stream')); header('X-Content-Type-Options: nosniff'); if (!str_contains(strtolower($f['type']), 'pdf') || !$inline) header("Content-Security-Policy: default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox");
+            header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; filename="' . $safe . '"; filename*=UTF-8\'\'' . rawurlencode($f['name']));
+            header('Content-Length: ' . strlen($f['data'])); echo $f['data']; exit;
+        }
+        if ($method === 'GET' && !$m['is_read'] && $m['folder'] === 'in') { pil_mail_mark($macc, $m, true); $m['is_read'] = 1; }
+        if ($method === 'POST' && in_array($seg[4] ?? '', ['read', 'unread'], true)) { pil_mail_mark($macc, $m, $seg[4] === 'read'); out(['ok' => true, 'is_read' => $seg[4] === 'read']); }
+        if ($method === 'GET') out(['atts' => pil_mail_atts($macc, $m)] + pil_mail_msg_out($m) + ['body' => $m['body'], 'to' => json_decode((string)$m['to_json'], true) ?: [],
             'drafts' => array_map('pil_mail_draft_out', q('SELECT * FROM pil_mail_drafts WHERE msg_id = ? ORDER BY id DESC', [$id])->fetchAll())]);
         if ($method === 'PUT') {
             $b = body(); $st = (string)($b['state'] ?? '');

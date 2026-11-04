@@ -309,7 +309,7 @@ function pil_imap_sync(array $acc, bool $deep): array {
                 [cid(), $acc['id'], "imap:$kind:$uv:{$m['uid']}", mb_substr((string)$p['root'], 0, 255), json_encode(['mid' => $p['mid'], 'refs' => array_slice($p['refs'], -10)], JSON_UNESCAPED_SLASHES), $isIn ? 'in' : 'sent',
                  $isIn ? $p['from'][0] : $acc['email'], mb_substr($isIn ? $p['from'][1] : (string)$acc['name'], 0, 190), json_encode(array_map(fn($x) => ['email' => $x[0], 'name' => $x[1]], $p['to']), JSON_UNESCAPED_UNICODE),
                  mb_substr($p['subject'], 0, 500), $p['date'] ?? $m['date'] ?? now(), mb_substr(preg_replace('/\s+/', ' ', (string)$text), 0, 400), $text,
-                 $isIn && $atts ? json_encode($atts, JSON_UNESCAPED_UNICODE) : null, null, str_contains($m['flags'], '\\Seen') ? 1 : 0, now()]);
+                 $atts ? json_encode($atts, JSON_UNESCAPED_UNICODE) : null, null, str_contains($m['flags'], '\\Seen') ? 1 : 0, now()]);
             if ($r->rowCount()) $new++;
         }
     }

@@ -206,6 +206,25 @@ T::test('dossiers comme Outlook : réception / envoyés / publicité par boîte 
     [, $l] = $admin->req('GET', 'pilot/mail/list&box=all&folder=in'); T::ok(!in_array('promo@pub-fictif.be', array_column($l['items'], 'from_email'), true) || true, 'publicité');
     [$c] = (new Client('anon'))->req('GET', 'pilot/mail/list&box=all&folder=in'); T::ok($c === 401 || $c === 403, "anonyme : $c");
 });
+T::test('lu / non lu comme Outlook : ouvrir = lu (aussi dans Outlook) ; « non lu » ; la relève ne défait pas « lu » ; pièces jointes ouvertes et téléchargées depuis BatiPro', function () use ($admin, $glog) {
+    $id = (int)db()->query("SELECT id FROM pil_mail_msgs WHERE graph_id = 'AAA1'")->fetchColumn();
+    db()->exec("UPDATE pil_mail_msgs SET is_read = 0, atts = '[]' WHERE id = $id");
+    [$c, $m] = $admin->req('GET', "pilot/mail/msgs/$id"); T::eq(200, $c);
+    T::eq('devis-fictif.pdf', $m['atts'][0]['name'] ?? null, 'pièce jointe listée'); T::eq(true, $m['is_read'], 'ouvert = lu');
+    T::eq(1, (int)db()->query("SELECT is_read FROM pil_mail_msgs WHERE id = $id")->fetchColumn());
+    $patch = array_values(array_filter($glog(), fn($x) => $x['m'] === 'PATCH' && str_ends_with($x['p'], '/me/messages/AAA1')));
+    T::ok($patch && json_decode(end($patch)['body'], true) === ['isRead' => true], 'Outlook prévenu : lu');
+    [$c, , $raw] = $admin->req('GET', "pilot/mail/msgs/$id/att/0"); T::eq(200, $c); T::ok(str_starts_with($raw, '%PDF') && str_contains($raw, 'devis fictif'), 'PDF ouvert');
+    [$c, , $raw] = $admin->req('GET', "pilot/mail/msgs/$id/att/0&download=1"); T::ok($c === 200 && str_starts_with($raw, '%PDF'), 'téléchargé');
+    [$c] = $admin->req('GET', "pilot/mail/msgs/$id/att/5"); T::eq(404, $c, 'pièce inexistante');
+    [$c] = (new Client('anon2'))->req('GET', "pilot/mail/msgs/$id/att/0"); T::ok($c === 401 || $c === 403, "anonyme : $c");
+    db()->exec('UPDATE pil_mail_accounts SET last_sync = NOW() - INTERVAL 1 HOUR'); $admin->req('POST', 'pilot/mail/sync', []);
+    T::eq(1, (int)db()->query("SELECT is_read FROM pil_mail_msgs WHERE id = $id")->fetchColumn(), 'relève : reste lu (Outlook dit encore « non lu » dans le faux serveur)');
+    [$c, $r] = $admin->req('POST', "pilot/mail/msgs/$id/unread", []); T::eq(200, $c); T::eq(false, $r['is_read']);
+    T::eq(0, (int)db()->query("SELECT is_read FROM pil_mail_msgs WHERE id = $id")->fetchColumn());
+    $patch = array_values(array_filter($glog(), fn($x) => $x['m'] === 'PATCH' && str_ends_with($x['p'], '/me/messages/AAA1')));
+    T::ok(json_decode(end($patch)['body'], true) === ['isRead' => false], 'Outlook prévenu : non lu');
+});
 T::test('déconnexion : boîte, e-mails relevés et brouillons effacés de BatiPro', function () use ($admin) {
     $id = (int)db()->query('SELECT id FROM pil_mail_accounts')->fetchColumn();
     [$c] = $admin->req('DELETE', "pilot/mail/accounts/$id"); T::eq(200, $c);
@@ -241,6 +260,15 @@ T::test('relève : encodages (ISO-8859-1, € , sujet encodé), historique cité
     T::eq(false, $last['iban_clair'], 'IBAN masqué'); T::eq(true, $last['pdf'], 'PDF lu'); T::eq(false, $last['cite'], 'historique non transmis');
     $S['idraft'] = $r['brief']['drafts'][0]['id'] ?? null; T::ok($S['idraft'], 'réponse préparée');
     [, $r2] = $admin->req('POST', 'pilot/mail/sync'); T::eq(0, $r2['results'][0]['new'], 'pas de doublon');
+});
+T::test('boîte hébergée : ouvrir = lu sur le serveur (\\Seen) ; pièce jointe PDF ouverte depuis BatiPro', function () use ($admin, $ilog) {
+    $id = (int)db()->query("SELECT id FROM pil_mail_msgs WHERE from_email = 'client@exemple-fictif.be' AND graph_id LIKE 'imap:%'")->fetchColumn();
+    db()->exec("UPDATE pil_mail_msgs SET is_read = 0 WHERE id = $id");
+    [$c, $m] = $admin->req('GET', "pilot/mail/msgs/$id"); T::eq(200, $c); T::eq(true, $m['is_read']); T::eq('devis-fictif.pdf', $m['atts'][0]['name'] ?? null);
+    $st = array_values(array_filter($ilog("imap_mock.log"), fn($x) => isset($x["store"]))); T::ok($st && str_contains(end($st)['store'], '+FLAGS.SILENT (\\Seen)') && end($st)['sel'] === 'in', json_encode($st));
+    [$c, , $raw] = $admin->req('GET', "pilot/mail/msgs/$id/att/0"); T::eq(200, $c); T::ok(str_starts_with($raw, '%PDF'), substr((string)$raw, 0, 80));
+    [$c] = $admin->req('POST', "pilot/mail/msgs/$id/unread", []); T::eq(200, $c);
+    $st = array_values(array_filter($ilog("imap_mock.log"), fn($x) => isset($x["store"]))); T::ok(str_contains(end($st)['store'], '-FLAGS.SILENT'), 'non lu sur le serveur');
 });
 T::test('rangement IMAP : publicité → « Publicité » (UTF-7, dossier créé) ; expéditeur connu jamais rangé ; remise sans doublon ni nouveau rangement', function () use ($admin, $ilog) {
     $l = $ilog('imap_mock.log');
