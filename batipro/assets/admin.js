@@ -164,7 +164,7 @@ route('dashboard', async () => {
   if (pLate.length) add(4, { tone: 'info', icon: 'pin', title: `${pLate.length} point(s) de chantier en retard`, sub: 'Réserves et remarques à lever', href: '#/projects', act: ['Voir', '#/projects'] });
   items.sort((a, b) => a.rank - b.rank);
   // « ✕ » : l'utilisateur a réglé la chose autrement → masquée (sur tous ses appareils) ; elle revient si elle change (autre montant)
-  const hidden = await api('GET', 'todohide').catch(() => ({})) || {};
+  const h0 = await api('GET', 'todohide').catch(() => null); const hidden = h0 && typeof h0 === 'object' && !Array.isArray(h0) ? h0 : {};
   const tkey = (x) => `${x.title}|${x.amount ? Math.round(x.amount * 100) : ''}`;
   const nHidden = items.filter((x) => hidden[tkey(x)]).length;
   for (let i = items.length - 1; i >= 0; i--) if (hidden[tkey(items[i])]) items.splice(i, 1);

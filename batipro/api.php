@@ -430,11 +430,11 @@ switch ($seg[0] ?? '') {
     // ------------------------------------------------------------ Accueil : éléments « à faire » masqués par l'utilisateur (réglés autrement)
     case 'todohide':
         $me = require_user(); $k = 'todo_hide_' . (int)$me['id'];
-        if ($method === 'GET') out(setting($k, []) ?: []);
+        if ($method === 'GET') out((object)(setting($k, []) ?: [])); // toujours un objet JSON ({} si vide)
         if ($method === 'PUT') {
             $keep = [];
             foreach ((array)(body()['hidden'] ?? []) as $key => $at) if (is_string($key) && mb_strlen($key) <= 300 && is_string($at) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $at) && $at >= date('Y-m-d', strtotime('-120 days'))) $keep[$key] = $at;
-            $keep = array_slice($keep, -400, null, true); set_setting($k, $keep); out($keep);
+            $keep = array_slice($keep, -400, null, true); set_setting($k, (object)$keep); out((object)$keep);
         }
         fail(405, 'Méthode non autorisée');
 
