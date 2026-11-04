@@ -305,7 +305,8 @@ function pil_mail_draft_out(array $d): array {
 }
 function pil_mail_brief(array $me, string $today): array {
     $accs = q('SELECT id FROM pil_mail_accounts WHERE company_id = ? AND user_id = ?', [cid(), $me['id']])->fetchAll(PDO::FETCH_COLUMN);
-    if (!$accs) return ['accounts' => pil_mail_accounts($me), 'todo' => [], 'waiting' => [], 'drafts' => [], 'info' => [], 'counts' => ['todo' => 0, 'waiting' => 0, 'drafts' => 0, 'info' => 0, 'new' => 0]];
+    if (!$accs) return ['accounts' => [], 'todo' => [], 'waiting' => [], 'drafts' => [], 'info' => [], 'new' => [], 'counts' => ['todo' => 0, 'waiting' => 0, 'drafts' => 0, 'info' => 0, 'new' => 0, 'urgent' => 0],
+        'ai' => pil_ai_ready(), 'configured' => pil_mail_ready()];
     $in = implode(',', array_map('intval', $accs));
     $msgs = array_map('pil_mail_msg_out', q("SELECT * FROM pil_mail_msgs WHERE company_id = ? AND account_id IN ($in) AND folder = 'in' AND at >= ? ORDER BY at DESC", [cid(), date('Y-m-d', strtotime("$today -30 days"))])->fetchAll());
     $rank = fn($m) => [($m['analysis']['urgence'] ?? 'normale') === 'haute' ? 0 : 1, ($m['analysis']['echeance'] ?? '') ?: '9999', $m['at']];

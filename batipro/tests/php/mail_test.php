@@ -29,6 +29,7 @@ T::test('configuration réservée au propriétaire ; identifiants vérifiés ; s
     [, $g, $raw] = $admin->req('GET', 'pilot/mail/config');
     T::eq(true, $g['hasSecret']); T::ok(!str_contains($raw, 'secret-fictif'), 'secret absent de la réponse'); T::ok(str_ends_with($g['redirect'], '/outlook-callback.php') && !str_contains($g['redirect'], '?'), $g['redirect']);
     T::ok(!str_contains((string)db()->query("SELECT v FROM settings WHERE k = 'pilotage_mail'")->fetchColumn(), 'secret-fictif'), 'secret chiffré en base');
+    [, $b] = $admin->req('GET', 'pilot/mail/brief'); T::eq(true, $b['configured'] ?? null, 'aucune boîte encore : la page sait que Microsoft 365 est configuré (bouton « Connecter »)');
 });
 T::test('connexion : adresse Microsoft avec PKCE et « state » ; un « state » falsifié est refusé', function () use ($admin) {
     [$c, $r] = $admin->req('POST', 'pilot/mail/connect'); T::eq(200, $c);
