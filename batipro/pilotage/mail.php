@@ -92,17 +92,25 @@ function pil_ms_token(array $params): array {
     $c = pil_mail_conf();
     [$code, $j] = pil_http('POST', pil_ms_login() . '/' . rawurlencode((string)($c['tenant'] ?? '') ?: 'organizations') . '/oauth2/v2.0/token', [],
         ['client_id' => $c['clientId'], 'client_secret' => pil_mail_dec($c['secret'])['s'] ?? '', 'scope' => PIL_MAIL_SCOPES] + $params, true);
+    if (($code !== 200 || empty($j['access_token'])) && ($params['grant_type'] ?? '') === 'refresh_token') {
+        [$code, $j] = pil_http('POST', pil_ms_login() . '/' . rawurlencode((string)($c['tenant'] ?? '') ?: 'organizations') . '/oauth2/v2.0/token', [],
+            ['client_id' => $c['clientId'], 'client_secret' => pil_mail_dec($c['secret'])['s'] ?? '', 'scope' => 'offline_access User.Read Mail.Read Mail.Send'] + $params, true);
+    }
     if ($code !== 200 || empty($j['access_token'])) throw new PilError('Connexion Microsoft refusée : ' . mb_substr((string)($j['error_description'] ?? $j['error'] ?? "HTTP $code"), 0, 300), 502);
     return $j;
 }
 /** Jeton d'accès valide d'une boîte (renouvelé si besoin). */
 function pil_mail_access(array $acc): string {
+    static $mem = [];
+    if (isset($mem[$acc['id']]) && $mem[$acc['id']][1] > time() + 120) return $mem[$acc['id']][0];
+    $acc = q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$acc['id']])->fetch() ?: $acc; // jeton le plus récent (une autre relève a pu le renouveler)
     $t = pil_mail_dec($acc['token_enc']);
     if (!$t) throw new PilError('Connexion à reconnecter (jeton illisible).', 401);
-    if (!empty($t['access']) && (int)$acc['expires_at'] > time() + 120) return (string)$t['access'];
+    if (!empty($t['access']) && (int)$acc['expires_at'] > time() + 120) { $mem[$acc['id']] = [(string)$t['access'], (int)$acc['expires_at']]; return (string)$t['access']; }
     try { $j = pil_ms_token(['grant_type' => 'refresh_token', 'refresh_token' => $t['refresh'] ?? '']); }
     catch (PilError $e) { q("UPDATE pil_mail_accounts SET status = 'reconnect', last_error = ? WHERE id = ?", [mb_substr($e->getMessage(), 0, 500), $acc['id']]); throw new PilError('Boîte ' . $acc['email'] . ' : reconnectez-la (' . $e->getMessage() . ').', 401); }
     q('UPDATE pil_mail_accounts SET token_enc = ?, expires_at = ?, status = ? WHERE id = ?', [pil_mail_enc(['access' => $j['access_token'], 'refresh' => $j['refresh_token'] ?? ($t['refresh'] ?? '')]), time() + (int)($j['expires_in'] ?? 3600), 'ok', $acc['id']]);
+    $mem[$acc['id']] = [(string)$j['access_token'], time() + (int)($j['expires_in'] ?? 3600)];
     return (string)$j['access_token'];
 }
 function pil_graph(array $acc, string $method, string $path, $body = null): array {
@@ -580,6 +588,12 @@ function pil_mail_route(string $method, array $seg, array $me): void {
                 [cid(), $m['account_id'], $id, json_encode([['email' => $m['from_email'], 'name' => $m['from_name']]]), mb_substr('RE: ' . preg_replace('/^(re|tr|fw|fwd|aw)\s*:\s*/i', '', (string)$m['subject']), 0, 500), '', 'utilisateur', 'brouillon', now(), now()]);
             out(pil_mail_draft_out(q('SELECT * FROM pil_mail_drafts WHERE id = ?', [(int)db()->lastInsertId()])->fetch()));
         }
+    }
+    if ($a === 'drafts' && $method === 'POST' && !$id) {
+        $b = body(); $acc = pil_mail_account($me, (int)($b['account_id'] ?? 0));
+        q('INSERT INTO pil_mail_drafts (company_id, account_id, msg_id, to_json, cc_json, subject, body, origin, status, created_at, updated_at) VALUES (?,?,NULL,?,?,?,?,?,?,?,?)',
+            [cid(), $acc['id'], json_encode(pil_mail_rcpts($b['to'] ?? [])), json_encode(pil_mail_rcpts($b['cc'] ?? [])), mb_substr(trim((string)($b['subject'] ?? '')), 0, 500), (string)($b['body'] ?? ''), 'utilisateur', 'brouillon', now(), now()]);
+        out(pil_mail_draft_out(q('SELECT * FROM pil_mail_drafts WHERE id = ?', [(int)db()->lastInsertId()])->fetch()));
     }
     if ($a === 'drafts' && $id) {
         $d = q('SELECT d.* FROM pil_mail_drafts d JOIN pil_mail_accounts a ON a.id = d.account_id WHERE d.id = ? AND d.company_id = ? AND a.user_id = ?', [$id, cid(), $me['id']])->fetch();

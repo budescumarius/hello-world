@@ -24,7 +24,7 @@ async function pilMailPage() {
   const [b, projects] = await Promise.all([api('GET', 'pilot/mail/brief'), db.list('project').catch(() => [])]);
   const last = b.accounts.map((a) => a.last_sync).filter(Boolean).sort().pop();
   const page = layout({ icon: 'mail', title: 'E-mails', sub: `${b.accounts.length ? `Dernière relève : ${last ? fmtDT(last) : 'jamais'} · ` : ''}rien ne part sans votre relecture`,
-    actions: `${b.accounts.length ? '<button class="btn" data-sync>Relever maintenant</button>' : ''}${b.configured ? '<button class="btn primary" data-connect>+ Boîte Microsoft 365</button>' : ''}<button class="btn ${b.configured ? '' : 'primary'}" data-imap>+ Boîte ${b.configured ? 'Hostico' : '(Hostico / cPanel)'}</button>` });
+    actions: `${b.accounts.length ? '<button class="btn primary" data-compose>✎ Nouveau message</button><button class="btn" data-sync>Relever maintenant</button>' : ''}${b.configured ? `<button class="btn ${b.accounts.length ? '' : 'primary'}" data-connect>+ Boîte Microsoft 365</button>` : ''}<button class="btn ${b.configured ? '' : 'primary'}" data-imap>+ Boîte ${b.configured ? 'Hostico' : '(Hostico / cPanel)'}</button>` });
   const pname = (id) => { const p = byId(projects, id); return p ? p.data.name : ''; };
   const accColor = (id) => PM_COLORS[Math.max(0, b.accounts.findIndex((a) => a.id === id)) % PM_COLORS.length];
   const accTag = (m) => { const a = b.accounts.find((x) => x.id === m.account_id); return `<span class="pm-acc" style="--c:${accColor(m.account_id)}" title="${esc(a ? a.email : '')}">${esc(a ? a.email.split('@')[0] : '?')}</span>`; };
@@ -32,6 +32,7 @@ async function pilMailPage() {
     $('[data-imap]').onclick = () => pilImapConnect();
     const cn = $('[data-connect]'); if (cn) cn.onclick = async () => { const r = await api('POST', 'pilot/mail/connect'); location.href = r.url; };
     const sy = $('[data-sync]'); if (sy) sy.onclick = () => pilMailSync(sy);
+    const cp = $('[data-compose]'); if (cp) cp.onclick = () => pilCompose(b.accounts);
   };
   const msConf = () => { if (!pilCan('settings.write')) return; page.insertAdjacentHTML('beforeend', `<details class="card pm-conf"><summary><b>Microsoft 365</b> <span class="muted">connexion des boîtes hébergées chez Microsoft ${b.configured ? '· configuré ✓' : '(à configurer une fois)'}</span></summary><div data-conf></div></details>`); const det = $('.pm-conf', page); det.addEventListener('toggle', () => { const d = $('[data-conf]', det); if (!d.childElementCount) pilMailConfig(d); }, { once: true }); };
   if (!b.accounts.length) {
@@ -39,6 +40,14 @@ async function pilMailPage() {
     bindTop(); msConf(); return;
   }
   if (!b.ai) page.insertAdjacentHTML('afterbegin', '<div class="alert warn">Assistant IA non configuré : les e-mails sont relevés mais pas triés ni préparés (Paramètres → Assistant IA : clé API Claude).</div>');
+  // boîte qui n'est plus relevée : la cause et quoi faire, en permanence (pas seulement dans un message éphémère)
+  const stale = b.accounts.filter((a) => a.status !== 'ok' || a.last_error || !a.last_sync || Date.now() - Date.parse(String(a.last_sync).replace(' ', 'T')) > 30 * 60000);
+  stale.forEach((a) => page.insertAdjacentHTML('afterbegin', `<div class="alert bad pm-stale"><b>⚠ ${esc(a.email)} : ${a.status !== 'ok' ? 'la connexion doit être refaite' : a.last_error ? 'la dernière relève a échoué' : `pas relevée depuis ${a.last_sync ? fmtDT(a.last_sync) : 'la connexion'}`}.</b>${a.last_error ? `<br><small>${esc(a.last_error)}</small>` : ''}
+    <div class="btns"><button class="btn sm primary" data-recon="${a.id}">Reconnecter</button><button class="btn sm" data-diag="${a.id}">Diagnostic</button><button class="btn sm" data-sync2>Relever maintenant</button></div></div>`));
+  const reconnect = async (a) => { if (a.kind === 'imap') return pilImapConnect(a.email); const r = await api('POST', 'pilot/mail/connect'); location.href = r.url; };
+  $$('[data-recon]', page).forEach((x) => { x.onclick = () => reconnect(b.accounts.find((a) => a.id === +x.dataset.recon)); });
+  $$('[data-diag]', page).forEach((x) => { x.onclick = () => pilMailCheck(+x.dataset.diag); });
+  $$('[data-sync2]', page).forEach((x) => { x.onclick = () => pilMailSync(x); });
   const st = ui.pm || (ui.pm = { box: 'all', folder: b.counts.todo ? 'todo' : 'in' });
   if (st.box !== 'all' && !b.accounts.some((a) => a.id === +st.box)) { st.box = 'all'; st.folder = 'in'; }
   const fold = (box, folder, label, n, cls = '') => `<button type="button" class="pm-f ${String(st.box) === String(box) && st.folder === folder ? 'on' : ''} ${cls}" data-box="${box}" data-folder="${folder}"><span class="grow">${label}</span>${n ? `<span class="pm-n">${n}</span>` : ''}</button>`;
@@ -163,7 +172,7 @@ async function pilMailOpen(id, projects) {
 // relecture d'un brouillon, puis envoi CONFIRMÉ par l'utilisateur
 function pilDraftEdit(d, msg, accounts) {
   const acc = (accounts || []).find((x) => x.id === d.account_id);
-  const md = modal(`${mhead(d.origin === 'ia' ? 'Réponse préparée par l\'IA – à relire' : 'Votre réponse')}<form class="m-body">
+  const md = modal(`${mhead(d.origin === 'ia' ? 'Réponse préparée par l\'IA – à relire' : d.msg_id ? 'Votre réponse' : `Nouveau message${(accounts || []).find((x) => x.id === d.account_id) ? ` – depuis ${(accounts || []).find((x) => x.id === d.account_id).email}` : ''}`)}<form class="m-body">
     ${d.origin === 'ia' ? '<div class="alert warn">Relisez et corrigez si besoin : l\'IA ne connaît que l\'e-mail reçu. Rien n\'est envoyé tant que vous ne confirmez pas.</div>' : ''}
     ${(d.check.non_verifie || []).length ? `<div class="alert warn">⚠ Montant(s) cité(s) qui ne figurent pas dans l'e-mail reçu : <b>${d.check.non_verifie.map(esc).join(', ')}</b> – vérifiez-les.</div>` : ''}
     ${msg ? `<details><summary class="muted">E-mail reçu : ${esc(msg.subject || '')}</summary><div class="pre pil-mail-full">${esc(msg.body || msg.preview || '')}</div></details>` : ''}
@@ -250,4 +259,13 @@ async function pilMailCheck(id) {
     <table class="dt"><thead><tr><th>Reçu</th><th>De</th><th>Objet</th><th>Dans BatiPro</th></tr></thead><tbody>${r.server.map((x) => `<tr><td class="nowrap">${esc(x.at || '')}</td><td>${esc(x.from)}</td><td>${esc(x.subject)}</td><td>${x.in_batipro ? '✓' : '<b class="late">non</b>'}</td></tr>`).join('')}</tbody></table>
     <div class="btns" style="margin-top:10px"><button class="btn primary" data-now>Relever maintenant</button></div>`;
   $('[data-now]', md.el).onclick = () => { md.close(); pilMailSync(null, false); };
+}
+
+// nouveau message (pas une réponse) : choix de la boîte d'envoi, puis le même écran de relecture et de confirmation
+async function pilCompose(accounts) {
+  const ok = accounts.filter((a) => a.status === 'ok');
+  if (!ok.length) return toast('Aucune boîte connectée en état d\'envoyer : reconnectez-la d\'abord.', 5000);
+  const start = async (a) => { const d = await api('POST', 'pilot/mail/drafts', { account_id: a.id, to: [], subject: '', body: `\n\n${mailSign()}` }); pilDraftEdit(d, null, accounts); };
+  if (ok.length === 1) return start(ok[0]);
+  menuSheet('Envoyer depuis…', ok.map((a) => ({ label: a.email, icon: 'mail', run: () => start(a) })));
 }

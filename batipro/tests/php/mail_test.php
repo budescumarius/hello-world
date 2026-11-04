@@ -110,6 +110,14 @@ T::test('diagnostic : derniers e-mails de la boîte comparés à BatiPro (lectur
     T::eq(null, $r['error']); T::ok(count($r['server']) >= 2 && !array_filter($r['server'], fn($x) => !$x['in_batipro']), json_encode($r['server'], JSON_UNESCAPED_UNICODE));
     T::eq('Europe/Brussels', $r['php_tz']);
 });
+T::test('nouveau message (pas une réponse) : brouillon, envoi confirmé seulement, part par sendMail', function () use ($admin, $sent) {
+    $id = (int)db()->query('SELECT id FROM pil_mail_accounts')->fetchColumn(); $before = count($sent());
+    [$c, $d] = $admin->req('POST', 'pilot/mail/drafts', ['account_id' => $id, 'to' => [], 'subject' => '', 'body' => '']); T::eq(200, $c, json_encode($d)); T::eq(null, $d['msg_id']);
+    [$c] = $admin->req('POST', "pilot/mail/drafts/{$d['id']}/send", ['to' => [['email' => 'archi@bureau-fictif.be']], 'subject' => 'Visite', 'body' => 'Bonjour']); T::eq(400, $c, 'sans confirmation');
+    [$c, $r] = $admin->req('POST', "pilot/mail/drafts/{$d['id']}/send", ['confirm' => true, 'to' => [['email' => 'archi@bureau-fictif.be']], 'subject' => 'Visite chantier', 'body' => 'Bonjour, visite jeudi ?']); T::eq(200, $c, json_encode($r));
+    $s = $sent(); T::eq($before + 1, count($s)); T::ok(str_ends_with(end($s)['p'], '/me/sendMail') && str_contains(end($s)['body'], 'Visite chantier'), end($s)['p']);
+    [$c] = (new Client('anon'))->req('POST', 'pilot/mail/drafts', ['account_id' => $id]); T::ok(in_array($c, [401, 403], true), "anonyme : $c");
+});
 T::test('jeton expiré : renouvelé automatiquement', function () use ($admin, $glog) {
     db()->exec('UPDATE pil_mail_accounts SET expires_at = 0, last_sync = NULL');
     [$c, $r] = $admin->req('POST', 'pilot/mail/sync'); T::eq(200, $c); T::eq([], $r['errors'], json_encode($r['errors']));

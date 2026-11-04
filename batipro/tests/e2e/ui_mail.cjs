@@ -52,6 +52,19 @@ const sql = (s) => execFileSync('php', ['-r', `$p=new PDO("mysql:host=127.0.0.1;
   check('« Envoyer… » demande d\'abord une confirmation (rien n\'est parti)', sent === null && /Envoyer maintenant/.test(await p.textContent('.modal [data-conf]')));
   await p.click('.modal [data-yes]'); await p.waitForTimeout(800);
   check('« Oui, envoyer » : part avec le texte relu et la confirmation', sent && sent.confirm === true && /Texte relu par la direction/.test(sent.body), JSON.stringify(sent));
+  // nouveau message : même relecture, envoi confirmé
+  sent = null; await p.evaluate(() => closeModals()); await p.waitForTimeout(300);
+  await p.click('[data-compose]'); await p.waitForSelector('.modal textarea[name=body]');
+  check('« ✎ Nouveau message » : fenêtre de rédaction depuis la boîte', /Nouveau message – depuis direction@madibu-fictif\.be/.test(await p.textContent('.modal')));
+  await p.fill('.modal input[name=to]', 'archi@bureau-fictif.be'); await p.fill('.modal input[name=subject]', 'Visite jeudi');
+  await p.click('.modal [data-send]'); await p.waitForTimeout(300); check('nouveau message : rien ne part avant « Oui, envoyer »', sent === null);
+  await p.click('.modal [data-yes]'); await p.waitForTimeout(800);
+  check('nouveau message envoyé après confirmation', sent && sent.confirm === true && sent.subject === 'Visite jeudi' && sent.to[0].email === 'archi@bureau-fictif.be', JSON.stringify(sent));
+  // boîte qui n'est plus relevée : bandeau permanent avec la cause et « Reconnecter »
+  sql("UPDATE pil_mail_accounts SET status = 'reconnect', last_error = 'Connexion Microsoft refusée : AADSTS65001 test'");
+  await p.evaluate(() => render()); await p.waitForSelector('.pm-stale', { timeout: 8000 }).catch(() => {});
+  check('bandeau : boîte à reconnecter, cause affichée, boutons Reconnecter / Diagnostic', /la connexion doit être refaite/.test(await p.textContent('.pm-stale').catch(() => '')) && /AADSTS65001/.test(await p.textContent('.pm-stale').catch(() => '')) && !!(await p.$('[data-recon]')) && !!(await p.$('[data-diag]')));
+  sql("UPDATE pil_mail_accounts SET status = 'ok', last_error = NULL, last_sync = NOW()");
   const m = await b.newPage({ viewport: { width: 390, height: 844 }, bypassCSP: true }); m.on('pageerror', (e) => errs.push('mobile: ' + e.message));
   await m.route((u) => /r=pilot\/mail\/sync/.test(u.toString()), (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"results":[],"errors":[]}' }));
   await m.goto(BASE + '/'); await m.fill('input[name=email]', 'admin@test.madibu.local'); await m.fill('input[name=password]', 'Admin-Test-2026'); await m.click('button[type=submit]');

@@ -2230,3 +2230,6 @@ details.card > summary { cursor: pointer; padding: 4px 0; }
 .plan-share { display: grid; gap: 8px; margin-top: 10px; }
 .plan-share .btn.big { justify-content: flex-start; }
 @media (max-width: 560px) { .viewer-wrap .top-actions .btn { padding: 0 10px; font-size: 13px; } }
+
+.alert.bad { background: rgba(229, 72, 77, .10); border: 1px solid rgba(229, 72, 77, .45); color: var(--text); }
+.pm-stale .btns { margin-top: 8px; }
