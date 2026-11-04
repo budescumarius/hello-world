@@ -41,6 +41,7 @@ function pil_mail_migrate(): void {
     if (!q("SHOW COLUMNS FROM pil_mail_msgs LIKE 'msg_ref'")->fetch()) db()->exec('ALTER TABLE pil_mail_msgs ADD msg_ref TEXT NULL AFTER conv_id');
     if (!q("SHOW COLUMNS FROM pil_mail_msgs LIKE 'moved'")->fetch()) db()->exec('ALTER TABLE pil_mail_msgs ADD moved VARCHAR(120) NULL, ADD keep_in TINYINT NOT NULL DEFAULT 0');
     if (!q("SHOW COLUMNS FROM pil_mail_accounts LIKE 'opts'")->fetch()) db()->exec('ALTER TABLE pil_mail_accounts ADD opts TEXT NULL');
+    db()->exec('CREATE TABLE IF NOT EXISTS pil_mail_oauth (state CHAR(32) PRIMARY KEY, company_id INT NOT NULL, user_id INT NOT NULL, verifier VARCHAR(100) NOT NULL, created_at DATETIME NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 }
 
 // --------------------------------------------------------------------- Chiffrement des jetons (clé hors base de données)
@@ -128,16 +129,40 @@ function pil_mail_connect_url(array $me): string {
     $c = pil_mail_conf();
     $verifier = rtrim(strtr(base64_encode(random_bytes(48)), '+/', '-_'), '=');
     $state = bin2hex(random_bytes(16));
-    $_SESSION['pil_mail_oauth'] = ['state' => $state, 'uid' => (int)$me['id'], 'cid' => cid(), 'verifier' => $verifier, 'at' => time()];
+    q('INSERT INTO pil_mail_oauth (state, company_id, user_id, verifier, created_at) VALUES (?,?,?,?,?)', [$state, cid(), (int)$me['id'], $verifier, now()]);
     return pil_ms_login() . '/' . rawurlencode((string)($c['tenant'] ?? '') ?: 'organizations') . '/oauth2/v2.0/authorize?' . http_build_query([
         'client_id' => $c['clientId'], 'response_type' => 'code', 'redirect_uri' => pil_mail_redirect(), 'response_mode' => 'query', 'scope' => PIL_MAIL_SCOPES,
         'state' => $state, 'prompt' => 'select_account', 'code_challenge' => rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '='), 'code_challenge_method' => 'S256']);
 }
-function pil_mail_callback(array $me): void {
-    $back = function (string $q) { header('Location: ' . rtrim(str_replace('\\', '/', dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/api.php'))), '/') . '/#/pilotage/emails?' . $q); http_response_code(302); exit; };
-    $s = $_SESSION['pil_mail_oauth'] ?? null; unset($_SESSION['pil_mail_oauth']);
-    if (!$s || !hash_equals((string)$s['state'], (string)($_GET['state'] ?? '')) || (int)$s['uid'] !== (int)$me['id'] || (int)$s['cid'] !== cid() || time() - (int)$s['at'] > 900) $back('err=' . rawurlencode('Connexion expirée ou invalide : recommencez.'));
-    if (!empty($_GET['error'])) $back('err=' . rawurlencode('Microsoft : ' . mb_substr((string)($_GET['error_description'] ?? $_GET['error']), 0, 200)));
+/**
+ * Retour de Microsoft. Fonctionne aussi dans une fenêtre séparée (téléphone, application installée) qui n'a pas la session de BatiPro :
+ * la demande est retrouvée par son « state » (aléatoire, à usage unique, 15 minutes), gardé en base.
+ * Affiche une petite page : « Boîte connectée » (la fenêtre se ferme et BatiPro se met à jour) ou la raison de l'échec, avec « Retour à BatiPro ».
+ */
+function pil_mail_callback_public(): void {
+    $app = rtrim(str_replace('\\', '/', dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/api.php'))), '/') . '/';
+    $page = function (bool $ok, string $msg, string $email = '') use ($app) {
+        $link = $app . '#/pilotage/emails' . ($ok ? '?connected=' . rawurlencode($email) : '?err=' . rawurlencode($msg));
+        header('Content-Type: text/html; charset=utf-8'); header('Cache-Control: no-store');
+        $e = fn($s) => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
+        echo '<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>BatiPro</title></head>'
+            . '<body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:520px;margin:40px auto;padding:0 20px;color:#16203a">'
+            . '<h2>' . ($ok ? '✓ Boîte connectée' : 'Connexion non faite') . '</h2><p>' . $e($ok ? $email : $msg) . '</p>'
+            . '<p><a href="' . $e($link) . '" style="display:inline-block;background:#0f1a3d;color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none">Retour à BatiPro</a></p>'
+            . '<p style="color:#6b7385;font-size:14px">Vous pouvez aussi fermer cette fenêtre.</p>'
+            . '<script>try{if(window.opener&&!window.opener.closed){window.opener.postMessage(' . json_encode(['bp' => 'mail', 'ok' => $ok, 'email' => $email, 'msg' => $msg]) . ',location.origin);setTimeout(function(){window.close()},600);}else{setTimeout(function(){location.replace(' . json_encode($link) . ')},' . ($ok ? 900 : 4000) . ');}}catch(e){}</script></body></html>';
+        exit;
+    };
+    pil_mail_schema();
+    $st = (string)($_GET['state'] ?? '');
+    $s = $st !== '' ? q('SELECT * FROM pil_mail_oauth WHERE state = ?', [$st])->fetch() : null;
+    if ($s) q('DELETE FROM pil_mail_oauth WHERE state = ?', [$st]); // usage unique
+    q('DELETE FROM pil_mail_oauth WHERE created_at < ?', [date('Y-m-d H:i:s', time() - 3600)]);
+    if (!$s || strtotime($s['created_at']) < time() - 900) $page(false, 'Connexion expirée ou invalide : recommencez depuis BatiPro.');
+    $GLOBALS['BP_CID'] = (int)$s['company_id'];
+    $me = q('SELECT * FROM users WHERE id = ? AND company_id = ? AND active = 1', [(int)$s['user_id'], cid()])->fetch();
+    if (!$me) $page(false, 'Utilisateur introuvable.');
+    if (!empty($_GET['error'])) $page(false, 'Microsoft : ' . mb_substr((string)($_GET['error_description'] ?? $_GET['error']), 0, 300));
     try {
         $j = pil_ms_token(['grant_type' => 'authorization_code', 'code' => (string)($_GET['code'] ?? ''), 'redirect_uri' => pil_mail_redirect(), 'code_verifier' => (string)$s['verifier']]);
         [$code, $u] = pil_http('GET', pil_ms_graph() . '/me?$select=displayName,mail,userPrincipalName', ['Authorization: Bearer ' . $j['access_token']]);
@@ -145,14 +170,14 @@ function pil_mail_callback(array $me): void {
         if ($code !== 200 || !filter_var($email, FILTER_VALIDATE_EMAIL)) throw new PilError('Adresse de la boîte introuvable.', 502);
         $tok = pil_mail_enc(['access' => $j['access_token'], 'refresh' => $j['refresh_token'] ?? '']);
         $ex = q('SELECT id, user_id FROM pil_mail_accounts WHERE company_id = ? AND email = ?', [cid(), $email])->fetch();
-        if ($ex && (int)$ex['user_id'] !== (int)$me['id']) $back('err=' . rawurlencode("La boîte $email est déjà connectée par un autre utilisateur."));
-        if ($ex) q("UPDATE pil_mail_accounts SET token_enc = ?, expires_at = ?, status = 'ok', last_error = NULL, name = ? WHERE id = ?", [$tok, time() + (int)($j['expires_in'] ?? 3600), mb_substr((string)($u['displayName'] ?? ''), 0, 190), $ex['id']]);
+        if ($ex && (int)$ex['user_id'] !== (int)$me['id']) $page(false, "La boîte $email est déjà connectée par un autre utilisateur.");
+        if ($ex) q("UPDATE pil_mail_accounts SET kind = 'graph', token_enc = ?, expires_at = ?, status = 'ok', last_error = NULL, name = ? WHERE id = ?", [$tok, time() + (int)($j['expires_in'] ?? 3600), mb_substr((string)($u['displayName'] ?? ''), 0, 190), $ex['id']]);
         else q('INSERT INTO pil_mail_accounts (company_id, user_id, email, name, token_enc, expires_at, status, created_at) VALUES (?,?,?,?,?,?,?,?)', [cid(), $me['id'], $email, mb_substr((string)($u['displayName'] ?? ''), 0, 190), $tok, time() + (int)($j['expires_in'] ?? 3600), 'ok', now()]);
         $aid = $ex ? (int)$ex['id'] : (int)db()->lastInsertId();
-        pil_audit('boite_mail_connectee', 'mail_account', $aid, null, ['email' => $email]);
+        pil_audit('boite_mail_connectee', 'mail_account', $aid, null, ['email' => $email], 'utilisateur', (int)$me['id']);
         try { pil_mail_subscribe(q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$aid])->fetch()); } catch (Throwable $e) { error_log('[pilotage mail] abonnement : ' . $e->getMessage()); }
-        $back('connected=' . rawurlencode($email));
-    } catch (Throwable $e) { $back('err=' . rawurlencode($e->getMessage())); }
+        $page(true, '', $email);
+    } catch (Throwable $e) { $page(false, $e->getMessage()); }
 }
 function pil_mail_accounts(array $me): array {
     return array_map(fn($a) => ['id' => (int)$a['id'], 'kind' => $a['kind'] ?? 'graph', 'autoPub' => pil_mail_opts($a)['autoPub'], 'email' => $a['email'], 'name' => $a['name'], 'status' => $a['status'], 'last_sync' => $a['last_sync'], 'last_error' => $a['last_error']],
@@ -196,10 +221,13 @@ function pil_mail_sync(array $acc, bool $deep = false): array {
     if (empty($o['since_utc'])) { $deep = true; $o['since_utc'] = 1; q('UPDATE pil_mail_accounts SET opts = ? WHERE id = ?', [json_encode($o), $acc['id']]); }
     $since = $acc['last_sync'] && !$deep ? gmdate('Y-m-d\TH:i:s\Z', strtotime($acc['last_sync']) - 6 * 3600) : gmdate('Y-m-d\TH:i:s\Z', time() - 14 * 86400);
     $new = 0;
+    $t0 = microtime(true); $partial = false;
     foreach (['inbox' => 'receivedDateTime', 'sentitems' => 'sentDateTime'] as $folder => $dt) {
+        if (microtime(true) - $t0 > 20) { $partial = true; break; }
         $sel = $folder === 'inbox' ? 'id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,hasAttachments,isRead,webLink' : 'id,conversationId,subject,toRecipients,ccRecipients,sentDateTime,bodyPreview,body,hasAttachments,webLink';
-        $url = "/me/mailFolders/$folder/messages?" . http_build_query(['$top' => 50, '$orderby' => "$dt desc", '$filter' => "$dt ge $since", '$select' => $sel]);
-        for ($page = 0; $page < 6 && $url; $page++) {
+        $url = "/me/mailFolders/$folder/messages?" . http_build_query(['$top' => 25, '$orderby' => "$dt desc", '$filter' => "$dt ge $since", '$select' => $sel]);
+        for ($page = 0; $page < 12 && $url; $page++) {
+            if ($page && microtime(true) - $t0 > ($folder === 'inbox' ? 18 : 24)) { $partial = true; break; }
             $j = pil_graph($acc, 'GET', $url);
             foreach ($j['value'] ?? [] as $m) {
                 $at = date('Y-m-d H:i:s', strtotime((string)($m[$dt] ?? 'now')));
@@ -341,8 +369,8 @@ function pil_mail_brief(array $me, string $today): array {
 function pil_mail_folders(array $me): array {
     $out = [];
     foreach (q('SELECT id, email, name, kind FROM pil_mail_accounts WHERE company_id = ? AND user_id = ? ORDER BY id', [cid(), $me['id']])->fetchAll() as $a) {
-        $c = q("SELECT SUM(folder = 'in' AND moved IS NULL) AS inbox, SUM(folder = 'in' AND moved IS NULL AND is_read = 0) AS unread, SUM(folder = 'sent') AS sent, SUM(folder = 'in' AND moved IS NOT NULL) AS pub FROM pil_mail_msgs WHERE account_id = ?", [$a['id']])->fetch();
-        $out[] = ['id' => (int)$a['id'], 'email' => $a['email'], 'name' => $a['name'], 'inbox' => (int)$c['inbox'], 'unread' => (int)$c['unread'], 'sent' => (int)$c['sent'], 'pub' => (int)$c['pub']];
+        $c = q("SELECT SUM(folder = 'in' AND moved IS NULL) AS inbox, SUM(folder = 'in' AND moved IS NULL AND is_read = 0) AS unread, SUM(folder = 'sent') AS sent, SUM(folder = 'in' AND moved IS NOT NULL) AS pub, MAX(IF(folder = 'in', at, NULL)) AS newest FROM pil_mail_msgs WHERE account_id = ?", [$a['id']])->fetch();
+        $out[] = ['id' => (int)$a['id'], 'email' => $a['email'], 'name' => $a['name'], 'kind' => $a['kind'] ?? 'graph', 'inbox' => (int)$c['inbox'], 'unread' => (int)$c['unread'], 'sent' => (int)$c['sent'], 'pub' => (int)$c['pub'], 'newest' => $c['newest']];
     }
     return $out;
 }
@@ -505,7 +533,7 @@ function pil_mail_cron(): void {
 function pil_mail_route(string $method, array $seg, array $me): void {
     pil_mail_schema();
     $a = $seg[2] ?? ''; $id = (int)($seg[3] ?? 0);
-    if ($a === 'callback' && $method === 'GET') pil_mail_callback($me);
+    if ($a === 'callback' && $method === 'GET') pil_mail_callback_public();
     if ($a === 'config') {
         pil_need($me, 'settings.write');
         $c = pil_mail_conf();
@@ -558,8 +586,12 @@ function pil_mail_route(string $method, array $seg, array $me): void {
     }
     if ($a === 'sync' && $method === 'POST') {
         @set_time_limit(300);
+        $GLOBALS['PIL_MAIL_CUR'] = null;
+        register_shutdown_function(function () { $e = error_get_last(); $id = $GLOBALS['PIL_MAIL_CUR'] ?? null;
+            if ($id && $e && in_array($e['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR], true)) { try { q('UPDATE pil_mail_accounts SET last_error = ? WHERE id = ?', [mb_substr('Relève interrompue par l\'hébergeur : ' . $e['message'], 0, 500), $id]); } catch (Throwable $x) { /* */ } } });
         $res = []; $errs = [];
         foreach (q('SELECT * FROM pil_mail_accounts WHERE company_id = ? AND user_id = ?', [cid(), $me['id']])->fetchAll() as $acc) {
+            $GLOBALS['PIL_MAIL_CUR'] = (int)$acc['id'];
             try { $s = pil_mail_sync($acc, !empty(body()['deep'])); $an = pil_mail_analyze(q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$acc['id']])->fetch(), $me, 15);
                 $t = 0; try { $t = pil_mail_tidy(q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$acc['id']])->fetch()); } catch (Throwable $e) { $errs[] = $acc['email'] . ' : rangement – ' . $e->getMessage(); }
                 $res[] = ['email' => $acc['email']] + $s + $an + ['ranges' => $t]; }

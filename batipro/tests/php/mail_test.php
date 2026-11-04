@@ -36,12 +36,15 @@ T::test('connexion : adresse Microsoft avec PKCE et « state » ; un « state »
     parse_str((string)parse_url($r['url'], PHP_URL_QUERY), $q);
     T::eq('11111111-2222-3333-4444-555555555555', $q['client_id']); T::eq('S256', $q['code_challenge_method']); T::ok(strlen($q['state']) === 32 && str_contains($q['scope'], 'Mail.Send'), 'state / scope');
     T::ok(str_contains($r['url'], '/madibu-fictif.be/oauth2/v2.0/authorize'), $r['url']);
-    [$c] = $admin->req('GET', 'pilot/mail/callback&code=code-fictif&state=faux', null, ['noCsrf' => true]); T::eq(302, $c);
+    [$c, , $raw] = (new Client('fenetre'))->req('GET', '', null, ['noCsrf' => true, 'raw' => 'outlook-callback.php?code=code-fictif&state=faux']); T::eq(200, $c); T::ok(str_contains($raw, 'Connexion non faite') && str_contains($raw, 'Retour à BatiPro'), 'page de retour avec « Retour à BatiPro »');
     T::eq(0, (int)db()->query('SELECT COUNT(*) FROM pil_mail_accounts')->fetchColumn(), 'aucune boîte connectée');
 });
 T::test('connexion acceptée : boîte enregistrée, jetons chiffrés (jamais en clair en base)', function () use ($admin) {
     [, $r] = $admin->req('POST', 'pilot/mail/connect'); parse_str((string)parse_url($r['url'], PHP_URL_QUERY), $q);
-    [$c, , $raw] = $admin->req('GET', '', null, ['noCsrf' => true, 'raw' => 'outlook-callback.php?code=code-fictif&state=' . $q['state']]); T::eq(302, $c, $raw); // adresse déclarée chez Microsoft
+    // fenêtre séparée SANS la session BatiPro (téléphone, application installée) : la connexion aboutit quand même
+    [$c, , $raw] = (new Client('fenetre'))->req('GET', '', null, ['noCsrf' => true, 'raw' => 'outlook-callback.php?code=code-fictif&state=' . $q['state']]); T::eq(200, $c, $raw);
+    T::ok(str_contains($raw, 'Boîte connectée') && str_contains($raw, 'postMessage'), 'page « Boîte connectée » qui prévient BatiPro et se ferme');
+    [, , $raw2] = (new Client('fenetre'))->req('GET', '', null, ['noCsrf' => true, 'raw' => 'outlook-callback.php?code=code-fictif&state=' . $q['state']]); T::ok(str_contains($raw2, 'Connexion non faite'), '« state » à usage unique');
     $a = db()->query('SELECT * FROM pil_mail_accounts')->fetch();
     T::eq('direction@madibu-fictif.be', $a['email'] ?? null); T::ok(!str_contains($a['token_enc'], 'rafraichi') && !str_contains($a['token_enc'], 'acces-1'), 'jetons chiffrés');
     [, $l] = $admin->req('GET', 'pilot/mail/accounts'); T::eq(1, count($l)); T::ok(!isset($l[0]['token_enc']), 'jetons jamais envoyés au navigateur');
@@ -223,6 +226,13 @@ T::test('envoi : seulement confirmé ; part par le SMTP de la boîte, en répons
     T::ok(str_contains($sm[0]['data'], 'In-Reply-To: <q1@exemple-fictif.be>'), 'réponse au bon e-mail');
     preg_match("/\n\n(.+)$/s", $sm[0]['data'], $mm); T::ok(str_contains((string)base64_decode(preg_replace('/\s+/', '', $mm[1] ?? '')), 'relu par la direction'), 'texte relu');
     T::ok((bool)array_filter($ilog('imap_mock.log'), fn($x) => !empty($x['append'])), 'copie dans INBOX.Sent');
+});
+T::test('boîte connectée par Hostico puis reconnectée avec Microsoft : passe sur Microsoft 365 (plus jamais relevée chez Hostico)', function () use ($admin) {
+    T::eq('imap', db()->query('SELECT kind FROM pil_mail_accounts')->fetchColumn());
+    [, $r] = $admin->req('POST', 'pilot/mail/connect'); parse_str((string)parse_url($r['url'], PHP_URL_QUERY), $q);
+    [$c, , $raw] = (new Client('fenetre'))->req('GET', '', null, ['noCsrf' => true, 'raw' => 'outlook-callback.php?code=code-fictif&state=' . $q['state']]); T::eq(200, $c); T::ok(str_contains($raw, 'Boîte connectée'), $raw);
+    T::eq('graph', db()->query("SELECT kind FROM pil_mail_accounts WHERE email = 'direction@madibu-fictif.be'")->fetchColumn());
+    T::eq(1, (int)db()->query('SELECT COUNT(*) FROM pil_mail_accounts')->fetchColumn(), 'même boîte, pas de doublon');
 });
 T::test('déconnexion de la boîte hébergée', function () use ($admin) {
     $id = (int)db()->query('SELECT id FROM pil_mail_accounts')->fetchColumn(); [$c] = $admin->req('DELETE', "pilot/mail/accounts/$id"); T::eq(200, $c);

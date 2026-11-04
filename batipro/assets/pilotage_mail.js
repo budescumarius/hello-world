@@ -24,13 +24,15 @@ async function pilMailPage() {
   const [b, projects] = await Promise.all([api('GET', 'pilot/mail/brief'), db.list('project').catch(() => [])]);
   const last = b.accounts.map((a) => a.last_sync).filter(Boolean).sort().pop();
   const page = layout({ icon: 'mail', title: 'E-mails', sub: `${b.accounts.length ? `Dernière relève : ${last ? fmtDT(last) : 'jamais'} · ` : ''}rien ne part sans votre relecture`,
-    actions: `${b.accounts.length ? '<button class="btn primary" data-compose>✎ Nouveau message</button><button class="btn" data-sync>Relever maintenant</button>' : ''}${b.configured ? `<button class="btn ${b.accounts.length ? '' : 'primary'}" data-connect>+ Boîte Microsoft 365</button>` : ''}<button class="btn ${b.configured ? '' : 'primary'}" data-imap>+ Boîte ${b.configured ? 'Hostico' : '(Hostico / cPanel)'}</button>` });
+    actions: b.accounts.length ? '<button class="btn primary" data-compose>✎ Nouveau message</button><button class="btn" data-sync>Relever maintenant</button><button class="btn" data-conns>⚙ Connexions</button>'
+      : `${b.configured ? '<button class="btn primary" data-connect>+ Boîte Microsoft 365</button>' : ''}<button class="btn ${b.configured ? '' : 'primary'}" data-imap>+ Boîte ${b.configured ? 'Hostico' : '(Hostico / cPanel)'}</button>` });
   const pname = (id) => { const p = byId(projects, id); return p ? p.data.name : ''; };
   const accColor = (id) => PM_COLORS[Math.max(0, b.accounts.findIndex((a) => a.id === id)) % PM_COLORS.length];
   const accTag = (m) => { const a = b.accounts.find((x) => x.id === m.account_id); return `<span class="pm-acc" style="--c:${accColor(m.account_id)}" title="${esc(a ? a.email : '')}">${esc(a ? a.email.split('@')[0] : '?')}</span>`; };
   const bindTop = () => {
-    $('[data-imap]').onclick = () => pilImapConnect();
-    const cn = $('[data-connect]'); if (cn) cn.onclick = async () => { const r = await api('POST', 'pilot/mail/connect'); location.href = r.url; };
+    const im = $('[data-imap]'); if (im) im.onclick = () => pilImapConnect();
+    const cn = $('[data-connect]'); if (cn) cn.onclick = async () => { pilMsConnect(); };
+    const cs = $('[data-conns]'); if (cs) cs.onclick = () => pilMailConnections(b);
     const sy = $('[data-sync]'); if (sy) sy.onclick = () => pilMailSync(sy);
     const cp = $('[data-compose]'); if (cp) cp.onclick = () => pilCompose(b.accounts);
   };
@@ -41,10 +43,14 @@ async function pilMailPage() {
   }
   if (!b.ai) page.insertAdjacentHTML('afterbegin', '<div class="alert warn">Assistant IA non configuré : les e-mails sont relevés mais pas triés ni préparés (Paramètres → Assistant IA : clé API Claude).</div>');
   // boîte qui n'est plus relevée : la cause et quoi faire, en permanence (pas seulement dans un message éphémère)
+  const newestOf = (id) => ((b.folders || []).find((f) => f.id === id) || {}).newest;
+  b.accounts.filter((a) => a.kind === 'imap' && a.status === 'ok' && !a.last_error && (!newestOf(a.id) || Date.now() - Date.parse(String(newestOf(a.id)).replace(' ', 'T')) > 24 * 3600000)).forEach((a) => page.insertAdjacentHTML('afterbegin', `<div class="alert bad pm-stale"><b>⚠ ${esc(a.email)} est connectée par Hostico (IMAP) et n'a reçu aucun e-mail depuis ${newestOf(a.id) ? fmtDT(newestOf(a.id)) : 'la connexion'}.</b><br><small>Si vos e-mails arrivent dans Outlook (Microsoft 365), reconnectez cette boîte avec Microsoft : elle passera sur Microsoft 365.</small>
+    <div class="btns">${b.configured ? '<button class="btn sm primary" data-tomsft>Connecter avec Microsoft 365</button>' : ''}<button class="btn sm" data-diag="${a.id}">Diagnostic</button></div></div>`));
+  $$('[data-tomsft]', page).forEach((x) => { x.onclick = () => pilMsConnect(); });
   const stale = b.accounts.filter((a) => a.status !== 'ok' || a.last_error || !a.last_sync || Date.now() - Date.parse(String(a.last_sync).replace(' ', 'T')) > 30 * 60000);
   stale.forEach((a) => page.insertAdjacentHTML('afterbegin', `<div class="alert bad pm-stale"><b>⚠ ${esc(a.email)} : ${a.status !== 'ok' ? 'la connexion doit être refaite' : a.last_error ? 'la dernière relève a échoué' : `pas relevée depuis ${a.last_sync ? fmtDT(a.last_sync) : 'la connexion'}`}.</b>${a.last_error ? `<br><small>${esc(a.last_error)}</small>` : ''}
     <div class="btns"><button class="btn sm primary" data-recon="${a.id}">Reconnecter</button><button class="btn sm" data-diag="${a.id}">Diagnostic</button><button class="btn sm" data-sync2>Relever maintenant</button></div></div>`));
-  const reconnect = async (a) => { if (a.kind === 'imap') return pilImapConnect(a.email); const r = await api('POST', 'pilot/mail/connect'); location.href = r.url; };
+  const reconnect = async (a) => { if (a.kind === 'imap') return pilImapConnect(a.email); pilMsConnect(); };
   $$('[data-recon]', page).forEach((x) => { x.onclick = () => reconnect(b.accounts.find((a) => a.id === +x.dataset.recon)); });
   $$('[data-diag]', page).forEach((x) => { x.onclick = () => pilMailCheck(+x.dataset.diag); });
   $$('[data-sync2]', page).forEach((x) => { x.onclick = () => pilMailSync(x); });
@@ -56,7 +62,7 @@ async function pilMailPage() {
   const navHtml = `<div class="pm-sec">Briefing</div>
       ${fold('all', 'todo', '⚑ À faire', b.counts.todo, b.counts.urgent ? 'urgent' : '')}${fold('all', 'drafts', '✎ Réponses préparées', b.counts.drafts)}${fold('all', 'waiting', '⏱ Sans réponse > 2 j', b.counts.waiting)}${b.counts.new ? fold('all', 'new', 'Pas encore triés', b.counts.new) : ''}${fold('all', 'info', 'Pour info', 0)}
       <div class="pm-sec">Toutes les boîtes</div>${fold('all', 'in', 'Boîte de réception', unreadAll)}${fold('all', 'sent', 'Envoyés', 0)}
-      ${fs.map((f) => { const a = b.accounts.find((x) => x.id === f.id) || {}; return `<div class="pm-sec pm-acc-h" style="--c:${accColor(f.id)}"><span class="grow" title="${esc(f.email)}">${esc(f.email)}</span>${a.status && a.status !== 'ok' ? '<span class="late" title="' + esc(a.last_error || '') + '">⚠</span>' : ''}<button type="button" class="icon-btn sm" data-acc="${f.id}" aria-label="Options de la boîte">${I.more}</button></div>
+      ${fs.map((f) => { const a = b.accounts.find((x) => x.id === f.id) || {}; return `<div class="pm-sec pm-acc-h" style="--c:${accColor(f.id)}"><span class="grow" title="${esc(f.email)}">${esc(f.email)}<small class="pm-kind">${f.kind === 'imap' ? 'Hostico (IMAP)' : 'Microsoft 365'}</small></span>${a.status && a.status !== 'ok' ? '<span class="late" title="' + esc(a.last_error || '') + '">⚠</span>' : ''}<button type="button" class="icon-btn sm" data-acc="${f.id}" aria-label="Options de la boîte">${I.more}</button></div>
         ${fold(f.id, 'in', 'Boîte de réception', f.unread)}${fold(f.id, 'sent', 'Envoyés', 0)}${f.pub ? fold(f.id, 'pub', 'Publicité', f.pub) : ''}`; }).join('')}`;
   const selOpts = [...[['all', 'todo'], ['all', 'drafts'], ['all', 'waiting'], ...(b.counts.new ? [['all', 'new']] : []), ['all', 'info'], ['all', 'in'], ['all', 'sent']].map(([bx, f]) => [`${bx}|${f}`, `${bx === 'all' && ['in', 'sent'].includes(f) ? 'Toutes les boîtes – ' : ''}${PM_FOLDERS[f]}`]),
     ...fs.flatMap((f) => [[`${f.id}|in`, `${f.email} – Boîte de réception${f.unread ? ` (${f.unread})` : ''}`], [`${f.id}|sent`, `${f.email} – Envoyés`], ...(f.pub ? [[`${f.id}|pub`, `${f.email} – Publicité`]] : [])])];
@@ -77,7 +83,7 @@ async function pilMailPage() {
   let qT = null; $('[data-q]', page).oninput = (e) => { clearTimeout(qT); qT = setTimeout(() => { st.q = e.target.value; saveUi(); load(); }, 300); };
   $$('[data-acc]', page).forEach((x) => { x.onclick = (e) => { e.stopPropagation(); const a = b.accounts.find((y) => y.id === +x.dataset.acc); menuSheet(a.email, [
     { label: `Dernière relève : ${a.last_sync ? fmtDT(a.last_sync) : 'jamais'}${a.last_error ? ` – ${a.last_error}` : ''}`, icon: 'clock', run: () => {} },
-    a.kind === 'imap' ? { label: 'Reconnecter (nouveau mot de passe…)', icon: 'key', run: () => pilImapConnect(a.email) } : { label: 'Reconnecter (Microsoft)', icon: 'key', run: async () => { const r = await api('POST', 'pilot/mail/connect'); location.href = r.url; } },
+    a.kind === 'imap' ? { label: 'Reconnecter (nouveau mot de passe…)', icon: 'key', run: () => pilImapConnect(a.email) } : { label: 'Reconnecter (Microsoft)', icon: 'key', run: async () => { pilMsConnect(); } },
     { label: 'Diagnostic (comparer avec la boîte)', icon: 'search', run: () => pilMailCheck(a.id) },
     { label: 'Relire les 14 derniers jours', icon: 'download', run: () => pilMailSync(null, true) },
     { label: a.autoPub ? '✓ Ranger les publicités dans « Publicité » (activé – désactiver)' : 'Ranger les publicités dans « Publicité » (désactivé – activer)', icon: 'check', run: async () => { await api('PUT', `pilot/mail/accounts/${a.id}`, { autoPub: !a.autoPub }); toast(a.autoPub ? 'Rangement automatique désactivé' : 'Rangement automatique activé'); render(); } },
@@ -268,4 +274,41 @@ async function pilCompose(accounts) {
   const start = async (a) => { const d = await api('POST', 'pilot/mail/drafts', { account_id: a.id, to: [], subject: '', body: `\n\n${mailSign()}` }); pilDraftEdit(d, null, accounts); };
   if (ok.length === 1) return start(ok[0]);
   menuSheet('Envoyer depuis…', ok.map((a) => ({ label: a.email, icon: 'mail', run: () => start(a) })));
+}
+
+// connexion Microsoft dans une fenêtre séparée : BatiPro reste ouvert dessous ; fermer la fenêtre = annuler
+let pmPopupWatch = null;
+async function pilMsConnect() {
+  let r; try { r = await api('POST', 'pilot/mail/connect'); } catch (e) { return toast(e.message, 6000); }
+  const w = window.open(r.url, 'bp-microsoft', 'popup,width=520,height=720');
+  if (!w) { if (confirm('Votre navigateur bloque la fenêtre Microsoft. Continuer dans cette page ? (« Retour à BatiPro » sera proposé à la fin)')) location.href = r.url; return; }
+  toast('Fenêtre Microsoft ouverte : choisissez « Compte professionnel ou scolaire ». Fermez-la pour annuler.', 6000);
+  clearInterval(pmPopupWatch);
+  pmPopupWatch = setInterval(() => { if (w.closed) { clearInterval(pmPopupWatch); pmPopupWatch = null; if (location.hash.startsWith('#/pilotage/emails')) render(); } }, 800);
+}
+window.addEventListener('message', (e) => {
+  if (e.origin !== location.origin || !e.data || e.data.bp !== 'mail') return;
+  if (e.data.ok) { toast(`Boîte ${e.data.email} connectée : première relève en cours…`, 4000); pmAutoAt = 0; render(); setTimeout(() => pilMailSync(null, false), 400); }
+  else toast(e.data.msg || 'Connexion non faite', 8000);
+});
+
+// « Connexions » : chaque boîte (type, état, dernière relève, dernier e-mail reçu) et ses actions ; ajouter une boîte ; Microsoft 365 (propriétaire)
+function pilMailConnections(b) {
+  const fs = b.folders || [];
+  const row = (a) => { const f = fs.find((x) => x.id === a.id) || {};
+    return `<div class="pm-conn"><div class="grow"><b>${esc(a.email)}</b> ${badge(a.kind === 'imap' ? 'Hostico (IMAP)' : 'Microsoft 365', a.kind === 'imap' ? '#e8590c' : '#3b5bdb')} ${a.status === 'ok' && !a.last_error ? badge('OK', '#2f9e44') : badge(a.status === 'ok' ? 'Erreur' : 'À reconnecter', '#e5484d')}
+      <br><small class="muted">Dernière relève : ${a.last_sync ? fmtDT(a.last_sync) : 'jamais'} · dernier e-mail reçu : ${f.newest ? fmtDT(f.newest) : '—'}</small>${a.last_error ? `<br><small class="late">${esc(a.last_error)}</small>` : ''}</div>
+      <div class="btns">${b.configured ? `<button class="btn sm ${a.kind === 'imap' ? 'primary' : ''}" data-cms>${a.kind === 'imap' ? 'Passer sur Microsoft 365' : 'Reconnecter (Microsoft)'}</button>` : ''}${a.kind === 'imap' ? `<button class="btn sm" data-cimap="${esc(a.email)}">Mot de passe Hostico…</button>` : ''}<button class="btn sm" data-cdiag="${a.id}">Diagnostic</button><button class="btn sm ghost" data-cdel="${a.id}">Déconnecter</button></div></div>`; };
+  const md = modal(`${mhead('Connexions des boîtes e-mail')}<div class="m-body">
+    <div class="pm-conns">${b.accounts.map(row).join('')}</div>
+    <div class="btns" style="margin-top:12px">${b.configured ? '<button class="btn primary" data-cadd-ms>+ Boîte Microsoft 365</button>' : ''}<button class="btn" data-cadd-imap>+ Boîte Hostico / cPanel</button></div>
+    <p class="muted sm">Vos e-mails arrivent dans Outlook avec un abonnement Microsoft 365 : connectez les boîtes avec « Microsoft 365 » (« Compte professionnel ou scolaire »). « Hostico » seulement pour des boîtes qui reçoivent encore leurs e-mails chez Hostico.</p>
+    ${pilCan('settings.write') ? `<details class="pm-conf"><summary><b>Microsoft 365 – réglage de l'application</b> <span class="muted">${b.configured ? 'configuré ✓' : 'à configurer une fois'}</span></summary><div data-conf></div></details>` : ''}</div>`, { wide: true });
+  $$('[data-cms]', md.el).forEach((x) => { x.onclick = () => { md.close(); pilMsConnect(); }; });
+  $$('[data-cimap]', md.el).forEach((x) => { x.onclick = () => { md.close(); pilImapConnect(x.dataset.cimap); }; });
+  $$('[data-cdiag]', md.el).forEach((x) => { x.onclick = () => { md.close(); pilMailCheck(+x.dataset.cdiag); }; });
+  $$('[data-cdel]', md.el).forEach((x) => { x.onclick = async () => { const a = b.accounts.find((y) => y.id === +x.dataset.cdel); if (!confirm(`Déconnecter ${a.email} ? Les e-mails relevés et les brouillons de cette boîte sont effacés de BatiPro (rien n'est effacé dans Outlook).`)) return; await api('DELETE', `pilot/mail/accounts/${a.id}`); md.close(); toast('Boîte déconnectée'); render(); }; });
+  const am = $('[data-cadd-ms]', md.el); if (am) am.onclick = () => { md.close(); pilMsConnect(); };
+  $('[data-cadd-imap]', md.el).onclick = () => { md.close(); pilImapConnect(); };
+  const det = $('.pm-conf', md.el); if (det) det.addEventListener('toggle', () => { const d = $('[data-conf]', det); if (!d.childElementCount) pilMailConfig(d); }, { once: true });
 }

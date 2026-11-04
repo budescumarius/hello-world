@@ -2233,3 +2233,8 @@ details.card > summary { cursor: pointer; padding: 4px 0; }
 
 .alert.bad { background: rgba(229, 72, 77, .10); border: 1px solid rgba(229, 72, 77, .45); color: var(--text); }
 .pm-stale .btns { margin-top: 8px; }
+
+.pm-kind { display: block; font-size: 11px; font-weight: 500; color: var(--muted); }
+.pm-conns { display: grid; gap: 10px; }
+.pm-conn { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.pm-conn .grow { min-width: 220px; overflow-wrap: anywhere; }
