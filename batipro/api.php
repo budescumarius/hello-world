@@ -397,6 +397,7 @@ switch ($seg[0] ?? '') {
             $d = json_decode($data, true) ?: [];
             if (empty($b['silent'])) log_activity($me['id'], 'update', $type, $id, $pid !== null ? (int)$pid : ($type === 'project' ? $id : null), $d['name'] ?? $d['title'] ?? $number);
             $row = q('SELECT * FROM items WHERE id = ?', [$id])->fetch();
+            if ($type === 'timesheet' && !empty($b['notify'])) hours_correction_notify($me, $cur, $row, (string)($b['reason'] ?? ''));
             if (in_array($type, ['order', 'point', 'quote'], true)) { try { notify_item($me, $type, $row, $cur); } catch (Throwable $e) { error_log('[batipro notif] ' . $e->getMessage()); } }
             out($view($row));
         }
@@ -420,11 +421,23 @@ switch ($seg[0] ?? '') {
             q('DELETE FROM items WHERE id = ? AND company_id = ?', [$id, cid()]);
             db()->commit();
             log_activity($me['id'], 'delete', $type, $id, $cur['project_id'] !== null ? (int)$cur['project_id'] : null, $d['name'] ?? $d['title'] ?? $cur['number']);
+            if ($type === 'timesheet' && !empty($_GET['notify'])) hours_correction_notify($me, $cur, null, (string)($_GET['reason'] ?? ''));
             out(['ok' => true]);
         }
         fail(404, 'Route inconnue');
 
     // ------------------------------------------------------------ Notifications de l'utilisateur
+    // ------------------------------------------------------------ Accueil : éléments « à faire » masqués par l'utilisateur (réglés autrement)
+    case 'todohide':
+        $me = require_user(); $k = 'todo_hide_' . (int)$me['id'];
+        if ($method === 'GET') out(setting($k, []) ?: []);
+        if ($method === 'PUT') {
+            $keep = [];
+            foreach ((array)(body()['hidden'] ?? []) as $key => $at) if (is_string($key) && mb_strlen($key) <= 300 && is_string($at) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $at) && $at >= date('Y-m-d', strtotime('-120 days'))) $keep[$key] = $at;
+            $keep = array_slice($keep, -400, null, true); set_setting($k, $keep); out($keep);
+        }
+        fail(405, 'Méthode non autorisée');
+
     case 'notifs':
         $me = require_user();
         notif_tables();

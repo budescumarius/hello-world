@@ -387,6 +387,38 @@ async function editTimesheet(t, preset = {}) {
     onDelete: t ? async () => { await db.del('timesheet', t.id); render(); } : null,
   });
 }
+// Corriger ou supprimer des heures encodées par quelqu'un d'autre (terrain, chef) : la personne reçoit la version corrigée.
+async function hoursFix(t) {
+  const projects = await db.list('project');
+  const owner = S.users.find((u) => u.id === +t.created_by); const other = owner && owner.id !== S.me.id;
+  const d = t.data;
+  formModal({
+    title: `Heures de ${d.who || (owner ? owner.name : '—')}`, saveLabel: other ? 'Corriger et prévenir' : 'Enregistrer',
+    extra: `${d.correction ? `<p class="muted sm">Déjà corrigé le ${fmtDate(String(d.correction.at).slice(0, 10))} par ${esc(d.correction.by)}${d.correction.reason ? ` (${esc(d.correction.reason)})` : ''}.</p>` : ''}${other ? `<p class="muted sm">Encodé par <b>${esc(owner.name)}</b>. En enregistrant, ${esc(owner.name.split(' ')[0])} reçoit la version corrigée (notification et e-mail).</p>` : ''}`,
+    values: { date: d.date, hours: d.hours, project_id: t.project_id || (d.site ? 'site' : ''), task: d.task || '', reason: '', notify: !!other },
+    fields: [
+      { name: 'date', label: 'Date', type: 'date' }, { name: 'hours', label: 'Heures', type: 'number' },
+      { name: 'project_id', label: 'Chantier', type: 'select', options: [...(d.site && !t.project_id ? [['site', `À créer : « ${d.site} »`]] : [['', '—']]), ...projects.map((p) => [p.id, `${p.number || ''} · ${p.data.name}`])], cls: 'full' },
+      { name: 'task', label: 'Travail effectué', cls: 'full' },
+      ...(other ? [{ name: 'reason', label: 'Motif de la correction (envoyé à la personne)', cls: 'full', hint: 'ex. pause de midi non déduite, mauvais chantier' }, { name: 'notify', label: `Prévenir ${owner.name}`, type: 'check' }] : []),
+    ],
+    async onSave(v) {
+      if (num(v.hours) < 0 || num(v.hours) > 24) throw new Error('Heures : entre 0 et 24');
+      const before = { date: d.date, hours: d.hours, project_id: t.project_id, site: d.site || '' };
+      t.data = { ...d, date: v.date, hours: num(v.hours), task: v.task };
+      if (v.project_id && v.project_id !== 'site') { t.project_id = +v.project_id; delete t.data.site; } else if (!v.project_id) t.project_id = null;
+      if (other) t.data.correction = { by: S.me.name, at: new Date().toISOString(), reason: (v.reason || '').trim(), before };
+      await persist('timesheet', t, { extra: other && v.notify ? { notify: 1, reason: (v.reason || '').trim() } : undefined });
+      toast(other && v.notify ? `Corrigé ✓ – ${owner.name} est prévenu(e)` : 'Enregistré ✓', 3000); render();
+    },
+    onDelete: async () => {
+      const why = other ? (prompt(`Motif de la suppression (envoyé à ${owner.name}) :`, '') ?? null) : '';
+      if (why === null) return; // annulé : rien n'est supprimé
+      await db.del('timesheet', t.id, other ? `&notify=1&reason=${encodeURIComponent(why)}` : '');
+      toast(other ? `Supprimé – ${owner.name} est prévenu(e)` : 'Supprimé', 3000); render();
+    },
+  });
+}
 // ---------------------------------------------------------------- Heures par mois
 // Chaque mois repart de zéro ; les mois passés restent consultables (archives) avec leur total, et le total général en bas.
 const monthLabel = (ym) => new Date(ym + '-15T12:00:00').toLocaleDateString('fr-BE', { month: 'long', year: 'numeric' }).replace(/^./, (c) => c.toUpperCase());
@@ -410,7 +442,7 @@ function hoursTable(el, rows, staff, projects, showProject) {
       { l: 'Travail', v: (t) => esc(t.data.task || '') }, { l: 'Heures', cls: 'r', v: (t) => fnum(num(t.data.hours), 2), sort: (t) => num(t.data.hours) },
       { l: 'Coût', cls: 'r', v: (t) => money(num(t.data.hours) * num(t.data.rate)), sort: (t) => num(t.data.hours) * num(t.data.rate) },
     ],
-    onRow: (t) => (!t.project_id && t.data.site ? attachSite(t) : t.data.employeeId ? editTimesheet(t) : menuSheet(`${t.data.who || 'Sous-traitant'} – ${fnum(num(t.data.hours), 2)} h`, [{ label: 'Supprimer ces heures', icon: 'trash', danger: true, run: async () => { await db.del('timesheet', t.id); render(); } }])), empty: 'Aucune heure encodée',
+    onRow: (t) => (t.created_by && +t.created_by !== S.me.id && S.users.some((u) => u.id === +t.created_by) && !(!t.project_id && t.data.site) ? hoursFix(t) : !t.project_id && t.data.site ? attachSite(t) : t.data.employeeId ? editTimesheet(t) : menuSheet(`${t.data.who || 'Sous-traitant'} – ${fnum(num(t.data.hours), 2)} h`, [{ label: 'Supprimer ces heures', icon: 'trash', danger: true, run: async () => { await db.del('timesheet', t.id); render(); } }])), empty: 'Aucune heure encodée',
     footer: (l) => `<tr><td colspan="${showProject ? 4 : 3}">Total</td><td class="r"><b>${fnum(l.reduce((a, t) => a + num(t.data.hours), 0), 2)} h</b></td><td class="r"><b>${money(l.reduce((a, t) => a + num(t.data.hours) * num(t.data.rate), 0))}</b></td></tr>`,
   });
 }
@@ -424,14 +456,16 @@ async function attachSite(t) {
   const days = [...new Set(same.map((x) => x.data.date))].sort();
   formModal({
     title: `Chantier « ${t.data.site} »`, saveLabel: 'Valider',
-    extra: `<p class="muted">${same.length} ligne(s) · <b>${fnum(same.reduce((a, x) => a + num(x.data.hours), 0), 2)} h</b> encodées par ${esc(who)} (${days.map(fmtDate).join(', ')}) sur un chantier qui n'existe pas encore dans l'application.</p>`,
+    extra: `<p class="muted">${same.length} ligne(s) · <b>${fnum(same.reduce((a, x) => a + num(x.data.hours), 0), 2)} h</b> encodées par ${esc(who)} (${days.map(fmtDate).join(', ')}) sur un chantier qui n'existe pas encore dans l'application.</p>
+      <div class="rows hf-lines">${same.map((x) => `<div class="row static"><span class="grow">${fmtDate(x.data.date)} · <b>${fnum(num(x.data.hours), 2)} h</b> · ${esc(x.data.who || '')}${x.data.task ? ` <small class="muted">${esc(x.data.task)}</small>` : ''}</span><button type="button" class="btn sm" data-hfix="${x.id}">Corriger / supprimer</button></div>`).join('')}</div>`,
     values: { mode: 'new', name: t.data.site, project_id: '' },
     fields: [
       { name: 'mode', label: 'Que faire ?', type: 'select', options: [['new', 'Créer ce chantier'], ['link', 'Rattacher à un chantier existant']], cls: 'full' },
       { name: 'name', label: 'Nom du nouveau chantier', cls: 'full', hint: 'Vous compléterez ensuite le client, l\'adresse et les dates.' },
       { name: 'project_id', label: 'Chantier existant', type: 'select', options: [['', '—'], ...projects.map((p) => [p.id, `${p.number || ''} · ${p.data.name}`])], cls: 'full' },
     ],
-    after(form) { const sync = () => { const n = form.elements.mode.value === 'new'; form.elements.name.closest('.field').style.display = n ? '' : 'none'; form.elements.project_id.closest('.field').style.display = n ? 'none' : ''; }; form.elements.mode.onchange = sync; sync(); },
+    after(form, m) { $$('[data-hfix]', form).forEach((b) => { b.onclick = () => { m.close(); hoursFix(same.find((x) => x.id === +b.dataset.hfix)); }; });
+      const sync = () => { const n = form.elements.mode.value === 'new'; form.elements.name.closest('.field').style.display = n ? '' : 'none'; form.elements.project_id.closest('.field').style.display = n ? 'none' : ''; }; form.elements.mode.onchange = sync; sync(); },
     async onSave(v) {
       // ceux qui ont encodé ces heures voient ensuite le chantier dans leur espace
       const users = [...new Set(same.map((x) => +x.created_by).filter((id) => S.users.some((u) => u.id === id && ['ouvrier', 'soustraitant'].includes(u.role))))];

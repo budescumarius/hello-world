@@ -49,6 +49,14 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   await p.click('[data-submit]'); await p.waitForTimeout(1500);
   const ncd = await p.evaluate(async (id) => (await db.get('expense', id)).data, nc);
   check('note de crédit (-108,23 € HT) validée sans chantier', ncd.status === 'validee' && !ncd.toCheck, `${ncd.status} ${(await p.textContent('#toasts, .toast').catch(() => '')) || ''}`);
+  // accueil : « ✕ » masque un élément réglé autrement, « Tout réafficher » le remet
+  await p.goto(`${BASE}/#/dashboard`); await p.waitForSelector('.todo-x', { timeout: 15000 }).catch(() => {});
+  const n0 = (await p.$$('.todo')).length; const t0 = await p.textContent('.todo .todo-tx b').catch(() => '');
+  if (n0) { await p.click('.todo .todo-x'); await p.waitForTimeout(1800); }
+  const n1 = (await p.$$('.todo')).length; const txt = await p.textContent('#page');
+  check('accueil : ✕ masque l\'élément', n0 > 0 && n1 === n0 - 1 && /élément\(s\) masqué\(s\)/.test(txt) && !(await p.$$eval('.todo .todo-tx b', (l, t) => l.some((x) => x.textContent === t), t0)), `${n0} → ${n1}`);
+  await p.click('[data-unhide]').catch(() => {}); await p.waitForTimeout(1500);
+  check('« Tout réafficher »', (await p.$$('.todo')).length === n0);
   check('aucune erreur JavaScript', errs.length === 0, errs.join(' | '));
   await b.close();
   console.log(failed ? `\n${failed} échec(s)` : '\nFactures validées : conforme');

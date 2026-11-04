@@ -904,6 +904,23 @@ function push_flush(): void {
         if ($code === 404 || $code === 410) q('DELETE FROM push_subs WHERE id = ?', [$s['id']]);
     }
 }
+/** Heures encodées par quelqu'un d'autre, corrigées ou supprimées par le bureau : la personne reçoit la version corrigée (notification + e-mail). */
+function hours_correction_notify(array $me, array $cur, ?array $new, string $reason): void {
+    $owner = (int)$cur['created_by']; if (!$owner || $owner === (int)$me['id']) return;
+    $pname = function ($pid, $d) { if ($pid) { $r = q("SELECT data FROM items WHERE id = ? AND company_id = ? AND type = 'project'", [(int)$pid, cid()])->fetch(); return $r ? (string)((json_decode($r['data'], true) ?: [])['name'] ?? '') : ''; } return (string)($d['site'] ?? ''); };
+    $o = json_decode((string)$cur['data'], true) ?: []; $fmtH = fn($h) => str_replace('.', ',', (string)round((float)$h, 2)) . ' h';
+    $dd = fn($x) => !empty($x) ? date('d/m/Y', strtotime((string)$x)) : '?';
+    $old = $dd($o['date'] ?? '') . ' · ' . $fmtH($o['hours'] ?? 0) . ' · ' . ($pname($cur['project_id'], $o) ?: 'sans chantier') . (!empty($o['task']) ? ' · ' . $o['task'] : '');
+    $why = trim($reason) !== '' ? "
+Motif : " . mb_substr(trim($reason), 0, 300) : '';
+    try {
+        if ($new === null) notify([$owner], 'heures', 'Heures supprimées par ' . $me['name'], "Supprimé : $old$why", '#/t/heures', true);
+        else { $n = json_decode((string)$new['data'], true) ?: [];
+            $now = $dd($n['date'] ?? '') . ' · ' . $fmtH($n['hours'] ?? 0) . ' · ' . ($pname($new['project_id'], $n) ?: 'sans chantier') . (!empty($n['task']) ? ' · ' . $n['task'] : '');
+            if ($now !== $old) notify([$owner], 'heures', 'Heures corrigées par ' . $me['name'], "Avant : $old
+Corrigé : $now$why", '#/t/heures', true); }
+    } catch (Throwable $e) { error_log('[batipro heures] ' . $e->getMessage()); }
+}
 function notify(array $uids, string $kind, string $title, string $body = '', string $href = '', bool $email = false): void {
     notif_tables();
     $uids = array_values(array_unique(array_filter(array_map('intval', $uids))));

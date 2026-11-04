@@ -120,7 +120,7 @@ const db = {
     // résumé des totaux gardé avec le document : les listes l'affichent sans charger toutes les lignes
     if (LITE_TYPES.includes(type) && it.data && Array.isArray(it.data.lines)) { const { _sum, ...d0 } = it.data; it.data._sum = totals(d0); }
     try {
-      if (it.id) return await api('PUT', `items/${type}/${it.id}`, { data: it.data, version: it.version, project_id: it.project_id ?? null, number: it.number, silent: opt.silent, force: opt.force });
+      if (it.id) return await api('PUT', `items/${type}/${it.id}`, { data: it.data, version: it.version, project_id: it.project_id ?? null, number: it.number, silent: opt.silent, force: opt.force, ...(opt.extra || {}) });
       return await api('POST', `items/${type}`, { data: it.data, project_id: it.project_id ?? null, parent_id: it.parent_id ?? null });
     } catch (e) {
       if (e.status === 409) {
@@ -130,7 +130,7 @@ const db = {
       throw e;
     }
   },
-  del: (type, id) => api('DELETE', `items/${type}/${id}`),
+  del: (type, id, q = '') => api('DELETE', `items/${type}/${id}${q}`),
 };
 // Sauvegarde d'un élément en place : met à jour id / version / numéro mais garde le même objet `data`,
 // que les éditeurs ouverts continuent de modifier.

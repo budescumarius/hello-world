@@ -121,6 +121,34 @@ T::test('« ouvrier » : aucune facture visible, création interdite', function 
     T::eq(403, $c);
 });
 
+T::test('heures du terrain : le bureau les corrige (la personne reçoit l\'avant / après et le motif) ou les supprime (prévenue) ; l\'ouvrier ne touche pas à celles des autres', function () use ($admin, $ouvrier, $user) {
+    [$c, $t] = $ouvrier->req('POST', 'items/timesheet', ['data' => ['date' => date('Y-m-d'), 'hours' => 9, 'site' => 'Eduard', 'task' => 'Démolition']]); T::eq(200, $c, json_encode($t));
+    $uid = (int)db()->query("SELECT id FROM users WHERE email = 'ouvrier@test.madibu.local'")->fetchColumn();
+    try { db()->exec("DELETE FROM notifs WHERE user_id = $uid"); } catch (Throwable $e) { /* table créée à la première notification */ }
+    [$c, $r] = $admin->req('PUT', "items/timesheet/{$t['id']}", ['data' => ['date' => date('Y-m-d'), 'hours' => 8.5, 'site' => 'Eduard', 'task' => 'Démolition', 'who' => $t['data']['who'] ?? ''], 'version' => $t['version'], 'project_id' => null, 'notify' => 1, 'reason' => 'pause de midi non déduite']);
+    T::eq(200, $c, json_encode($r)); T::eq(8.5, (float)$r['data']['hours']);
+    $n = db()->query("SELECT * FROM notifs WHERE user_id = $uid ORDER BY id DESC LIMIT 1")->fetch();
+    T::ok($n && str_contains($n['title'], 'Heures corrigées') && str_contains($n['body'], 'Avant : ') && str_contains($n['body'], '9 h') && str_contains($n['body'], '8,5 h') && str_contains($n['body'], 'pause de midi'), json_encode($n, JSON_UNESCAPED_UNICODE));
+    [, $mine] = $ouvrier->req('GET', 'items/timesheet'); $x = array_values(array_filter($mine, fn($y) => $y['id'] === $t['id']))[0] ?? null; T::eq(8.5, (float)($x['data']['hours'] ?? 0), 'l\'ouvrier voit la version corrigée');
+    [$c] = $ouvrier->req('DELETE', "items/timesheet/{$t['id']}&notify=1"); T::ok(in_array($c, [200], true), "l'ouvrier peut encore supprimer sa propre ligne (mois ouvert) : $c");
+    [$c, $t2] = $ouvrier->req('POST', 'items/timesheet', ['data' => ['date' => date('Y-m-d'), 'hours' => 4, 'site' => 'Eduard']]);
+    [$c] = $admin->req('DELETE', "items/timesheet/{$t2['id']}&notify=1&reason=" . rawurlencode('doublon')); T::eq(200, $c);
+    $n = db()->query("SELECT * FROM notifs WHERE user_id = $uid ORDER BY id DESC LIMIT 1")->fetch();
+    T::ok($n && str_contains($n['title'], 'Heures supprimées') && str_contains($n['body'], '4 h') && str_contains($n['body'], 'doublon'), json_encode($n, JSON_UNESCAPED_UNICODE));
+    // sans « notify » (ou ses propres heures) : personne n'est prévenu
+    [$c, $t3] = $admin->req('POST', 'items/timesheet', ['data' => ['date' => date('Y-m-d'), 'hours' => 2, 'site' => 'Eduard']]);
+    $before = (int)db()->query('SELECT COUNT(*) FROM notifs')->fetchColumn();
+    $admin->req('DELETE', "items/timesheet/{$t3['id']}&notify=1"); T::eq($before, (int)db()->query('SELECT COUNT(*) FROM notifs')->fetchColumn(), 'ses propres heures : pas de notification');
+});
+T::test('accueil : « ✕ » masque un élément (par utilisateur, sur tous ses appareils) ; valeurs invalides ignorées', function () use ($admin, $user) {
+    [$c, $h] = $admin->req('PUT', 'todohide', ['hidden' => ['Payer KLEVERS BV|170000' => date('Y-m-d'), 'vieux' => '2000-01-01', 'mauvais' => 'x']]); T::eq(200, $c);
+    T::eq(['Payer KLEVERS BV|170000' => date('Y-m-d')], $h);
+    [, $h] = $admin->req('GET', 'todohide'); T::eq(['Payer KLEVERS BV|170000' => date('Y-m-d')], $h);
+    [, $hu] = $user->req('GET', 'todohide'); T::eq([], $hu, 'propre à chaque utilisateur');
+    [$c] = (new Client())->req('GET', 'todohide'); T::eq(401, $c);
+    $admin->req('PUT', 'todohide', ['hidden' => []]);
+});
+
 echo "\nFichiers\n";
 T::test('envoi d\'un PDF puis lecture authentifiée ; type .php refusé ; accès direct à uploads/ refusé', function () use ($admin) {
     $tmp = tempnam(sys_get_temp_dir(), 'pdf'); file_put_contents($tmp, "%PDF-1.4\n% fichier de test\n");

@@ -163,6 +163,11 @@ route('dashboard', async () => {
   const pLate = all.point.filter(isLatePt);
   if (pLate.length) add(4, { tone: 'info', icon: 'pin', title: `${pLate.length} point(s) de chantier en retard`, sub: 'Réserves et remarques à lever', href: '#/projects', act: ['Voir', '#/projects'] });
   items.sort((a, b) => a.rank - b.rank);
+  // « ✕ » : l'utilisateur a réglé la chose autrement → masquée (sur tous ses appareils) ; elle revient si elle change (autre montant)
+  const hidden = await api('GET', 'todohide').catch(() => ({})) || {};
+  const tkey = (x) => `${x.title}|${x.amount ? Math.round(x.amount * 100) : ''}`;
+  const nHidden = items.filter((x) => hidden[tkey(x)]).length;
+  for (let i = items.length - 1; i >= 0; i--) if (hidden[tkey(items[i])]) items.splice(i, 1);
   // l'argent : à recevoir, en retard, à payer, en attente de signature
   const toCash = inv.filter((x) => ['impayee', 'partielle', 'retard'].includes(x.s.s)); const late = inv.filter((x) => x.s.s === 'retard');
   const toPay = exp.filter((e) => ['apayer', 'partiel', 'retard'].includes(purchState(e)) && purchRest(e.data) > 0.005);
@@ -173,12 +178,13 @@ route('dashboard', async () => {
   page.innerHTML = `<div class="today">
     <section class="today-feed">
       <div class="today-hello"><b>Bonjour ${esc((S.me.name || '').split(' ')[0])}</b><span>${n ? `${n} chose${n > 1 ? 's' : ''} demande${n > 1 ? 'nt' : ''} votre attention` : 'Rien d\'urgent : tout est à jour'}</span></div>
-      ${n ? `<ol class="todo-list">${items.map((x, k) => `<li class="todo tl-${x.tone}" data-k="${k}">
+      ${n ? `<ol class="todo-list">${items.map((x, k) => `<li class="todo tl-${x.tone}" data-k="${k}"><button type="button" class="todo-x" data-hide="${k}" title="Masquer : c'est réglé" aria-label="Masquer">✕</button>
         <span class="todo-ic">${I[x.icon] || I.check}</span>
         <a class="todo-tx" href="${x.href}"><b>${esc(x.title)}</b><small>${esc(x.sub || '')}</small></a>
         ${x.amount ? `<span class="todo-amt">${money(x.amount)}</span>` : ''}
         ${x.done ? `<button type="button" class="todo-go" data-done="${x.done}">${I.check}<span>C'est fait</span></button>` : x.act ? `<a class="todo-go" href="${x.act[1]}">${esc(x.act[0])}</a>` : ''}</li>`).join('')}</ol>`
         : `<div class="todo-empty">${I.check}<b>Tout est à jour</b><span>Aucune facture en retard, aucune tâche en attente. Bon chantier !</span></div>`}
+      ${nHidden ? `<p class="todo-hidden muted sm">${nHidden} élément(s) masqué(s) · <a href="#" data-unhide>Tout réafficher</a></p>` : ''}
     </section>
     <aside class="today-side">
       <div class="card money-card"><div class="card-h"><h3>Votre argent</h3></div>
@@ -189,6 +195,13 @@ route('dashboard', async () => {
       <div class="card works-card"><div class="card-h"><h3>Chantiers en cours</h3><a class="muted" href="#/projects">Tous ›</a></div>
         ${projects.length ? projects.slice(0, 6).map((p) => { const pc = prog(p); return `<a class="wk" href="#/project/${p.id}"><span class="wk-dot" style="--c:${esc(p.data.color || '#1c2550')}"></span><span class="wk-tx"><b>${esc(p.data.name)}</b><small>${esc([st(PST, p.data.status).replace(/<[^>]+>/g, ''), p.data.city].filter(Boolean).join(' · '))}</small>${pc != null ? `<i class="wk-bar"><i style="width:${pc}%"></i></i>` : ''}</span></a>`; }).join('') : '<p class="muted">Aucun chantier en cours.</p>'}</div>
     </aside></div>`;
+  $$('[data-hide]', page).forEach((b) => { b.onclick = async (ev) => {
+    ev.preventDefault(); ev.stopPropagation(); const x = items[+b.dataset.hide]; hidden[tkey(x)] = today();
+    b.closest('.todo').classList.add('gone');
+    try { await api('PUT', 'todohide', { hidden }); } catch (e) { toast(e.message, 4000); }
+    toast('Masqué ✓ (« Tout réafficher » en bas de la liste)', 2500); setTimeout(render, 450);
+  }; });
+  const uh = $('[data-unhide]', page); if (uh) uh.onclick = async (ev) => { ev.preventDefault(); await api('PUT', 'todohide', { hidden: {} }); render(); };
   $$('[data-done]', page).forEach((b) => { b.onclick = async () => {
     const t = all.task.find((x) => x.id === +b.dataset.done); if (!t) return;
     t.data.status = 'done'; b.closest('.todo').classList.add('gone'); await persist('task', t, { silent: true });
