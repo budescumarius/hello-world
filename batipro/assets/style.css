@@ -2247,3 +2247,19 @@ details.card > summary { cursor: pointer; padding: 4px 0; }
 .pt-bar .grow { min-width: 0; overflow-wrap: anywhere; }
 .pt-acts { margin: 10px 0; }
 .pt-mail { display: block; border: 0; background: none; color: var(--primary); cursor: pointer; text-align: left; padding: 2px 0; font-size: 12.5px; }
+
+/* Conseiller du jour (e-mails) */
+@media (min-width: 1101px) { .pm.adv { grid-template-columns: 250px minmax(0, 1fr) minmax(0, 440px); } }
+@media (min-width: 761px) and (max-width: 1100px) { .pm.adv { grid-template-columns: minmax(0, 1fr) minmax(0, 360px); } }
+.pm-adv { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.pm-adv .card { margin: 0; }
+.pm-adv-k { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--muted); }
+.pm-adv-k b { color: var(--text); font-size: 16px; }
+.pm-adv-k .late b { color: var(--danger); }
+.pm-adv-h { margin: 6px 0 0; font-size: 14px; }
+.pm-adv-t { display: flex; align-items: center; gap: 8px; }
+.pm-adv-c p { margin: 6px 0; }
+.pm-adv-c.lvl-haute { border-left: 4px solid var(--danger); }
+.pm-adv-c.lvl-normale { border-left: 4px solid #f08c00; }
+.pm-adv-m { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.pm-adv-ai .pre { white-space: pre-wrap; line-height: 1.5; }

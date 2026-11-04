@@ -19,6 +19,7 @@ $g = '/v1.0';
 $stf = sys_get_temp_dir() . '/graph_state.json'; $state = is_file($stf) ? json_decode((string)file_get_contents($stf), true) : ['moved' => [], 'folder' => null];
 $save = function () use (&$state, $stf) { file_put_contents($stf, json_encode($state)); };
 if ($path === '/test/arrive') { $state['arrive'] = true; $save(); $json(['ok' => true]); }
+if ($path === '/test/twin') { $state['twin'] = true; $save(); $json(['ok' => true]); } // identifiant qui ne diffère d'un autre que par les majuscules (comme chez Microsoft)
 if ($path === "$g/subscriptions" && $_SERVER['REQUEST_METHOD'] === 'POST') { $state['sub'] = json_decode($raw, true); $save(); $json(['id' => 'SUB-1'] + $state['sub'], 201); }
 if (preg_match("#^$g/subscriptions/#", $path)) { if ($_SERVER['REQUEST_METHOD'] === 'DELETE') { http_response_code(204); exit; } $json(['id' => 'SUB-1']); }
 if ($path === "$g/me/mailFolders" && $_SERVER['REQUEST_METHOD'] === 'GET') $json(['value' => $state['folder'] ? [['id' => 'F-PUB', 'displayName' => 'Publicité']] : []]);
@@ -33,6 +34,7 @@ if ($path === "$g/me/mailFolders/inbox/messages") $json(['value' => array_values
     $msg('AAA1', 'C1', 'client@exemple-fictif.be', 'Client Fictif', 'Demande de devis cuisine Dupont', "Bonjour,\nPouvez-vous nous envoyer le devis pour la cuisine avant vendredi ? Acompte prévu de 1.250,00 €.\nVirement depuis BE68 5390 0754 7034.\n\nDe : MADIBU\nEnvoyé : lundi\nAncien message cité", 3600 * 5, true),
     $msg('AAA2', 'C2', 'promo@pub-fictif.be', 'Promo Fictive', 'Soldes -30 % sur l\'outillage', 'Profitez de nos promotions.', 3600 * 30),
     $msg('AAA3', 'C3', 'archi@bureau-fictif.be', 'Architecte Fictif', 'Plans modifiés', 'Voici les plans modifiés.', 3600 * 72),
+    ...(!empty($state['twin']) ? [$msg('aaa3', 'C9', 'compta@chape-fictif.be', 'Chape Fictive', 'Facture chape 2026-118', 'Veuillez trouver notre facture.', 10, true)] : []),
     ...(!empty($state['arrive']) ? [$msg('AAA4', 'C4', 'chef@client-fictif.be', 'Chef Fictif', 'Livraison demain 7h', 'Livraison des blocs demain à 7h, confirmez svp.', 60)] : []),
 ], fn($m) => !in_array($m['id'], $state['moved'], true)))]);
 if ($path === "$g/me/mailFolders/sentitems/messages") $json(['value' => [['id' => 'SSS3', 'conversationId' => 'C3', 'subject' => 'RE: Plans modifiés', 'toRecipients' => [['emailAddress' => ['address' => 'archi@bureau-fictif.be']]], 'sentDateTime' => gmdate('Y-m-d\TH:i:s\Z', $now - 3600 * 48)]]]);

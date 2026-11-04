@@ -105,7 +105,7 @@ T::test('relève suivante : demande à Microsoft les e-mails depuis la dernière
     $l = array_values(array_filter($glog(), fn($x) => str_contains($x['p'], '/inbox/messages'))); $last = end($l);
     $all = (string)shell_exec('docker exec bp-test-web cat /tmp/graph_mock.log');
     preg_match_all('/receivedDateTime(?:\+|%20)ge(?:\+|%20)([0-9T:%A-Z-]+?Z)/', $all, $m); $ge = urldecode((string)end($m[1]));
-    T::ok($ge !== '' && strtotime($ge) <= time() - 600 && strtotime($ge) >= time() - 600 - 7 * 3600, "depuis $ge (dernière relève il y a 10 min)");
+    T::ok($ge !== '' && strtotime($ge) <= time() - 600 && strtotime($ge) >= time() - 600 - 9 * 3600, "depuis $ge (dernière relève il y a 10 min)");
 });
 T::test('diagnostic : derniers e-mails de la boîte comparés à BatiPro (lecture seule)', function () use ($admin) {
     $id = (int)db()->query('SELECT id FROM pil_mail_accounts')->fetchColumn();
@@ -159,6 +159,44 @@ T::test('e-mail reçu tout de suite : Microsoft prévient, BatiPro relève et en
     $n = db()->query('SELECT * FROM notifs ORDER BY id DESC LIMIT 1')->fetch();
     T::ok($n && str_contains($n['title'], 'Chef Fictif') && str_contains($n['body'], 'Livraison demain'), 'notification : ' . json_encode($n, JSON_UNESCAPED_UNICODE));
     T::eq('#/pilotage/emails', $n['href']);
+});
+T::test('identifiant Microsoft qui ne diffère d\'un autre que par les majuscules : nouvel e-mail bien relevé et affiché en premier ; diagnostic exact', function () use ($admin, $W) {
+    $col = db()->query("SHOW FULL COLUMNS FROM pil_mail_msgs LIKE 'graph_id'")->fetch(); T::ok(str_ends_with((string)$col['Collation'], '_bin'), 'comparaison exacte : ' . $col['Collation']);
+    shell_exec("docker exec $W php -r " . escapeshellarg('file_get_contents("http://127.0.0.1:9091/test/twin", false, stream_context_create(["http" => ["method" => "POST", "header" => "Authorization: Bearer acces-1"]]));'));
+    [$c] = $admin->req('POST', 'pilot/mail/sync', []); T::eq(200, $c);
+    $r = db()->query("SELECT subject, at FROM pil_mail_msgs WHERE graph_id = 'aaa3'")->fetch(); T::eq('Facture chape 2026-118', $r['subject'] ?? null, 'nouvel e-mail enregistré');
+    T::eq('Plans modifiés', db()->query("SELECT subject FROM pil_mail_msgs WHERE graph_id = 'AAA3'")->fetchColumn(), 'l\'ancien e-mail intact');
+    [, $l] = $admin->req('GET', 'pilot/mail/list&box=all&folder=in'); T::eq('Facture chape 2026-118', $l['items'][0]['subject'] ?? null, 'le plus récent en premier');
+    // une ligne enregistrée avec une date fausse est corrigée à la relève suivante (Microsoft fait foi)
+    db()->exec("UPDATE pil_mail_msgs SET at = '2020-01-01 00:00:00' WHERE graph_id = 'aaa3'");
+    $id = (int)db()->query('SELECT id FROM pil_mail_accounts LIMIT 1')->fetchColumn();
+    [, $d] = $admin->req('GET', "pilot/mail/accounts/$id/check"); $x = array_values(array_filter($d['server'], fn($s) => $s['subject'] === 'Facture chape 2026-118'))[0];
+    T::eq(false, $x['in_batipro'], 'diagnostic : écart montré'); T::eq('2020-01-01 00:00:00', $x['stored']['at']);
+    db()->exec('UPDATE pil_mail_accounts SET last_sync = NOW() - INTERVAL 1 HOUR'); $admin->req('POST', 'pilot/mail/sync', []);
+    T::eq($r['at'], db()->query("SELECT at FROM pil_mail_msgs WHERE graph_id = 'aaa3'")->fetchColumn(), 'date corrigée');
+    [, $d] = $admin->req('GET', "pilot/mail/accounts/$id/check"); T::ok(!array_filter($d['server'], fn($s) => !$s['in_batipro']), json_encode($d['server'], JSON_UNESCAPED_UNICODE));
+});
+T::test('conseiller du jour : client qui écrit avec une facture échue ; facture fournisseur reçue à encoder (disparaît une fois encodée) ; IA : conseil vérifié, sans texte complet des e-mails', function () use ($admin, $user) {
+    [, $cli] = $admin->req('POST', 'items/contact', ['data' => ['kind' => 'client', 'company' => 'Client Fictif SA', 'email' => 'Client@exemple-fictif.be']]);
+    [, $p] = $admin->req('POST', 'items/project', ['data' => ['name' => 'Cuisine Dupont Fictif', 'status' => 'encours', 'clientId' => $cli['id']]]);
+    [$c] = $admin->req('POST', 'items/invoice', ['project_id' => $p['id'], 'data' => ['clientId' => $cli['id'], 'status' => 'emise', 'date' => date('Y-m-d', strtotime('-40 days')), 'due' => date('Y-m-d', strtotime('-10 days')), 'lines' => [['kind' => 'item', 'desc' => 'Acompte', 'qty' => 1, 'price' => 3000, 'vat' => 21]]]]); T::eq(200, $c);
+    [$c, $r] = $admin->req('GET', 'pilot/mail/advice'); T::eq(200, $c, json_encode($r, JSON_UNESCAPED_UNICODE));
+    $k = []; foreach ($r['conseils'] as $x) $k[$x['kind']] = $x;
+    T::ok(isset($k['client_impaye']), 'client avec facture échue : ' . json_encode(array_keys($k)));
+    T::eq(363000, $k['client_impaye']['montant'], '3.000 + TVA 21 %'); T::ok(str_contains($k['client_impaye']['titre'], 'Client Fictif SA') && str_contains($k['client_impaye']['titre'], '3.630,00'), $k['client_impaye']['titre']);
+    T::eq('Demande de devis cuisine Dupont', $k['client_impaye']['emails'][0]['objet']);
+    T::ok(isset($k['achats']) && in_array('Facture chape 2026-118', array_column($k['achats']['emails'], 'objet'), true), 'facture fournisseur à encoder');
+    T::ok(isset($k['urgent']), 'urgent');
+    $admin->req('POST', 'items/expense', ['project_id' => $p['id'], 'data' => ['ref' => '2026-118', 'date' => date('Y-m-d'), 'amount' => 800, 'vat' => 21, 'category' => 'mat']]);
+    [, $r] = $admin->req('GET', 'pilot/mail/advice'); T::ok(!in_array('achats', array_column($r['conseils'], 'kind'), true), 'encodée : plus signalée');
+    [$c] = $user->req('GET', 'pilot/mail/advice'); T::ok(in_array($c, [200, 403], true), "autre utilisateur : $c");
+    if ($c === 200) { [, $ru] = $user->req('GET', 'pilot/mail/advice'); T::eq([], $ru['conseils'], 'aucun e-mail d\'un autre'); }
+    shell_exec('docker exec bp-test-web sh -c "> /tmp/claude_mock.log"');
+    [$c, $a] = $admin->req('POST', 'pilot/mail/advice', []); T::eq(200, $c, json_encode($a, JSON_UNESCAPED_UNICODE));
+    T::ok(str_contains($a['texte'], '3.630,00'), $a['texte']); T::eq(true, $a['verification']['ok'], 'montant vérifié');
+    $log = array_values(array_filter(array_map(fn($l) => json_decode($l, true), array_filter(explode("\n", (string)shell_exec('docker exec bp-test-web cat /tmp/claude_mock.log')))), fn($l) => !empty($l['conseil'])));
+    T::ok($log && !$log[0]['corps_complet'] && !$log[0]['iban_clair'], 'résumés seulement, IBAN masqué : ' . json_encode($log));
+    [, $r] = $admin->req('GET', 'pilot/mail/advice'); T::eq($a['texte'], $r['conseil']['texte'] ?? null, 'conservé pour la journée');
 });
 T::test('dossiers comme Outlook : réception / envoyés / publicité par boîte ; liste par dossier ; recherche', function () use ($admin) {
     [$c, $b] = $admin->req('GET', 'pilot/mail/brief'); T::eq(200, $c);

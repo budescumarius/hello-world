@@ -36,6 +36,13 @@ if (in_array('classer_emails', array_column($req['tools'] ?? [], 'name'), true))
     }
     $reply([['type' => 'tool_use', 'id' => 'toolu_mock_mail', 'name' => 'classer_emails', 'input' => ['emails' => $out]]], 'tool_use');
 }
+// conseiller e-mails : cite le montant du premier signal qui en a un (doit être vérifié comme exact) ; journal : texte complet d'un e-mail envoyé ?
+if (str_contains($firstQ, 'bras droit de la direction')) {
+    file_put_contents(sys_get_temp_dir() . '/claude_mock.log', json_encode(['conseil' => true, 'corps_complet' => str_contains($firstQ, 'Ancien message cité'), 'iban_clair' => (bool)preg_match('/BE68\s?5390\s?0754\s?7034/', $firstQ)]) . "\n", FILE_APPEND);
+    preg_match('/\{.*\}/s', $firstQ, $m); $d = json_decode($m[0] ?? '{}', true) ?: []; $mt = null;
+    foreach ($d['signaux'] ?? [] as $s) if ($mt === null && !empty($s['montant'])) $mt = (int)$s['montant'];
+    $reply([['type' => 'text', 'text' => "1. **Aujourd'hui** : répondre au client (#1) et lui rappeler les " . ($mt !== null ? $fmt($mt) . ' €' : 'factures') . " impayés.\n2. **À déléguer** : encoder la facture chape.\n3. **Attention** : facture échue.\n4. **Peut attendre** : le reste."]], 'end_turn');
+}
 if (!empty($req['tools']) && !$hasResult) {
     if (preg_match('/PROPOSE.*facture (\d+)/', $firstQ, $mm)) $reply([['type' => 'tool_use', 'id' => 'toolu_mock_p', 'name' => 'proposer_action', 'input' => ['type' => 'relance_client', 'facture_id' => (int)$mm[1], 'justification' => 'Facture en retard de paiement']]], 'tool_use');
     $tool = str_contains(mb_strtolower($firstQ), 'sous-traitant') ? ['totaux_achats', ['type_fournisseur' => 'soustraitant', 'du' => '2026-01-01', 'au' => '2026-12-31']]

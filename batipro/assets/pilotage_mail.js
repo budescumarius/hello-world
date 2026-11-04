@@ -15,7 +15,7 @@ let pmAutoAt = 0; // relève automatique à l'ouverture (au plus toutes les 5 mi
 let pmTimer = null; // page ouverte : relève discrète chaque minute
 const pmTime = (s) => { const d = String(s || ''); if (d.slice(0, 10) === today()) return d.slice(11, 16); const days = (Date.parse(today()) - Date.parse(d.slice(0, 10))) / 864e5; return days < 7 ? new Date(d.slice(0, 10) + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'short' }) + ' ' + d.slice(11, 16) : fmtDate(d.slice(0, 10)); };
 const pmDay = (s) => { const d = String(s || '').slice(0, 10); if (d === today()) return 'Aujourd\'hui'; if (d === addDays(today(), -1)) return 'Hier'; const t = new Date(d + 'T12:00:00'); return (Date.parse(today()) - Date.parse(d)) / 864e5 < 7 ? t.toLocaleDateString('fr-BE', { weekday: 'long' }).replace(/^./, (c) => c.toUpperCase()) : t.toLocaleDateString('fr-BE', { day: 'numeric', month: 'long', year: 'numeric' }); };
-const PM_FOLDERS = { todo: 'À faire', drafts: 'Réponses préparées', waiting: 'Sans réponse > 2 jours', new: 'Pas encore triés', in: 'Boîte de réception', sent: 'Envoyés', pub: 'Publicité', info: 'Pour info' };
+const PM_FOLDERS = { advice: 'Conseiller du jour', todo: 'À faire', drafts: 'Réponses préparées', waiting: 'Sans réponse > 2 jours', new: 'Pas encore triés', in: 'Boîte de réception', sent: 'Envoyés', pub: 'Publicité', info: 'Pour info' };
 
 async function pilMailPage() {
   const q = new URLSearchParams(location.hash.split('?')[1] || '');
@@ -54,19 +54,19 @@ async function pilMailPage() {
   $$('[data-recon]', page).forEach((x) => { x.onclick = () => reconnect(b.accounts.find((a) => a.id === +x.dataset.recon)); });
   $$('[data-diag]', page).forEach((x) => { x.onclick = () => pilMailCheck(+x.dataset.diag); });
   $$('[data-sync2]', page).forEach((x) => { x.onclick = () => pilMailSync(x); });
-  const st = ui.pm || (ui.pm = { box: 'all', folder: b.counts.todo ? 'todo' : 'in' });
+  const st = ui.pm || (ui.pm = { box: 'all', folder: 'advice' });
   if (st.box !== 'all' && !b.accounts.some((a) => a.id === +st.box)) { st.box = 'all'; st.folder = 'in'; }
   const fold = (box, folder, label, n, cls = '') => `<button type="button" class="pm-f ${String(st.box) === String(box) && st.folder === folder ? 'on' : ''} ${cls}" data-box="${box}" data-folder="${folder}"><span class="grow">${label}</span>${n ? `<span class="pm-n">${n}</span>` : ''}</button>`;
   const fs = b.folders || [];
   const unreadAll = fs.reduce((a, f) => a + f.unread, 0);
   const navHtml = `<div class="pm-sec">Briefing</div>
-      ${fold('all', 'todo', '⚑ À faire', b.counts.todo, b.counts.urgent ? 'urgent' : '')}${fold('all', 'drafts', '✎ Réponses préparées', b.counts.drafts)}${fold('all', 'waiting', '⏱ Sans réponse > 2 j', b.counts.waiting)}${b.counts.new ? fold('all', 'new', 'Pas encore triés', b.counts.new) : ''}${fold('all', 'info', 'Pour info', 0)}
+      ${fold('all', 'advice', '💡 Conseiller du jour', 0)}${fold('all', 'todo', '⚑ À faire', b.counts.todo, b.counts.urgent ? 'urgent' : '')}${fold('all', 'drafts', '✎ Réponses préparées', b.counts.drafts)}${fold('all', 'waiting', '⏱ Sans réponse > 2 j', b.counts.waiting)}${b.counts.new ? fold('all', 'new', 'Pas encore triés', b.counts.new) : ''}${fold('all', 'info', 'Pour info', 0)}
       <div class="pm-sec">Toutes les boîtes</div>${fold('all', 'in', 'Boîte de réception', unreadAll)}${fold('all', 'sent', 'Envoyés', 0)}
       ${fs.map((f) => { const a = b.accounts.find((x) => x.id === f.id) || {}; return `<div class="pm-sec pm-acc-h" style="--c:${accColor(f.id)}"><span class="grow" title="${esc(f.email)}">${esc(f.email)}<small class="pm-kind">${f.kind === 'imap' ? 'Hostico (IMAP)' : 'Microsoft 365'}</small></span>${a.status && a.status !== 'ok' ? '<span class="late" title="' + esc(a.last_error || '') + '">⚠</span>' : ''}<button type="button" class="icon-btn sm" data-acc="${f.id}" aria-label="Options de la boîte">${I.more}</button></div>
         ${fold(f.id, 'in', 'Boîte de réception', f.unread)}${fold(f.id, 'sent', 'Envoyés', 0)}${f.pub ? fold(f.id, 'pub', 'Publicité', f.pub) : ''}`; }).join('')}`;
-  const selOpts = [...[['all', 'todo'], ['all', 'drafts'], ['all', 'waiting'], ...(b.counts.new ? [['all', 'new']] : []), ['all', 'info'], ['all', 'in'], ['all', 'sent']].map(([bx, f]) => [`${bx}|${f}`, `${bx === 'all' && ['in', 'sent'].includes(f) ? 'Toutes les boîtes – ' : ''}${PM_FOLDERS[f]}`]),
+  const selOpts = [...[['all', 'advice'], ['all', 'todo'], ['all', 'drafts'], ['all', 'waiting'], ...(b.counts.new ? [['all', 'new']] : []), ['all', 'info'], ['all', 'in'], ['all', 'sent']].map(([bx, f]) => [`${bx}|${f}`, `${bx === 'all' && ['in', 'sent'].includes(f) ? 'Toutes les boîtes – ' : ''}${PM_FOLDERS[f]}`]),
     ...fs.flatMap((f) => [[`${f.id}|in`, `${f.email} – Boîte de réception${f.unread ? ` (${f.unread})` : ''}`], [`${f.id}|sent`, `${f.email} – Envoyés`], ...(f.pub ? [[`${f.id}|pub`, `${f.email} – Publicité`]] : [])])];
-  page.insertAdjacentHTML('beforeend', `<div class="pm ${st.sel ? 'reading' : ''}">
+  page.insertAdjacentHTML('beforeend', `<div class="pm ${st.sel ? 'reading' : ''} ${st.folder === 'advice' ? 'adv' : ''}">
       <nav class="pm-nav">${navHtml}</nav>
       <section class="pm-list"><div class="pm-lh"><select class="pm-sel" data-sel aria-label="Dossier">${selOpts.map(([v, l]) => `<option value="${v}" ${v === `${st.box}|${st.folder}` ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
         <b class="pm-title">${esc(PM_FOLDERS[st.folder] || '')}${st.box !== 'all' ? ` <small class="muted">${esc((b.accounts.find((a) => a.id === +st.box) || {}).email || '')}</small>` : ''}</b>
@@ -116,6 +116,7 @@ async function pilMailPage() {
   };
   async function load(before) {
     if (st.folder === 'drafts') { drawRows(false); return; }
+    if (st.folder === 'advice') { pilAdviceLoad(rowsEl, { open: openMsg, go: go2, b }); return; }
     const r = await api('GET', `pilot/mail/list&box=${st.box}&folder=${st.folder}${st.q ? `&q=${encodeURIComponent(st.q)}` : ''}${before ? `&before=${encodeURIComponent(before)}` : ''}`);
     items = before ? [...items, ...r.items] : r.items; drawRows(r.more);
   }
@@ -262,7 +263,7 @@ async function pilMailCheck(id) {
     ${r.last_error ? `<div class="alert warn"><b>Dernière erreur :</b> ${esc(r.last_error)}</div>` : ''}
     ${r.error ? `<div class="alert warn"><b>Lecture du serveur impossible :</b> ${esc(r.error)}</div>` : ''}
     <p>${missing ? `<b class="late">${missing} e-mail(s) récent(s) pas encore dans BatiPro</b>` : '<b class="good">✓ Les 10 derniers e-mails sont dans BatiPro</b>'} · BatiPro : ${r.in_batipro} e-mail(s) relevé(s), le plus récent du ${esc(r.newest_batipro || '—')}</p>
-    <table class="dt"><thead><tr><th>Reçu</th><th>De</th><th>Objet</th><th>Dans BatiPro</th></tr></thead><tbody>${r.server.map((x) => `<tr><td class="nowrap">${esc(x.at || '')}</td><td>${esc(x.from)}</td><td>${esc(x.subject)}</td><td>${x.in_batipro ? '✓' : '<b class="late">non</b>'}</td></tr>`).join('')}</tbody></table>
+    <table class="dt"><thead><tr><th>Reçu</th><th>De</th><th>Objet</th><th>Dans BatiPro</th></tr></thead><tbody>${r.server.map((x) => `<tr><td class="nowrap">${esc(x.at || '')}</td><td>${esc(x.from)}</td><td>${esc(x.subject)}</td><td>${x.in_batipro ? '✓' : x.stored ? `<b class="late">confondu</b><br><small class="muted">enregistré : ${esc(x.stored.at)} · ${esc(x.stored.subject || '')}</small>` : '<b class="late">non</b>'}</td></tr>`).join('')}</tbody></table>
     <div class="btns" style="margin-top:10px"><button class="btn primary" data-now>Relever maintenant</button></div>`;
   $('[data-now]', md.el).onclick = () => { md.close(); pilMailSync(null, false); };
 }
@@ -311,4 +312,37 @@ function pilMailConnections(b) {
   const am = $('[data-cadd-ms]', md.el); if (am) am.onclick = () => { md.close(); pilMsConnect(); };
   $('[data-cadd-imap]', md.el).onclick = () => { md.close(); pilImapConnect(); };
   const det = $('.pm-conf', md.el); if (det) det.addEventListener('toggle', () => { const d = $('[data-conf]', det); if (!d.childElementCount) pilMailConfig(d); }, { once: true });
+}
+
+// ---------------------------------------------------------------- Conseiller du jour : signaux calculés par BatiPro + conseil de l'IA (montants vérifiés)
+const PM_LVL = { haute: ['Prioritaire', '#e5484d'], normale: ['À faire', '#f08c00'], info: ['Info', '#868e96'] };
+async function pilAdviceLoad(el, ctx) {
+  el.innerHTML = '<p class="muted pm-pad">Analyse de vos e-mails…</p>';
+  let r; try { r = await api('GET', 'pilot/mail/advice'); } catch (e) { el.innerHTML = `<p class="muted pm-pad">${esc(e.message)}</p>`; return; }
+  const s = r.stats || {};
+  const aiCard = () => {
+    const c = r.conseil && r.conseil.date === today() ? r.conseil : null;
+    if (!r.ai) return '<div class="alert warn"><b>Conseil personnalisé de l\'IA : désactivé.</b> Pour que BatiPro lise vos e-mails, les classe, prépare les réponses et vous conseille chaque jour, ajoutez la clé API Claude dans <a href="#/settings/ai">Paramètres → Assistant IA</a>. Les signaux ci-dessous fonctionnent déjà sans IA.</div>';
+    return `<div class="card pm-adv-ai"><div class="card-h"><h3>✦ Conseil du jour</h3>${c ? (c.verification.ok ? badge('Montants vérifiés', '#2f9e44') : badge('Montant(s) à vérifier', '#e5484d')) : ''}</div>
+      ${c ? `<div class="pre">${esc(c.texte)}</div>${c.verification.ok ? '' : `<p class="late">Montant(s) absent(s) des données : ${c.verification.unverified.map(esc).join(', ')}</p>`}<p class="muted sm">Rédigé à ${esc(String(c.at).slice(11, 16))} à partir des signaux ci-dessous. L'IA conseille, vous décidez : rien n'est envoyé ni exécuté.</p>`
+        : '<p class="muted">L\'IA lit vos e-mails ouverts (résumés), les signaux et les factures en retard, et vous dit quoi faire en premier, quoi déléguer et à quoi faire attention.</p>'}
+      <div class="btns"><button class="btn ${c ? '' : 'primary'}" data-adv-ai>${c ? 'Actualiser le conseil' : 'Me conseiller maintenant'}</button></div></div>`;
+  };
+  const draw = () => {
+    el.innerHTML = `<div class="pm-adv">
+      <div class="pm-adv-k"><span><b>${s.recus_aujourdhui || 0}</b> reçus aujourd'hui</span><span><b>${s.ouverts || 0}</b> à traiter</span><span class="${s.urgents ? 'late' : ''}"><b>${s.urgents || 0}</b> urgents</span><span><b>${s.attente || 0}</b> vous attendent</span><span><b>${s.brouillons || 0}</b> réponses prêtes</span></div>
+      ${aiCard()}
+      <h3 class="pm-adv-h">Ce que BatiPro a repéré</h3>
+      ${(r.conseils || []).map((c) => `<div class="card pm-adv-c lvl-${c.level}" data-kind="${esc(c.kind)}"><div class="pm-adv-t">${badge(PM_LVL[c.level][0], PM_LVL[c.level][1])}<b class="grow">${esc(c.titre)}</b></div>
+        <p>${esc(c.detail)}</p>${(c.emails || []).length ? `<div class="pm-adv-m">${c.emails.map((m) => `<button type="button" class="pt-mail" data-m="${m.id}">✉ ${esc(m.de || '')} – ${esc((m.objet || '(sans objet)').slice(0, 60))} <small class="muted">${esc(pmTime(m.recu))}</small></button>`).join('')}</div>` : ''}
+        ${c.href ? `<div class="btns"><button class="btn sm" data-go="${esc(c.href)}">${c.href === 'drafts' ? 'Relire les réponses' : c.href === 'new' ? 'Voir' : 'Ouvrir'}</button></div>` : ''}</div>`).join('') || '<div class="card"><p class="good">✓ Rien d\'important à signaler : vos e-mails sont à jour.</p></div>'}
+      <p class="muted sm">Source : ${esc(r._source || '')}.</p></div>`;
+    $$('[data-m]', el).forEach((x) => { x.onclick = () => ctx.open(+x.dataset.m); });
+    $$('[data-go]', el).forEach((x) => { x.onclick = () => { const h = x.dataset.go; if (h.startsWith('#')) location.hash = h; else ctx.go('all', h); }; });
+    const ai = $('[data-adv-ai]', el); if (ai) ai.onclick = async () => {
+      ai.disabled = true; ai.textContent = 'Analyse en cours…';
+      try { r.conseil = await api('POST', 'pilot/mail/advice', {}); draw(); } catch (e) { toast(e.message, 6000); ai.disabled = false; ai.textContent = 'Me conseiller maintenant'; }
+    };
+  };
+  draw();
 }

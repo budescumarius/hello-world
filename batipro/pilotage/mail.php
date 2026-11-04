@@ -41,6 +41,14 @@ function pil_mail_migrate(): void {
     if (!q("SHOW COLUMNS FROM pil_mail_msgs LIKE 'msg_ref'")->fetch()) db()->exec('ALTER TABLE pil_mail_msgs ADD msg_ref TEXT NULL AFTER conv_id');
     if (!q("SHOW COLUMNS FROM pil_mail_msgs LIKE 'moved'")->fetch()) db()->exec('ALTER TABLE pil_mail_msgs ADD moved VARCHAR(120) NULL, ADD keep_in TINYINT NOT NULL DEFAULT 0');
     if (!q("SHOW COLUMNS FROM pil_mail_accounts LIKE 'opts'")->fetch()) db()->exec('ALTER TABLE pil_mail_accounts ADD opts TEXT NULL');
+    // Les identifiants Microsoft distinguent majuscules et minuscules (…AbC ≠ …abc) : comparés sans en tenir compte, un nouvel e-mail
+    // était pris pour un ancien (ignoré à la relève, « ✓ » au diagnostic). Comparaison exacte (binaire), sans toucher aux données.
+    $col = q("SHOW FULL COLUMNS FROM pil_mail_msgs LIKE 'graph_id'")->fetch();
+    if ($col && !str_ends_with((string)($col['Collation'] ?? ''), '_bin')) {
+        db()->exec('ALTER TABLE pil_mail_msgs MODIFY graph_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL, MODIFY conv_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL');
+        foreach (q("SELECT id, opts FROM pil_mail_accounts WHERE kind = 'graph'")->fetchAll() as $a) { // relire 14 jours : rattraper les e-mails ignorés
+            $o = json_decode((string)$a['opts'], true) ?: []; unset($o['since_utc']); q('UPDATE pil_mail_accounts SET opts = ? WHERE id = ?', [json_encode($o), $a['id']]); }
+    }
     db()->exec('CREATE TABLE IF NOT EXISTS pil_mail_oauth (state CHAR(32) PRIMARY KEY, company_id INT NOT NULL, user_id INT NOT NULL, verifier VARCHAR(100) NOT NULL, created_at DATETIME NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 }
 
@@ -205,9 +213,10 @@ function pil_mail_mask(string $t): string {
     return preg_replace('/\b(?:\d[ -]?){13,19}\b/', '[numéro masqué]', $t);
 }
 /** E-mail déjà connu (même Message-ID) revenu dans la boîte de réception : nouvelle adresse, et on ne le range plus. */
-function pil_mail_back_in(array $acc, string $mid, string $graphId): bool {
+function pil_mail_back_in(array $acc, string $mid, string $graphId, ?string $from = null): bool {
     if ($mid === '') return false;
-    $id = q("SELECT id FROM pil_mail_msgs WHERE account_id = ? AND folder = 'in' AND msg_ref LIKE ? LIMIT 1", [$acc['id'], '%"mid":' . addcslashes(json_encode($mid, JSON_UNESCAPED_SLASHES), '%_\\') . '%'])->fetchColumn();
+    $id = q("SELECT id FROM pil_mail_msgs WHERE account_id = ? AND folder = 'in' AND msg_ref LIKE ?" . ($from !== null && $from !== '' ? ' AND (from_email = ? OR from_email IS NULL OR from_email = \'\')' : '') . ' LIMIT 1',
+        array_merge([$acc['id'], '%"mid":' . addcslashes(json_encode($mid, JSON_UNESCAPED_SLASHES), '%_\\') . '%'], $from !== null && $from !== '' ? [$from] : []))->fetchColumn();
     if (!$id) return false;
     q('UPDATE pil_mail_msgs SET keep_in = IF(moved IS NULL, keep_in, 1), moved = NULL, graph_id = ? WHERE id = ? AND graph_id <> ?', [$graphId, $id, $graphId]); // MySQL : affectations dans l'ordre (keep_in lit l'ancien « moved »)
     return true;
@@ -235,13 +244,15 @@ function pil_mail_sync(array $acc, bool $deep = false): array {
                 $from = $isIn ? ($m['from']['emailAddress'] ?? []) : ['address' => $acc['email'], 'name' => $acc['name']];
                 $to = array_map(fn($r) => ['email' => mb_strtolower((string)($r['emailAddress']['address'] ?? '')), 'name' => (string)($r['emailAddress']['name'] ?? '')], array_merge($m['toRecipients'] ?? [], $m['ccRecipients'] ?? []));
                 $mid = (string)($m['internetMessageId'] ?? '');
-                if ($isIn && !q('SELECT id FROM pil_mail_msgs WHERE account_id = ? AND graph_id = ?', [$acc['id'], (string)$m['id']])->fetch() && pil_mail_back_in($acc, $mid, (string)$m['id'])) continue;
+                if ($isIn && !q('SELECT id FROM pil_mail_msgs WHERE account_id = ? AND graph_id = ?', [$acc['id'], (string)$m['id']])->fetch() && pil_mail_back_in($acc, $mid, (string)$m['id'], mb_strtolower((string)($from['address'] ?? '')))) {
+                    q("UPDATE pil_mail_msgs SET at = ? WHERE account_id = ? AND graph_id = ?", [$at, $acc['id'], (string)$m['id']]); continue; }
                 $r = q('INSERT IGNORE INTO pil_mail_msgs (company_id, account_id, graph_id, conv_id, msg_ref, folder, from_email, from_name, to_json, subject, at, preview, body, atts, web_link, is_read, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     [cid(), $acc['id'], (string)$m['id'], (string)($m['conversationId'] ?? ''), json_encode(['mid' => $mid], JSON_UNESCAPED_SLASHES), $isIn ? 'in' : 'sent', mb_strtolower((string)($from['address'] ?? '')), mb_substr((string)($from['name'] ?? ''), 0, 190),
                      json_encode($to, JSON_UNESCAPED_UNICODE), mb_substr((string)($m['subject'] ?? ''), 0, 500), $at, mb_substr((string)($m['bodyPreview'] ?? ''), 0, 400),
                      pil_mail_clean((string)($m['body']['content'] ?? '')), $isIn && !empty($m['hasAttachments']) ? '[]' : null, mb_substr((string)($m['webLink'] ?? ''), 0, 1000) ?: null, $isIn ? (!empty($m['isRead']) ? 1 : 0) : 1, now()]);
                 if ($r->rowCount()) $new++;
-                elseif ($isIn) q('UPDATE pil_mail_msgs SET is_read = ? WHERE account_id = ? AND graph_id = ?', [!empty($m['isRead']) ? 1 : 0, $acc['id'], (string)$m['id']]);
+                // déjà relevé : lu/non lu, et la date et l'objet de Microsoft font foi (corrige une ligne enregistrée de travers)
+                elseif ($isIn) q("UPDATE pil_mail_msgs SET is_read = ?, at = ?, folder = 'in', subject = ? WHERE account_id = ? AND graph_id = ?", [!empty($m['isRead']) ? 1 : 0, $at, mb_substr((string)($m['subject'] ?? ''), 0, 500), $acc['id'], (string)$m['id']]);
             }
             $url = $j['@odata.nextLink'] ?? null;
         }
@@ -562,8 +573,12 @@ function pil_mail_route(string $method, array $seg, array $me): void {
         try {
             if (($acc['kind'] ?? 'graph') === 'graph') {
                 $j = pil_graph($acc, 'GET', '/me/mailFolders/inbox/messages?' . http_build_query(['$top' => 10, '$orderby' => 'receivedDateTime desc', '$select' => 'id,subject,from,receivedDateTime']));
-                foreach ($j['value'] ?? [] as $m) $out['server'][] = ['at' => date('Y-m-d H:i:s', strtotime((string)$m['receivedDateTime'])), 'from' => (string)($m['from']['emailAddress']['address'] ?? ''), 'subject' => mb_substr((string)($m['subject'] ?? ''), 0, 90),
-                    'in_batipro' => (bool)q('SELECT id FROM pil_mail_msgs WHERE account_id = ? AND graph_id = ?', [$id, (string)$m['id']])->fetch()];
+                foreach ($j['value'] ?? [] as $m) { $row = q('SELECT id, at, folder, moved, subject FROM pil_mail_msgs WHERE account_id = ? AND graph_id = ?', [$id, (string)$m['id']])->fetch();
+                    $at = date('Y-m-d H:i:s', strtotime((string)$m['receivedDateTime'])); $subj = mb_substr((string)($m['subject'] ?? ''), 0, 90);
+                    // « dans BatiPro » seulement si c'est bien le même e-mail (même date et même objet), sinon l'écart est montré
+                    $same = $row && abs(strtotime($row['at']) - strtotime($at)) <= 120 && mb_substr((string)$row['subject'], 0, 90) === $subj;
+                    $out['server'][] = ['at' => $at, 'from' => (string)($m['from']['emailAddress']['address'] ?? ''), 'subject' => $subj, 'in_batipro' => (bool)$same,
+                        'stored' => $row ? ['at' => $row['at'], 'folder' => $row['folder'], 'moved' => $row['moved'], 'subject' => mb_substr((string)$row['subject'], 0, 90)] : null]; }
             } else {
                 require_once __DIR__ . '/imap.php'; $c = pil_imap_open(pil_imap_conf($acc)); $uv = $c->examine('INBOX'); $u = $c->since(date('Y-m-d', time() - 3 * 86400)); rsort($u);
                 foreach ($c->fetch(array_slice($u, 0, 10), false) as $m) { $p = pil_mime_parse((string)$m['raw']); $out['server'][] = ['at' => $p['date'] ?? $m['date'], 'from' => $p['from'][0], 'subject' => mb_substr($p['subject'], 0, 90), 'in_batipro' => (bool)q('SELECT id FROM pil_mail_msgs WHERE account_id = ? AND (graph_id = ? OR msg_ref LIKE ?)', [$id, "imap:in:$uv:{$m['uid']}", '%' . addcslashes((string)$p['mid'], '%_\\') . '%'])->fetch()]; }
@@ -600,6 +615,12 @@ function pil_mail_route(string $method, array $seg, array $me): void {
         out(['results' => $res, 'errors' => $errs, 'brief' => pil_mail_brief($me, date('Y-m-d'))]);
     }
     if ($a === 'brief' && $method === 'GET') out(pil_mail_brief($me, date('Y-m-d')));
+    // conseiller : signaux calculés (toujours) + conseil du jour de l'IA (à la demande, conservé pour la journée)
+    if ($a === 'advice') {
+        require_once __DIR__ . '/mail_advice.php';
+        if ($method === 'GET') { $s = setting('mail_advice_' . (int)$me['id'], null); out(pil_mail_signals($me, date('Y-m-d')) + ['ai' => pil_ai_ready(), 'conseil' => is_array($s) ? $s : null]); }
+        if ($method === 'POST') { pil_need($me, 'ai.ask'); @set_time_limit(120); out(pil_mail_advice_ai($me, date('Y-m-d'))); }
+    }
     if ($a === 'list' && $method === 'GET') out(pil_mail_list($me, $_GET));
     if ($a === 'msgs' && $id) {
         $m = q('SELECT m.* FROM pil_mail_msgs m JOIN pil_mail_accounts a ON a.id = m.account_id WHERE m.id = ? AND m.company_id = ? AND a.user_id = ?', [$id, cid(), $me['id']])->fetch();
