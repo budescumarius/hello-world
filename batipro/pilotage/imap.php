@@ -382,6 +382,41 @@ function pil_imap_tidy(array $acc, array $rows): int {
     }
     return $n;
 }
+/** Corbeille du serveur (dossier marqué \Trash, sinon d'après le nom ; créée au besoin). */
+function pil_imap_trash_folder(PilImap $c, array $t): string {
+    [$list, $delim] = $c->folders(); $byName = null;
+    foreach ($list as $name => $flags) { if (preg_match('/\\Trash\b/i', $flags)) return $name;
+        if (!$byName && preg_match('/(^|[.\/])(trash|deleted|deleted items|deleted messages|corbeille|supprim|papierkorb|prullenbak|verwijderd)/iu', $name)) $byName = $name; }
+    if ($byName) return $byName;
+    $prefix = !empty($t['sent']) && preg_match('/^INBOX' . preg_quote($delim, '/') . '/i', $t['sent']) ? 'INBOX' . $delim : '';
+    if (!$c->create($prefix . 'Trash')) throw new PilError('Corbeille introuvable sur le serveur.', 502);
+    return $prefix . 'Trash';
+}
+function pil_imap_trash(array $acc, array $row): string {
+    $none = 'imap:trash:0:0:' . $row['id'];
+    if (!preg_match('/^imap:(in|sent|pub):(\d+):(\d+)$/', (string)$row['graph_id'], $g) || !(int)$g[3]) return $none; // plus sur le serveur : seulement la Corbeille de BatiPro
+    $t = pil_imap_conf($acc); $c = pil_imap_open($t); $caps = $c->caps();
+    $folder = $g[1] === 'in' ? 'INBOX' : ($g[1] === 'sent' ? (string)($t['sent'] ?? '') : pil_imap_pub_folder($c, $t));
+    if ($c->select($folder) !== (int)$g[2]) return $none;
+    $res = $c->move((int)$g[3], pil_imap_trash_folder($c, $t), $caps);
+    if ($res === null) throw new PilError('Le serveur n\'a pas pu mettre le message à la corbeille.', 502);
+    return $res[1] ? "imap:trash:{$res[0]}:{$res[1]}" : $none;
+}
+function pil_imap_restore(array $acc, array $row, string $from): string {
+    if (!preg_match('/^imap:trash:(\d+):(\d+)$/', (string)$row['graph_id'], $g) || !(int)$g[2]) throw new PilError('Restaurez ce message depuis la corbeille de votre messagerie.', 409);
+    $t = pil_imap_conf($acc); $c = pil_imap_open($t); $caps = $c->caps();
+    if ($c->select(pil_imap_trash_folder($c, $t)) !== (int)$g[1]) throw new PilError('La corbeille a changé sur le serveur : restaurez ce message depuis votre messagerie.', 409);
+    $res = $c->move((int)$g[2], $from === 'sent' && !empty($t['sent']) ? (string)$t['sent'] : 'INBOX', $caps);
+    if ($res === null) throw new PilError('Le serveur n\'a pas pu restaurer le message.', 502);
+    return $res[1] ? "imap:$from:{$res[0]}:{$res[1]}" : "imap:$from:0:0:" . $row['id'];
+}
+function pil_imap_purge(array $acc, array $row): void {
+    if (!preg_match('/^imap:trash:(\d+):(\d+)$/', (string)$row['graph_id'], $g) || !(int)$g[2]) return;
+    $t = pil_imap_conf($acc); $c = pil_imap_open($t); $caps = $c->caps();
+    if ($c->select(pil_imap_trash_folder($c, $t)) !== (int)$g[1]) return;
+    $c->cmd('UID STORE ' . (int)$g[2] . ' +FLAGS.SILENT (\\Deleted)');
+    if (isset($caps['UIDPLUS'])) $c->cmd('UID EXPUNGE ' . (int)$g[2]); // sans UIDPLUS : marqué supprimé, vidé par la messagerie
+}
 function pil_imap_unmove(array $acc, array $row): string {
     if (!preg_match('/^imap:pub:(\d+):(\d+)$/', (string)$row['graph_id'], $g) || !(int)$g[2]) throw new PilError('Déplacez ce message à la main dans Outlook (dossier « ' . PIL_MAIL_PUB . ' »).', 409);
     $t = pil_imap_conf($acc); $c = pil_imap_open($t); $caps = $c->caps();

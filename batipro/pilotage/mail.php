@@ -128,7 +128,7 @@ function pil_graph(array $acc, string $method, string $path, $body = null): arra
     if (!str_starts_with($url, pil_ms_graph() . '/')) throw new PilError('Adresse Microsoft inattendue.', 502);
     [$code, $j, $raw] = pil_http($method, $url, ['Authorization: Bearer ' . pil_mail_access($acc), 'Prefer: outlook.body-content-type="text"'], $body);
     if ($code >= 400) throw new PilError('Outlook : ' . mb_substr((string)($j['error']['message'] ?? "HTTP $code"), 0, 300), $code === 401 ? 401 : 502);
-    return $j;
+    return is_array($j) ? $j : []; // 204 (suppression) : pas de contenu
 }
 
 // --------------------------------------------------------------------- Connexion d'une boîte
@@ -215,10 +215,10 @@ function pil_mail_mask(string $t): string {
 /** E-mail déjà connu (même Message-ID) revenu dans la boîte de réception : nouvelle adresse, et on ne le range plus. */
 function pil_mail_back_in(array $acc, string $mid, string $graphId, ?string $from = null): bool {
     if ($mid === '') return false;
-    $id = q("SELECT id FROM pil_mail_msgs WHERE account_id = ? AND folder = 'in' AND msg_ref LIKE ?" . ($from !== null && $from !== '' ? ' AND (from_email = ? OR from_email IS NULL OR from_email = \'\')' : '') . ' LIMIT 1',
+    $id = q("SELECT id FROM pil_mail_msgs WHERE account_id = ? AND folder IN ('in', 'trash') AND msg_ref LIKE ?" . ($from !== null && $from !== '' ? ' AND (from_email = ? OR from_email IS NULL OR from_email = \'\')' : '') . ' LIMIT 1',
         array_merge([$acc['id'], '%"mid":' . addcslashes(json_encode($mid, JSON_UNESCAPED_SLASHES), '%_\\') . '%'], $from !== null && $from !== '' ? [$from] : []))->fetchColumn();
     if (!$id) return false;
-    q('UPDATE pil_mail_msgs SET keep_in = IF(moved IS NULL, keep_in, 1), moved = NULL, graph_id = ? WHERE id = ? AND graph_id <> ?', [$graphId, $id, $graphId]); // MySQL : affectations dans l'ordre (keep_in lit l'ancien « moved »)
+    q('UPDATE pil_mail_msgs SET keep_in = IF(moved IS NULL AND folder = \'in\', keep_in, 1), folder = \'in\', moved = NULL, graph_id = ? WHERE id = ? AND graph_id <> ?', [$graphId, $id, $graphId]); // MySQL : affectations dans l'ordre (keep_in lit l'ancien « moved »)
     return true;
 }
 function pil_mail_sync(array $acc, bool $deep = false): array {
@@ -380,8 +380,8 @@ function pil_mail_brief(array $me, string $today): array {
 function pil_mail_folders(array $me): array {
     $out = [];
     foreach (q('SELECT id, email, name, kind FROM pil_mail_accounts WHERE company_id = ? AND user_id = ? ORDER BY id', [cid(), $me['id']])->fetchAll() as $a) {
-        $c = q("SELECT SUM(folder = 'in' AND moved IS NULL) AS inbox, SUM(folder = 'in' AND moved IS NULL AND is_read = 0) AS unread, SUM(folder = 'sent') AS sent, SUM(folder = 'in' AND moved IS NOT NULL) AS pub, MAX(IF(folder = 'in', at, NULL)) AS newest FROM pil_mail_msgs WHERE account_id = ?", [$a['id']])->fetch();
-        $out[] = ['id' => (int)$a['id'], 'email' => $a['email'], 'name' => $a['name'], 'kind' => $a['kind'] ?? 'graph', 'inbox' => (int)$c['inbox'], 'unread' => (int)$c['unread'], 'sent' => (int)$c['sent'], 'pub' => (int)$c['pub'], 'newest' => $c['newest']];
+        $c = q("SELECT SUM(folder = 'in' AND moved IS NULL) AS inbox, SUM(folder = 'in' AND moved IS NULL AND is_read = 0) AS unread, SUM(folder = 'sent') AS sent, SUM(folder = 'trash') AS trash, SUM(folder = 'in' AND moved IS NOT NULL) AS pub, MAX(IF(folder = 'in', at, NULL)) AS newest FROM pil_mail_msgs WHERE account_id = ?", [$a['id']])->fetch();
+        $out[] = ['id' => (int)$a['id'], 'email' => $a['email'], 'name' => $a['name'], 'kind' => $a['kind'] ?? 'graph', 'inbox' => (int)$c['inbox'], 'unread' => (int)$c['unread'], 'sent' => (int)$c['sent'], 'trash' => (int)$c['trash'], 'pub' => (int)$c['pub'], 'newest' => $c['newest']];
     }
     return $out;
 }
@@ -396,6 +396,7 @@ function pil_mail_list(array $me, array $g): array {
     $f = (string)($g['folder'] ?? 'in');
     $w[] = match ($f) {
         'sent' => "m.folder = 'sent'",
+        'trash' => "m.folder = 'trash'",
         'pub' => "m.folder = 'in' AND m.moved IS NOT NULL",
         'todo' => "m.folder = 'in' AND m.state = 'a_faire'",
         'waiting' => "m.folder = 'in' AND m.state = 'a_faire' AND m.analysis LIKE '%\"reponse_necessaire\":true%' AND m.at < '" . date('Y-m-d H:i:s', time() - 2 * 86400) . "'",
@@ -552,6 +553,34 @@ function pil_mail_mark(array $acc, array $m, bool $read): void {
         } else pil_graph($acc, 'PATCH', '/me/messages/' . rawurlencode((string)$m['graph_id']), ['isRead' => $read]);
     } catch (Throwable $e) { error_log('[pilotage mail] lu/non lu : ' . $e->getMessage()); }
 }
+/** Supprimer : l'e-mail va dans la corbeille (« Éléments supprimés » d'Outlook, corbeille de Hostico) et dans la Corbeille de BatiPro, d'où il peut être restauré. */
+function pil_mail_trash(array $me, array $acc, array $m): void {
+    $ref = json_decode((string)$m['msg_ref'], true) ?: []; $ref['trash_from'] = $m['folder'] === 'sent' ? 'sent' : 'in';
+    if (($acc['kind'] ?? 'graph') === 'imap') { require_once __DIR__ . '/imap.php'; $gid = pil_imap_trash($acc, $m); }
+    else {
+        $gid = (string)$m['graph_id'];
+        try { $j = pil_graph($acc, 'POST', '/me/messages/' . rawurlencode($gid) . '/move', ['destinationId' => 'deleteditems']); $gid = (string)($j['id'] ?? $gid); }
+        catch (PilError $e) { if (!preg_match('/not found|ErrorItemNotFound/i', $e->getMessage())) throw $e; } // déjà supprimé dans Outlook
+    }
+    q("UPDATE pil_mail_msgs SET folder = 'trash', moved = NULL, graph_id = ?, msg_ref = ?, is_read = 1 WHERE id = ?", [$gid, json_encode($ref, JSON_UNESCAPED_SLASHES), $m['id']]);
+    q("DELETE FROM pil_mail_drafts WHERE msg_id = ? AND status = 'brouillon'", [$m['id']]);
+    pil_audit('email_supprime', 'mail_msg', (int)$m['id'], ['boite' => $acc['email'], 'de' => $m['from_email'], 'objet' => $m['subject'], 'recu' => $m['at']], null);
+}
+/** Restaurer depuis la Corbeille : retour dans la boîte de réception (ou Envoyés), aussi dans Outlook / Hostico ; jamais rangé à nouveau. */
+function pil_mail_restore(array $me, array $acc, array $m): void {
+    $ref = json_decode((string)$m['msg_ref'], true) ?: []; $from = ($ref['trash_from'] ?? 'in') === 'sent' ? 'sent' : 'in'; unset($ref['trash_from']);
+    if (($acc['kind'] ?? 'graph') === 'imap') { require_once __DIR__ . '/imap.php'; $gid = pil_imap_restore($acc, $m, $from); }
+    else { $j = pil_graph($acc, 'POST', '/me/messages/' . rawurlencode((string)$m['graph_id']) . '/move', ['destinationId' => $from === 'sent' ? 'sentitems' : 'inbox']); $gid = (string)($j['id'] ?? $m['graph_id']); }
+    q('UPDATE pil_mail_msgs SET folder = ?, graph_id = ?, msg_ref = ?, keep_in = 1 WHERE id = ?', [$from, $gid, json_encode($ref, JSON_UNESCAPED_SLASHES), $m['id']]);
+    pil_audit('email_restaure', 'mail_msg', (int)$m['id'], null, ['boite' => $acc['email'], 'objet' => $m['subject']]);
+}
+/** Supprimer définitivement (depuis la Corbeille). */
+function pil_mail_purge(array $me, array $acc, array $m): void {
+    if (($acc['kind'] ?? 'graph') === 'imap') { require_once __DIR__ . '/imap.php'; pil_imap_purge($acc, $m); }
+    else { try { pil_graph($acc, 'DELETE', '/me/messages/' . rawurlencode((string)$m['graph_id'])); } catch (PilError $e) { if (!preg_match('/not found|ErrorItemNotFound/i', $e->getMessage())) throw $e; } }
+    q('DELETE FROM pil_mail_drafts WHERE msg_id = ?', [$m['id']]); q('DELETE FROM pil_mail_msgs WHERE id = ?', [$m['id']]);
+    pil_audit('email_supprime_definitivement', 'mail_msg', (int)$m['id'], ['boite' => $acc['email'], 'de' => $m['from_email'], 'objet' => $m['subject'], 'recu' => $m['at']], null);
+}
 /** Liste des pièces jointes (relue chez Microsoft si elle n'est pas encore connue). */
 function pil_mail_atts(array $acc, array $m): array {
     if ($m['atts'] === null) return [];
@@ -679,6 +708,8 @@ function pil_mail_route(string $method, array $seg, array $me): void {
             header('Content-Length: ' . strlen($f['data'])); echo $f['data']; exit;
         }
         if ($method === 'GET' && !$m['is_read'] && $m['folder'] === 'in') { pil_mail_mark($macc, $m, true); $m['is_read'] = 1; }
+        if ($method === 'DELETE') { if ($m['folder'] === 'trash') pil_mail_purge($me, $macc, $m); else pil_mail_trash($me, $macc, $m); out(['ok' => true]); }
+        if ($method === 'POST' && ($seg[4] ?? '') === 'restore') { if ($m['folder'] !== 'trash') fail(409, 'Cet e-mail n\'est pas dans la corbeille.'); pil_mail_restore($me, $macc, $m); out(['ok' => true]); }
         if ($method === 'POST' && in_array($seg[4] ?? '', ['read', 'unread'], true)) { pil_mail_mark($macc, $m, $seg[4] === 'read'); out(['ok' => true, 'is_read' => $seg[4] === 'read']); }
         if ($method === 'GET') out(['atts' => pil_mail_atts($macc, $m)] + pil_mail_msg_out($m) + ['body' => $m['body'], 'to' => json_decode((string)$m['to_json'], true) ?: [],
             'drafts' => array_map('pil_mail_draft_out', q('SELECT * FROM pil_mail_drafts WHERE msg_id = ? ORDER BY id DESC', [$id])->fetchAll())]);

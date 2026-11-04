@@ -225,6 +225,30 @@ T::test('lu / non lu comme Outlook : ouvrir = lu (aussi dans Outlook) ; « non l
     $patch = array_values(array_filter($glog(), fn($x) => $x['m'] === 'PATCH' && str_ends_with($x['p'], '/me/messages/AAA1')));
     T::ok(json_decode(end($patch)['body'], true) === ['isRead' => false], 'Outlook prévenu : non lu');
 });
+T::test('supprimer un e-mail : va dans « Éléments supprimés » d\'Outlook (récupérable), sort de BatiPro, ne revient pas à la relève ; journalisé ; pas celui d\'un autre', function () use ($admin, $user, $glog) {
+    $id = (int)db()->query("SELECT id FROM pil_mail_msgs WHERE graph_id = 'AAA4'")->fetchColumn(); T::ok($id > 0, "e-mail trouvé");
+    [$c] = $user->req('DELETE', "pilot/mail/msgs/$id"); T::ok(in_array($c, [403, 404], true), "autre utilisateur : $c");
+    [$c] = $admin->req('DELETE', "pilot/mail/msgs/$id", null, ['noCsrf' => true]); T::eq(403, $c, 'sans en-tête anti-CSRF : refusé');
+    [$c, $r] = $admin->req('DELETE', "pilot/mail/msgs/$id"); T::eq(200, $c, json_encode($r));
+    $mv = array_values(array_filter($glog(), fn($x) => $x['m'] === 'POST' && str_ends_with($x['p'], '/me/messages/AAA4/move'))); T::ok($mv && json_decode(end($mv)['body'], true) === ['destinationId' => 'deleteditems'], 'déplacé dans Éléments supprimés');
+    T::eq(0, (int)db()->query("SELECT COUNT(*) FROM pil_mail_msgs WHERE graph_id = 'AAA4'")->fetchColumn(), 'plus dans la boîte de réception');
+    [, $l] = $admin->req('GET', 'pilot/mail/list&box=all&folder=trash'); T::eq(['Livraison demain 7h'], array_column($l['items'], 'subject'), 'visible dans la Corbeille');
+    [, $l] = $admin->req('GET', 'pilot/mail/list&box=all&folder=in'); T::ok(!in_array('Livraison demain 7h', array_column($l['items'], 'subject'), true), 'pas dans la réception');
+    [, $b] = $admin->req('GET', 'pilot/mail/brief'); T::eq(1, $b['folders'][0]['trash'], 'compteur corbeille');
+    db()->exec('UPDATE pil_mail_accounts SET last_sync = NOW() - INTERVAL 1 HOUR'); $admin->req('POST', 'pilot/mail/sync', []);
+    T::eq(1, (int)db()->query("SELECT COUNT(*) FROM pil_mail_msgs WHERE subject = 'Livraison demain 7h'")->fetchColumn(), 'relève : pas de doublon');
+    T::eq(1, (int)db()->query("SELECT COUNT(*) FROM pil_audit WHERE action = 'email_supprime'")->fetchColumn(), 'journalisé');
+    // restaurer : retour dans la boîte de réception (aussi dans Outlook)
+    [$c] = $admin->req('POST', "pilot/mail/msgs/$id/restore", []); T::eq(200, $c);
+    T::eq(['in', 'AAA4'], array_values(db()->query("SELECT folder, graph_id FROM pil_mail_msgs WHERE id = $id")->fetch(PDO::FETCH_NUM)), 'restauré');
+    db()->exec('UPDATE pil_mail_accounts SET last_sync = NOW() - INTERVAL 1 HOUR'); $admin->req('POST', 'pilot/mail/sync', []);
+    T::eq(1, (int)db()->query("SELECT COUNT(*) FROM pil_mail_msgs WHERE subject = 'Livraison demain 7h'")->fetchColumn(), 'restauré : pas de doublon');
+    // supprimer puis supprimer définitivement depuis la Corbeille
+    $admin->req('DELETE', "pilot/mail/msgs/$id"); [$c] = $admin->req('DELETE', "pilot/mail/msgs/$id"); T::eq(200, $c);
+    T::ok((bool)array_filter($glog(), fn($x) => $x['m'] === 'DELETE' && str_ends_with($x['p'], '/me/messages/DEL-AAA4')), 'supprimé définitivement chez Outlook');
+    T::eq(0, (int)db()->query("SELECT COUNT(*) FROM pil_mail_msgs WHERE id = $id")->fetchColumn(), 'sorti de BatiPro');
+    T::eq(1, (int)db()->query("SELECT COUNT(*) FROM pil_audit WHERE action = 'email_supprime_definitivement'")->fetchColumn());
+});
 T::test('déconnexion : boîte, e-mails relevés et brouillons effacés de BatiPro', function () use ($admin) {
     $id = (int)db()->query('SELECT id FROM pil_mail_accounts')->fetchColumn();
     [$c] = $admin->req('DELETE', "pilot/mail/accounts/$id"); T::eq(200, $c);
@@ -292,6 +316,17 @@ T::test('envoi : seulement confirmé ; part par le SMTP de la boîte, en répons
     T::ok(str_contains($sm[0]['data'], 'In-Reply-To: <q1@exemple-fictif.be>'), 'réponse au bon e-mail');
     preg_match("/\n\n(.+)$/s", $sm[0]['data'], $mm); T::ok(str_contains((string)base64_decode(preg_replace('/\s+/', '', $mm[1] ?? '')), 'relu par la direction'), 'texte relu');
     T::ok((bool)array_filter($ilog('imap_mock.log'), fn($x) => !empty($x['append'])), 'copie dans INBOX.Sent');
+});
+T::test('boîte hébergée : supprimer = corbeille du serveur, sorti de BatiPro', function () use ($admin, $ilog) {
+    $id = (int)db()->query("SELECT id FROM pil_mail_msgs WHERE from_email = 'client@exemple-fictif.be' AND graph_id LIKE 'imap:in:%'")->fetchColumn(); T::ok($id > 0, "e-mail trouvé");
+    [$c] = $admin->req('DELETE', "pilot/mail/msgs/$id"); T::eq(200, $c, 'supprimé');
+    T::ok((bool)array_filter($ilog('imap_mock.log'), fn($x) => str_ends_with((string)($x['move'] ?? ''), '->trash')), 'mis à la corbeille du serveur (INBOX.Trash)');
+    T::ok(str_starts_with((string)db()->query("SELECT graph_id FROM pil_mail_msgs WHERE id = $id AND folder = 'trash'")->fetchColumn(), 'imap:trash:779:'), 'dans la Corbeille');
+    [$c, $r] = $admin->req('POST', "pilot/mail/msgs/$id/restore", []); T::eq(200, $c, json_encode($r));
+    T::ok(str_starts_with((string)db()->query("SELECT graph_id FROM pil_mail_msgs WHERE id = $id AND folder = 'in'")->fetchColumn(), 'imap:in:777:'), 'restauré dans la boîte de réception');
+    $admin->req('DELETE', "pilot/mail/msgs/$id"); [$c] = $admin->req('DELETE', "pilot/mail/msgs/$id"); T::eq(200, $c);
+    T::ok((bool)array_filter($ilog('imap_mock.log'), fn($x) => isset($x['expunge']) && $x['sel'] === 'trash'), 'effacé de la corbeille du serveur');
+    T::eq(0, (int)db()->query("SELECT COUNT(*) FROM pil_mail_msgs WHERE id = $id")->fetchColumn());
 });
 T::test('boîte connectée par Hostico puis reconnectée avec Microsoft : passe sur Microsoft 365 (plus jamais relevée chez Hostico)', function () use ($admin) {
     T::eq('imap', db()->query('SELECT kind FROM pil_mail_accounts')->fetchColumn());

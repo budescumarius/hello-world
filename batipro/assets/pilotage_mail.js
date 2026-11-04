@@ -15,10 +15,12 @@ const pilRcptParse = (s) => String(s || '').split(/[,;\s]+/).map((x) => x.trim()
 // Téléphone : liste puis e-mail en plein écran (bouton « Retour »).
 const PM_COLORS = ['#3b5bdb', '#0c8599', '#e8590c', '#7048e8', '#2f9e44', '#c2255c'];
 let pmAutoAt = 0; // relève automatique à l'ouverture (au plus toutes les 5 minutes)
+let pmDelKey = null; // touche « Suppr » : supprime l'e-mail ouvert (après confirmation)
+document.addEventListener('keydown', (e) => { if ((e.key === 'Delete') && pmDelKey && location.hash.startsWith('#/pilotage/emails') && !/INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '') && document.querySelector('.pm-read [data-del]')) { e.preventDefault(); pmDelKey(); } });
 let pmTimer = null; // page ouverte : relève discrète chaque minute
 const pmTime = (s) => { const d = String(s || ''); if (d.slice(0, 10) === today()) return d.slice(11, 16); const days = (Date.parse(today()) - Date.parse(d.slice(0, 10))) / 864e5; return days < 7 ? new Date(d.slice(0, 10) + 'T12:00:00').toLocaleDateString('fr-BE', { weekday: 'short' }) + ' ' + d.slice(11, 16) : fmtDate(d.slice(0, 10)); };
 const pmDay = (s) => { const d = String(s || '').slice(0, 10); if (d === today()) return 'Aujourd\'hui'; if (d === addDays(today(), -1)) return 'Hier'; const t = new Date(d + 'T12:00:00'); return (Date.parse(today()) - Date.parse(d)) / 864e5 < 7 ? t.toLocaleDateString('fr-BE', { weekday: 'long' }).replace(/^./, (c) => c.toUpperCase()) : t.toLocaleDateString('fr-BE', { day: 'numeric', month: 'long', year: 'numeric' }); };
-const PM_FOLDERS = { advice: 'Conseiller du jour', todo: 'À faire', drafts: 'Réponses préparées', waiting: 'Sans réponse > 2 jours', new: 'Pas encore triés', in: 'Boîte de réception', sent: 'Envoyés', pub: 'Publicité', info: 'Pour info' };
+const PM_FOLDERS = { advice: 'Conseiller du jour', todo: 'À faire', drafts: 'Réponses préparées', waiting: 'Sans réponse > 2 jours', new: 'Pas encore triés', in: 'Boîte de réception', sent: 'Envoyés', trash: 'Corbeille', pub: 'Publicité', info: 'Pour info' };
 
 async function pilMailPage() {
   const q = new URLSearchParams(location.hash.split('?')[1] || '');
@@ -64,11 +66,11 @@ async function pilMailPage() {
   const unreadAll = fs.reduce((a, f) => a + f.unread, 0);
   const navHtml = `<div class="pm-sec">Briefing</div>
       ${fold('all', 'advice', '💡 Conseiller du jour', 0)}${fold('all', 'todo', '⚑ À faire', b.counts.todo, b.counts.urgent ? 'urgent' : '')}${fold('all', 'drafts', '✎ Réponses préparées', b.counts.drafts)}${fold('all', 'waiting', '⏱ Sans réponse > 2 j', b.counts.waiting)}${b.counts.new ? fold('all', 'new', 'Pas encore triés', b.counts.new) : ''}${fold('all', 'info', 'Pour info', 0)}
-      <div class="pm-sec">Toutes les boîtes</div>${fold('all', 'in', 'Boîte de réception', unreadAll)}${fold('all', 'sent', 'Envoyés', 0)}
+      <div class="pm-sec">Toutes les boîtes</div>${fold('all', 'in', 'Boîte de réception', unreadAll)}${fold('all', 'sent', 'Envoyés', 0)}${fold('all', 'trash', '🗑 Corbeille', 0)}
       ${fs.map((f) => { const a = b.accounts.find((x) => x.id === f.id) || {}; return `<div class="pm-sec pm-acc-h" style="--c:${accColor(f.id)}"><span class="grow" title="${esc(f.email)}">${esc(f.email)}<small class="pm-kind">${f.kind === 'imap' ? 'Hostico (IMAP)' : 'Microsoft 365'}</small></span>${a.status && a.status !== 'ok' ? '<span class="late" title="' + esc(a.last_error || '') + '">⚠</span>' : ''}<button type="button" class="icon-btn sm" data-acc="${f.id}" aria-label="Options de la boîte">${I.more}</button></div>
-        ${fold(f.id, 'in', 'Boîte de réception', f.unread)}${fold(f.id, 'sent', 'Envoyés', 0)}${f.pub ? fold(f.id, 'pub', 'Publicité', f.pub) : ''}`; }).join('')}`;
-  const selOpts = [...[['all', 'advice'], ['all', 'todo'], ['all', 'drafts'], ['all', 'waiting'], ...(b.counts.new ? [['all', 'new']] : []), ['all', 'info'], ['all', 'in'], ['all', 'sent']].map(([bx, f]) => [`${bx}|${f}`, `${bx === 'all' && ['in', 'sent'].includes(f) ? 'Toutes les boîtes – ' : ''}${PM_FOLDERS[f]}`]),
-    ...fs.flatMap((f) => [[`${f.id}|in`, `${f.email} – Boîte de réception${f.unread ? ` (${f.unread})` : ''}`], [`${f.id}|sent`, `${f.email} – Envoyés`], ...(f.pub ? [[`${f.id}|pub`, `${f.email} – Publicité`]] : [])])];
+        ${fold(f.id, 'in', 'Boîte de réception', f.unread)}${fold(f.id, 'sent', 'Envoyés', 0)}${f.pub ? fold(f.id, 'pub', 'Publicité', f.pub) : ''}${fold(f.id, 'trash', '🗑 Corbeille', 0)}`; }).join('')}`;
+  const selOpts = [...[['all', 'advice'], ['all', 'todo'], ['all', 'drafts'], ['all', 'waiting'], ...(b.counts.new ? [['all', 'new']] : []), ['all', 'info'], ['all', 'in'], ['all', 'sent'], ['all', 'trash']].map(([bx, f]) => [`${bx}|${f}`, `${bx === 'all' && ['in', 'sent', 'trash'].includes(f) ? 'Toutes les boîtes – ' : ''}${PM_FOLDERS[f]}`]),
+    ...fs.flatMap((f) => [[`${f.id}|in`, `${f.email} – Boîte de réception${f.unread ? ` (${f.unread})` : ''}`], [`${f.id}|sent`, `${f.email} – Envoyés`], ...(f.pub ? [[`${f.id}|pub`, `${f.email} – Publicité`]] : []), [`${f.id}|trash`, `${f.email} – Corbeille`]])];
   page.insertAdjacentHTML('beforeend', `<div class="pm ${st.sel ? 'reading' : ''} ${st.folder === 'advice' ? 'adv' : ''}">
       <nav class="pm-nav">${navHtml}</nav>
       <section class="pm-list"><div class="pm-lh"><select class="pm-sel" data-sel aria-label="Dossier">${selOpts.map(([v, l]) => `<option value="${v}" ${v === `${st.box}|${st.folder}` ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
@@ -129,7 +131,7 @@ async function pilMailPage() {
     $$('.pm-row', rowsEl).forEach((x) => x.classList.toggle('on', +x.dataset.id === id));
     readEl.innerHTML = '<p class="muted pm-pad">Chargement…</p>';
     let m; try { m = await api('GET', `pilot/mail/msgs/${id}`); } catch (e) { st.sel = null; saveUi(); readEl.innerHTML = `<p class="muted pm-pad">${esc(e.message)}</p>`; return; }
-    const a = m.analysis || {}; const acc = b.accounts.find((x) => x.id === m.account_id) || {}; const it = items.find((x) => x.id === id) || {}; const sent = it.folder === 'sent';
+    const a = m.analysis || {}; const acc = b.accounts.find((x) => x.id === m.account_id) || {}; const it = items.find((x) => x.id === id) || {}; const trash = it.folder === 'trash'; const sentF = it.folder === 'sent'; const sent = sentF || trash;
     const setRead = (read) => {
       if (sent || !!it.is_read === read) return; it.is_read = read;
       const r = $(`.pm-row[data-id="${id}"]`, rowsEl); if (r) r.classList.toggle('unread', !read);
@@ -140,16 +142,30 @@ async function pilMailPage() {
     const draft = (m.drafts || []).find((x) => x.status === 'brouillon');
     readEl.innerHTML = `<div class="pm-rh"><button type="button" class="btn sm pm-back" data-back>← Retour</button>
         <h2>${esc(m.subject || '(sans objet)')}</h2>
-        <div class="pm-meta"><b>${esc(sent ? (acc.email || '') : (m.from_name || m.from_email || ''))}</b> ${sent ? '' : `&lt;${esc(m.from_email || '')}&gt;`}<br><small class="muted">À : ${esc(pilRcptTxt(m.to))} · ${fmtDT(m.at)}</small><br>
-          <small>${sent ? 'Envoyé depuis' : 'Reçu sur'} <span class="pm-acc" style="--c:${accColor(m.account_id)}">${esc(acc.email || '')}</span></small></div>
-        <div class="btns">${sent ? '' : `<button class="btn sm primary" data-reply>${draft ? 'Relire la réponse préparée…' : 'Répondre'}</button>`}${m.state === 'a_faire' || m.state === 'nouveau' ? '<button class="btn sm good" data-done>✓ Fait</button><button class="btn sm ghost" data-ign>Ignorer</button>' : ''}${sent ? '' : '<button class="btn sm ghost" data-unread>Marquer comme non lu</button>'}${m.moved ? '<button class="btn sm" data-unmove>Remettre dans la boîte de réception</button>' : ''}${m.web_link ? `<a class="btn sm ghost" href="${esc(m.web_link)}" target="_blank" rel="noopener">Ouvrir dans Outlook ↗</a>` : ''}</div></div>
+        <div class="pm-meta"><b>${esc(sentF ? (acc.email || '') : (m.from_name || m.from_email || ''))}</b> ${sentF ? '' : `&lt;${esc(m.from_email || '')}&gt;`}<br><small class="muted">À : ${esc(pilRcptTxt(m.to))} · ${fmtDT(m.at)}</small><br>
+          <small>${sentF ? 'Envoyé depuis' : 'Reçu sur'} <span class="pm-acc" style="--c:${accColor(m.account_id)}">${esc(acc.email || '')}</span></small></div>
+        ${trash ? '<div class="alert warn pm-trash">🗑 Dans la corbeille. Vous pouvez le restaurer, ou le supprimer définitivement.</div>' : ''}
+        <div class="btns">${trash ? '<button class="btn sm primary" data-restore>↩ Restaurer</button><button class="btn sm ghost danger" data-del>Supprimer définitivement</button>' : ''}${sent ? '' : `<button class="btn sm primary" data-reply>${draft ? 'Relire la réponse préparée…' : 'Répondre'}</button>`}${m.state === 'a_faire' || m.state === 'nouveau' ? '<button class="btn sm good" data-done>✓ Fait</button><button class="btn sm ghost" data-ign>Ignorer</button>' : ''}${sent ? '' : '<button class="btn sm ghost" data-unread>Marquer comme non lu</button>'}${trash ? '' : '<button class="btn sm ghost danger" data-del title="Supprimer (touche Suppr)">🗑 Supprimer</button>'}${m.moved ? '<button class="btn sm" data-unmove>Remettre dans la boîte de réception</button>' : ''}${m.web_link ? `<a class="btn sm ghost" href="${esc(m.web_link)}" target="_blank" rel="noopener">Ouvrir dans Outlook ↗</a>` : ''}</div></div>
       ${a.resume || a.action ? `<div class="alert info">${a.resume ? `<b>Résumé :</b> ${esc(a.resume)}` : ''}${a.action ? `<br><b>À faire :</b> ${esc(a.action)}${a.echeance ? ` (avant le ${fmtDate(a.echeance)})` : ''}` : ''}${a.pieces ? `<br><b>Pièces jointes :</b> ${esc(a.pieces)}` : ''}${(a.non_verifie || []).length ? `<br><span class="late">⚠ Montant à vérifier : ${a.non_verifie.map(esc).join(', ')}</span>` : ''}</div>` : ''}
       ${pilAttsHtml(m)}
       <div class="pre pm-body">${esc(m.body || m.preview || '')}</div>
-      ${sent ? '' : `<label class="field"><span>Chantier</span><select data-p><option value="">—</option>${projects.map((p) => `<option value="${p.id}" ${p.id === m.project_id ? 'selected' : ''}>${esc(p.data.name)}</option>`).join('')}</select></label>`}`;
+      ${sent || trash ? '' : `<label class="field"><span>Chantier</span><select data-p><option value="">—</option>${projects.map((p) => `<option value="${p.id}" ${p.id === m.project_id ? 'selected' : ''}>${esc(p.data.name)}</option>`).join('')}</select></label>`}`;
     $('[data-back]', readEl).onclick = () => { st.sel = null; saveUi(); wrap.classList.remove('reading'); $$('.pm-row', rowsEl).forEach((x) => x.classList.remove('on')); };
     const done = async (state) => { await api('PUT', `pilot/mail/msgs/${id}`, { state }); toast(state === 'fait' ? 'Marqué fait' : 'Ignoré'); render(); };
     const d1 = $('[data-done]', readEl); if (d1) d1.onclick = () => done('fait');
+    // supprimer : vers « Éléments supprimés » d'Outlook (ou la corbeille), puis l'e-mail suivant s'ouvre
+    const del = async () => {
+      if (!confirm(trash ? `Supprimer DÉFINITIVEMENT « ${m.subject || '(sans objet)'} » ?\n\nIl ne pourra plus être restauré.` : `Supprimer « ${m.subject || '(sans objet)'} » ?\n\nIl va dans la Corbeille (ici et dans ${acc.kind === 'imap' ? 'votre messagerie' : '« Éléments supprimés » d\'Outlook'}) : vous pouvez le restaurer.`)) return;
+      try { await api('DELETE', `pilot/mail/msgs/${id}`); } catch (e) { toast(e.message, 6000); return; }
+      leave(trash ? 'E-mail supprimé définitivement' : 'Mis dans la corbeille');
+    };
+    const leave = (msg) => {
+      setRead(true); const i = items.findIndex((x) => x.id === id); items = items.filter((x) => x.id !== id); toast(msg);
+      const next = items[i] || items[i - 1]; drawRows(false);
+      if (next && wrap.offsetWidth > 760) openMsg(next.id); else { st.sel = null; saveUi(); wrap.classList.remove('reading'); readEl.innerHTML = '<div class="pm-empty muted">Sélectionnez un e-mail pour le lire.</div>'; }
+    };
+    $('[data-del]', readEl).onclick = del; pmDelKey = del;
+    const rs = $('[data-restore]', readEl); if (rs) rs.onclick = async () => { try { await api('POST', `pilot/mail/msgs/${id}/restore`, {}); } catch (e) { toast(e.message, 6000); return; } leave('Restauré'); };
     const ur = $('[data-unread]', readEl); if (ur) ur.onclick = async () => { await api('POST', `pilot/mail/msgs/${id}/unread`, {}); setRead(false); toast('Marqué comme non lu'); st.sel = null; saveUi(); wrap.classList.remove('reading'); readEl.innerHTML = '<div class="pm-empty muted">Sélectionnez un e-mail pour le lire.</div>'; $$('.pm-row', rowsEl).forEach((x) => x.classList.remove('on')); };
     const d2 = $('[data-ign]', readEl); if (d2) d2.onclick = () => done('ignore');
     const um = $('[data-unmove]', readEl); if (um) um.onclick = async () => { um.disabled = true; try { await api('POST', `pilot/mail/msgs/${id}/unmove`); toast('Remis dans la boîte de réception (il ne sera plus rangé)'); render(); } catch (e) { um.disabled = false; toast(e.message, 6000); } };

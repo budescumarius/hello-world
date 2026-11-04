@@ -24,7 +24,8 @@ if ($path === "$g/subscriptions" && $_SERVER['REQUEST_METHOD'] === 'POST') { $st
 if (preg_match("#^$g/subscriptions/#", $path)) { if ($_SERVER['REQUEST_METHOD'] === 'DELETE') { http_response_code(204); exit; } $json(['id' => 'SUB-1']); }
 if ($path === "$g/me/mailFolders" && $_SERVER['REQUEST_METHOD'] === 'GET') $json(['value' => $state['folder'] ? [['id' => 'F-PUB', 'displayName' => 'Publicité']] : []]);
 if ($path === "$g/me/mailFolders" && $_SERVER['REQUEST_METHOD'] === 'POST') { $state['folder'] = json_decode($raw, true)['displayName'] ?? ''; $save(); $json(['id' => 'F-PUB', 'displayName' => $state['folder']], 201); }
-if (preg_match("#^$g/me/messages/([^/]+)/move$#", $path, $mv) && $_SERVER['REQUEST_METHOD'] === 'POST') { $to = json_decode($raw, true)['destinationId'] ?? ''; if ($to === 'F-PUB') $state['moved'][] = $mv[1]; else $state['moved'] = array_values(array_diff($state['moved'], [preg_replace('/^MOVED-/', '', $mv[1])])); $save(); $json(['id' => $to === 'F-PUB' ? 'MOVED-' . $mv[1] : preg_replace('/^MOVED-/', '', $mv[1])], 201); }
+if (preg_match("#^$g/me/messages/([^/]+)/move$#", $path, $mv) && $_SERVER['REQUEST_METHOD'] === 'POST') { $to = json_decode($raw, true)['destinationId'] ?? ''; if ($to === 'deleteditems') { $state['deleted'][] = $mv[1]; $save(); $json(['id' => 'DEL-' . $mv[1]], 201); }
+    if ($to === 'inbox' && str_starts_with($mv[1], 'DEL-')) { $o = substr($mv[1], 4); $state['deleted'] = array_values(array_diff($state['deleted'] ?? [], [$o])); $save(); $json(['id' => $o], 201); } if ($to === 'F-PUB') $state['moved'][] = $mv[1]; else $state['moved'] = array_values(array_diff($state['moved'], [preg_replace('/^MOVED-/', '', $mv[1])])); $save(); $json(['id' => $to === 'F-PUB' ? 'MOVED-' . $mv[1] : preg_replace('/^MOVED-/', '', $mv[1])], 201); }
 if ($path === "$g/me") $json(['displayName' => 'Direction Fictive', 'mail' => 'direction@madibu-fictif.be', 'userPrincipalName' => 'direction@madibu-fictif.be']);
 $now = time();
 $msg = fn($id, $conv, $from, $name, $subj, $body, $ago, $att = false) => ['id' => $id, 'conversationId' => $conv, 'subject' => $subj, 'from' => ['emailAddress' => ['address' => $from, 'name' => $name]],
@@ -36,12 +37,13 @@ if ($path === "$g/me/mailFolders/inbox/messages") $json(['value' => array_values
     $msg('AAA3', 'C3', 'archi@bureau-fictif.be', 'Architecte Fictif', 'Plans modifiés', 'Voici les plans modifiés.', 3600 * 72),
     ...(!empty($state['twin']) ? [$msg('aaa3', 'C9', 'compta@chape-fictif.be', 'Chape Fictive', 'Facture chape 2026-118', 'Veuillez trouver notre facture.', 10, true)] : []),
     ...(!empty($state['arrive']) ? [$msg('AAA4', 'C4', 'chef@client-fictif.be', 'Chef Fictif', 'Livraison demain 7h', 'Livraison des blocs demain à 7h, confirmez svp.', 60)] : []),
-], fn($m) => !in_array($m['id'], $state['moved'], true)))]);
+], fn($m) => !in_array($m['id'], $state['moved'], true) && !in_array($m['id'], $state['deleted'] ?? [], true)))]);
 if ($path === "$g/me/mailFolders/sentitems/messages") $json(['value' => [['id' => 'SSS3', 'conversationId' => 'C3', 'subject' => 'RE: Plans modifiés', 'toRecipients' => [['emailAddress' => ['address' => 'archi@bureau-fictif.be']]], 'sentDateTime' => gmdate('Y-m-d\TH:i:s\Z', $now - 3600 * 48)]]]);
 if ($path === "$g/me/messages/AAA1/attachments") $json(['value' => [['id' => 'P1', 'name' => 'devis-fictif.pdf', 'contentType' => 'application/pdf', 'size' => 400, 'isInline' => false]]]);
 if ($path === "$g/me/messages/AAA1/attachments/P1") $json(['id' => 'P1', 'name' => 'devis-fictif.pdf', 'contentBytes' => base64_encode("%PDF-1.4\n% devis fictif 1.250,00\n%%EOF")]);
 if (preg_match("#^$g/me/messages/[^/]+/attachments$#", $path)) $json(['value' => []]);
 if (preg_match("#^$g/me/messages/([^/]+)/reply$#", $path) && $_SERVER['REQUEST_METHOD'] === 'POST') { http_response_code(202); exit; }
 if ($path === "$g/me/sendMail" && $_SERVER['REQUEST_METHOD'] === 'POST') { http_response_code(202); exit; }
+if (preg_match("#^$g/me/messages/([^/]+)$#", $path) && $_SERVER['REQUEST_METHOD'] === 'DELETE') { http_response_code(204); exit; }
 if (preg_match("#^$g/me/messages/([^/]+)$#", $path, $pm) && $_SERVER['REQUEST_METHOD'] === 'PATCH') $json(['id' => $pm[1]] + (json_decode($raw, true) ?: []));
 $json(['error' => ['message' => "route fictive inconnue $path"]], 404);

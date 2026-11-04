@@ -13,7 +13,7 @@ $INBOX = [
  13 => "From: Architecte Fictif <archi@bureau-fictif.be>\r\nTo: direction@madibu-fictif.be\r\nSubject: Plans modifiés\r\nDate: {$d(72)}\r\nMessage-ID: <a1@bureau-fictif.be>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nVoici les plans modifiés.\r\n",
 ];
 $SENT = [21 => "From: direction@madibu-fictif.be\r\nTo: archi@bureau-fictif.be\r\nSubject: RE: Plans modifiés\r\nDate: {$d(48)}\r\nMessage-ID: <r1@madibu-fictif.be>\r\nIn-Reply-To: <a1@bureau-fictif.be>\r\nReferences: <a1@bureau-fictif.be>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nMerci.\r\n"];
-$PUB = []; $PUBNAME = 'INBOX.Publicit&AOk-'; $created = false; $next = 100;
+$PUB = []; $TRASH = []; $PUBNAME = 'INBOX.Publicit&AOk-'; $created = false; $next = 100;
 $imap = stream_socket_server('tcp://127.0.0.1:9143'); $smtp = stream_socket_server('tcp://127.0.0.1:9025');
 while (true) {
     $r = [$imap, $smtp]; $w = $e = null;
@@ -45,14 +45,16 @@ while (true) {
             if (str_starts_with($U, 'LOGIN ')) { preg_match_all('/"((?:[^"\\\\]|\\\\.)*)"/', $rest, $m); $ok = stripcslashes($m[1][0] ?? '') === $USER && stripcslashes($m[1][1] ?? '') === $PASS; $authed = $ok; $log('imap_mock.log', ['login' => $ok]); $put($ok ? "$tag OK" : "$tag NO [AUTHENTICATIONFAILED] refusé"); continue; }
             if (!$authed && !str_starts_with($U, 'LOGOUT')) { $put("$tag NO login"); continue; }
             if (str_starts_with($U, 'CAPABILITY')) { $put('* CAPABILITY IMAP4rev1 MOVE UIDPLUS'); $put("$tag OK"); }
-            elseif (str_starts_with($U, 'LIST')) { $put('* LIST (\\HasNoChildren) "." "INBOX"'); $put('* LIST (\\HasNoChildren \\Sent) "." "INBOX.Sent"'); if ($created) $put('* LIST (\\HasNoChildren) "." "' . $PUBNAME . '"'); $put("$tag OK"); }
+            elseif (str_starts_with($U, 'LIST')) { $put('* LIST (\\HasNoChildren) "." "INBOX"'); $put('* LIST (\\HasNoChildren \\Sent) "." "INBOX.Sent"'); $put('* LIST (\\HasNoChildren \\Trash) "." "INBOX.Trash"'); if ($created) $put('* LIST (\\HasNoChildren) "." "' . $PUBNAME . '"'); $put("$tag OK"); }
             elseif (str_starts_with($U, 'CREATE')) { $created = str_contains($rest, $PUBNAME); $log('imap_mock.log', ['create' => trim(substr($rest, 7), '"')]); $put($created ? "$tag OK" : "$tag NO nom"); }
             elseif (str_starts_with($U, 'SUBSCRIBE')) $put("$tag OK");
-            elseif (str_starts_with($U, 'EXAMINE') || str_starts_with($U, 'SELECT')) { $sel = str_contains($rest, 'Sent') ? 'sent' : (str_contains($rest, 'Publicit') ? 'pub' : 'in'); $put('* OK [UIDVALIDITY ' . ($sel === 'pub' ? 778 : 777) . '] ok'); $put("$tag OK"); }
+            elseif (str_starts_with($U, 'EXAMINE') || str_starts_with($U, 'SELECT')) { $sel = str_contains($rest, 'Sent') ? 'sent' : (str_contains($rest, 'Publicit') ? 'pub' : (str_contains($rest, 'Trash') ? 'trash' : 'in')); $put('* OK [UIDVALIDITY ' . ($sel === 'pub' ? 778 : ($sel === 'trash' ? 779 : 777)) . '] ok'); $put("$tag OK"); }
             elseif (str_starts_with($U, 'UID SEARCH')) { $put('* SEARCH ' . implode(' ', array_keys($sel === 'sent' ? $SENT : ($sel === 'pub' ? $PUB : $INBOX)))); $put("$tag OK"); }
             elseif (str_starts_with($U, 'UID MOVE')) {
                 preg_match('/UID MOVE (\d+) "(.*)"$/i', $rest, $m); $uid = (int)$m[1]; $to = $m[2]; $nu = ++$next;
                 if ($sel === 'in' && $to === $PUBNAME && isset($INBOX[$uid])) { $PUB[$nu] = $INBOX[$uid]; unset($INBOX[$uid]); $put("* OK [COPYUID 778 $uid $nu] moved"); $log('imap_mock.log', ['move' => "INBOX:$uid->pub:$nu"]); }
+                elseif ($sel === 'trash' && $to === 'INBOX' && isset($TRASH[$uid])) { $INBOX[$nu] = $TRASH[$uid]; unset($TRASH[$uid]); $put("* OK [COPYUID 777 $uid $nu] moved"); $log('imap_mock.log', ['move' => "trash:{$uid}->INBOX:$nu"]); }
+                elseif ($sel === 'in' && $to === 'INBOX.Trash' && isset($INBOX[$uid])) { $TRASH[$nu] = $INBOX[$uid]; unset($INBOX[$uid]); $put("* OK [COPYUID 779 $uid $nu] moved"); $log('imap_mock.log', ['move' => "INBOX:{$uid}->trash"]); }
                 elseif ($sel === 'pub' && $to === 'INBOX' && isset($PUB[$uid])) { $INBOX[$nu] = $PUB[$uid]; unset($PUB[$uid]); $put("* OK [COPYUID 777 $uid $nu] moved"); $log('imap_mock.log', ['move' => "pub:$uid->INBOX:$nu"]); }
                 else { $put("$tag NO introuvable"); continue; }
                 $put("$tag OK");
@@ -65,6 +67,7 @@ while (true) {
                     else $put("* " . ($i + 1) . " FETCH (UID $uid FLAGS () INTERNALDATE \"" . date('d-M-Y H:i:s O') . "\" RFC822.SIZE " . strlen($msg) . ")"); }
                 $put("$tag OK");
             }
+            elseif (str_starts_with($U, 'UID EXPUNGE')) { $log('imap_mock.log', ['expunge' => $rest, 'sel' => $sel]); $put("$tag OK"); }
             elseif (str_starts_with($U, 'UID STORE')) { $log('imap_mock.log', ['store' => $rest, 'sel' => $sel]); $put("$tag OK"); }
             elseif (str_starts_with($U, 'APPEND')) { preg_match('/\{(\d+)\}$/', $rest, $m); $put('+ go'); $data = ''; while (strlen($data) < (int)$m[1]) $data .= fread($c, (int)$m[1] - strlen($data)); fgets($c); $log('imap_mock.log', ['append' => str_contains($rest, 'INBOX.Sent'), 'data' => $data]); $put("$tag OK"); }
             elseif (str_starts_with($U, 'LOGOUT')) { $put('* BYE'); $put("$tag OK"); break; }
