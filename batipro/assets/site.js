@@ -262,7 +262,7 @@ route('site', async (pid, sub) => {
   st.redraw = () => { if (alive()) { opsAll().then((l) => { if (!alive()) return; st.snap.pending = l.filter((o) => +o.pid === pid).length; drawHead(); drawSheet(); drawPins(); }); } };
   const p = snap.project;
   app.innerHTML = `<div class="site-wrap">
-    <header class="site-top"><a class="icon-btn" href="${S.offline ? '#/site' : isChef() ? `#/resp/p/${pid}` : `#/project/${pid}`}" aria-label="Retour">${I.back}</a><div class="grow"><b>Sur le chantier</b><small>${esc(p.data.name)}</small></div><span data-net></span><button class="btn sm" data-mt>Réunion</button></header>
+    <header class="site-top"><a class="icon-btn" href="${S.offline ? '#/site' : isChef() ? `#/resp/p/${pid}` : `#/project/${pid}`}" aria-label="Retour">${I.back}</a><div class="grow"><b>Sur le chantier</b><small>${esc(p.data.name)}</small></div><span data-net></span><button class="btn sm" data-share aria-label="Partager le plan">${I.send}</button><button class="btn sm" data-mt>Réunion</button></header>
     <div data-live></div>
     <div class="site-planbar" data-chips></div>
     <div class="site-main" data-main></div>
@@ -355,6 +355,7 @@ route('site', async (pid, sub) => {
   const setAdding = (on) => { st.adding = on; $('[data-banner]').hidden = !on; $('[data-add]').classList.toggle('on', on); };
   $('[data-add]').onclick = () => { if (st.plan === 'none') return siteNewPoint(st, {}); setAdding(!st.adding); };
   $('[data-cancel]').onclick = () => setAdding(false);
+  $('[data-share]').onclick = () => { const pl = st.plan === 'none' ? null : st.snap.plans.find((x) => x.id === st.plan); if (!pl) return toast('Choisissez d\'abord un plan', 2500); sharePlan(st.snap.project, pl, st.snap.points); };
   const draw = () => { if (!alive()) return; drawHead(); drawChips(); drawMain(); drawSheet(); };
   const onNet = () => { if (alive()) drawHead(); };
   window.addEventListener('offline', onNet); window.addEventListener('online', onNet);

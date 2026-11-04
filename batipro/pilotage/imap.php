@@ -298,17 +298,17 @@ function pil_imap_sync(array $acc, bool $deep): array {
         $known = array_flip(q('SELECT graph_id FROM pil_mail_msgs WHERE account_id = ? AND graph_id LIKE ?', [$acc['id'], "imap:$kind:$uv:%"])->fetchAll(PDO::FETCH_COLUMN));
         $uids = array_values(array_filter($c->since($since), fn($u) => !isset($known["imap:$kind:$uv:$u"])));
         rsort($uids); $uids = array_slice($uids, 0, 150);
-        foreach (array_chunk($uids, 25) as $chunk) foreach ($c->fetch($chunk, $kind === 'in') as $m) {
+        foreach (array_chunk($uids, 25) as $chunk) foreach ($c->fetch($chunk, true) as $m) {
             if ($m['raw'] === null) continue;
             $p = pil_mime_parse($m['raw']);
             $isIn = $kind === 'in';
             $atts = array_values(array_map(fn($x) => ['name' => $x['name'], 'size' => $x['size'], 'type' => $x['type']], $p['atts']));
-            $text = $isIn ? pil_mail_clean($p['text']) : null;
+            $text = pil_mail_clean($p['text']);
             if ($isIn && pil_mail_back_in($acc, (string)$p['mid'], "imap:in:$uv:{$m['uid']}")) continue;
             $r = q('INSERT IGNORE INTO pil_mail_msgs (company_id, account_id, graph_id, conv_id, msg_ref, folder, from_email, from_name, to_json, subject, at, preview, body, atts, web_link, is_read, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 [cid(), $acc['id'], "imap:$kind:$uv:{$m['uid']}", mb_substr((string)$p['root'], 0, 255), json_encode(['mid' => $p['mid'], 'refs' => array_slice($p['refs'], -10)], JSON_UNESCAPED_SLASHES), $isIn ? 'in' : 'sent',
                  $isIn ? $p['from'][0] : $acc['email'], mb_substr($isIn ? $p['from'][1] : (string)$acc['name'], 0, 190), json_encode(array_map(fn($x) => ['email' => $x[0], 'name' => $x[1]], $p['to']), JSON_UNESCAPED_UNICODE),
-                 mb_substr($p['subject'], 0, 500), $p['date'] ?? $m['date'] ?? now(), $isIn ? mb_substr(preg_replace('/\s+/', ' ', (string)$text), 0, 400) : null, $text,
+                 mb_substr($p['subject'], 0, 500), $p['date'] ?? $m['date'] ?? now(), mb_substr(preg_replace('/\s+/', ' ', (string)$text), 0, 400), $text,
                  $isIn && $atts ? json_encode($atts, JSON_UNESCAPED_UNICODE) : null, null, str_contains($m['flags'], '\\Seen') ? 1 : 0, now()]);
             if ($r->rowCount()) $new++;
         }

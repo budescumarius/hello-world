@@ -140,7 +140,9 @@ function pil_mail_callback(array $me): void {
         if ($ex && (int)$ex['user_id'] !== (int)$me['id']) $back('err=' . rawurlencode("La boîte $email est déjà connectée par un autre utilisateur."));
         if ($ex) q("UPDATE pil_mail_accounts SET token_enc = ?, expires_at = ?, status = 'ok', last_error = NULL, name = ? WHERE id = ?", [$tok, time() + (int)($j['expires_in'] ?? 3600), mb_substr((string)($u['displayName'] ?? ''), 0, 190), $ex['id']]);
         else q('INSERT INTO pil_mail_accounts (company_id, user_id, email, name, token_enc, expires_at, status, created_at) VALUES (?,?,?,?,?,?,?,?)', [cid(), $me['id'], $email, mb_substr((string)($u['displayName'] ?? ''), 0, 190), $tok, time() + (int)($j['expires_in'] ?? 3600), 'ok', now()]);
-        pil_audit('boite_mail_connectee', 'mail_account', $ex ? (int)$ex['id'] : (int)db()->lastInsertId(), null, ['email' => $email]);
+        $aid = $ex ? (int)$ex['id'] : (int)db()->lastInsertId();
+        pil_audit('boite_mail_connectee', 'mail_account', $aid, null, ['email' => $email]);
+        try { pil_mail_subscribe(q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$aid])->fetch()); } catch (Throwable $e) { error_log('[pilotage mail] abonnement : ' . $e->getMessage()); }
         $back('connected=' . rawurlencode($email));
     } catch (Throwable $e) { $back('err=' . rawurlencode($e->getMessage())); }
 }
@@ -182,7 +184,7 @@ function pil_mail_sync(array $acc, bool $deep = false): array {
     $since = $acc['last_sync'] && !$deep ? date('Y-m-d\TH:i:s\Z', strtotime($acc['last_sync']) - 3600) : gmdate('Y-m-d\TH:i:s\Z', time() - 14 * 86400);
     $new = 0;
     foreach (['inbox' => 'receivedDateTime', 'sentitems' => 'sentDateTime'] as $folder => $dt) {
-        $sel = $folder === 'inbox' ? 'id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,hasAttachments,isRead,webLink' : 'id,conversationId,subject,toRecipients,sentDateTime';
+        $sel = $folder === 'inbox' ? 'id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,hasAttachments,isRead,webLink' : 'id,conversationId,subject,toRecipients,ccRecipients,sentDateTime,bodyPreview,body,hasAttachments,webLink';
         $url = "/me/mailFolders/$folder/messages?" . http_build_query(['$top' => 50, '$orderby' => "$dt desc", '$filter' => "$dt ge $since", '$select' => $sel]);
         for ($page = 0; $page < 6 && $url; $page++) {
             $j = pil_graph($acc, 'GET', $url);
@@ -195,8 +197,8 @@ function pil_mail_sync(array $acc, bool $deep = false): array {
                 if ($isIn && !q('SELECT id FROM pil_mail_msgs WHERE account_id = ? AND graph_id = ?', [$acc['id'], (string)$m['id']])->fetch() && pil_mail_back_in($acc, $mid, (string)$m['id'])) continue;
                 $r = q('INSERT IGNORE INTO pil_mail_msgs (company_id, account_id, graph_id, conv_id, msg_ref, folder, from_email, from_name, to_json, subject, at, preview, body, atts, web_link, is_read, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     [cid(), $acc['id'], (string)$m['id'], (string)($m['conversationId'] ?? ''), json_encode(['mid' => $mid], JSON_UNESCAPED_SLASHES), $isIn ? 'in' : 'sent', mb_strtolower((string)($from['address'] ?? '')), mb_substr((string)($from['name'] ?? ''), 0, 190),
-                     json_encode($to, JSON_UNESCAPED_UNICODE), mb_substr((string)($m['subject'] ?? ''), 0, 500), $at, $isIn ? mb_substr((string)($m['bodyPreview'] ?? ''), 0, 400) : null,
-                     $isIn ? pil_mail_clean((string)($m['body']['content'] ?? '')) : null, !empty($m['hasAttachments']) ? '[]' : null, $isIn ? mb_substr((string)($m['webLink'] ?? ''), 0, 1000) : null, !empty($m['isRead']) ? 1 : 0, now()]);
+                     json_encode($to, JSON_UNESCAPED_UNICODE), mb_substr((string)($m['subject'] ?? ''), 0, 500), $at, mb_substr((string)($m['bodyPreview'] ?? ''), 0, 400),
+                     pil_mail_clean((string)($m['body']['content'] ?? '')), $isIn && !empty($m['hasAttachments']) ? '[]' : null, mb_substr((string)($m['webLink'] ?? ''), 0, 1000) ?: null, $isIn ? (!empty($m['isRead']) ? 1 : 0) : 1, now()]);
                 if ($r->rowCount()) $new++;
                 elseif ($isIn) q('UPDATE pil_mail_msgs SET is_read = ? WHERE account_id = ? AND graph_id = ?', [!empty($m['isRead']) ? 1 : 0, $acc['id'], (string)$m['id']]);
             }
@@ -306,7 +308,7 @@ function pil_mail_draft_out(array $d): array {
 function pil_mail_brief(array $me, string $today): array {
     $accs = q('SELECT id FROM pil_mail_accounts WHERE company_id = ? AND user_id = ?', [cid(), $me['id']])->fetchAll(PDO::FETCH_COLUMN);
     if (!$accs) return ['accounts' => [], 'todo' => [], 'waiting' => [], 'drafts' => [], 'info' => [], 'new' => [], 'counts' => ['todo' => 0, 'waiting' => 0, 'drafts' => 0, 'info' => 0, 'new' => 0, 'urgent' => 0],
-        'ai' => pil_ai_ready(), 'configured' => pil_mail_ready()];
+        'ai' => pil_ai_ready(), 'configured' => pil_mail_ready(), 'folders' => [], 'drafts' => []];
     $in = implode(',', array_map('intval', $accs));
     $msgs = array_map('pil_mail_msg_out', q("SELECT * FROM pil_mail_msgs WHERE company_id = ? AND account_id IN ($in) AND folder = 'in' AND at >= ? ORDER BY at DESC", [cid(), date('Y-m-d', strtotime("$today -30 days"))])->fetchAll());
     $rank = fn($m) => [($m['analysis']['urgence'] ?? 'normale') === 'haute' ? 0 : 1, ($m['analysis']['echeance'] ?? '') ?: '9999', $m['at']];
@@ -319,7 +321,42 @@ function pil_mail_brief(array $me, string $today): array {
     $new = array_values(array_filter($msgs, fn($m) => $m['state'] === 'nouveau'));
     return ['accounts' => pil_mail_accounts($me), 'todo' => $todo, 'waiting' => $waiting, 'drafts' => $drafts, 'info' => array_slice($info, 0, 60), 'new' => array_slice($new, 0, 60),
         'counts' => ['todo' => count($todo), 'waiting' => count($waiting), 'drafts' => count($drafts), 'info' => count($info), 'new' => count($new), 'urgent' => count(array_filter($todo, fn($m) => ($m['analysis']['urgence'] ?? '') === 'haute'))],
-        'ai' => pil_ai_ready(), 'configured' => pil_mail_ready()];
+        'ai' => pil_ai_ready(), 'configured' => pil_mail_ready(), 'folders' => pil_mail_folders($me)];
+}
+
+/** Dossiers de chaque boîte (comme dans Outlook) : réception (non lus), envoyés, publicité rangée. */
+function pil_mail_folders(array $me): array {
+    $out = [];
+    foreach (q('SELECT id, email, name, kind FROM pil_mail_accounts WHERE company_id = ? AND user_id = ? ORDER BY id', [cid(), $me['id']])->fetchAll() as $a) {
+        $c = q("SELECT SUM(folder = 'in' AND moved IS NULL) AS inbox, SUM(folder = 'in' AND moved IS NULL AND is_read = 0) AS unread, SUM(folder = 'sent') AS sent, SUM(folder = 'in' AND moved IS NOT NULL) AS pub FROM pil_mail_msgs WHERE account_id = ?", [$a['id']])->fetch();
+        $out[] = ['id' => (int)$a['id'], 'email' => $a['email'], 'name' => $a['name'], 'inbox' => (int)$c['inbox'], 'unread' => (int)$c['unread'], 'sent' => (int)$c['sent'], 'pub' => (int)$c['pub']];
+    }
+    return $out;
+}
+/** Liste d'un dossier : box = id de boîte ou « all » ; folder = in | sent | pub | todo | waiting | info | new ; q = recherche ; before = pages suivantes. */
+function pil_mail_list(array $me, array $g): array {
+    $accs = array_map('intval', q('SELECT id FROM pil_mail_accounts WHERE company_id = ? AND user_id = ?', [cid(), $me['id']])->fetchAll(PDO::FETCH_COLUMN));
+    if (!$accs) return ['items' => [], 'more' => false];
+    $box = (string)($g['box'] ?? 'all');
+    $ids = $box === 'all' ? $accs : array_values(array_intersect($accs, [(int)$box]));
+    if (!$ids) fail(404, 'Boîte introuvable');
+    $w = ['m.company_id = ?', 'm.account_id IN (' . implode(',', $ids) . ')']; $p = [cid()];
+    $f = (string)($g['folder'] ?? 'in');
+    $w[] = match ($f) {
+        'sent' => "m.folder = 'sent'",
+        'pub' => "m.folder = 'in' AND m.moved IS NOT NULL",
+        'todo' => "m.folder = 'in' AND m.state = 'a_faire'",
+        'waiting' => "m.folder = 'in' AND m.state = 'a_faire' AND m.analysis LIKE '%\"reponse_necessaire\":true%' AND m.at < '" . date('Y-m-d H:i:s', time() - 2 * 86400) . "'",
+        'info' => "m.folder = 'in' AND m.state = 'info' AND m.moved IS NULL",
+        'new' => "m.folder = 'in' AND m.state = 'nouveau'",
+        default => "m.folder = 'in' AND m.moved IS NULL",
+    };
+    $qs = trim((string)($g['q'] ?? ''));
+    if ($qs !== '') { $w[] = '(m.subject LIKE ? OR m.from_name LIKE ? OR m.from_email LIKE ? OR m.preview LIKE ? OR m.to_json LIKE ?)'; $l = '%' . addcslashes($qs, '%_\\') . '%'; array_push($p, $l, $l, $l, $l, $l); }
+    if (!empty($g['before']) && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', (string)$g['before'])) { $w[] = 'm.at < ?'; $p[] = $g['before']; }
+    $rows = q('SELECT m.*, a.email AS account_email FROM pil_mail_msgs m JOIN pil_mail_accounts a ON a.id = m.account_id WHERE ' . implode(' AND ', $w) . ' ORDER BY m.at DESC LIMIT 61', $p)->fetchAll();
+    $more = count($rows) > 60; $rows = array_slice($rows, 0, 60);
+    return ['items' => array_map(fn($r) => pil_mail_msg_out($r) + ['account_email' => $r['account_email'], 'folder' => $r['folder'], 'to' => json_decode((string)$r['to_json'], true) ?: []], $rows), 'more' => $more];
 }
 
 // --------------------------------------------------------------------- Envoi : seulement par l'utilisateur, après relecture (jamais par l'IA ni par une tâche planifiée)
@@ -351,6 +388,53 @@ function pil_mail_rcpts($l): array {
     foreach ((array)$l as $r) { $e = mb_strtolower(trim((string)(is_array($r) ? ($r['email'] ?? '') : $r))); if ($e === '') continue; if (!filter_var($e, FILTER_VALIDATE_EMAIL)) fail(400, "Adresse invalide : $e"); $out[$e] = ['email' => $e, 'name' => is_array($r) ? (string)($r['name'] ?? '') : '']; }
     if (count($out) > 20) fail(400, 'Maximum 20 destinataires.');
     return array_values($out);
+}
+
+// --------------------------------------------------------------------- E-mails reçus tout de suite (Microsoft 365) : abonnement aux nouveaux messages
+// Microsoft prévient outlook-notify.php dès qu'un e-mail arrive ; BatiPro relève alors la boîte et envoie une notification (téléphone).
+function pil_mail_base(): string {
+    $c = pil_mail_conf();
+    if (!empty($_SERVER['HTTP_HOST'])) return preg_replace('#/outlook-callback\.php$#', '', pil_mail_redirect());
+    return rtrim((string)($c['base'] ?? ''), '/');
+}
+function pil_mail_subscribe(array $acc): void {
+    if (($acc['kind'] ?? 'graph') !== 'graph') return;
+    $base = pil_mail_base(); if (!str_starts_with($base, 'https://') && empty(config()['ms_graph_base'])) return; // Microsoft exige https
+    $o = pil_mail_opts($acc); $exp = gmdate('Y-m-d\TH:i:s\Z', time() + 4200 * 60); // ~70 h (maximum Microsoft : 7 jours)
+    if (!empty($o['sub_id'])) {
+        try { pil_graph($acc, 'PATCH', '/subscriptions/' . rawurlencode($o['sub_id']), ['expirationDateTime' => $exp]); $o['sub_exp'] = time() + 4200 * 60; q('UPDATE pil_mail_accounts SET opts = ? WHERE id = ?', [json_encode($o), $acc['id']]); return; }
+        catch (Throwable $e) { unset($o['sub_id']); } // expiré ou supprimé chez Microsoft : on en recrée un
+    }
+    $state = bin2hex(random_bytes(16));
+    $j = pil_graph($acc, 'POST', '/subscriptions', ['changeType' => 'created', 'notificationUrl' => $base . '/outlook-notify.php', 'resource' => "me/mailFolders('Inbox')/messages", 'expirationDateTime' => $exp, 'clientState' => $state]);
+    $o['sub_id'] = (string)($j['id'] ?? ''); $o['sub_state'] = $state; $o['sub_exp'] = time() + 4200 * 60;
+    q('UPDATE pil_mail_accounts SET opts = ? WHERE id = ?', [json_encode($o), $acc['id']]);
+}
+/** Notifications reçues : relève des boîtes concernées, tri, rangement, notification à l'utilisateur. */
+function pil_mail_notified(array $values): void {
+    $done = [];
+    foreach ($values as $v) {
+        $sid = (string)($v['subscriptionId'] ?? ''); if ($sid === '' || isset($done[$sid])) continue; $done[$sid] = true;
+        $acc = null;
+        foreach (q("SELECT * FROM pil_mail_accounts WHERE kind = 'graph' AND opts LIKE ?", ['%' . addcslashes(json_encode($sid), '%_\\') . '%'])->fetchAll() as $a) { $o = pil_mail_opts($a); if (($o['sub_id'] ?? '') === $sid) $acc = $a; }
+        if (!$acc || !hash_equals((string)(pil_mail_opts($acc)['sub_state'] ?? ''), (string)($v['clientState'] ?? ''))) continue; // notification non authentifiée : ignorée
+        $GLOBALS['BP_CID'] = (int)$acc['company_id'];
+        if (!pil_enabled()) continue;
+        pil_mail_schema();
+        if ($acc['last_sync'] && time() - strtotime($acc['last_sync']) < 10) continue; // plusieurs e-mails d'un coup : une seule relève
+        $start = now();
+        try {
+            pil_mail_sync($acc);
+            $u = q('SELECT * FROM users WHERE id = ? AND company_id = ? AND active = 1', [(int)$acc['user_id'], cid()])->fetch();
+            if (!$u) continue;
+            $fresh = q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$acc['id']])->fetch();
+            try { pil_mail_analyze($fresh, $u, 10); pil_mail_tidy($fresh); } catch (Throwable $e) { error_log('[pilotage mail notify] tri : ' . $e->getMessage()); }
+            $new = q("SELECT from_name, from_email, subject, analysis FROM pil_mail_msgs WHERE account_id = ? AND folder = 'in' AND moved IS NULL AND created_at >= ? ORDER BY at DESC", [$acc['id'], $start])->fetchAll();
+            if (count($new) === 1) { $a = json_decode((string)$new[0]['analysis'], true) ?: [];
+                notify([(int)$u['id']], 'mail', ($a['urgence'] ?? '') === 'haute' ? '⚑ Urgent – ' . ($new[0]['from_name'] ?: $new[0]['from_email']) : '✉ ' . ($new[0]['from_name'] ?: $new[0]['from_email']), (string)$new[0]['subject'] . (!empty($a['action']) ? ' – ' . $a['action'] : ''), '#/pilotage/emails'); }
+            elseif (count($new) > 1) notify([(int)$u['id']], 'mail', '✉ ' . count($new) . ' nouveaux e-mails (' . $acc['email'] . ')', implode(' · ', array_map(fn($m) => $m['from_name'] ?: $m['from_email'], array_slice($new, 0, 4))), '#/pilotage/emails');
+        } catch (Throwable $e) { q('UPDATE pil_mail_accounts SET last_error = ? WHERE id = ?', [mb_substr($e->getMessage(), 0, 500), $acc['id']]); }
+    }
 }
 
 // --------------------------------------------------------------------- Rangement automatique : publicités et newsletters → dossier « Publicité »
@@ -394,8 +478,9 @@ function pil_mail_unmove(array $acc, array $row): void {
 // --------------------------------------------------------------------- Tâche planifiée : relève et analyse (aucun envoi)
 function pil_mail_cron(): void {
     pil_mail_schema();
-    foreach (q("SELECT * FROM pil_mail_accounts WHERE company_id = ? AND status = 'ok' AND (last_sync IS NULL OR last_sync < ?)", [cid(), date('Y-m-d H:i:s', time() - 25 * 60)])->fetchAll() as $acc) {
+    foreach (q("SELECT * FROM pil_mail_accounts WHERE company_id = ? AND status = 'ok' AND (last_sync IS NULL OR last_sync < ?)", [cid(), date('Y-m-d H:i:s', time() - 10 * 60)])->fetchAll() as $acc) {
         try {
+            $o = pil_mail_opts($acc); if (($acc['kind'] ?? 'graph') === 'graph' && (empty($o['sub_id']) || (int)($o['sub_exp'] ?? 0) < time() + 86400)) { try { pil_mail_subscribe($acc); } catch (Throwable $e) { error_log('[pilotage mail] abonnement : ' . $e->getMessage()); } }
             pil_mail_sync($acc);
             $u = q('SELECT * FROM users WHERE id = ? AND company_id = ? AND active = 1', [(int)$acc['user_id'], cid()])->fetch();
             if ($u) { pil_mail_analyze(q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$acc['id']])->fetch(), $u, 15); pil_mail_tidy(q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$acc['id']])->fetch()); }
@@ -418,6 +503,7 @@ function pil_mail_route(string $method, array $seg, array $me): void {
             if ($n['clientId'] !== '' && !preg_match('/^[0-9a-f-]{36}$/i', $n['clientId'])) fail(400, 'ID d\'application (client) invalide : 36 caractères, ex. 1a2b3c4d-…');
             if ($n['tenant'] !== '' && !preg_match('/^([0-9a-f-]{36}|[a-z0-9.-]+\.[a-z]{2,})$/i', $n['tenant'])) fail(400, 'ID d\'annuaire (tenant) invalide.');
             if (trim((string)($b['secret'] ?? '')) !== '') $n['secret'] = pil_mail_enc(['s' => trim((string)$b['secret'])]);
+            $n['base'] = pil_mail_base();
             set_setting('pilotage_mail', $n);
             pil_audit('outlook_configure', 'settings', null, null, ['clientId' => $n['clientId'], 'tenant' => $n['tenant'], 'secret_modifie' => trim((string)($b['secret'] ?? '')) !== '']);
             out(['ok' => true]);
@@ -434,6 +520,7 @@ function pil_mail_route(string $method, array $seg, array $me): void {
     }
     if ($a === 'accounts' && $method === 'DELETE' && $id) {
         $acc = pil_mail_account($me, $id);
+        $o = pil_mail_opts($acc); if (!empty($o['sub_id'])) { try { pil_graph($acc, 'DELETE', '/subscriptions/' . rawurlencode($o['sub_id'])); } catch (Throwable $e) { /* déjà expiré */ } }
         q('DELETE FROM pil_mail_drafts WHERE account_id = ?', [$id]); q('DELETE FROM pil_mail_msgs WHERE account_id = ?', [$id]); q('DELETE FROM pil_mail_accounts WHERE id = ?', [$id]);
         pil_audit('boite_mail_deconnectee', 'mail_account', $id, ['email' => $acc['email']], null);
         out(['ok' => true]);
@@ -450,6 +537,7 @@ function pil_mail_route(string $method, array $seg, array $me): void {
         out(['results' => $res, 'errors' => $errs, 'brief' => pil_mail_brief($me, date('Y-m-d'))]);
     }
     if ($a === 'brief' && $method === 'GET') out(pil_mail_brief($me, date('Y-m-d')));
+    if ($a === 'list' && $method === 'GET') out(pil_mail_list($me, $_GET));
     if ($a === 'msgs' && $id) {
         $m = q('SELECT m.* FROM pil_mail_msgs m JOIN pil_mail_accounts a ON a.id = m.account_id WHERE m.id = ? AND m.company_id = ? AND a.user_id = ?', [$id, cid(), $me['id']])->fetch();
         if (!$m) fail(404, 'E-mail introuvable');

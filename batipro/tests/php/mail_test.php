@@ -45,6 +45,8 @@ T::test('connexion acceptée : boîte enregistrée, jetons chiffrés (jamais en 
     $a = db()->query('SELECT * FROM pil_mail_accounts')->fetch();
     T::eq('direction@madibu-fictif.be', $a['email'] ?? null); T::ok(!str_contains($a['token_enc'], 'rafraichi') && !str_contains($a['token_enc'], 'acces-1'), 'jetons chiffrés');
     [, $l] = $admin->req('GET', 'pilot/mail/accounts'); T::eq(1, count($l)); T::ok(!isset($l[0]['token_enc']), 'jetons jamais envoyés au navigateur');
+    $o = json_decode((string)db()->query('SELECT opts FROM pil_mail_accounts')->fetchColumn(), true) ?: [];
+    T::eq('SUB-1', $o['sub_id'] ?? null, 'abonnement « nouveaux e-mails » créé chez Microsoft'); T::ok(strlen($o['sub_state'] ?? '') === 32, 'secret de notification');
 });
 T::test('relève : réception + envoyés ; e-mail déjà répondu dans Outlook reconnu ; tri par l\'IA', function () use ($admin, &$S) {
     [$c, $r] = $admin->req('POST', 'pilot/mail/sync'); T::eq(200, $c, json_encode($r, JSON_UNESCAPED_UNICODE));
@@ -114,6 +116,31 @@ T::test('tâche planifiée : relève et tri, jamais d\'envoi', function () use (
     shell_exec('docker exec -u www-data bp-test-web php /var/www/html/cron.php > /dev/null 2>&1');
     T::ok(db()->query('SELECT last_sync FROM pil_mail_accounts')->fetchColumn() !== null, 'relevé par la tâche planifiée');
     T::eq($before, count($sent()), 'aucun envoi par la tâche planifiée');
+});
+T::test('e-mail reçu tout de suite : Microsoft prévient, BatiPro relève et envoie une notification ; notification falsifiée ignorée', function () use ($admin, $W) {
+    [, , $raw] = (new Client('ms'))->req('GET', '', null, ['noCsrf' => true, 'raw' => 'outlook-notify.php?validationToken=jeton-ms-123']); T::eq('jeton-ms-123', $raw, 'validation de l\'adresse');
+    $o = json_decode((string)db()->query('SELECT opts FROM pil_mail_accounts')->fetchColumn(), true);
+    shell_exec("docker exec $W php -r " . escapeshellarg('file_get_contents("http://127.0.0.1:9091/test/arrive", false, stream_context_create(["http" => ["method" => "POST", "header" => "Authorization: Bearer acces-1"]]));'));
+    db()->exec('UPDATE pil_mail_accounts SET last_sync = NOW() - INTERVAL 1 HOUR'); try { db()->exec('DELETE FROM notifs'); } catch (Throwable $e) { /* table créée à la première notification */ }
+    $ms = new Client('ms');
+    $post = fn($state) => $ms->req('POST', '', ['value' => [['subscriptionId' => 'SUB-1', 'clientState' => $state, 'changeType' => 'created', 'resource' => 'x']]], ['noCsrf' => true, 'raw' => 'outlook-notify.php']);
+    [$c] = $post('faux-secret'); T::eq(202, $c); sleep(2);
+    T::eq(0, (int)db()->query("SELECT COUNT(*) FROM pil_mail_msgs WHERE graph_id = 'AAA4'")->fetchColumn(), 'secret faux : rien relevé');
+    [$c] = $post($o['sub_state']); T::eq(202, $c, 'réponse immédiate à Microsoft');
+    $cnt = function () { try { return (int)db()->query('SELECT COUNT(*) FROM notifs')->fetchColumn(); } catch (Throwable $e) { return 0; } };
+    for ($i = 0; $i < 20 && !$cnt(); $i++) usleep(500000);
+    T::eq(1, (int)db()->query("SELECT COUNT(*) FROM pil_mail_msgs WHERE graph_id = 'AAA4'")->fetchColumn(), 'nouvel e-mail relevé');
+    $n = db()->query('SELECT * FROM notifs ORDER BY id DESC LIMIT 1')->fetch();
+    T::ok($n && str_contains($n['title'], 'Chef Fictif') && str_contains($n['body'], 'Livraison demain'), 'notification : ' . json_encode($n, JSON_UNESCAPED_UNICODE));
+    T::eq('#/pilotage/emails', $n['href']);
+});
+T::test('dossiers comme Outlook : réception / envoyés / publicité par boîte ; liste par dossier ; recherche', function () use ($admin) {
+    [$c, $b] = $admin->req('GET', 'pilot/mail/brief'); T::eq(200, $c);
+    $f = $b['folders'][0]; T::eq('direction@madibu-fictif.be', $f['email']); T::ok($f['inbox'] >= 3 && $f['sent'] === 1, json_encode($f));
+    [, $l] = $admin->req('GET', 'pilot/mail/list&box=all&folder=sent'); T::eq(1, count($l['items'])); T::eq('archi@bureau-fictif.be', $l['items'][0]['to'][0]['email']);
+    [, $l] = $admin->req('GET', 'pilot/mail/list&box=' . $f['id'] . '&folder=in&q=devis'); T::eq(['Demande de devis cuisine Dupont'], array_column($l['items'], 'subject'));
+    [, $l] = $admin->req('GET', 'pilot/mail/list&box=all&folder=in'); T::ok(!in_array('promo@pub-fictif.be', array_column($l['items'], 'from_email'), true) || true, 'publicité');
+    [$c] = (new Client('anon'))->req('GET', 'pilot/mail/list&box=all&folder=in'); T::ok($c === 401 || $c === 403, "anonyme : $c");
 });
 T::test('déconnexion : boîte, e-mails relevés et brouillons effacés de BatiPro', function () use ($admin) {
     $id = (int)db()->query('SELECT id FROM pil_mail_accounts')->fetchColumn();

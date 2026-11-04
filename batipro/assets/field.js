@@ -183,8 +183,8 @@ async function viewPlan(p, planId, opt = {}) {
   const intent = planIntent; planIntent = null;
   const vis = opt.field ? Object.keys(PTS) : ui.pinStatus || (ui.pinStatus = Object.keys(PTS).filter((k) => k !== 'closed'));
   app.innerHTML = `<div class="viewer-wrap">
-    <header class="top"><a class="icon-btn" href="${opt.back || `#/project/${p.id}/plans`}">${I.back}</a><div class="top-title"><div><h1>${esc(d.name)}</h1><div class="top-sub">${esc(p.data.name)}${opt.field ? '' : ` · v${d.version || 1}`}</div></div></div>
-      <div class="top-actions" ${opt.field ? 'hidden' : ''}><button class="btn" data-act="filter">${I.filter} Filtres</button><button class="btn" data-act="draw">${I.pencil} Annoter</button><button class="btn primary" data-act="add">${I.plus} Point</button></div></header>
+    <header class="top"><a class="btn sm plan-back" href="${opt.back || `#/project/${p.id}/plans`}" aria-label="Retour">${I.back}<span>Retour</span></a><div class="top-title"><div><h1>${esc(d.name)}</h1><div class="top-sub">${esc(p.data.name)}${opt.field ? '' : ` · v${d.version || 1}`}</div></div></div>
+      <div class="top-actions"><button class="btn" data-act="share">${I.send} Partager</button>${opt.field ? '' : `<button class="btn" data-act="filter">${I.filter} Filtres</button><button class="btn" data-act="draw">${I.pencil} Annoter</button><button class="btn primary" data-act="add">${I.plus} Point</button>`}</div></header>
     <div class="viewer" id="vp"><div class="plan-inner" id="inner" style="width:${d.w}px;height:${d.h}px"><img src="${fileUrl(d.fileId)}" alt="" draggable="false">
       <svg class="markups" id="mk" viewBox="0 0 ${d.w} ${d.h}" preserveAspectRatio="none"></svg><div id="pins"></div></div>
       <div class="banner" id="banner" hidden></div>
@@ -229,6 +229,8 @@ async function viewPlan(p, planId, opt = {}) {
   vp.addEventListener('wheel', (e) => { e.preventDefault(); const q = rel(e); zoomAt(q.x, q.y, scale * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0025))); }, { passive: false });
   vp.addEventListener('dblclick', (e) => { if (e.target.closest('.viewer-tools,.draw-layer')) return; const q = rel(e); zoomAt(q.x, q.y, scale * 2); });
   $$('[data-z]').forEach((b) => { b.onclick = () => { const r = vp.getBoundingClientRect(); if (b.dataset.z === 'fit') fit(); else zoomAt(r.width / 2, r.height / 2, scale * (b.dataset.z === 'in' ? 1.6 : 1 / 1.6)); }; });
+  $('[data-act=share]').onclick = () => sharePlan(p, pl, points);
+  if (opt.field) { const f = document.createElement('i'); f.dataset.act = 'filter'; f.hidden = true; const d2 = document.createElement('i'); d2.dataset.act = 'draw'; d2.hidden = true; const a2 = document.createElement('i'); a2.dataset.act = 'add'; a2.hidden = true; $('.viewer-wrap').append(f, d2, a2); } // boutons absents en mode terrain : liaisons sans effet
   $('[data-act=add]').onclick = () => setMode(mode === 'add' ? 'view' : 'add', 'Touchez le plan à l\'endroit du nouveau point');
   $('[data-act=filter]').onclick = () => {
     const m = modal(`${mhead('Afficher sur le plan')}<div class="m-body">${Object.entries(PTS).map(([k, [l, c]]) => `<label class="chk"><input type="checkbox" value="${k}" ${vis.includes(k) ? 'checked' : ''}><i class="dot" style="--c:${c}"></i>${l} (${points.filter((x) => x.data.status === k && x.data.x != null).length})</label>`).join('')}</div>`);
@@ -276,6 +278,36 @@ async function viewPlan(p, planId, opt = {}) {
   fit(); drawMk(); drawPins(intent && intent.highlight);
   if (intent && intent.highlight) { const pt = points.find((q) => q.id === intent.highlight); if (pt && pt.data.x != null) { const r = vp.getBoundingClientRect(); scale = Math.min(maxS, scale * 3); tx = r.width / 2 - pt.data.x * d.w * scale; ty = r.height / 2 - pt.data.y * d.h * scale; apply(); } }
   if (mode === 'move') setMode('move', 'Touchez le plan pour positionner le point');
+}
+
+// ---------------------------------------------------------------- Partager un plan (image JPEG, avec ou sans les points à faire)
+async function sharePlan(p, pl, pts = []) {
+  const open = (pts || []).filter((x) => x.data.x != null && +x.data.planId === pl.id && isOpenPt(x));
+  const name = fileTitle(`${p.data.name} ${pl.data.name}`);
+  const make = async (withPts) => { const url = await planWithPins(pl, withPts ? open : [], 3000); return (await fetch(url)).blob(); };
+  const test = new File([new Blob(['x'], { type: 'image/jpeg' })], 'x.jpg', { type: 'image/jpeg' });
+  const native = !!(navigator.canShare && navigator.canShare({ files: [test] }));
+  const m = modal(`${mhead(`Partager « ${pl.data.name} »`)}<div class="m-body">
+    ${open.length ? `<label class="chk"><input type="checkbox" data-pts checked> Avec les points à faire (${open.length}) dessinés sur le plan</label>` : '<p class="muted">Le plan avec ses annotations.</p>'}
+    <div class="s-list plan-share">
+      ${native ? `<button class="btn primary big" data-sh="native">${I.send} Partager… (WhatsApp, Messages, Mail…)</button>` : ''}
+      ${!isField() ? `<button class="btn ${native ? '' : 'primary'} big" data-sh="mail">${I.mail} Envoyer par e-mail</button>` : ''}
+      <button class="btn big" data-sh="dl">${I.download} Télécharger l'image</button></div></div>`);
+  const withPts = () => { const c = $('[data-pts]', m.el); return !!(c && c.checked); };
+  $$('[data-sh]', m.el).forEach((btn) => { btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      const k = btn.dataset.sh; const blob = await make(withPts()); const fname = `${name}${withPts() ? '-points' : ''}.jpg`;
+      if (k === 'native') { await navigator.share({ files: [new File([blob], fname, { type: 'image/jpeg' })], title: `${pl.data.name} – ${p.data.name}` }).catch((e) => { if (e.name !== 'AbortError') throw e; }); m.close(); return; }
+      if (k === 'dl') { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fname; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); m.close(); return; }
+      const contacts = await db.list('contact').catch(() => []);
+      const ids = [...new Set([+p.data.clientId, +p.data.architectId, ...(p.data.subs || []).map(Number), ...open.map((x) => +x.data.companyId)].filter(Boolean))];
+      m.close();
+      sendMailDialog({ subject: `Plan ${pl.data.name} – ${p.data.name}`, body: `Bonjour,\n\nVeuillez trouver ci-joint le plan « ${pl.data.name} » du chantier ${p.data.name}${withPts() ? ', avec les points à traiter' : ''}.\n\n${mailSign()}`,
+        recipients: [...ids.map((id) => byId(contacts, id)).filter(Boolean).map((c) => contactRcpt(c, 'Intervenants du chantier', false)), ...S.users.filter((u) => u.active && u.id !== S.me.id).map((u) => userRcpt(u, 'Notre équipe', false))],
+        projectId: p.id, extra: [{ label: fname, name: fname, mime: 'image/jpeg', checked: true, make: async () => blob }] });
+    } catch (e) { btn.disabled = false; toast(e.message, 6000); }
+  }; });
 }
 
 // ---------------------------------------------------------------- Images pour rapports
@@ -733,7 +765,7 @@ async function tabDocuments(p, el) {
   const list = docs.filter((x) => !cur || x.data.folder === cur).sort((a, b) => b.id - a.id);
   el.innerHTML = `<div class="toolbar"><div class="chips"><button class="chip ${!cur ? 'on' : ''}" data-f="">Tous (${docs.length})</button>${folders.map((f) => `<button class="chip ${cur === f ? 'on' : ''}" data-f="${esc(f)}">${esc(f)} (${docs.filter((x) => x.data.folder === f).length})</button>`).join('')}<button class="chip" data-newf>${I.plus} Catégorie</button>${cur && custom.includes(cur) && !docs.some((x) => x.data.folder === cur) ? '<button class="chip" data-delf>Supprimer cette catégorie</button>' : ''}</div><span class="grow"></span><button class="btn primary" data-act="up">${I.plus} Ajouter des fichiers</button></div>
     <div class="drop" data-drop>Glissez des fichiers ici</div>
-    ${list.length ? `<div class="docs">${list.map((x) => `<div class="doc-card"><a href="${fileUrl(x.data.fileId)}" target="_blank">${x.plan && x.data.thumbId ? `<img src="${fileUrl(x.data.thumbId)}" alt="" loading="lazy">` : /^image\//.test(x.data.mime) ? `<img src="${fileUrl(x.data.fileId)}" alt="" loading="lazy">` : `<span class="doc-ic">${I.file}<b>${esc((x.data.name.split('.').pop() || '').toUpperCase())}</b></span>`}</a>
+    ${list.length ? `<div class="docs">${list.map((x) => `<div class="doc-card"><a href="${x.plan ? `#/project/${p.id}/plan/${x.plan.id}` : fileUrl(x.data.fileId)}" ${x.plan ? '' : 'target="_blank"'}>${x.plan && x.data.thumbId ? `<img src="${fileUrl(x.data.thumbId)}" alt="" loading="lazy">` : /^image\//.test(x.data.mime) ? `<img src="${fileUrl(x.data.fileId)}" alt="" loading="lazy">` : `<span class="doc-ic">${I.file}<b>${esc((x.data.name.split('.').pop() || '').toUpperCase())}</b></span>`}</a>
       <div class="dc-meta"><b title="${esc(x.data.name)}">${esc(x.data.name)}</b><small class="muted">${x.plan ? `Plan${x.plan.data.version > 1 ? ` · version ${x.plan.data.version}` : ''} · onglet Plans` : `${esc(x.data.folder || '')} · ${fnum((x.data.size || 0) / 1048576, 1)} Mo`} · ${esc(userName(x.created_by))}</small></div>
       <button class="icon-btn sm" data-doc="${x.id}">${I.more}</button></div>`).join('')}</div>` : empty('Aucun document', 'Ajoutez contrats, permis, fiches techniques, photos…')}`;
   $$('[data-f]', el).forEach((b) => { b.onclick = () => { ui['docf_' + p.id] = b.dataset.f; saveUi(); render(); }; });

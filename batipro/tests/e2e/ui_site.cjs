@@ -114,6 +114,19 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
   check('PV affiché avec « Pendant la visite » et les signatures', /Pendant la visite/.test(pv) && /Signatures/.test(pv));
   await p.evaluate(() => closeModals());
 
+  // partager un plan (depuis « Sur le chantier ») : e-mail avec l'image du plan en pièce jointe
+  await p.goto(`${BASE}/#/site/${ids.pid}`); await p.waitForSelector('.site-viewer .pin'); await p.waitForTimeout(600);
+  await p.click('.site-top [data-share]'); await p.waitForSelector('.modal [data-sh="dl"]');
+  check('« Partager » le plan : avec les points à faire, e-mail et téléchargement proposés', !!(await p.$('.modal [data-pts]')) && !!(await p.$('.modal [data-sh="mail"]')));
+  await p.click('.modal [data-sh="mail"]'); await p.waitForSelector('.modal .mail-form', { timeout: 15000 });
+  check('e-mail : l\'image du plan est jointe', /Joindre aussi : .*\.jpg/.test(await p.textContent('.modal .mail-form')));
+  await p.evaluate(() => closeModals());
+  // visionneuse du plan : bouton « Retour » visible et « Partager »
+  await p.goto(`${BASE}/#/project/${ids.pid}/plan/${ids.plan}`); await p.waitForSelector('.viewer-wrap .plan-back');
+  check('visionneuse : « Retour » et « Partager » visibles sur téléphone', await p.isVisible('.plan-back') && await p.isVisible('[data-act=share]'));
+  await p.click('.plan-back'); await p.waitForTimeout(800);
+  check('« Retour » ramène au chantier', /#\/project\//.test(p.url()) && !(await p.$('.viewer-wrap')));
+
   // ordinateur : les onglets restent
   const d = await b.newPage({ viewport: { width: 1280, height: 900 }, bypassCSP: true }); d.on('pageerror', (e) => errs.push(e.message));
   await d.goto(BASE + '/'); await d.waitForFunction('typeof S !== "undefined" && S.ready', null, { timeout: 30000 }).catch(async () => { await d.fill('input[name=email]', 'admin@test.madibu.local'); await d.fill('input[name=password]', 'Admin-Test-2026'); await d.click('button[type=submit]'); await d.waitForFunction('typeof S !== "undefined" && S.ready'); });

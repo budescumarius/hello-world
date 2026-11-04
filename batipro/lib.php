@@ -1,6 +1,7 @@
 <?php
 // Fonctions communes : base de données, session, réponses JSON.
 declare(strict_types=1);
+date_default_timezone_set('Europe/Brussels'); // entreprise belge : dates et heures à l'heure belge, quel que soit le réglage de l'hébergeur
 
 const APP_VERSION = '1.0.0';
 const MAX_UPLOAD = 32 * 1024 * 1024;
