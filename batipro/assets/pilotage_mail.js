@@ -48,7 +48,7 @@ document.addEventListener('click', (e) => {
 });
 // texte de l'IA (titres **…**, listes, gras) mis en page proprement ; « #123 » ouvre l'e-mail cité
 function pilMd(t) {
-  const inl = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[\s(«])#(\d{1,7})\b/g, '$1<a href="#" class="pm-ref" data-m="$2">#$2</a>');
+  const inl = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[\s(«>,;:\/])#(\d{1,7})\b/g, '$1<a href="#" class="pm-ref" data-m="$2">#$2</a>');
   const out = []; let list = null;
   const close = () => { if (list) { out.push(`</${list}>`); list = null; } };
   for (const raw of String(t || '').split('\n')) {
