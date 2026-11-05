@@ -314,13 +314,17 @@ function pil_mail_analyze(array $acc, array $me, int $max = 10): array {
         }
     }
     $system = "Tu es l'assistant de direction de " . ($co['name'] ?? 'MADIBU Group') . ". Tu tries les e-mails reçus et prépares le travail ; tu ne décides rien et tu n'envoies rien : chaque brouillon sera relu, modifié si besoin et envoyé par la direction elle-même.\n"
-        . "Règles : n'invente aucun fait, montant, date ou engagement ; recopie les montants tels qu'écrits ; publicité et newsletters : urgence basse, pas d'action, pas de réponse ; un e-mail qui demande une réponse, une décision, un paiement, un document ou une date : action_requise ; chantier_id seulement si le nom, l'adresse ou le client correspond clairement.";
+        . "Règles : n'invente aucun fait, montant, date ou engagement ; recopie les montants tels qu'écrits ; publicité et newsletters : urgence basse, pas d'action, pas de réponse ; un e-mail qui demande une réponse, une décision, un paiement, un document ou une date : action_requise ; chantier_id seulement si le nom, l'adresse ou le client correspond clairement.\nRéponds UNIQUEMENT en appelant l'outil classer_emails une seule fois, avec une entrée par e-mail (#id).";
     $client = new Anthropic\Client(apiKey: ai_key(), baseUrl: ai_base_url());
     @set_time_limit(240);
-    $resp = $client->beta->messages->create(maxTokens: 12000, model: AI_MODEL, system: $system, tools: [pil_mail_ai_tool()], toolChoice: ['type' => 'tool', 'name' => 'classer_emails'],
+    $resp = $client->beta->messages->create(maxTokens: 12000, model: AI_MODEL, system: $system, tools: [pil_mail_ai_tool()], // pas de tool_choice forcé : refusé par le modèle (« tool_choice … not supported ») ; l'instruction suffit
         messages: [['role' => 'user', 'content' => $content]], outputConfig: ['effort' => 'low'], fallbacks: 'default', betas: ['server-side-fallback-2026-07-01']);
     $out = [];
     foreach ($resp->content as $b) if ($b->type === 'tool_use') { $in = json_decode(json_encode($b->input), true) ?: []; $out = $in['emails'] ?? []; }
+    if (!$out) { // le modèle a répondu en texte : on reprend le JSON qu'il contient
+        $txt = ''; foreach ($resp->content as $b) if ($b->type === 'text') $txt .= $b->text;
+        if (preg_match('/\{.*\}/s', $txt, $jm)) { $j = json_decode($jm[0], true); $out = is_array($j) ? ($j['emails'] ?? []) : []; }
+    }
     $ids = array_column($rows, null, 'id'); $done = 0; $pids = array_column($projects, 'id');
     foreach ($out as $e) {
         $id = (int)($e['id'] ?? 0); if (!isset($ids[$id])) continue;

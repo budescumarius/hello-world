@@ -9,6 +9,8 @@
 $raw = (string)file_get_contents('php://input'); $req = json_decode($raw, true) ?: [];
 // journal : outils proposés et présence éventuelle d'un IBAN complet dans la requête (ne doit pas arriver pour le rapport)
 file_put_contents(sys_get_temp_dir() . '/claude_mock.log', json_encode(['path' => $_SERVER['REQUEST_URI'], 'tools' => array_column($req['tools'] ?? [], 'name'), 'n' => count($req['messages'] ?? []), 'iban' => (bool)preg_match('/BE\d{14}/', $raw)]) . "\n", FILE_APPEND);
+// comme le vrai modèle : un tool_choice forcé (« tool » / « any ») est refusé
+if (in_array($req['tool_choice']['type'] ?? '', ['tool', 'any'], true)) { http_response_code(400); header('Content-Type: application/json'); echo json_encode(['type' => 'error', 'error' => ['type' => 'invalid_request_error', 'message' => 'tool_choice: type "tool" and "any" are not supported for this model.']]); exit; }
 $fmt = fn(int $c) => ($c < 0 ? '-' : '') . number_format(abs($c) / 100, 2, ',', '.');
 $msgs = $req['messages'] ?? [];
 $last = end($msgs);
