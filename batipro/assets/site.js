@@ -436,8 +436,9 @@ function siteNewPoint(st, pos, kind0 = 'faire') {
   const drawPh = () => { $('[data-ph]', m.el).innerHTML = photos.map((x, i) => `<div class="ph"><img src="${x.url}" alt=""><button type="button" data-rm="${i}">✕</button></div>`).join(''); $$('[data-rm]', m.el).forEach((b) => { b.onclick = () => { photos.splice(+b.dataset.rm, 1); drawPh(); }; }); };
   $$('[data-cam]', m.el).forEach((cam) => { cam.onchange = async () => { for (const f of cam.files) { const b = await sitePhoto(f); photos.push({ key: lid() + lid(), blob: b, url: URL.createObjectURL(b) }); } cam.value = ''; drawPh(); }; });
   const setKind = (k) => { const oldCat = PT_KINDS[kind][1]; kind = k; $$('[data-k]', m.el).forEach((a) => a.classList.toggle('on', a.dataset.k === k)); $('[data-tl]', m.el).textContent = TITLE[k];
-    $$('[data-only-todo]', m.el).forEach((x) => { x.hidden = k === 'remarque'; }); if (!form.category.value.trim() || form.category.value === oldCat) form.category.value = PT_KINDS[k][1]; };
+    $$('[data-only-todo]', m.el).forEach((x) => { x.hidden = k === 'remarque'; x.style.display = k === 'remarque' ? 'none' : ''; }); if (!form.category.value.trim() || form.category.value === oldCat) form.category.value = PT_KINDS[k][1]; };
   $$('[data-k]', m.el).forEach((a) => { a.onclick = (e) => { e.preventDefault(); setKind(a.dataset.k); }; });
+  setKind(kind); // ouvert directement en « remarque » : sans « qui » ni « pour quand »
   const pick = (box, attr, set) => { $$(`[${attr}]`, box).forEach((b) => { b.onclick = () => { $$(`[${attr}]`, box).forEach((x) => x.classList.toggle('on', x === b)); set(b.getAttribute(attr)); const sel = $('select', box); if (sel) sel.value = ''; const dt = $('input[type=date]', box); if (dt) dt.value = ''; }; }); };
   pick($('[data-who]', m.el), 'data-c', (v) => { companyId = v; });
   pick($('[data-due]', m.el), 'data-d', (v) => { due = v; });
