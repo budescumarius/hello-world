@@ -101,7 +101,8 @@ T::test('envoi après relecture : le texte corrigé part en réponse au bon e-ma
     [$c, $d] = $admin->req('POST', "pilot/mail/drafts/{$S['draft']}/send", ['confirm' => true, 'to' => [['email' => 'client@exemple-fictif.be']], 'subject' => 'RE: Demande de devis cuisine Dupont', 'body' => "Bonjour,\nTexte relu et corrigé par la direction.\nCordialement"]);
     T::eq(200, $c, json_encode($d, JSON_UNESCAPED_UNICODE)); T::eq('envoye', $d['status']);
     $s = $sent(); T::eq(1, count($s)); T::ok(str_ends_with($s[0]['p'], '/me/messages/AAA1/reply'), $s[0]['p']);
-    T::ok(str_contains(json_decode($s[0]['body'], true)['comment'], 'Texte relu et corrigé'), 'texte relu envoyé');
+    $cm = json_decode($s[0]['body'], true)['comment']; T::ok(str_contains($cm, 'Texte relu et corrigé'), 'texte relu envoyé');
+    T::ok(str_contains($cm, 'Bonjour,<br>') && str_contains($cm, 'direction.<br>'), 'retours à la ligne gardés dans Outlook (HTML) : ' . $cm);
     T::eq('repondu', db()->query("SELECT state FROM pil_mail_msgs WHERE graph_id = 'AAA1'")->fetchColumn());
     T::ok((bool)db()->query("SELECT id FROM pil_audit WHERE action = 'email_envoye'")->fetch(), 'journal d\'audit');
     [$c] = $admin->req('POST', "pilot/mail/drafts/{$S['draft']}/send", ['confirm' => true]); T::eq(409, $c, 'pas deux fois');
@@ -125,8 +126,10 @@ T::test('nouveau message (pas une réponse) : brouillon, envoi confirmé seuleme
     $id = (int)db()->query('SELECT id FROM pil_mail_accounts')->fetchColumn(); $before = count($sent());
     [$c, $d] = $admin->req('POST', 'pilot/mail/drafts', ['account_id' => $id, 'to' => [], 'subject' => '', 'body' => '']); T::eq(200, $c, json_encode($d)); T::eq(null, $d['msg_id']);
     [$c] = $admin->req('POST', "pilot/mail/drafts/{$d['id']}/send", ['to' => [['email' => 'archi@bureau-fictif.be']], 'subject' => 'Visite', 'body' => 'Bonjour']); T::eq(400, $c, 'sans confirmation');
-    [$c, $r] = $admin->req('POST', "pilot/mail/drafts/{$d['id']}/send", ['confirm' => true, 'to' => [['email' => 'archi@bureau-fictif.be']], 'subject' => 'Visite chantier', 'body' => 'Bonjour, visite jeudi ?']); T::eq(200, $c, json_encode($r));
+    [$c, $r] = $admin->req('POST', "pilot/mail/drafts/{$d['id']}/send", ['confirm' => true, 'to' => [['email' => 'archi@bureau-fictif.be']], 'subject' => 'Visite chantier', 'body' => "Bonjour,\n\nVisite jeudi ? <b>pas de HTML injecté</b>\nMerci"]); T::eq(200, $c, json_encode($r));
     $s = $sent(); T::eq($before + 1, count($s)); T::ok(str_ends_with(end($s)['p'], '/me/sendMail') && str_contains(end($s)['body'], 'Visite chantier'), end($s)['p']);
+    $mb = json_decode(end($s)['body'], true)['message']['body']; T::eq('HTML', $mb['contentType']);
+    T::ok(substr_count($mb['content'], '<p ') === 2 && str_contains($mb['content'], '<br>Merci') && str_contains($mb['content'], '&lt;b&gt;'), 'paragraphes et lignes gardés, texte échappé : ' . $mb['content']);
     [$c] = (new Client('anon'))->req('POST', 'pilot/mail/drafts', ['account_id' => $id]); T::ok(in_array($c, [401, 403], true), "anonyme : $c");
 });
 T::test('jeton expiré : renouvelé automatiquement', function () use ($admin, $glog) {

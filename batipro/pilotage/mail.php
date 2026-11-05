@@ -416,6 +416,13 @@ function pil_mail_list(array $me, array $g): array {
     return ['items' => array_map(fn($r) => pil_mail_msg_out($r) + ['account_email' => $r['account_email'], 'folder' => $r['folder'], 'to' => json_decode((string)$r['to_json'], true) ?: []], $rows), 'more' => $more];
 }
 
+/** Texte relu → HTML pour Outlook : paragraphes et retours à la ligne gardés (Outlook affiche la réponse en HTML : sans cela, tout tenait sur une ligne). */
+function pil_mail_html(string $t): string {
+    $t = str_replace(["\r\n", "\r"], "\n", trim($t));
+    $paras = preg_split('/\n{2,}/', $t);
+    $h = implode('', array_map(fn($p) => '<p style="margin:0 0 12px 0">' . str_replace("\n", '<br>', htmlspecialchars($p, ENT_QUOTES, 'UTF-8')) . '</p>', $paras));
+    return '<div style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt;color:#000">' . $h . '</div>';
+}
 // --------------------------------------------------------------------- Envoi : seulement par l'utilisateur, après relecture (jamais par l'IA ni par une tâche planifiée)
 function pil_mail_send(array $me, int $draftId, array $b): array {
     $d = q('SELECT * FROM pil_mail_drafts WHERE id = ? AND company_id = ?', [$draftId, cid()])->fetch();
@@ -433,8 +440,8 @@ function pil_mail_send(array $me, int $draftId, array $b): array {
     $note = null;
     if (test_mode()) { $note = 'Site de test : e-mail NON envoyé (simulation).'; error_log('[BatiPro mode test] e-mail Outlook NON envoyé : ' . $subject); }
     elseif (($acc['kind'] ?? 'graph') === 'imap') { require_once __DIR__ . '/imap.php'; $note = pil_imap_send($acc, $me, $to, $cc, $subject, $body, $msg); }
-    elseif ($msg) pil_graph($acc, 'POST', '/me/messages/' . rawurlencode($msg['graph_id']) . '/reply', ['message' => ['toRecipients' => $rc($to), 'ccRecipients' => $rc($cc)], 'comment' => $body]);
-    else pil_graph($acc, 'POST', '/me/sendMail', ['message' => ['subject' => $subject, 'body' => ['contentType' => 'Text', 'content' => $body], 'toRecipients' => $rc($to), 'ccRecipients' => $rc($cc)], 'saveToSentItems' => true]);
+    elseif ($msg) pil_graph($acc, 'POST', '/me/messages/' . rawurlencode($msg['graph_id']) . '/reply', ['message' => ['toRecipients' => $rc($to), 'ccRecipients' => $rc($cc)], 'comment' => pil_mail_html($body)]);
+    else pil_graph($acc, 'POST', '/me/sendMail', ['message' => ['subject' => $subject, 'body' => ['contentType' => 'HTML', 'content' => pil_mail_html($body)], 'toRecipients' => $rc($to), 'ccRecipients' => $rc($cc)], 'saveToSentItems' => true]);
     q("UPDATE pil_mail_drafts SET status = 'envoye', sent_at = ?, sent_by = ?, note = ? WHERE id = ?", [now(), $me['id'], $note, $draftId]);
     if ($msg) q("UPDATE pil_mail_msgs SET state = 'repondu', done_by = ?, done_at = ? WHERE id = ?", [$me['id'], now(), $msg['id']]);
     pil_audit('email_envoye', 'mail_draft', $draftId, null, ['boite' => $acc['email'], 'a' => array_column($to, 'email'), 'objet' => $subject, 'origine_brouillon' => $d['origin'], 'relu_et_confirme_par' => (int)$me['id'], 'simulation' => test_mode()]);
