@@ -49,6 +49,16 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   await p.click('[data-submit]'); await p.waitForTimeout(1500);
   const ncd = await p.evaluate(async (id) => (await db.get('expense', id)).data, nc);
   check('note de crédit (-108,23 € HT) validée sans chantier', ncd.status === 'validee' && !ncd.toCheck, `${ncd.status} ${(await p.textContent('#toasts, .toast').catch(() => '')) || ''}`);
+  // fiche d'un sous-traitant : ses factures reçues, les paiements, le reste à payer et ses chantiers
+  const sc = await p.evaluate(async () => {
+    const c = await persist('contact', { data: { kind: 'soustraitant', company: 'BIMG Fictif SRL' } });
+    const pr = await persist('project', { data: { name: 'Chantier BIMG fictif', status: 'encours' } });
+    await persist('expense', { project_id: pr.id, data: { date: '2026-10-01', due: '2026-10-31', category: 'st', status: 'validee', ref: 'BIMG-1', supplierId: c.id, amount: 1000, ttc: 1000, vat: 0, vatLines: [{ rate: 0, amount: 0 }], payments: [{ date: '2026-10-15', amount: 400, method: 'Virement' }] } });
+    await persist('expense', { project_id: pr.id, data: { date: '2026-10-20', due: '2099-12-31', category: 'st', status: 'validee', ref: 'BIMG-2', supplierId: c.id, amount: 500, ttc: 500, vat: 0, vatLines: [{ rate: 0, amount: 0 }], payments: [{ date: '2026-10-25', amount: 500, method: 'Virement' }] } });
+    return c.id; });
+  await p.goto(`${BASE}/#/contact/${sc}`); await p.waitForTimeout(1500);
+  const ct = (await p.textContent('#page')).replace(/\s+/g, ' ');
+  check('sous-traitant : factures reçues, paiements, reste à payer, chantier (pas d\'« Opportunités » vides)', /Factures reçues/.test(ct) && /BIMG-1/.test(ct) && /BIMG-2/.test(ct) && /Paiements/.test(ct) && /1 500,00/.test(ct) && /900,00/.test(ct) && /600,00/.test(ct) && /Chantier BIMG fictif/.test(ct) && !/Opportunités/.test(ct) && /Dont en retard/.test(ct), ct.slice(0, 400));
   // accueil : « ✕ » masque un élément réglé autrement, « Tout réafficher » le remet
   await p.goto(`${BASE}/#/dashboard`); await p.waitForSelector('.todo-x', { timeout: 15000 }).catch(() => {});
   const n0 = (await p.$$('.todo')).length; const t0 = await p.textContent('.todo .todo-tx b').catch(() => '');

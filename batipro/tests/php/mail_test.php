@@ -181,7 +181,7 @@ T::test('identifiant Microsoft qui ne diffère d\'un autre que par les majuscule
     [, $d] = $admin->req('GET', "pilot/mail/accounts/$id/check"); $x = array_values(array_filter($d['server'], fn($s) => $s['subject'] === 'Facture chape 2026-118'))[0];
     T::eq(false, $x['in_batipro'], 'diagnostic : écart montré'); T::eq('2020-01-01 00:00:00', $x['stored']['at']);
     db()->exec('UPDATE pil_mail_accounts SET last_sync = NOW() - INTERVAL 1 HOUR'); $admin->req('POST', 'pilot/mail/sync', []);
-    T::eq($r['at'], db()->query("SELECT at FROM pil_mail_msgs WHERE graph_id = 'aaa3'")->fetchColumn(), 'date corrigée');
+    T::ok(abs(strtotime($r['at']) - strtotime((string)db()->query("SELECT at FROM pil_mail_msgs WHERE graph_id = 'aaa3'")->fetchColumn())) <= 3, 'date corrigée (le faux serveur recalcule l\'heure à chaque requête)');
     [, $d] = $admin->req('GET', "pilot/mail/accounts/$id/check"); T::ok(!array_filter($d['server'], fn($s) => !$s['in_batipro']), json_encode($d['server'], JSON_UNESCAPED_UNICODE));
 });
 T::test('conseiller du jour : client qui écrit avec une facture échue ; facture fournisseur reçue à encoder (disparaît une fois encodée) ; IA : conseil vérifié, sans texte complet des e-mails', function () use ($admin, $user) {

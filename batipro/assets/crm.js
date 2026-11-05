@@ -93,13 +93,25 @@ route('contacts', async (kind = 'client') => {
 
 route('contact', async (id) => {
   const c = await db.get('contact', +id);
-  const all = await db.many(['opportunity', 'quote', 'project', 'invoice', 'order', 'installation', 'intervention'], null, { lite: true });
+  const all = await db.many(['opportunity', 'quote', 'project', 'invoice', 'order', 'installation', 'intervention', 'expense', 'timesheet'], null, { lite: true });
   const mine = (t, key = 'clientId') => all[t].filter((x) => +x.data[key] === c.id);
   const opps = mine('opportunity'); const quotes = mine('quote'); const projects = mine('project'); const invoices = mine('invoice');
   const orders = mine('order', 'supplierId'); const inst = mine('installation'); const inter = mine('intervention');
   const sales = invoices.reduce((a, i) => { const s = invState(i); return s.s === 'brouillon' ? a : a + s.t.base * (i.data.kind === 'avoir' ? 1 : 1); }, 0);
   const due = invoices.reduce((a, i) => { const s = invState(i); return ['impayee', 'partielle', 'retard'].includes(s.s) ? a + s.rest : a; }, 0);
   const d = c.data;
+  // fournisseur / sous-traitant : ses factures reçues, ce qui a été payé, ce qui reste, ses chantiers et ses heures
+  const isSup = ['fournisseur', 'soustraitant'].includes(d.kind);
+  const purch = (all.expense || []).filter((e) => +e.data.supplierId === c.id && !e.data.refused).sort((a, b) => (b.data.date || '').localeCompare(a.data.date || ''));
+  const pays = purch.flatMap((e) => (Array.isArray(e.data.payments) && e.data.payments.length ? e.data.payments : e.data.paid ? [{ date: e.data.paidDate || e.data.date, amount: purchTtc(e.data), method: '' }] : [])
+    .map((p) => ({ ...p, e }))).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const hours = (all.timesheet || []).filter((t) => +t.data.contactId === c.id);
+  const pIds = new Set([...purch.flatMap((e) => expenseParts(e).map((x) => x.pid)), ...orders.map((o) => o.project_id), ...hours.map((t) => t.project_id), ...all.project.filter((p) => (p.data.subs || []).map(Number).includes(c.id)).map((p) => p.id)].filter(Boolean).map(Number));
+  const supProjects = all.project.filter((p) => pIds.has(p.id));
+  const billedFor = (pid) => purch.reduce((a, e) => a + expenseParts(e).filter((x) => +x.pid === pid).reduce((s, x) => s + x.amount, 0), 0);
+  const tTtc = purch.reduce((a, e) => a + purchTtc(e.data), 0); const tPaid = purch.reduce((a, e) => a + purchPaid(e.data), 0);
+  const tRest = purch.filter((e) => purchState(e) !== 'avalider').reduce((a, e) => a + Math.max(0, purchRest(e.data)), 0);
+  const late = purch.filter((e) => purchState(e) === 'retard'); const tLate = late.reduce((a, e) => a + purchRest(e.data), 0);
   const page = layout({ active: 'contacts', icon: 'contacts', title: contactName(c), back: `#/contacts/${d.kind || 'all'}`,
     sub: badge(CONTACT_KINDS[d.kind] || '—', CONTACT_COLORS[d.kind] || '#999'),
     actions: `<button class="btn" data-act="edit">${I.edit} Modifier</button><button class="btn primary" data-act="new">${I.plus} Créer…</button>` });
@@ -112,13 +124,18 @@ route('contact', async (id) => {
         ['IBAN', d.iban], ['Origine', d.source]].filter(([, v]) => v).map(([k, v]) => `<div class="kv"><span>${k}</span><div>${k === 'Email' || k === 'Téléphone' || k === 'GSM' || k === 'Adresse' ? v : esc(v)}</div></div>`).join('')}
       ${d.notes ? `<div class="kv"><span>Notes</span><div class="pre">${esc(d.notes)}</div></div>` : ''}
       <div class="muted sm">Créé par ${esc(userName(c.created_by))} le ${fmtDT(c.created_at)}</div></div>
+      ${isSup || purch.length ? `<div class="kpis">${kpi('Facturé (TTC)', money(tTtc), { sub: `${purch.length} facture(s) reçue(s)` })}${kpi('Payé', money(tPaid), { sub: `${pays.length} paiement(s)` })}${kpi('Reste à payer', money(tRest), { cls: tRest > 0.005 ? 'warn' : '' })}${late.length ? kpi('Dont en retard', money(tLate), { cls: 'bad', sub: `${late.length} facture(s)` }) : ''}${hours.length ? kpi('Heures prestées', `${fnum(hours.reduce((a, t) => a + num(t.data.hours), 0), 1)} h`) : ''}</div>` : ''}
       ${d.kind === 'client' || invoices.length ? `<div class="kpis">${kpi('Chiffre d\'affaires HT', money(sales))}${kpi('Reste à encaisser', money(due), { cls: due > 0 ? 'warn' : '' })}</div>` : ''}
     </div>
     <div class="col-main">
-      ${sect('Opportunités', opps, (o) => `<a class="row" href="#/opportunities?o=${o.id}"><span class="grow"><b>${esc(o.data.title)}</b><small class="muted">${esc(o.number || '')}</small></span>${stageBadge(o.data.stage)}<b>${money(o.data.amount)}</b></a>`, 'Aucune opportunité')}
-      ${sect('Devis', quotes, (q) => `<a class="row" href="#/quote/${q.id}"><span class="grow"><b>${esc(q.number)} · ${esc(q.data.title || '')}</b><small class="muted">${fmtDate(q.data.date)}</small></span>${st(QST, q.data.status)}<b>${money(totals(q.data).base)}</b></a>`, 'Aucun devis')}
-      ${sect('Chantiers', projects, (p) => `<a class="row" href="#/project/${p.id}"><span class="grow"><b>${esc(p.data.name)}</b><small class="muted">${esc(p.number || '')} · ${esc(p.data.city || '')}</small></span>${st(PST, p.data.status)}</a>`, 'Aucun chantier')}
-      ${sect('Factures', invoices, (i) => { const s = invState(i); return `<a class="row" href="#/invoice/${i.id}"><span class="grow"><b>${esc(i.number || 'Brouillon')} · ${esc(IKIND[i.data.kind] || 'Facture')}</b><small class="muted">${fmtDate(i.data.date)}</small></span>${st(IST, s.s)}<b>${money(s.t.total)}</b></a>`; }, 'Aucune facture')}
+      ${isSup || purch.length ? `${sect('Factures reçues', purch, (e) => { const s = purchState(e); return `<a class="row" href="#/purchase/${e.id}"><span class="grow"><b>${esc(e.data.ref || 'Sans référence')}</b><small class="muted">${fmtDate(e.data.date)}${e.data.due ? ` · échéance ${fmtDate(e.data.due)}` : ''}${expenseParts(e).map((x) => byId(all.project, x.pid)).filter(Boolean).map((p) => ` · ${esc(p.data.name)}`).join('')}</small></span>${st(PURCH_ST, s)}<span class="r"><b>${money(purchTtc(e.data))}</b>${s !== 'payee' && Math.abs(purchRest(e.data)) > 0.005 ? `<br><small class="muted">reste ${money(purchRest(e.data))}</small>` : ''}</span></a>`; }, 'Aucune facture reçue de ce fournisseur')}
+        ${sect('Paiements', pays, (p) => `<a class="row" href="#/purchase/${p.e.id}"><span class="grow"><b>${fmtDate(p.date)}</b><small class="muted">Facture ${esc(p.e.data.ref || '—')}${p.method ? ` · ${esc(p.method)}` : ''}</small></span><b>${money(num(p.amount))}</b></a>`, 'Aucun paiement enregistré')}
+        ${sect('Chantiers', supProjects, (p) => `<a class="row" href="#/project/${p.id}"><span class="grow"><b>${esc(p.data.name)}</b><small class="muted">${esc(p.number || '')}${p.data.city ? ` · ${esc(p.data.city)}` : ''}</small></span>${st(PST, p.data.status)}${billedFor(p.id) ? `<b>${money(billedFor(p.id))} HT</b>` : ''}</a>`, 'Aucun chantier')}
+        ${hours.length ? sect('Heures prestées', hours.slice().sort((a, b) => (b.data.date || '').localeCompare(a.data.date || '')).slice(0, 30), (t) => `<div class="row static"><span class="grow"><b>${fmtDate(t.data.date)}</b><small class="muted">${esc((byId(all.project, t.project_id) || { data: { name: t.data.site || '' } }).data.name)}${t.data.task ? ` · ${esc(t.data.task)}` : ''}</small></span><b>${fnum(num(t.data.hours), 2)} h</b></div>`, '') : ''}` : ''}
+      ${isSup && !opps.length ? '' : sect('Opportunités', opps, (o) => `<a class="row" href="#/opportunities?o=${o.id}"><span class="grow"><b>${esc(o.data.title)}</b><small class="muted">${esc(o.number || '')}</small></span>${stageBadge(o.data.stage)}<b>${money(o.data.amount)}</b></a>`, 'Aucune opportunité')}
+      ${isSup && !quotes.length ? '' : sect('Devis', quotes, (q) => `<a class="row" href="#/quote/${q.id}"><span class="grow"><b>${esc(q.number)} · ${esc(q.data.title || '')}</b><small class="muted">${fmtDate(q.data.date)}</small></span>${st(QST, q.data.status)}<b>${money(totals(q.data).base)}</b></a>`, 'Aucun devis')}
+      ${isSup && !projects.length ? '' : sect('Chantiers', projects, (p) => `<a class="row" href="#/project/${p.id}"><span class="grow"><b>${esc(p.data.name)}</b><small class="muted">${esc(p.number || '')} · ${esc(p.data.city || '')}</small></span>${st(PST, p.data.status)}</a>`, 'Aucun chantier')}
+      ${isSup && !invoices.length ? '' : sect('Factures', invoices, (i) => { const s = invState(i); return `<a class="row" href="#/invoice/${i.id}"><span class="grow"><b>${esc(i.number || 'Brouillon')} · ${esc(IKIND[i.data.kind] || 'Facture')}</b><small class="muted">${fmtDate(i.data.date)}</small></span>${st(IST, s.s)}<b>${money(s.t.total)}</b></a>`; }, 'Aucune facture')}
       ${orders.length ? sect('Commandes', orders, (o) => `<a class="row" href="#/order/${o.id}"><span class="grow"><b>${esc(o.number)}</b><small class="muted">${fmtDate(o.data.date)}</small></span>${st(OST, o.data.status)}<b>${money(totals(o.data).base)}</b></a>`, '') : ''}
       ${inst.length ? sect('Installations', inst, (x) => `<a class="row" href="#/installations?i=${x.id}"><span class="grow"><b>${esc(x.data.name)}</b><small class="muted">${esc([x.data.brand, x.data.model].filter(Boolean).join(' '))}</small></span></a>`, '') : ''}
       ${inter.length ? sect('Interventions', inter, (x) => `<a class="row" href="#/intervention/${x.id}"><span class="grow"><b>${esc(x.number)} · ${esc(x.data.title || '')}</b><small class="muted">${fmtDate(x.data.date)}</small></span>${st(INTST, x.data.status)}</a>`, '') : ''}
@@ -130,7 +147,7 @@ route('contact', async (id) => {
     { label: 'Chantier', run: () => editProject(null, { clientId: c.id }) },
     { label: 'Intervention', run: () => editIntervention(null, { clientId: c.id }) },
     { label: 'Installation', run: () => editInstallation(null, { clientId: c.id }) },
-    ...(d.kind === 'fournisseur' || d.kind === 'soustraitant' ? [{ label: 'Commande', run: () => newOrder({ supplierId: c.id, kind: d.kind }) }] : []),
+    ...(isSup ? [{ label: 'Facture reçue (saisie)', run: () => editExpense(null, { supplierId: c.id, category: d.kind === 'soustraitant' ? 'st' : 'mat' }) }, { label: 'Commande', run: () => newOrder({ supplierId: c.id, kind: d.kind }) }] : []),
   ]);
 });
 
