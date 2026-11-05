@@ -747,11 +747,19 @@ function pil_mail_route(string $method, array $seg, array $me): void {
             out(pil_mail_draft_out(q('SELECT * FROM pil_mail_drafts WHERE id = ?', [(int)db()->lastInsertId()])->fetch()));
         }
     }
-    if ($a === 'drafts' && $method === 'POST' && !$id) {
+    if ($a === 'drafts' && $method === 'POST' && !$id && empty(body()['reject'])) {
         $b = body(); $acc = pil_mail_account($me, (int)($b['account_id'] ?? 0));
         q('INSERT INTO pil_mail_drafts (company_id, account_id, msg_id, to_json, cc_json, subject, body, origin, status, created_at, updated_at) VALUES (?,?,NULL,?,?,?,?,?,?,?,?)',
             [cid(), $acc['id'], json_encode(pil_mail_rcpts($b['to'] ?? [])), json_encode(pil_mail_rcpts($b['cc'] ?? [])), mb_substr(trim((string)($b['subject'] ?? '')), 0, 500), (string)($b['body'] ?? ''), 'utilisateur', 'brouillon', now(), now()]);
         out(pil_mail_draft_out(q('SELECT * FROM pil_mail_drafts WHERE id = ?', [(int)db()->lastInsertId()])->fetch()));
+    }
+    // supprimer des réponses préparées (sélection ou toutes) : seulement celles des boîtes de l'utilisateur, jamais envoyées
+    if ($a === 'drafts' && !$id && $method === 'POST' && ($seg[3] ?? '') === '' && !empty(body()['reject'])) {
+        $b = body(); $ids = array_values(array_filter(array_map('intval', (array)($b['ids'] ?? []))));
+        if (empty($b['all']) && !$ids) fail(400, 'Aucune réponse choisie.');
+        $w = 'd.company_id = ? AND a.user_id = ? AND d.status = \'brouillon\'' . (empty($b['all']) ? ' AND d.id IN (' . implode(',', $ids) . ')' : '');
+        $r = q("UPDATE pil_mail_drafts d JOIN pil_mail_accounts a ON a.id = d.account_id SET d.status = 'rejete', d.updated_at = ? WHERE $w", [now(), cid(), $me['id']]);
+        out(['ok' => true, 'deleted' => $r->rowCount()]);
     }
     if ($a === 'drafts' && $id) {
         $d = q('SELECT d.* FROM pil_mail_drafts d JOIN pil_mail_accounts a ON a.id = d.account_id WHERE d.id = ? AND d.company_id = ? AND a.user_id = ?', [$id, cid(), $me['id']])->fetch();

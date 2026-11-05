@@ -2316,3 +2316,12 @@ details.card > summary { cursor: pointer; padding: 4px 0; }
 .pm-attpage { width: 100%; max-width: 1100px; height: auto; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .15); }
 .pm-attimg { max-width: 100%; height: auto; }
 .pm-attview .pre { width: 100%; background: var(--surface); padding: 12px; }
+
+/* réponses préparées : choisir, supprimer */
+.pm-dbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); position: sticky; top: 0; z-index: 1; }
+.pm-dbar label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.pm-drow { display: flex; align-items: stretch; border-bottom: 1px solid var(--border); }
+.pm-drow .pm-row { border-bottom: 0; flex: 1; min-width: 0; }
+.pm-dsel { display: flex; align-items: center; padding: 0 4px 0 10px; }
+.pm-dx { border: 0; background: none; padding: 0 12px; cursor: pointer; opacity: .55; font-size: 16px; }
+.pm-dx:hover, .pm-dx:focus-visible { opacity: 1; background: var(--surface-2); }

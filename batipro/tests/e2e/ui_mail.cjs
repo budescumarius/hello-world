@@ -73,6 +73,7 @@ const sql = (s) => execFileSync('php', ['-r', `$p=new PDO("mysql:host=127.0.0.1;
   let sent = null;
   await p.route((u) => /r=pilot\/mail\/drafts\/\d+\/send/.test(u.toString()), async (route) => { sent = JSON.parse(route.request().postData() || '{}'); await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 1, status: 'envoye', note: null }) }); });
   await p.click('.pm-f[data-folder="drafts"]'); await p.waitForSelector('.pm-row.draft');
+  check('réponses préparées : case à cocher, 🗑 par proposition, « Tout supprimer »', !!(await p.$('[data-dsel]')) && !!(await p.$('[data-drej]')) && !!(await p.$('[data-dwipe]')));
   check('« Réponses préparées » : brouillon de l\'IA avec montant à vérifier', /Préparé par l'IA/.test(await p.textContent('.pm-rows')) && /9\.999,00/.test(await p.textContent('.pm-rows')));
   await p.click('.pm-row.draft'); await p.waitForSelector('.modal textarea[name=body]');
   check('relecture : avertissement IA', /Relisez et corrigez/.test(await p.textContent('.modal')));

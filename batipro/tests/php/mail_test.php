@@ -132,6 +132,19 @@ T::test('nouveau message (pas une réponse) : brouillon, envoi confirmé seuleme
     T::ok(substr_count($mb['content'], '<p ') === 2 && str_contains($mb['content'], '<br>Merci') && str_contains($mb['content'], '&lt;b&gt;'), 'paragraphes et lignes gardés, texte échappé : ' . $mb['content']);
     [$c] = (new Client('anon'))->req('POST', 'pilot/mail/drafts', ['account_id' => $id]); T::ok(in_array($c, [401, 403], true), "anonyme : $c");
 });
+T::test('réponses préparées : supprimer une, une sélection ou toutes (rien n\'est envoyé) ; jamais celles d\'un autre', function () use ($admin, $user, $sent) {
+    $acc = (int)db()->query('SELECT id FROM pil_mail_accounts LIMIT 1')->fetchColumn(); $ids = [];
+    for ($i = 1; $i <= 4; $i++) { [, $d] = $admin->req('POST', 'pilot/mail/drafts', ['account_id' => $acc, 'to' => [['email' => "x$i@fictif.be"]], 'subject' => "Brouillon $i", 'body' => 'Texte']); $ids[] = $d['id']; }
+    $before = count($sent()); $st = fn($id) => db()->query("SELECT status FROM pil_mail_drafts WHERE id = $id")->fetchColumn();
+    [$c, $r] = $user->req('POST', 'pilot/mail/drafts', ['reject' => 1, 'all' => 1]); T::ok(in_array($c, [200, 403], true)); if ($c === 200) T::eq(0, $r['deleted'], 'un autre utilisateur ne supprime rien');
+    [$c, $r] = $admin->req('POST', 'pilot/mail/drafts', ['reject' => 1, 'ids' => [$ids[0]]]); T::eq(200, $c); T::eq(1, $r['deleted']); T::eq('rejete', $st($ids[0]));
+    [, $r] = $admin->req('POST', 'pilot/mail/drafts', ['reject' => 1, 'ids' => [$ids[1], $ids[2]]]); T::eq(2, $r['deleted']);
+    T::eq('brouillon', $st($ids[3]), 'les autres restent');
+    [, $r] = $admin->req('POST', 'pilot/mail/drafts', ['reject' => 1, 'all' => 1]); T::ok($r['deleted'] >= 1); T::eq('rejete', $st($ids[3]));
+    T::eq(0, (int)db()->query("SELECT COUNT(*) FROM pil_mail_drafts WHERE status = 'brouillon'")->fetchColumn(), 'liste vide');
+    T::eq($before, count($sent()), 'rien envoyé');
+    [$c] = $admin->req('POST', 'pilot/mail/drafts', ['reject' => 1]); T::eq(400, $c, 'rien choisi');
+});
 T::test('jeton expiré : renouvelé automatiquement', function () use ($admin, $glog) {
     db()->exec('UPDATE pil_mail_accounts SET expires_at = 0, last_sync = NULL');
     [$c, $r] = $admin->req('POST', 'pilot/mail/sync'); T::eq(200, $c); T::eq([], $r['errors'], json_encode($r['errors']));

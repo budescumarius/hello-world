@@ -158,11 +158,22 @@ async function pilMailPage() {
       <span class="pm-r2">${esc(m.subject || '(sans objet)')}${(m.atts || []).length ? ' <span title="Pièce jointe">📎</span>' : ''}</span>
       <span class="pm-r3 muted">${esc(a.action ? `➜ ${a.action}` : (a.resume || m.preview || ''))}</span>
       <span class="pm-r4">${st.box === 'all' ? accTag(m) : ''}${cat && st.folder !== 'sent' ? badge(cat[0], cat[1]) : ''}${m.state === 'repondu' ? '<small class="muted">↩ répondu</small>' : m.state === 'fait' ? '<small class="good">✓ fait</small>' : ''}${m.moved ? `<small class="muted">📁 ${esc(m.moved)}</small>` : ''}${m.project_id ? `<small>🏗 ${esc(pname(m.project_id))}</small>` : ''}</span></button>`; };
-  const draftRow = (d) => `<button type="button" class="pm-row draft" data-draft="${d.id}"><span class="pm-r1"><b class="grow">À : ${esc(pilRcptTxt(d.to))}</b>${d.origin === 'ia' ? badge('Préparé par l\'IA', '#7048e8') : badge('Votre brouillon', '#3b5bdb')}</span>
-      <span class="pm-r2">${esc(d.subject)}</span><span class="pm-r3 muted">${esc((d.body || '').slice(0, 160))}</span>${(d.check.non_verifie || []).length ? `<span class="pm-r4 late">⚠ Montant à vérifier : ${d.check.non_verifie.map(esc).join(', ')}</span>` : ''}</button>`;
+  const draftRow = (d) => `<div class="pm-drow"><label class="pm-dsel" aria-label="Choisir"><input type="checkbox" data-dsel="${d.id}"></label><button type="button" class="pm-row draft" data-draft="${d.id}"><span class="pm-r1"><b class="grow">À : ${esc(pilRcptTxt(d.to))}</b>${d.origin === 'ia' ? badge('Préparé par l\'IA', '#7048e8') : badge('Votre brouillon', '#3b5bdb')}</span>
+      <span class="pm-r2">${esc(d.subject)}</span><span class="pm-r3 muted">${esc((d.body || '').slice(0, 160))}</span>${(d.check.non_verifie || []).length ? `<span class="pm-r4 late">⚠ Montant à vérifier : ${d.check.non_verifie.map(esc).join(', ')}</span>` : ''}</button><button type="button" class="pm-dx" data-drej="${d.id}" title="Supprimer cette proposition" aria-label="Supprimer">🗑</button></div>`;
   const groupKey = (m) => { const g = st.folder === 'todo' ? (ui.pilMailGrp || '') : 'day'; return g === 'day' ? pmDay(m.at) : g === 'cat' ? (PIL_MCAT[(m.analysis || {}).categorie] || PIL_MCAT.autre)[0] : g === 'proj' ? (m.project_id ? pname(m.project_id) || 'Chantier' : 'Sans chantier') : g === 'from' ? (m.from_name || m.from_email || '?') : ''; };
   const drawRows = (more) => {
-    if (st.folder === 'drafts') { rowsEl.innerHTML = b.drafts.map(draftRow).join('') || '<p class="muted pm-pad">Aucune réponse en attente.</p>'; }
+    if (st.folder === 'drafts') {
+      rowsEl.innerHTML = b.drafts.length ? `<div class="pm-dbar"><label><input type="checkbox" data-dall> Tout choisir</label><button type="button" class="btn sm danger ghost" data-dsome hidden>Supprimer la sélection</button><span class="grow"></span><button type="button" class="btn sm danger ghost" data-dwipe>Tout supprimer (${b.drafts.length})</button></div>${b.drafts.map(draftRow).join('')}` : '<p class="muted pm-pad">Aucune réponse en attente.</p>';
+      // supprimer des propositions : rien n'est envoyé, l'e-mail d'origine reste dans « À faire »
+      const reject = async (body, n) => { try { const r = await api('POST', 'pilot/mail/drafts', { reject: 1, ...body }); toast(`${r.deleted} proposition(s) supprimée(s)`, 2500); render(); } catch (e) { toast(e.message, 5000); } };
+      const sel = () => $$('[data-dsel]:checked', rowsEl).map((x) => +x.dataset.dsel);
+      const upd = () => { const n = sel().length; const bt = $('[data-dsome]', rowsEl); if (bt) { bt.hidden = !n; bt.textContent = `Supprimer la sélection (${n})`; } };
+      $$('[data-dsel]', rowsEl).forEach((x) => { x.onchange = upd; });
+      const all = $('[data-dall]', rowsEl); if (all) all.onchange = () => { $$('[data-dsel]', rowsEl).forEach((x) => { x.checked = all.checked; }); upd(); };
+      const some = $('[data-dsome]', rowsEl); if (some) some.onclick = () => { const ids = sel(); if (ids.length && confirm(`Supprimer ${ids.length} réponse(s) préparée(s) ? Rien n'est envoyé ; les e-mails restent dans « À faire ».`)) reject({ ids }); };
+      const wipe = $('[data-dwipe]', rowsEl); if (wipe) wipe.onclick = () => { if (confirm(`Supprimer les ${b.drafts.length} réponses préparées ? Rien n'est envoyé ; les e-mails restent dans « À faire ».`)) reject({ all: 1 }); };
+      $$('[data-drej]', rowsEl).forEach((x) => { x.onclick = () => reject({ ids: [+x.dataset.drej] }); });
+    }
     else {
       let list = items; if (st.folder === 'todo' && !ui.pilMailGrp) list = [...items].sort((x, y) => ((x.analysis || {}).urgence === 'haute' ? 0 : 1) - ((y.analysis || {}).urgence === 'haute' ? 0 : 1) || y.at.localeCompare(x.at));
       let cur = null; let html = '';
