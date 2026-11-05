@@ -428,7 +428,8 @@ function pil_compare_months(string $m1, string $m2): array {
 function pil_ai_tools(): array {
     $o = fn(array $props = [], array $req = []) => ['type' => 'object', 'properties' => (object)$props, 'required' => $req];
     $date = ['type' => 'string', 'description' => 'Date AAAA-MM-JJ'];
-    return [
+    require_once __DIR__ . '/ask_tools.php';
+    return [...pil_ask_tool_defs(),
         ['name' => 'tresorerie', 'description' => 'Soldes bancaires (dernier extrait de chaque compte, avec sa date), trésorerie consolidée, prévisions 7/30/90 jours des 3 scénarios (solde final, minimum, date négative), hypothèses et fiabilité.', 'inputSchema' => $o()],
         ['name' => 'encaissements', 'description' => 'Factures clients à encaisser : totaux, factures échues, clients à relancer triés par montant et retard, encaissements attendus à 30 jours.', 'inputSchema' => $o()],
         ['name' => 'decaissements', 'description' => 'Paiements à venir sur N jours (défaut 30) : achats à payer, sous-traitants, salaires, ONSS, TVA, crédits, leasing, autres ; obligatoires et estimés séparés.', 'inputSchema' => $o(['jours' => ['type' => 'integer']])],
@@ -446,6 +447,8 @@ function pil_ai_tools(): array {
     ];
 }
 function pil_run_tool(string $name, array $in, string $today): array {
+    require_once __DIR__ . '/ask_tools.php';
+    if (($r = pil_ask_tool($name, $in, $today)) !== null) return $r; // e-mails et fiche chantier
     $src = fn(array $r, string $source, string $period = '', array $hyp = [], array $missing = []) => $r + ['_source' => $source, '_periode' => $period ?: 'au ' . pil_d($today), '_hypotheses' => $hyp, '_manquant' => $missing];
     $dateOk = fn($d) => is_string($d) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $d);
     switch ($name) {
@@ -577,6 +580,8 @@ function pil_ai_system(): string {
         . "- Pour chaque réponse, indique la période, la source et les hypothèses (champs _periode, _source, _hypotheses).\n"
         . "- Si une information manque (champ _manquant, extraits non couverts, donnée absente de BâtiPro), dis-le explicitement au lieu de deviner.\n"
         . "- Tu ne peux exécuter aucun paiement, signer, accepter un contrat, envoyer un e-mail ou une commande, ni modifier une donnée financière : pour une action sensible, utilise proposer_action (elle va au centre d'approbation, la direction décide). Tu peux créer une tâche interne.\n"
+        . "- Pour un avis sur un chantier : fiche_chantier d'abord, puis chercher_emails (chantier_id, client, fournisseurs) et lire_email pour les e-mails importants ; relie les faits (e-mail ↔ devis ↔ facture ↔ point ouvert) et dis ce qui est à faire, dans l'ordre.\n"
+        . "- Cite chaque e-mail par son numéro sous la forme #123 (il devient un lien) ; n'invente jamais un numéro.\n"
         . "- Réponds dans la langue de la question (souvent roumain ou français), de façon concise et structurée.";
 }
 /** Commentaire du rapport quotidien par l'IA (facultatif) ; les montants cités sont vérifiés contre le rapport. */
@@ -606,6 +611,7 @@ function pil_ask(array $me, string $question, ?int $convId, string $today): arra
     foreach (array_slice($turns, -8) as $t) { $msgs[] = ['role' => 'user', 'content' => $t['q']]; $msgs[] = ['role' => 'assistant', 'content' => $t['a'] !== '' ? $t['a'] : '(pas de réponse)']; }
     $msgs[] = ['role' => 'user', 'content' => $question . "\n\n[Date du jour : $today]"];
     $client = new Anthropic\Client(apiKey: ai_key(), baseUrl: ai_base_url());
+    $GLOBALS['PIL_ASK_ME'] = $me; // e-mails : seulement les boîtes de la personne qui pose la question
     $used = []; $data = [];
     for ($i = 0; $i < 8; $i++) {
         $resp = $client->beta->messages->create(maxTokens: 6000, model: AI_MODEL, system: pil_ai_system(), tools: pil_ai_tools(), messages: $msgs, outputConfig: ['effort' => 'medium'], fallbacks: 'default', betas: ['server-side-fallback-2026-07-01']);

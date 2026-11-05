@@ -222,6 +222,18 @@ T::test('conseiller du jour : client qui écrit avec une facture échue ; factur
     T::ok($log && !$log[0]['corps_complet'] && !$log[0]['iban_clair'], 'résumés seulement, IBAN masqué : ' . json_encode($log));
     [, $r] = $admin->req('GET', 'pilot/mail/advice'); T::eq($a['texte'], $r['conseil']['texte'] ?? null, 'conservé pour la journée');
 });
+T::test('discussion avec le conseiller : cherche dans les e-mails (#n° cité) et la fiche du chantier ; jamais les e-mails d\'un autre', function () use ($admin, $user) {
+    [$c, $r] = $admin->req('POST', 'pilot/ask', ['question' => 'MAILS : qu\'a demandé le client pour la cuisine ?']); T::eq(200, $c, json_encode($r, JSON_UNESCAPED_UNICODE));
+    $id = (int)db()->query("SELECT id FROM pil_mail_msgs WHERE subject = 'Demande de devis cuisine Dupont' LIMIT 1")->fetchColumn();
+    T::ok(str_contains($r['answer'], "#$id"), 'e-mail trouvé et cité : ' . $r['answer']); T::eq('chercher_emails', $r['tools'][0]['outil'] ?? null);
+    [$c, $r2] = $admin->req('POST', 'pilot/ask', ['question' => 'FICHE : que penses-tu du chantier Cuisine Dupont ?', 'conv_id' => $r['conv_id']]); T::eq(200, $c);
+    T::ok(str_contains($r2['answer'], 'Cuisine Dupont Fictif') && str_contains($r2['answer'], '1 facture(s) client'), 'fiche du chantier : ' . $r2['answer']); T::eq($r['conv_id'], $r2['conv_id'], 'même discussion');
+    // un autre utilisateur (sans boîte) n'obtient aucun e-mail de l'administrateur
+    $uid2 = (int)db()->query("SELECT id FROM users WHERE email = 'user@test.madibu.local'")->fetchColumn(); $old = db()->query("SELECT role FROM pil_user_roles WHERE company_id = 1 AND user_id = $uid2")->fetchColumn();
+    db()->exec("REPLACE INTO pil_user_roles (company_id, user_id, role, granted_by, granted_at) VALUES (1, $uid2, 'admin', 1, NOW())"); $u2 = new Client('user2'); $u2->login('user@test.madibu.local', 'Role-Test-2026');
+    [$c, $r3] = $u2->req('POST', 'pilot/ask', ['question' => 'MAILS : devis cuisine ?']); T::eq(200, $c, json_encode($r3)); T::ok(!str_contains($r3['answer'], "#$id") && str_contains($r3['answer'], 'Aucune boîte'), $r3['answer']);
+    if ($old) db()->exec("UPDATE pil_user_roles SET role = " . db()->quote($old) . " WHERE company_id = 1 AND user_id = $uid2"); else db()->exec("DELETE FROM pil_user_roles WHERE company_id = 1 AND user_id = $uid2");
+});
 T::test('dossiers comme Outlook : réception / envoyés / publicité par boîte ; liste par dossier ; recherche', function () use ($admin) {
     [$c, $b] = $admin->req('GET', 'pilot/mail/brief'); T::eq(200, $c);
     $f = $b['folders'][0]; T::eq('direction@madibu-fictif.be', $f['email']); T::ok($f['inbox'] >= 3 && $f['sent'] === 1, json_encode($f));

@@ -2325,3 +2325,14 @@ details.card > summary { cursor: pointer; padding: 4px 0; }
 .pm-dsel { display: flex; align-items: center; padding: 0 4px 0 10px; }
 .pm-dx { border: 0; background: none; padding: 0 12px; cursor: pointer; opacity: .55; font-size: 16px; }
 .pm-dx:hover, .pm-dx:focus-visible { opacity: 1; background: var(--surface-2); }
+
+/* Conseiller : discussion */
+.pm-chat { padding: 18px 22px; }
+.pm-chat-log { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; max-height: 70vh; overflow-y: auto; }
+.pm-chat-log:empty { display: none; }
+.pm-q { align-self: flex-end; max-width: 85%; background: var(--navy, #1c2550); color: #fff; padding: 8px 12px; border-radius: 14px 14px 4px 14px; white-space: pre-wrap; }
+.pm-a { align-self: stretch; background: var(--surface-2); border: 1px solid var(--border); padding: 10px 14px; border-radius: 4px 14px 14px 14px; }
+.pm-chat-f { display: flex; gap: 8px; align-items: flex-end; }
+.pm-chat-f textarea { flex: 1; min-height: 48px; resize: vertical; }
+.pm-chat-ex { margin-top: 8px; }
+.pm-chat-ex .chip { white-space: normal; text-align: left; }

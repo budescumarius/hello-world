@@ -427,9 +427,18 @@ async function pilAdviceLoad(el, ctx) {
         : '<p class="muted">L\'IA lit vos e-mails ouverts (résumés), les signaux et les factures en retard, et vous dit quoi faire en premier, quoi déléguer et à quoi faire attention.</p>'}
       <div class="btns"><button class="btn ${c ? '' : 'primary'}" data-adv-ai>${c ? 'Actualiser le conseil' : 'Me conseiller maintenant'}</button></div></div>`;
   };
+  // discussion : « que penses-tu du chantier X ? » → l'IA cherche dans les chantiers, devis, factures, achats, PV et e-mails
+  const chat = ui.pmChat || (ui.pmChat = { conv: null, turns: [] });
+  const TOOL_L = { fiche_chantier: 'chantier', chercher_emails: 'e-mails', lire_email: 'e-mail', chantiers: 'finances des chantiers', tresorerie: 'trésorerie', encaissements: 'factures clients', decaissements: 'paiements à venir', totaux_achats: 'achats', suivre_argent: 'banque', alertes: 'alertes', totaux_bancaires: 'banque' };
+  const chatCard = () => (!r.ai || !pilCan('ai.ask') ? '' : `<div class="card pm-chat"><div class="card-h"><h3>💬 Demandez au conseiller</h3>${chat.turns.length ? '<button type="button" class="btn sm ghost" data-chnew>Nouvelle discussion</button>' : ''}</div>
+      <div class="pm-chat-log">${chat.turns.map((t) => `<div class="pm-q">${esc(t.q)}</div><div class="pm-a"><div class="pm-md">${pilMd(t.a)}</div>${t.check && !t.check.ok ? `<p class="late sm">⚠ Montant(s) à vérifier : ${(t.check.unverified || []).map(esc).join(', ')}</p>` : ''}${(t.tools || []).length ? `<small class="muted">Cherché dans : ${[...new Set(t.tools.map((x) => TOOL_L[x.outil] || x.outil))].map(esc).join(', ')}</small>` : ''}</div>`).join('')}</div>
+      <form class="pm-chat-f" data-chf><textarea data-chq rows="2" placeholder="ex. Que penses-tu du chantier Hippodrome ? Que dois-je faire ? (🎤 du clavier pour dicter)"></textarea><button class="btn primary" data-chgo>Demander</button></form>
+      ${chat.turns.length ? '' : `<div class="chips pm-chat-ex">${['Que penses-tu du chantier … ? Que dois-je faire ?', 'Résume mes échanges avec BIMG et ce qui reste à payer', 'Quels e-mails attendent une réponse de ma part, par chantier ?'].map((x) => `<button type="button" class="chip" data-chex="${esc(x)}">${esc(x)}</button>`).join('')}</div>`}
+      <p class="muted sm">L'assistant lit vos chantiers, devis, factures, achats, PV et vos e-mails (vos boîtes seulement). Il conseille ; il n'envoie et ne modifie rien.</p></div>`);
   const draw = () => {
     el.innerHTML = `<div class="pm-adv">
       <div class="pm-adv-k"><span><b>${s.recus_aujourdhui || 0}</b> reçus aujourd'hui</span><span><b>${s.ouverts || 0}</b> à traiter</span><span class="${s.urgents ? 'late' : ''}"><b>${s.urgents || 0}</b> urgents</span><span><b>${s.attente || 0}</b> vous attendent</span><span><b>${s.brouillons || 0}</b> réponses prêtes</span></div>
+      ${chatCard()}
       ${aiCard()}
       <h3 class="pm-adv-h">Ce que BatiPro a repéré</h3><div class="pm-adv-grid">
       ${(r.conseils || []).map((c) => `<div class="card pm-adv-c lvl-${c.level}" data-kind="${esc(c.kind)}"><div class="pm-adv-t">${badge(PM_LVL[c.level][0], PM_LVL[c.level][1])}<b class="grow">${esc(c.titre)}</b></div>
@@ -438,6 +447,23 @@ async function pilAdviceLoad(el, ctx) {
       <p class="muted sm">Source : ${esc(r._source || '')}.</p></div>`;
     $$('[data-m]', el).forEach((x) => { x.onclick = (e) => { e.preventDefault(); ctx.open(+x.dataset.m); }; });
     $$('[data-go]', el).forEach((x) => { x.onclick = () => { const h = x.dataset.go; if (h.startsWith('#')) location.hash = h; else ctx.go('all', h); }; });
+    const chf = $('[data-chf]', el);
+    if (chf) {
+      const ta = $('[data-chq]', el);
+      $$('[data-chex]', el).forEach((x) => { x.onclick = () => { ta.value = x.dataset.chex; ta.focus(); }; });
+      ta.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !isPhone()) { e.preventDefault(); chf.requestSubmit(); } };
+      const nw = $('[data-chnew]', el); if (nw) nw.onclick = () => { chat.conv = null; chat.turns = []; saveUi(); draw(); };
+      chf.onsubmit = async (e) => {
+        e.preventDefault(); const q = ta.value.trim(); if (!q) return;
+        const go = $('[data-chgo]', el); go.disabled = true; ta.disabled = true; go.textContent = 'Recherche…';
+        $('.pm-chat-log', el).insertAdjacentHTML('beforeend', `<div class="pm-q">${esc(q)}</div><div class="pm-a muted">Je cherche dans les chantiers, devis, factures et e-mails… (jusqu'à une minute)</div>`);
+        try {
+          const x = await api('POST', 'pilot/ask', { question: q, conv_id: chat.conv });
+          chat.conv = x.conv_id; chat.turns = [...chat.turns, { q, a: x.answer, tools: x.tools, check: x.check }].slice(-12); saveUi(); draw();
+          const log = $('.pm-chat-log', el); if (log) { const last = log.lastElementChild; if (last) last.scrollIntoView({ block: 'nearest' }); }
+        } catch (er) { toast(er.message, 6000); draw(); const t2 = $('[data-chq]', el); if (t2) t2.value = q; }
+      };
+    }
     const ai = $('[data-adv-ai]', el); if (ai) ai.onclick = async () => {
       ai.disabled = true; ai.textContent = 'Analyse en cours…';
       try { r.conseil = await api('POST', 'pilot/mail/advice', {}); draw(); } catch (e) { toast(e.message, 6000); ai.disabled = false; ai.textContent = 'Me conseiller maintenant'; }

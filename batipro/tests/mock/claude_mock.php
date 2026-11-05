@@ -47,12 +47,17 @@ if (str_contains($firstQ, 'bras droit de la direction')) {
 }
 if (!empty($req['tools']) && !$hasResult) {
     if (preg_match('/PROPOSE.*facture (\d+)/', $firstQ, $mm)) $reply([['type' => 'tool_use', 'id' => 'toolu_mock_p', 'name' => 'proposer_action', 'input' => ['type' => 'relance_client', 'facture_id' => (int)$mm[1], 'justification' => 'Facture en retard de paiement']]], 'tool_use');
+    if (str_contains($firstQ, 'FICHE')) $reply([['type' => 'tool_use', 'id' => 'toolu_mock_f', 'name' => 'fiche_chantier', 'input' => ['recherche' => 'Cuisine Dupont']]], 'tool_use');
+    if (str_contains($firstQ, 'MAILS')) $reply([['type' => 'tool_use', 'id' => 'toolu_mock_m', 'name' => 'chercher_emails', 'input' => ['recherche' => 'devis cuisine']]], 'tool_use');
     $tool = str_contains(mb_strtolower($firstQ), 'sous-traitant') ? ['totaux_achats', ['type_fournisseur' => 'soustraitant', 'du' => '2026-01-01', 'au' => '2026-12-31']]
         : (str_contains(mb_strtolower($firstQ), 'chantier') ? ['chantiers', []] : ['tresorerie', []]);
     $reply([['type' => 'tool_use', 'id' => 'toolu_mock_1', 'name' => $tool[0], 'input' => (object)$tool[1]]], 'tool_use');
 }
 if ($hasResult) {
     $res = json_decode((string)$last['content'][0]['content'], true) ?: [];
+    if (isset($res['emails'])) $reply([['type' => 'text', 'text' => count($res['emails']) ? 'Échange trouvé : #' . $res['emails'][0]['id'] . ' « ' . $res['emails'][0]['objet'] . ' ».' : 'Aucun e-mail trouvé.']], 'end_turn');
+    if (isset($res['chantier'])) $reply([['type' => 'text', 'text' => "**{$res['chantier']['nom']}** : " . count($res['factures_clients']) . ' facture(s) client, ' . $res['nombre_points_ouverts'] . ' point(s) ouvert(s).']], 'end_turn');
+    if (isset($res['error'])) $reply([['type' => 'text', 'text' => 'Erreur outil : ' . $res['error']]], 'end_turn');
     $amount = null;
     array_walk_recursive($res, function ($v, $k) use (&$amount) { if ($amount === null && is_int($v) && abs($v) >= 100 && in_array($k, ['total', 'total_ttc', 'end', 'contract'], true)) $amount = $v; });
     $a = str_contains($firstQ, 'INVENTE') ? 99999999 : ($amount ?? 0);
