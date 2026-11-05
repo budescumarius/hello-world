@@ -2280,3 +2280,15 @@ details.card > summary { cursor: pointer; padding: 4px 0; }
 .todo-x:hover, .todo-x:focus-visible { background: var(--surface-2); color: var(--text); opacity: 1; }
 .todo-hidden { margin: 10px 4px; }
 .hf-lines { margin: 8px 0; }
+
+/* Sur le chantier : photo de l'appareil ou de l'album ; type de point ; ajouter au PV */
+.site-phbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.site-phbtns .btn { justify-content: center; }
+.site-kind { margin-bottom: 6px; }
+.site-addpv { flex-wrap: wrap; }
+.site-mtlist { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+.site-mtlist .row { text-align: left; border: 0; background: none; padding: 6px 0; display: flex; gap: 8px; align-items: center; width: 100%; cursor: pointer; }
+/* PV : photos des points */
+.doc .pv-phs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.doc .pv-phs img { height: 90px; max-width: 140px; object-fit: cover; border-radius: 3px; border: 1px solid #ddd; }
+.doc .pv-rem { break-inside: avoid; page-break-inside: avoid; margin-bottom: 8px; }

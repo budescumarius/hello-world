@@ -230,7 +230,9 @@ async function siteRun(o) {
 
 // ---------------------------------------------------------------- Écran « Sur le chantier »
 const siteContactName = (c) => (c ? contactName(c) : '');
-const siteBadge = (k) => st(PTS, k); // st() global (badge de statut) : masqué plus bas par l'état local « st »
+const siteBadge = (k, x) => (x && ptKind(x) === 'remarque' ? badge('Remarque', PT_KINDS.remarque[2]) : x && ptKind(x) === 'voir' && isOpenPt(x) ? badge('À voir', PT_KINDS.voir[2]) : st(PTS, k));
+// photos : prendre une photo maintenant OU en choisir dans l'album (plusieurs à la fois)
+const sitePhBtns = (cam = 'Prendre une photo') => `<div class="site-phbtns"><label class="btn"><input type="file" accept="image/*" capture="environment" hidden data-cam>📷 ${cam}</label><label class="btn"><input type="file" accept="image/*" multiple hidden data-cam>🖼 Choisir dans l'album</label></div>`; // st() global (badge de statut) : masqué plus bas par l'état local « st »
 const siteOpen = (snap) => snap.points.filter(isOpenPt);
 const siteLive = (snap) => snap.meetings.find((m) => m.data.status === 'encours');
 const siteVis = () => ui.siteF || 'todo';
@@ -303,7 +305,7 @@ route('site', async (pid, sub) => {
     sheet.innerHTML = `<button class="site-grab" data-grab aria-label="Afficher la liste"><span></span></button>
       <div class="site-sh"><b class="grow">${open} point${open > 1 ? 's' : ''} à faire</b><div class="site-seg">${[['todo', 'À faire'], ['done', 'Faits'], ['all', 'Tous']].map(([k, l]) => `<a href="#" data-f="${k}" class="${siteVis() === k ? 'on' : ''}">${l}</a>`).join('')}</div></div>
       <div class="site-list">${list.map((x) => { const c = byId(st.snap.contacts, x.data.companyId); const ph = (x.data.photos || [])[0];
-        return `<button class="site-pt" data-pt="${x.id}">${ph ? `<img data-src="${esc(ph)}" alt="">` : '<span class="site-noph">📷</span>'}<span class="grow"><b><span class="num" style="--c:${PTS[x.data.status][1]}">${esc(x.number)}</span> ${esc(x.data.title)}</b><small class="muted">${esc([c ? siteContactName(c) : 'Notre équipe', x.data.due && `avant le ${fmtDate(x.data.due)}`, String(x.id).startsWith('tmp-') && 'pas encore envoyé'].filter(Boolean).join(' · '))}</small></span>${siteBadge(x.data.status)}</button>`; }).join('') || `<p class="muted">${siteVis() === 'todo' ? 'Rien à faire ici.' : 'Aucun point.'}</p>`}</div>`;
+        return `<button class="site-pt" data-pt="${x.id}">${ph ? `<img data-src="${esc(ph)}" alt="">` : '<span class="site-noph">📷</span>'}<span class="grow"><b><span class="num" style="--c:${PTS[x.data.status][1]}">${esc(x.number)}</span> ${esc(x.data.title)}</b><small class="muted">${esc([c ? siteContactName(c) : 'Notre équipe', x.data.due && `avant le ${fmtDate(x.data.due)}`, String(x.id).startsWith('tmp-') && 'pas encore envoyé'].filter(Boolean).join(' · '))}</small></span>${siteBadge(x.data.status, x)}</button>`; }).join('') || `<p class="muted">${siteVis() === 'todo' ? 'Rien à faire ici.' : 'Aucun point.'}</p>`}</div>`;
     $('[data-grab]', sheet).onclick = () => { st.sheetOpen = !st.sheetOpen; drawSheet(); };
     $$('[data-f]', sheet).forEach((a) => { a.onclick = (e) => { e.preventDefault(); ui.siteF = a.dataset.f; saveUi(); drawSheet(); drawPins(); }; });
     $$('[data-pt]', sheet).forEach((b) => { b.onclick = () => { const x = st.snap.points.find((y) => String(y.id) === b.dataset.pt); if (x) sitePoint(st, x); }; });
@@ -406,32 +408,36 @@ const siteNextMeeting = (snap) => { const m = snap.meetings.find((x) => x.data.n
 async function sitePhoto(file) {
   try { const r = await resizeImage(await blobToImg(file), 1600); return r.blob; } catch (e) { return file; }
 }
-function siteNewPoint(st, pos) {
+function siteNewPoint(st, pos, kind0 = 'faire') {
   const snap = st.snap; const who = siteWho(snap); const nextMt = siteNextMeeting(snap);
   const photos = []; // { key, url }
-  let companyId = ''; let due = '';
-  const m = modal(`${mhead('Nouveau point')}<form class="m-body site-form">
-    <label class="field full"><span>Que faut-il faire ?</span><textarea name="title" rows="2" required placeholder="ex. Fissure au-dessus de la porte (🎤 du clavier pour dicter)"></textarea></label>
+  let companyId = ''; let due = ''; let kind = PT_KINDS[kind0] ? kind0 : 'faire';
+  const TITLE = { faire: 'Que faut-il faire ?', voir: 'Que faut-il voir / discuter ?', remarque: 'Remarque' };
+  const m = modal(`${mhead(siteLive(snap) ? 'Ajouter au PV' : 'Nouveau point')}<form class="m-body site-form">
+    <div class="site-seg site-kind" data-kind>${Object.entries(PT_KINDS).map(([k, [l]]) => `<a href="#" data-k="${k}" class="${k === kind ? 'on' : ''}">${l}</a>`).join('')}</div>
+    <label class="field full"><span data-tl>${TITLE[kind]}</span><textarea name="title" rows="2" required placeholder="ex. Fissure au-dessus de la porte (🎤 du clavier pour dicter)"></textarea></label>
     <div class="site-photos" data-ph></div>
-    <label class="site-cam btn"><input type="file" accept="image/*" capture="environment" hidden data-cam>📷 Ajouter une photo (facultatif)</label>
-    <div class="field full"><span>Qui doit le faire ?</span><div class="chips" data-who>
+    ${sitePhBtns()}
+    <div class="field full" data-only-todo><span>Qui doit le faire ?</span><div class="chips" data-who>
       <button type="button" class="chip on" data-c="">Notre équipe</button>${who.near.map((c) => `<button type="button" class="chip" data-c="${c.id}">${esc(contactName(c))}</button>`).join('')}
       ${who.others.length ? `<select data-other aria-label="Autre intervenant"><option value="">Autre…</option>${who.others.map((c) => `<option value="${c.id}">${esc(contactName(c))}</option>`).join('')}</select>` : ''}</div></div>
-    <div class="field full"><span>Pour quand ?</span><div class="chips" data-due>
+    <div class="field full" data-only-todo><span>Pour quand ?</span><div class="chips" data-due>
       <button type="button" class="chip on" data-d="">Pas de date</button><button type="button" class="chip" data-d="${addDays(today(), 7)}">Cette semaine</button>
       ${nextMt ? `<button type="button" class="chip" data-d="${nextMt}">Prochaine réunion (${fmtDate(nextMt)})</button>` : `<button type="button" class="chip" data-d="${addDays(today(), 14)}">Dans 2 semaines</button>`}
       <input type="date" data-date aria-label="Date"></div></div>
     <details class="site-more"><summary>Plus de détails</summary><div class="grid2">
       <label class="field full"><span>Description</span><textarea name="desc" rows="3"></textarea></label>
       <label class="field"><span>Priorité</span><select name="priority">${Object.entries(PRIO).map(([k, [l]]) => `<option value="${k}" ${k === 'normal' ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      <label class="field"><span>Catégorie</span><input name="category" list="site-cats" value="Réserve"></label>
+      <label class="field"><span>Catégorie</span><input name="category" list="site-cats" value="${PT_KINDS[kind][1]}"></label>
       <label class="field full"><span>Localisation</span><input name="location" placeholder="ex. Étage 2, app. 7"></label></div>
       <datalist id="site-cats">${PT_CATS.map((x) => `<option value="${x}">`).join('')}</datalist></details>
   </form><div class="m-foot"><span class="grow muted" data-hint>${pos.planId ? '' : 'Point sans plan'}</span><button class="btn" data-close>Annuler</button><button class="btn primary" data-save>Enregistrer</button></div>`, { onClose: () => photos.forEach((x) => URL.revokeObjectURL(x.url)) });
   const form = $('form', m.el);
   const drawPh = () => { $('[data-ph]', m.el).innerHTML = photos.map((x, i) => `<div class="ph"><img src="${x.url}" alt=""><button type="button" data-rm="${i}">✕</button></div>`).join(''); $$('[data-rm]', m.el).forEach((b) => { b.onclick = () => { photos.splice(+b.dataset.rm, 1); drawPh(); }; }); };
-  const cam = $('[data-cam]', m.el);
-  cam.onchange = async () => { for (const f of cam.files) { const b = await sitePhoto(f); photos.push({ key: lid() + lid(), blob: b, url: URL.createObjectURL(b) }); } cam.value = ''; drawPh(); };
+  $$('[data-cam]', m.el).forEach((cam) => { cam.onchange = async () => { for (const f of cam.files) { const b = await sitePhoto(f); photos.push({ key: lid() + lid(), blob: b, url: URL.createObjectURL(b) }); } cam.value = ''; drawPh(); }; });
+  const setKind = (k) => { const oldCat = PT_KINDS[kind][1]; kind = k; $$('[data-k]', m.el).forEach((a) => a.classList.toggle('on', a.dataset.k === k)); $('[data-tl]', m.el).textContent = TITLE[k];
+    $$('[data-only-todo]', m.el).forEach((x) => { x.hidden = k === 'remarque'; }); if (!form.category.value.trim() || form.category.value === oldCat) form.category.value = PT_KINDS[k][1]; };
+  $$('[data-k]', m.el).forEach((a) => { a.onclick = (e) => { e.preventDefault(); setKind(a.dataset.k); }; });
   const pick = (box, attr, set) => { $$(`[${attr}]`, box).forEach((b) => { b.onclick = () => { $$(`[${attr}]`, box).forEach((x) => x.classList.toggle('on', x === b)); set(b.getAttribute(attr)); const sel = $('select', box); if (sel) sel.value = ''; const dt = $('input[type=date]', box); if (dt) dt.value = ''; }; }); };
   pick($('[data-who]', m.el), 'data-c', (v) => { companyId = v; });
   pick($('[data-due]', m.el), 'data-d', (v) => { due = v; });
@@ -443,14 +449,16 @@ function siteNewPoint(st, pos) {
     const title = form.title.value.trim();
     if (!title) { toast('Écrivez en une phrase ce qu\'il faut faire'); form.title.focus(); return; }
     const id = tmpId(); const live = siteLive(st.snap);
-    const data = { title, desc: form.desc.value.trim(), status: 'open', priority: form.priority.value, category: form.category.value.trim(), location: form.location.value.trim(),
-      companyId: companyId ? +companyId : null, assigneeId: null, due, planId: pos.planId || null, x: pos.x ?? null, y: pos.y ?? null };
+    const rem = kind === 'remarque'; // une remarque est notée au PV, il n'y a rien à faire : pas « ouverte »
+    const data = { title, kind, desc: form.desc.value.trim(), status: rem ? 'closed' : 'open', priority: form.priority.value, category: form.category.value.trim(), location: form.location.value.trim(),
+      companyId: !rem && companyId ? +companyId : null, assigneeId: null, due: rem ? '' : due, planId: pos.planId || null, x: pos.x ?? null, y: pos.y ?? null };
     const blobs = Object.fromEntries(photos.map((x) => [x.key, x.blob]));
     m.close();
     await siteDo({ t: 'pt-new', pid: st.pid, id, data, photos: photos.map((x) => x.key) }, blobs);
     if (live) await siteDo({ t: 'mt-point', pid: st.pid, id: live.tmp || live.id, point: id, kind: 'new' });
-    toast(siteNet() ? 'Point enregistré' : 'Point gardé dans le téléphone : envoyé au retour du réseau', 3000);
+    toast(siteNet() ? (live ? `${PT_KINDS[kind][0]} ajouté au PV` : 'Point enregistré') : 'Gardé dans le téléphone : envoyé au retour du réseau', 3000);
     st.soft();
+    if (live && pos.back) setTimeout(() => siteMeeting(st), 350); // ajouté depuis la réunion : on y revient
   };
 }
 
@@ -460,11 +468,11 @@ function sitePoint(st, x) {
   const after = (x.data.after || []).map(String);
   const open = isOpenPt(x);
   const m = modal(`${mhead(`N° ${x.number} · ${x.data.title}`)}<div class="m-body site-card">
-    <div class="muted">${esc([c ? siteContactName(c) : 'Notre équipe', x.data.due && `avant le ${fmtDate(x.data.due)}`, x.data.location].filter(Boolean).join(' · '))} ${siteBadge(x.data.status)}</div>
+    <div class="muted">${esc([c ? siteContactName(c) : 'Notre équipe', x.data.due && `avant le ${fmtDate(x.data.due)}`, x.data.location].filter(Boolean).join(' · '))} ${siteBadge(x.data.status, x)}</div>
     ${x.data.desc ? `<p class="pre">${esc(x.data.desc)}</p>` : ''}
     <div class="site-photos big">${(x.data.photos || []).map((f) => `<figure><img data-src="${esc(f)}" alt=""><figcaption>${after.includes(String(f)) ? 'après' : 'avant'}</figcaption></figure>`).join('') || '<span class="muted">Pas de photo</span>'}</div>
     <div class="site-acts">${open ? '<button class="btn big good" data-st="done">✓ Fait</button>' : '<button class="btn big" data-st="open">Rouvrir</button>'}
-      <label class="btn big"><input type="file" accept="image/*" capture="environment" hidden data-cam>📷 Photo</label></div>
+      <label class="btn big"><input type="file" accept="image/*" capture="environment" hidden data-cam>📷 Photo</label><label class="btn big"><input type="file" accept="image/*" multiple hidden data-cam>🖼 Album</label></div>
     <div class="comment-row"><input data-cmt placeholder="Commentaire… (🎤 du clavier pour dicter)"><button type="button" class="btn" data-addc>Ajouter</button></div>
     <div class="history">${[...(x.data.history || [])].reverse().map((h) => `<div class="h ${h.kind === 'comment' ? '' : 'sys'}"><small>${fmtDT(h.t)} · ${esc(userName(h.uid))}</small>${esc(h.text)}</div>`).join('')}</div>
   </div><div class="m-foot">${x.data.planId && x.data.planId !== st.plan ? '<button class="btn" data-goplan>Voir sur le plan</button>' : ''}<span class="grow"></span>${!S.offline && !String(x.id).startsWith('tmp-') && siteNet() && typeof editPoint === 'function' ? '<button class="btn" data-full>Tout modifier</button>' : ''}<button class="btn" data-close>Fermer</button></div>`);
@@ -477,8 +485,10 @@ function sitePoint(st, x) {
     if (live) await siteDo({ t: 'mt-point', pid: st.pid, id: live.tmp || live.id, point: id, kind: s2 === 'done' ? 'done' : 'reopen' });
     toast(s2 === 'done' ? `Point ${x.number} fait` : `Point ${x.number} rouvert`, 2500); st.soft();
   };
-  const cam = $('[data-cam]', m.el);
-  cam.onchange = async () => { const f = cam.files[0]; if (!f) return; const b = await sitePhoto(f); const k = lid() + lid(); m.close(); await siteDo({ t: 'pt-photo', pid: st.pid, id, blob: k, after: true }, { [k]: b }); toast('Photo ajoutée', 2000); st.soft(); };
+  // point encore ouvert : la photo montre le problème ; point fait : la photo « après »
+  $$('[data-cam]', m.el).forEach((cam) => { cam.onchange = async () => { const fs = [...cam.files]; if (!fs.length) return; m.close();
+    for (const f of fs) { const b = await sitePhoto(f); const k = lid() + lid(); await siteDo({ t: 'pt-photo', pid: st.pid, id, blob: k, after: !open }, { [k]: b }); }
+    toast(fs.length > 1 ? `${fs.length} photos ajoutées` : 'Photo ajoutée', 2000); st.soft(); }; });
   const addC = async () => { const inp = $('[data-cmt]', m.el); const t = inp.value.trim(); if (!t) return; m.close(); await siteDo({ t: 'pt-comment', pid: st.pid, id, text: t }); toast('Commentaire ajouté', 2000); };
   $('[data-addc]', m.el).onclick = addC; $('[data-cmt]', m.el).onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addC(); } };
   const gp = $('[data-goplan]', m.el); if (gp) gp.onclick = () => { m.close(); st.plan = +x.data.planId; st.draw(); setTimeout(() => st.focus(x), 120); };
@@ -519,13 +529,18 @@ function siteMeeting(st) {
     <label class="field full"><span>Absents / excusés</span><input name="absents" value="${esc(d.absents || '')}"></label>
     <label class="field full"><span>Notes et décisions</span><textarea name="notes" rows="6" placeholder="(🎤 du clavier pour dicter)">${esc(d.notes || '')}</textarea></label>
     <label class="field"><span>Prochaine réunion</span><input type="date" name="next" value="${esc(d.next || '')}"></label>
-    <div class="tile"><b>Pendant cette réunion</b><span class="muted">${du.created.length} nouveau(x) point(s) · ${du.done.length} fait(s) · ${siteOpen(snap).length} encore ouvert(s)</span></div>
+    <div class="field full"><span>Ajouter au PV (avec photos, plan facultatif)</span><div class="btns site-addpv">${Object.entries(PT_KINDS).map(([k, [l]]) => `<button type="button" class="btn" data-addk="${k}">＋ ${l}</button>`).join('')}</div></div>
+    <div class="tile"><b>Pendant cette réunion</b><span class="muted">${du.created.length} ajout(s) au PV · ${du.done.length} fait(s) · ${siteOpen(snap).length} encore ouvert(s)</span>
+      ${du.created.length ? `<div class="site-mtlist">${du.created.map((pid0) => snap.points.find((x) => String(x.id) === String(pid0) || String(x.tmp) === String(pid0))).filter(Boolean).map((x) => `<button type="button" class="row" data-mpt="${esc(String(x.id))}"><span class="grow">${badge(PT_KINDS[ptKind(x)][0], PT_KINDS[ptKind(x)][2])} ${esc(x.data.title)}</span><small class="muted">${(x.data.photos || []).length ? `📷 ${x.data.photos.length}` : ''}</small></button>`).join('')}</div>` : ''}</div>
   </form><div class="m-foot"><button class="btn" data-save>Enregistrer</button><span class="grow"></span><button class="btn primary" data-end>Terminer et signer…</button></div>`, { wide: true });
   const form = $('form', m.el);
   $$('[data-u],[data-a]', m.el).forEach((b) => { b.onclick = () => { b.classList.toggle('on'); }; });
   $('[data-other]', m.el).onchange = (e) => { const c = byId(ppl.all, +e.target.value); if (!c) return; e.target.insertAdjacentHTML('beforebegin', `<button type="button" class="chip on" data-a="${c.id}">${esc(contactName(c))}</button>`); const nb = e.target.previousElementSibling; nb.onclick = () => nb.classList.toggle('on'); e.target.value = ''; };
   const patch = () => ({ users: $$('[data-u].on', m.el).map((b) => +b.dataset.u), attendees: $$('[data-a].on', m.el).map((b) => +b.dataset.a), absents: form.absents.value.trim(), notes: form.notes.value, next: form.next.value });
   $('[data-save]', m.el).onclick = async () => { await siteDo({ t: 'mt-set', pid: st.pid, id: mid, patch: patch() }); m.close(); toast('Réunion enregistrée', 2000); st.soft(); };
+  // ajouter au PV : on garde d'abord ce qui est écrit (présents, notes), puis le point, puis retour à la réunion
+  $$('[data-addk]', m.el).forEach((b) => { b.onclick = async () => { await siteDo({ t: 'mt-set', pid: st.pid, id: mid, patch: patch() }); m.close(); siteNewPoint(st, { back: true }, b.dataset.addk); }; });
+  $$('[data-mpt]', m.el).forEach((b) => { b.onclick = () => { const x = snap.points.find((y) => String(y.id) === b.dataset.mpt); if (x) { m.close(); sitePoint(st, x); } }; });
   $('[data-end]', m.el).onclick = async () => { const pa = patch(); await siteDo({ t: 'mt-set', pid: st.pid, id: mid, patch: pa }); m.close(); siteSign(st, live, pa, ppl); };
 }
 // signatures des présents sur l'écran, puis fin de la réunion et PV

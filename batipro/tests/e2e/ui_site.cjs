@@ -127,6 +127,33 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
   await p.click('.plan-back'); await p.waitForTimeout(800);
   check('« Retour » ramène au chantier', /#\/project\//.test(p.url()) && !(await p.$('.viewer-wrap')));
 
+  // ----- PV SANS PLAN : à faire / à voir / remarque, photos choisies dans l'album (pas d'appareil photo imposé)
+  const pid2 = await p.evaluate(async () => (await persist('project', { data: { name: 'Chantier sans plan (fictif)', status: 'encours', city: 'Ixelles' } })).id);
+  await p.goto(`${BASE}/#/site/${pid2}`); await p.waitForSelector('.site-top [data-mt]'); await p.waitForTimeout(800);
+  await p.click('.site-top [data-mt]'); await p.click('.modal [data-start]'); await p.waitForTimeout(2000);
+  await p.click('.site-live'); await p.waitForSelector('.modal [data-addk="remarque"]');
+  check('réunion : « Ajouter au PV » (à faire, à voir, remarque) sans plan', !!(await p.$('.modal [data-addk="faire"]')) && !!(await p.$('.modal [data-addk="voir"]')));
+  await p.fill('.modal textarea[name=notes]', 'Visite avec le client.');
+  await p.click('.modal [data-addk="remarque"]'); await p.waitForSelector('.modal textarea[name=title]');
+  check('remarque : ni « qui » ni « pour quand » ; album proposé (sans appareil imposé)', await p.isHidden('.modal [data-only-todo]') && !!(await p.$('.modal .site-phbtns input[multiple]:not([capture])')));
+  await p.fill('.modal textarea[name=title]', 'Façade arrière : enduit d\'origine à conserver');
+  await p.setInputFiles('.modal .site-phbtns input[multiple]', [{ name: 'a.png', mimeType: 'image/png', buffer: PNG }, { name: 'b.png', mimeType: 'image/png', buffer: PNG }]); await p.waitForTimeout(700);
+  check('deux photos de l\'album ajoutées', (await p.$$('.modal .site-photos .ph')).length === 2);
+  await p.click('.modal [data-save]'); await p.waitForSelector('.modal [data-addk="voir"]', { timeout: 8000 }).catch(() => {});
+  check('après l\'ajout : retour à la réunion (notes gardées)', !!(await p.$('.modal [data-end]')) && (await p.inputValue('.modal textarea[name=notes]')) === 'Visite avec le client.');
+  await p.click('.modal [data-addk="voir"]'); await p.waitForSelector('.modal textarea[name=title]');
+  await p.fill('.modal textarea[name=title]', 'Choix du carrelage terrasse');
+  await p.setInputFiles('.modal .site-phbtns input[multiple]', { name: 'c.png', mimeType: 'image/png', buffer: PNG }); await p.waitForTimeout(500);
+  await p.click('.modal [data-save]'); await p.waitForSelector('.modal [data-end]', { timeout: 8000 }); await p.waitForTimeout(2500);
+  const p2 = await p.evaluate(async (pid) => api('GET', `items/point&project=${pid}`), pid2);
+  const rem = p2.find((x) => x.data.kind === 'remarque'); const voir = p2.find((x) => x.data.kind === 'voir');
+  check('remarque enregistrée (pas « à faire »), 2 photos ; « à voir » ouvert avec sa photo ; aucun plan', rem && rem.data.status === 'closed' && rem.data.photos.length === 2 && voir && voir.data.status === 'open' && voir.data.photos.length === 1 && !rem.data.planId && !voir.data.planId, JSON.stringify(p2.map((x) => [x.data.kind, x.data.status, (x.data.photos || []).length])));
+  await p.click('.modal [data-end]'); await p.waitForSelector('.modal .site-sig canvas');
+  await p.click('.modal [data-fin]'); await p.waitForTimeout(4000);
+  const pvt = await p.textContent('body');
+  check('PV : « À voir / à discuter » et « Remarques » avec les photos', /À voir \/ à discuter \(1\)/.test(pvt) && /Remarques \(1\)/.test(pvt) && /Points à faire \(0\)/.test(pvt) && (await p.$$('.doc .pv-phs img')).length === 3, pvt.slice(0, 200));
+  await p.evaluate(() => closeModals());
+
   // ordinateur : les onglets restent
   const d = await b.newPage({ viewport: { width: 1280, height: 900 }, bypassCSP: true }); d.on('pageerror', (e) => errs.push(e.message));
   await d.goto(BASE + '/'); await d.waitForFunction('typeof S !== "undefined" && S.ready', null, { timeout: 30000 }).catch(async () => { await d.fill('input[name=email]', 'admin@test.madibu.local'); await d.fill('input[name=password]', 'Admin-Test-2026'); await d.click('button[type=submit]'); await d.waitForFunction('typeof S !== "undefined" && S.ready'); });

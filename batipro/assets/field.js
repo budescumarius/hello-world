@@ -3,6 +3,9 @@
 
 const PTS = { open: ['Ouvert', '#e5484d'], progress: ['En cours', '#f08c00'], done: ['Levé', '#2f9e44'], closed: ['Clôturé', '#868e96'] };
 const PT_CATS = ['Réserve', 'Observation', 'Défaut', 'Sécurité', 'Qualité', 'Question', 'Information'];
+// type d'un point : à faire (réserve), à voir / à discuter (question), remarque (information, rien à faire)
+const PT_KINDS = { faire: ['À faire', 'Réserve', '#e5484d'], voir: ['À voir / à discuter', 'Question', '#f08c00'], remarque: ['Remarque', 'Observation', '#3b5bdb'] };
+const ptKind = (x) => (PT_KINDS[(x.data || {}).kind] ? x.data.kind : 'faire');
 const isOpenPt = (x) => ['open', 'progress'].includes(x.data.status);
 const isLatePt = (x) => isOpenPt(x) && x.data.due && x.data.due < today();
 
@@ -546,7 +549,16 @@ route('pv', async (id) => {
     ${d.notes ? `<h2>Discussions et décisions</h2><div class="pre">${esc(d.notes)}</div>` : ''}
     ${(() => { const du = d.during || {}; const L = (ids) => (ids || []).map((x) => byId(points, +x)).filter(Boolean); const cr = L(du.created); const dn = L(du.done);
       return (cr.length || dn.length) ? `<h2>Pendant la visite</h2>${cr.length ? `<p><b>Nouveaux points (${cr.length}) :</b> ${cr.map((x) => `N° ${esc(x.number)} ${esc(x.data.title)}`).join(' · ')}</p>` : ''}${dn.length ? `<p><b>Points faits pendant la réunion (${dn.length}) :</b> ${dn.map((x) => `N° ${esc(x.number)} ${esc(x.data.title)}`).join(' · ')}</p>` : ''}` : ''; })()}
-    <h2>Suivi des points (${pts.length})</h2>${pts.length ? `<table class="d-lines"><tr><th>N°</th><th>Description</th><th>Intervenant</th><th>Statut</th><th>Échéance</th><th>Dernier commentaire</th></tr>${pts.map((x) => { const lc = [...(x.data.history || [])].reverse().find((h) => h.kind === 'comment'); return `<tr><td><b>${esc(x.number)}</b></td><td><b>${esc(x.data.title)}</b>${x.data.desc ? `<br>${esc(x.data.desc)}` : ''}${byId(plans, x.data.planId) ? `<br><small>Plan : ${esc(byId(plans, x.data.planId).data.name)}</small>` : ''}</td><td>${esc(contactName(byId(contacts, x.data.companyId)))}</td><td>${st(PTS, x.data.status)}</td><td>${fmtDate(x.data.due)}</td><td>${lc ? esc(lc.text) : ''}</td></tr>`; }).join('')}</table>` : '<p>—</p>'}
+    ${(() => {
+      const phs = (x) => ((x.data.photos || []).length ? `<div class="pv-phs">${x.data.photos.slice(0, 6).map((f) => `<img src="${fileUrl(f)}" alt="">`).join('')}</div>` : '');
+      const where = (x) => [byId(plans, x.data.planId) && `Plan : ${byId(plans, x.data.planId).data.name}`, x.data.location].filter(Boolean).join(' · ');
+      const table = (l) => `<table class="d-lines"><tr><th>N°</th><th>Description</th><th>Intervenant</th><th>Statut</th><th>Échéance</th><th>Dernier commentaire</th></tr>${l.map((x) => { const lc = [...(x.data.history || [])].reverse().find((h) => h.kind === 'comment'); return `<tr><td><b>${esc(x.number)}</b></td><td><b>${esc(x.data.title)}</b>${x.data.desc ? `<br>${esc(x.data.desc)}` : ''}${where(x) ? `<br><small>${esc(where(x))}</small>` : ''}${phs(x)}</td><td>${esc(contactName(byId(contacts, x.data.companyId)))}</td><td>${st(PTS, x.data.status)}</td><td>${fmtDate(x.data.due)}</td><td>${lc ? esc(lc.text) : ''}</td></tr>`; }).join('')}</table>`;
+      const by = (k) => pts.filter((x) => ptKind(x) === k);
+      const todo = by('faire'); const see = by('voir'); const rem = by('remarque');
+      return `<h2>Points à faire (${todo.length})</h2>${todo.length ? table(todo) : '<p>—</p>'}
+        ${see.length ? `<h2>À voir / à discuter (${see.length})</h2>${table(see)}` : ''}
+        ${rem.length ? `<h2>Remarques (${rem.length})</h2>${rem.map((x) => `<div class="pv-rem"><p><b>${esc(x.number)}.</b> <b>${esc(x.data.title)}</b>${x.data.desc ? ` – ${esc(x.data.desc)}` : ''}${where(x) ? ` <small>(${esc(where(x))})</small>` : ''}</p>${phs(x)}</div>`).join('')}` : ''}`;
+    })()}
     ${d.next ? `<p><b>Prochaine réunion :</b> ${fmtDate(d.next)}</p>` : ''}
     <p class="muted sm">Sans remarque écrite dans les 8 jours, le présent procès-verbal est considéré comme approuvé.</p>
     ${(d.signatures || []).length ? `<h2>Signatures</h2><div class="d-sign">${d.signatures.map((x) => `<div><img src="${fileUrl(x.fileId)}" alt="" style="max-height:70px;display:block">${esc(x.name || '')}<br><small class="muted">${fmtDT(x.at)}</small></div>`).join('')}</div>`
