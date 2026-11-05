@@ -683,13 +683,21 @@ function pil_mail_route(string $method, array $seg, array $me): void {
         register_shutdown_function(function () { $e = error_get_last(); $id = $GLOBALS['PIL_MAIL_CUR'] ?? null;
             if ($id && $e && in_array($e['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR], true)) { try { q('UPDATE pil_mail_accounts SET last_error = ? WHERE id = ?', [mb_substr('Relève interrompue par l\'hébergeur : ' . $e['message'], 0, 500), $id]); } catch (Throwable $x) { /* */ } } });
         $res = []; $errs = [];
+        // une seule relève à la fois par utilisateur : avec le tri par l'IA, une relève peut durer ; les suivantes ne s'empilent pas
+        // (chez l'hébergeur, les requêtes empilées bloquaient tout le reste de la page : dossiers, boîtes…)
+        $lk = 'bp_mailsync_' . cid() . '_' . (int)$me['id'];
+        if (!(int)q('SELECT GET_LOCK(?, 0)', [$lk])->fetchColumn()) out(['results' => [], 'errors' => [], 'busy' => true, 'brief' => pil_mail_brief($me, date('Y-m-d'))]);
+        // relève automatique (« quick ») : courte ; le tri complet se fait au bouton « Relever maintenant » et par la tâche planifiée
+        $quick = !empty(body()['quick']); $t0 = microtime(true);
         foreach (q('SELECT * FROM pil_mail_accounts WHERE company_id = ? AND user_id = ?', [cid(), $me['id']])->fetchAll() as $acc) {
             $GLOBALS['PIL_MAIL_CUR'] = (int)$acc['id'];
-            try { $s = pil_mail_sync($acc, !empty(body()['deep'])); $an = pil_mail_analyze(q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$acc['id']])->fetch(), $me, 15);
+            try { $s = pil_mail_sync($acc, !empty(body()['deep']));
+                $an = microtime(true) - $t0 > ($quick ? 15 : 90) ? ['analyzed' => 0] : pil_mail_analyze(q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$acc['id']])->fetch(), $me, $quick ? 4 : 15);
                 $t = 0; try { $t = pil_mail_tidy(q('SELECT * FROM pil_mail_accounts WHERE id = ?', [$acc['id']])->fetch()); } catch (Throwable $e) { $errs[] = $acc['email'] . ' : rangement – ' . $e->getMessage(); }
                 $res[] = ['email' => $acc['email']] + $s + $an + ['ranges' => $t]; }
             catch (Throwable $e) { $errs[] = $acc['email'] . ' : ' . $e->getMessage(); q('UPDATE pil_mail_accounts SET last_error = ? WHERE id = ?', [mb_substr($e->getMessage(), 0, 500), $acc['id']]); }
         }
+        q('SELECT RELEASE_LOCK(?)', [$lk]);
         out(['results' => $res, 'errors' => $errs, 'brief' => pil_mail_brief($me, date('Y-m-d'))]);
     }
     if ($a === 'brief' && $method === 'GET') out(pil_mail_brief($me, date('Y-m-d')));

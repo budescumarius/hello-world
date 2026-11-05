@@ -233,11 +233,17 @@ async function pilMailPage() {
   if (Date.now() - pmAutoAt > 5 * 60000 && (!last || Date.now() - Date.parse(last.replace(' ', 'T')) > 5 * 60000)) { pmAutoAt = Date.now(); pilMailSync(null, false, true); }
   if (!pmTimer) pmTimer = setInterval(() => { if (document.hidden || !location.hash.startsWith('#/pilotage/emails')) return; pilMailSync(null, false, true); }, 60000);
 }
+let pmSyncing = false; // une relève à la fois (la suivante attend la fin de la précédente)
 async function pilMailSync(btn, deep = false, quiet = false) {
+  if (pmSyncing) { if (!quiet) toast('Relève déjà en cours… les e-mails s\'affichent dès qu\'elle est finie', 4000); return; }
+  pmSyncing = true;
+  try { return await pilMailSync0(btn, deep, quiet); } finally { pmSyncing = false; }
+}
+async function pilMailSync0(btn, deep = false, quiet = false) {
   if (btn) { btn.disabled = true; btn.textContent = 'Relève en cours…'; }
   if (!quiet) toast('Relève et tri des e-mails… (jusqu\'à une minute)', 60000);
   if (quiet) { // relève automatique à l'ouverture : discrète, la page se met à jour s'il y a du nouveau
-    try { const r = await api('POST', 'pilot/mail/sync', { deep }); const n = r.results.reduce((a, x) => a + x.new, 0); if (n) toast(`${n} nouvel(s) e-mail(s)`, 2500); if (n || r.errors.length) { if (r.errors.length) toast(r.errors.join(' · '), 8000); if (location.hash.startsWith('#/pilotage/emails') && !document.querySelector('.overlay')) render(); } } catch (e) { /* hors ligne : on garde la liste */ }
+    try { const r = await api('POST', 'pilot/mail/sync', { deep, quick: 1 }); if (r.busy) return; const n = r.results.reduce((a, x) => a + x.new, 0); if (n) toast(`${n} nouvel(s) e-mail(s)`, 2500); if (n || r.errors.length) { if (r.errors.length) toast(r.errors.join(' · '), 8000); if (location.hash.startsWith('#/pilotage/emails') && !document.querySelector('.overlay')) render(); } } catch (e) { /* hors ligne : on garde la liste */ }
     return;
   }
   try { const r = await api('POST', 'pilot/mail/sync', { deep }); const n = r.results.reduce((a, x) => a + x.new, 0); const rg = r.results.reduce((a, x) => a + (x.ranges || 0), 0); toast(`${n} nouvel(s) e-mail(s)${rg ? ` · ${rg} publicité(s) rangée(s)` : ''}${r.results.some((x) => x.analyzed) ? ` · ${r.results.reduce((a, x) => a + (x.analyzed || 0), 0)} trié(s) par l'IA` : ''}${r.errors.length ? ` · ${r.errors.join(' · ')}` : ''}`, r.errors.length ? 8000 : 3500); }

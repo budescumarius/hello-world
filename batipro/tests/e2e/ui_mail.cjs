@@ -28,6 +28,16 @@ const sql = (s) => execFileSync('php', ['-r', `$p=new PDO("mysql:host=127.0.0.1;
   execFileSync('php', [path.join(__dirname, 'seed_mail.php')]);
   await p.evaluate(() => { ui.pm = { box: 'all', folder: 'todo' }; saveUi(); render(); }); await p.waitForSelector('.pm-row');
   const nav = await p.textContent('.pm-nav');
+  // iPad (paysage) : les boutons de gauche (boîtes, dossiers) répondent
+  await p.setViewportSize({ width: 1180, height: 820 }); await p.waitForTimeout(300);
+  const accId = await p.getAttribute('.pm-f[data-folder="in"]:not([data-box="all"])', 'data-box');
+  await p.click(`.pm-f[data-box="${accId}"][data-folder="sent"]`); await p.waitForFunction((id) => !!document.querySelector(`.pm-f.on[data-box="${id}"][data-folder="sent"]`), accId, { timeout: 8000 }).catch(() => {});
+  const ok1 = /Envoyés/.test(await p.textContent('.pm-title')) && /direction@madibu-fictif\.be/.test(await p.textContent('.pm-title'));
+  await p.click(`.pm-f[data-box="${accId}"][data-folder="in"]`); await p.waitForFunction((id) => !!document.querySelector(`.pm-f.on[data-box="${id}"][data-folder="in"]`), accId, { timeout: 8000 }).catch(() => {});
+  const ok2 = /Boîte de réception/.test(await p.textContent('.pm-title'));
+  await p.click('.pm-f[data-box="all"][data-folder="todo"]'); await p.waitForSelector('.pm-f.on[data-box="all"][data-folder="todo"]', { timeout: 8000 }).catch(() => {});
+  check('iPad : boutons de gauche (boîte → Envoyés, Réception, À faire) répondent', ok1 && ok2 && !!(await p.$('.pm-f.on[data-folder="todo"]')));
+  await p.setViewportSize({ width: 1400, height: 900 }); await p.waitForSelector('.pm-row');
   check('dossiers : Briefing (à faire, réponses préparées) puis chaque boîte (réception, envoyés, publicité)', /À faire/.test(nav) && /Réponses préparées/.test(nav) && /direction@madibu-fictif\.be/.test(nav) && /Envoyés/.test(nav) && /Publicité/.test(nav) && /Corbeille/.test(nav), nav.replace(/\s+/g, ' ').slice(0, 200));
   check('« À faire » : e-mail urgent avec son action et sa boîte', /Envoyer le devis cuisine Dupont/.test(await p.textContent('.pm-rows')) && !!(await p.$('.pm-row .pm-urg')) && !!(await p.$('.pm-row .pm-acc')));
   await p.click('.pm-f[data-folder="advice"]'); await p.waitForSelector('.pm-adv', { timeout: 10000 });

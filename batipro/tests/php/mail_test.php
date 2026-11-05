@@ -58,6 +58,14 @@ T::test('relève : réception + envoyés ; e-mail déjà répondu dans Outlook r
     T::ok(!str_contains((string)db()->query("SELECT body FROM pil_mail_msgs WHERE graph_id = 'AAA1'")->fetchColumn(), 'Ancien message cité'), 'historique cité retiré');
     $S['brief'] = $r['brief'];
 });
+T::test('relève déjà en cours (autre onglet, relève automatique) : la suivante répond tout de suite sans s\'empiler', function () use ($admin) {
+    $uid = (int)db()->query("SELECT id FROM users WHERE email = 'admin@test.madibu.local'")->fetchColumn();
+    T::eq(1, (int)db()->query("SELECT GET_LOCK('bp_mailsync_1_$uid', 0)")->fetchColumn(), 'relève simulée en cours');
+    $t = microtime(true); [$c, $r] = $admin->req('POST', 'pilot/mail/sync', ['quick' => 1]);
+    T::eq(200, $c); T::eq(true, $r['busy'] ?? null, json_encode($r)); T::ok(microtime(true) - $t < 5, 'réponse immédiate'); T::ok(isset($r['brief']['folders']), 'la page reste à jour');
+    db()->query("SELECT RELEASE_LOCK('bp_mailsync_1_$uid')");
+    [, $r] = $admin->req('POST', 'pilot/mail/sync', ['quick' => 1]); T::ok(empty($r['busy']), 'ensuite : relève normale');
+});
 T::test('envoyé à l\'IA : texte nettoyé, IBAN masqué, PDF joint lu ; aucun outil d\'envoi', function () {
     $log = array_map(fn($l) => json_decode($l, true), array_filter(explode("\n", (string)shell_exec('docker exec bp-test-web cat /tmp/claude_mock.log'))));
     $m = array_values(array_filter($log, fn($x) => !empty($x['mail']))); $last = end($m);
