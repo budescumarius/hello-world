@@ -6,7 +6,62 @@ const PIL_MCAT = { client: ['Client', '#3b5bdb'], fournisseur: ['Fournisseur', '
 const PIL_MURG = { haute: ['Urgent', '#e5484d'], normale: ['Normal', '#f08c00'], basse: ['Faible', '#868e96'] };
 // pièces jointes : ouvertes dans BatiPro (PDF, photos) ou téléchargées ; relues à la demande sur la boîte, rien n'est copié
 const pilAttSize = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1).replace('.', ',')} Mo` : `${Math.max(1, Math.round(n / 1024))} Ko`);
-const pilAttsHtml = (m) => ((m.atts || []).length ? `<div class="pm-atts">${m.atts.map((x, i) => `<span class="pm-att"><a href="api.php?r=pilot/mail/msgs/${m.id}/att/${i}" target="_blank" rel="noopener" title="Ouvrir">📎 ${esc(x.name || 'pièce jointe')}${x.size ? ` <small class="muted">${pilAttSize(x.size)}</small>` : ''}</a><a href="api.php?r=pilot/mail/msgs/${m.id}/att/${i}&download=1" class="pm-att-dl" title="Télécharger" aria-label="Télécharger ${esc(x.name || '')}">⬇</a></span>`).join('')}</div>` : '');
+const pilAttsHtml = (m) => ((m.atts || []).length ? `<div class="pm-atts">${m.atts.map((x, i) => `<span class="pm-att"><a href="api.php?r=pilot/mail/msgs/${m.id}/att/${i}" data-attv data-name="${esc(x.name || 'piece-jointe')}" data-type="${esc(x.type || '')}" title="Ouvrir">📎 ${esc(x.name || 'pièce jointe')}${x.size ? ` <small class="muted">${pilAttSize(x.size)}</small>` : ''}</a><a href="api.php?r=pilot/mail/msgs/${m.id}/att/${i}&download=1" class="pm-att-dl" data-attdl data-name="${esc(x.name || 'piece-jointe')}" title="Télécharger" aria-label="Télécharger ${esc(x.name || '')}">⬇</a></span>`).join('')}</div>` : '');
+async function pilAttFetch(url) {
+  const r = await fetch(url, { credentials: 'same-origin' });
+  if (!r.ok) { let msg = `Pièce jointe indisponible (${r.status})`; try { msg = (await r.json()).error || msg; } catch (e) { /* pas du JSON */ } throw new Error(msg); }
+  return r.blob();
+}
+const pilSaveBlob = (blob, name) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000); };
+// lecteur : PDF (toutes les pages), photo, texte ; les autres fichiers se téléchargent
+async function pilAttView(url, name, type) {
+  const isPdf = /pdf/i.test(type) || /\.pdf$/i.test(name); const isImg = /^image\//i.test(type) || /\.(png|jpe?g|gif|webp|heic)$/i.test(name); const isTxt = /^text\/plain/i.test(type) || /\.txt$/i.test(name);
+  const md = modal(`${mhead(name)}<div class="m-body pm-attview"><p class="muted">Ouverture…</p></div><div class="m-foot"><span class="grow"></span><button class="btn" data-share hidden>Partager</button><button class="btn" data-dl>⬇ Télécharger</button><button class="btn primary" data-close>Fermer</button></div>`, { wide: true });
+  const box = $('.pm-attview', md.el);
+  let blob; try { blob = await pilAttFetch(url); } catch (e) { box.innerHTML = `<div class="alert warn">${esc(e.message)}</div>`; return; }
+  $('[data-dl]', md.el).onclick = () => pilSaveBlob(blob, name);
+  const file = typeof File === 'function' ? new File([blob], name, { type: blob.type || type || 'application/octet-stream' }) : null;
+  const sh = $('[data-share]', md.el); if (file && navigator.canShare && navigator.canShare({ files: [file] })) { sh.hidden = false; sh.onclick = () => navigator.share({ files: [file], title: name }).catch(() => {}); }
+  if (isImg) { const u = URL.createObjectURL(blob); box.innerHTML = `<img class="pm-attimg" src="${u}" alt="">`; return; }
+  if (isTxt) { box.innerHTML = `<div class="pre">${esc(await blob.text())}</div>`; return; }
+  if (isPdf) {
+    try {
+      const lib = await loadPdfJs(); const doc = await lib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+      box.innerHTML = `<p class="muted sm">${doc.numPages} page(s)</p>`;
+      const w = Math.min(box.clientWidth || 800, 1100);
+      for (let i = 1; i <= Math.min(doc.numPages, 40); i++) {
+        if (!md.el.isConnected) return;
+        const pg = await doc.getPage(i); const v0 = pg.getViewport({ scale: 1 }); const sc = (w / v0.width) * Math.min(2, window.devicePixelRatio || 1); const vp = pg.getViewport({ scale: sc });
+        const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height; c.className = 'pm-attpage'; box.appendChild(c);
+        await pg.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+      }
+      if (doc.numPages > 40) box.insertAdjacentHTML('beforeend', '<p class="muted">… les pages suivantes : « Télécharger ».</p>');
+    } catch (e) { box.innerHTML = `<div class="alert warn">Ce PDF ne s'affiche pas ici : « Télécharger » pour l'ouvrir.</div>`; }
+    return;
+  }
+  box.innerHTML = `<p>Ce type de fichier (${esc(type || name.split('.').pop() || '?')}) ne s'affiche pas dans BatiPro.</p><p>« Télécharger » l'ouvre avec l'application du téléphone ou de l'ordinateur (Word, Excel…).</p>`;
+}
+document.addEventListener('click', (e) => {
+  const v = e.target.closest && e.target.closest('a[data-attv]'); const d = e.target.closest && e.target.closest('a[data-attdl]');
+  if (v) { e.preventDefault(); pilAttView(v.getAttribute('href'), v.dataset.name, v.dataset.type); }
+  else if (d) { e.preventDefault(); pilAttFetch(d.getAttribute('href')).then((b) => pilSaveBlob(b, d.dataset.name)).catch((x) => toast(x.message, 6000)); }
+});
+// texte de l'IA (titres **…**, listes, gras) mis en page proprement ; « #123 » ouvre l'e-mail cité
+function pilMd(t) {
+  const inl = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[\s(«])#(\d{1,7})\b/g, '$1<a href="#" class="pm-ref" data-m="$2">#$2</a>');
+  const out = []; let list = null;
+  const close = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  for (const raw of String(t || '').split('\n')) {
+    const l = raw.trim();
+    if (!l) { close(); continue; }
+    let m;
+    if ((m = l.match(/^#{1,4}\s+(.+)$/)) || (m = l.match(/^\*\*([^*]+)\*\*:?$/))) { close(); out.push(`<h4>${inl(m[1].replace(/\*\*/g, ''))}</h4>`); continue; }
+    if ((m = l.match(/^[-•*]\s+(.+)$/))) { if (list !== 'ul') { close(); out.push('<ul>'); list = 'ul'; } out.push(`<li>${inl(m[1])}</li>`); continue; }
+    if ((m = l.match(/^\d+[.)]\s+(.+)$/))) { if (list !== 'ol') { close(); out.push('<ol>'); list = 'ol'; } out.push(`<li>${inl(m[1])}</li>`); continue; }
+    close(); out.push(`<p>${inl(l)}</p>`);
+  }
+  close(); return out.join('');
+}
 const pilRcptTxt = (l) => (l || []).map((r) => r.email).join(', ');
 const pilRcptParse = (s) => String(s || '').split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean).map((email) => ({ email }));
 
@@ -351,7 +406,7 @@ async function pilAdviceLoad(el, ctx) {
     const c = r.conseil && r.conseil.date === today() ? r.conseil : null;
     if (!r.ai) return '<div class="alert warn"><b>Conseil personnalisé de l\'IA : désactivé.</b> Pour que BatiPro lise vos e-mails, les classe, prépare les réponses et vous conseille chaque jour, ajoutez la clé API Claude dans <a href="#/settings/ai">Paramètres → Assistant IA</a>. Les signaux ci-dessous fonctionnent déjà sans IA.</div>';
     return `<div class="card pm-adv-ai"><div class="card-h"><h3>✦ Conseil du jour</h3>${c ? (c.verification.ok ? badge('Montants vérifiés', '#2f9e44') : badge('Montant(s) à vérifier', '#e5484d')) : ''}</div>
-      ${c ? `<div class="pre">${esc(c.texte)}</div>${c.verification.ok ? '' : `<p class="late">Montant(s) absent(s) des données : ${c.verification.unverified.map(esc).join(', ')}</p>`}<p class="muted sm">Rédigé à ${esc(String(c.at).slice(11, 16))} à partir des signaux ci-dessous. L'IA conseille, vous décidez : rien n'est envoyé ni exécuté.</p>`
+      ${c ? `<div class="pm-md">${pilMd(c.texte)}</div>${c.verification.ok ? '' : `<p class="late">Montant(s) absent(s) des données : ${c.verification.unverified.map(esc).join(', ')}</p>`}<p class="muted sm">Rédigé à ${esc(String(c.at).slice(11, 16))} à partir des signaux ci-dessous. L'IA conseille, vous décidez : rien n'est envoyé ni exécuté.</p>`
         : '<p class="muted">L\'IA lit vos e-mails ouverts (résumés), les signaux et les factures en retard, et vous dit quoi faire en premier, quoi déléguer et à quoi faire attention.</p>'}
       <div class="btns"><button class="btn ${c ? '' : 'primary'}" data-adv-ai>${c ? 'Actualiser le conseil' : 'Me conseiller maintenant'}</button></div></div>`;
   };
@@ -359,12 +414,12 @@ async function pilAdviceLoad(el, ctx) {
     el.innerHTML = `<div class="pm-adv">
       <div class="pm-adv-k"><span><b>${s.recus_aujourdhui || 0}</b> reçus aujourd'hui</span><span><b>${s.ouverts || 0}</b> à traiter</span><span class="${s.urgents ? 'late' : ''}"><b>${s.urgents || 0}</b> urgents</span><span><b>${s.attente || 0}</b> vous attendent</span><span><b>${s.brouillons || 0}</b> réponses prêtes</span></div>
       ${aiCard()}
-      <h3 class="pm-adv-h">Ce que BatiPro a repéré</h3>
+      <h3 class="pm-adv-h">Ce que BatiPro a repéré</h3><div class="pm-adv-grid">
       ${(r.conseils || []).map((c) => `<div class="card pm-adv-c lvl-${c.level}" data-kind="${esc(c.kind)}"><div class="pm-adv-t">${badge(PM_LVL[c.level][0], PM_LVL[c.level][1])}<b class="grow">${esc(c.titre)}</b></div>
         <p>${esc(c.detail)}</p>${(c.emails || []).length ? `<div class="pm-adv-m">${c.emails.map((m) => `<button type="button" class="pt-mail" data-m="${m.id}">✉ ${esc(m.de || '')} – ${esc((m.objet || '(sans objet)').slice(0, 60))} <small class="muted">${esc(pmTime(m.recu))}</small></button>`).join('')}</div>` : ''}
-        ${c.href ? `<div class="btns"><button class="btn sm" data-go="${esc(c.href)}">${c.href === 'drafts' ? 'Relire les réponses' : c.href === 'new' ? 'Voir' : 'Ouvrir'}</button></div>` : ''}</div>`).join('') || '<div class="card"><p class="good">✓ Rien d\'important à signaler : vos e-mails sont à jour.</p></div>'}
+        ${c.href ? `<div class="btns"><button class="btn sm" data-go="${esc(c.href)}">${c.href === 'drafts' ? 'Relire les réponses' : c.href === 'new' ? 'Voir' : 'Ouvrir'}</button></div>` : ''}</div>`).join('') || '<div class="card"><p class="good">✓ Rien d\'important à signaler : vos e-mails sont à jour.</p></div>'}</div>
       <p class="muted sm">Source : ${esc(r._source || '')}.</p></div>`;
-    $$('[data-m]', el).forEach((x) => { x.onclick = () => ctx.open(+x.dataset.m); });
+    $$('[data-m]', el).forEach((x) => { x.onclick = (e) => { e.preventDefault(); ctx.open(+x.dataset.m); }; });
     $$('[data-go]', el).forEach((x) => { x.onclick = () => { const h = x.dataset.go; if (h.startsWith('#')) location.hash = h; else ctx.go('all', h); }; });
     const ai = $('[data-adv-ai]', el); if (ai) ai.onclick = async () => {
       ai.disabled = true; ai.textContent = 'Analyse en cours…';

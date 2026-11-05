@@ -2292,3 +2292,27 @@ details.card > summary { cursor: pointer; padding: 4px 0; }
 .doc .pv-phs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .doc .pv-phs img { height: 90px; max-width: 140px; object-fit: cover; border-radius: 3px; border: 1px solid #ddd; }
 .doc .pv-rem { break-inside: avoid; page-break-inside: avoid; margin-bottom: 8px; }
+
+/* Conseiller du jour : toute la largeur tant qu'aucun e-mail n'est ouvert ; texte de l'IA lisible */
+@media (min-width: 1101px) { .pm.adv:not(.reading) { grid-template-columns: 250px minmax(0, 1fr); } }
+@media (min-width: 761px) and (max-width: 1100px) { .pm.adv:not(.reading) { grid-template-columns: minmax(0, 1fr); } }
+@media (min-width: 761px) { .pm.adv:not(.reading) .pm-read { display: none; } }
+.pm-adv { max-width: 1100px; }
+.pm-adv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; align-items: start; }
+.pm.adv.reading .pm-adv-grid { grid-template-columns: minmax(0, 1fr); }
+.pm-md { font-size: 15px; line-height: 1.55; color: var(--text); }
+.pm-md h4 { font-size: 15.5px; margin: 18px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border); color: var(--navy, var(--text)); }
+.pm-md h4:first-child { margin-top: 4px; }
+.pm-md p { margin: 6px 0; }
+.pm-md ol, .pm-md ul { margin: 6px 0 6px 0; padding-left: 22px; }
+.pm-md li { margin: 6px 0; padding-left: 2px; }
+.pm-md li::marker { color: var(--muted); font-weight: 700; }
+.pm-md .pm-ref { font-weight: 700; text-decoration: none; background: rgba(59, 91, 219, .1); border-radius: 6px; padding: 0 5px; white-space: nowrap; }
+.pm-adv-ai { padding: 18px 22px; }
+.pm-adv-c { font-size: 14px; }
+.pm-adv-m .pt-mail { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+/* lecteur de pièces jointes */
+.pm-attview { display: flex; flex-direction: column; align-items: center; gap: 10px; background: var(--surface-2); max-height: 75vh; overflow: auto; }
+.pm-attpage { width: 100%; max-width: 1100px; height: auto; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .15); }
+.pm-attimg { max-width: 100%; height: auto; }
+.pm-attview .pre { width: 100%; background: var(--surface); padding: 12px; }
