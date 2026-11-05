@@ -71,7 +71,7 @@ T::test('envoyé à l\'IA : texte nettoyé, IBAN masqué, PDF joint lu ; aucun o
     $m = array_values(array_filter($log, fn($x) => !empty($x['mail']))); $last = end($m);
     T::eq(false, $last['iban_clair'], 'IBAN masqué'); T::eq(true, $last['pdf'], 'PDF joint transmis'); T::eq(false, $last['cite'], 'historique cité non transmis');
     $tools = []; foreach ($log as $x) foreach ($x['tools'] ?? [] as $t) $tools[$t] = true;
-    T::ok(!array_filter(array_keys($tools), fn($t) => preg_match('/send|envoy|mail(?!s)/i', $t) && $t !== 'classer_emails'), 'aucun outil d\'envoi : ' . implode(',', array_keys($tools)));
+    T::ok(!array_filter(array_keys($tools), fn($t) => preg_match('/send|envoy|mail(?!s)/i', $t) && !in_array($t, ['classer_emails', 'chercher_emails', 'lire_email'], true)) // tri et lecture seule : jamais d'envoi, 'aucun outil d\'envoi : ' . implode(',', array_keys($tools)));
 });
 T::test('briefing : à faire (urgent, action, pièce jointe), info, réponse préparée avec montant à vérifier signalé', function () use (&$S) {
     $b = $S['brief'];
