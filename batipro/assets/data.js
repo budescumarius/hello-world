@@ -205,7 +205,8 @@ function linesEditor(el, doc, opts) {
         if (l.kind === 'text') return `<tr class="l-text" data-i="${i}"><td></td><td colspan="${span + 1}"><textarea class="in" data-k="desc" rows="1" placeholder="Texte libre / commentaire" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea></td><td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
         const m = num(l.cost) > 0 ? r2((num(l.price) / num(l.cost) - 1) * 100) : '';
         return `<tr class="l-item ${l.option ? 'opt' : ''}" data-i="${i}"><td class="c-no">${noCell(l, i)}${l.type ? `<i class="tdot" style="--c:${TYPE_COLORS[l.type] || '#999'}" title="${esc(TYPES[l.type] || 'Ouvrage')}"></i>` : ''}</td>
-          <td class="c-d"><textarea class="in" data-k="desc" rows="1" placeholder="Désignation" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea>${l.option ? '<small class="muted">En option – non compris dans le total</small>' : ''}<div class="l-sugg" data-sg></div></td>
+          <td class="c-d"><textarea class="in" data-k="desc" rows="1" placeholder="Désignation" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea>${l.note != null ? `<textarea class="in l-note" data-k="note" rows="1" placeholder="Remarque sur ce poste (imprimée en italique sous la désignation)" ${opts.readOnly ? 'readonly' : ''}>${esc(l.note)}</textarea>` : ''}${l.option ? '<small class="muted">En option – non compris dans le total</small>' : ''}${l.calc ? `<small class="muted l-calcd">Prix calculé : ${esc(calcSummary(l.calc))}</small>` : ''}
+            ${opts.readOnly ? '' : `<div class="l-acts"><button type="button" class="${l.option ? 'on' : ''}" data-lopt="${i}" title="Poste en option : affiché mais non compris dans le total">${l.option ? '☑' : '☐'} Option</button><button type="button" data-lcalc="${i}" title="Matériaux, temps, marge → prix unitaire">🧮 Calculer le prix</button>${l.note == null ? `<button type="button" data-lnote="${i}">💬 Remarque</button>` : ''}</div>`}<div class="l-sugg" data-sg></div></td>
           ${showTm ? `<td class="c-tm" data-l="TM"><input class="in" data-k="tm" value="${esc(l.tm || '')}" maxlength="6" ${opts.readOnly ? 'readonly' : ''}></td>` : ''}
           <td class="c-u" data-l="Unité"><input class="in" data-k="unit" value="${esc(l.unit)}" list="units" ${opts.readOnly ? 'readonly' : ''}></td>
           <td class="c-n" data-l="Qté"><input class="in r" data-k="qty" inputmode="decimal" value="${esc(l.qty)}" ${opts.readOnly ? 'readonly' : ''}></td>
@@ -236,7 +237,7 @@ function linesEditor(el, doc, opts) {
         inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', () => {
           const k = inp.dataset.k;
           if (inp.tagName === 'TEXTAREA') autoGrow(inp);
-          if (k === 'desc' || k === 'unit') l[k] = inp.value;
+          if (k === 'desc' || k === 'unit' || k === 'note') l[k] = inp.value;
           else if (k === 'no') l.no = inp.value.trim();
           else if (k === 'tm') l.tm = inp.value.trim().toUpperCase();
           else if (k === 'vat') l.vat = num(inp.value);
@@ -252,7 +253,7 @@ function linesEditor(el, doc, opts) {
           $$('[data-sec]', el).forEach((x) => { x.textContent = money(secs[x.dataset.sec]); });
           changed();
         });
-        if (inp.dataset.k !== 'desc') inp.addEventListener('blur', () => { if (!['unit', 'tm', 'no'].includes(inp.dataset.k)) drawSoon(); });
+        if (inp.dataset.k !== 'desc') inp.addEventListener('blur', () => { if (!['unit', 'tm', 'no', 'note'].includes(inp.dataset.k)) drawSoon(); });
         // désignation d'une ligne : prix déjà pratiqués pour des lignes semblables
         if (inp.dataset.k === 'desc' && l.kind === 'item' && !opts.readOnly) {
           let t; const go2 = () => { clearTimeout(t); t = setTimeout(() => showHints(tr, l), 450); };
@@ -331,6 +332,16 @@ function linesEditor(el, doc, opts) {
     items.forEach((x) => { x.vat = num(v.vat); });
     draw(); changed(); toast(`TVA ${fnum(num(v.vat))} % appliquée à ${items.length} ligne(s)`, 3000);
   }
+  // boutons de la ligne : option, calcul du prix, remarque
+  // (un seul écouteur par zone, même si l'éditeur est recréé sur la même zone)
+  el.__lineActs = (ev) => {
+    const b = ev.target.closest && ev.target.closest('[data-lopt],[data-lcalc],[data-lnote]'); if (!b || opts.readOnly) return;
+    const l = doc.lines[+(b.dataset.lopt ?? b.dataset.lcalc ?? b.dataset.lnote)]; if (!l) return;
+    if (b.dataset.lopt != null) { l.option = !l.option; draw(); changed(); toast(l.option ? 'En option : affiché, non compris dans le total' : 'Compris dans le total', 2500); }
+    else if (b.dataset.lnote != null) { l.note = ''; draw(); changed(); const t = $(`tr[data-i="${b.dataset.lnote}"] [data-k=note]`, el); if (t) t.focus(); }
+    else priceCalc(l, () => { draw(); changed(); });
+  };
+  if (!el.__lineActsOn) { el.__lineActsOn = true; el.addEventListener('click', (ev) => { if (el.__lineActs) el.__lineActs(ev); }); }
   function lineMenu(i) {
     const l = doc.lines[i];
     menuSheet(l.kind === 'title' ? (tlevel(l) === 2 ? 'Sous-chapitre' : 'Chapitre') : 'Ligne', [
@@ -348,6 +359,8 @@ function linesEditor(el, doc, opts) {
       ...(l.kind === 'item' ? [
         { label: 'Type de déboursé…', run: async () => { const v = await ask('Type de déboursé', [{ name: 'type', label: 'Type', type: 'select', options: optsOf(TYPES) }], { type: l.type }); if (v) { l.type = v.type; delete l.costBy; draw(); changed(); } } },
         { label: l.option ? 'Inclure dans le total' : 'Mettre en option (hors total)', run: () => { l.option = !l.option; draw(); changed(); } },
+        { label: 'Calculer le prix (matériaux, temps, marge)…', run: () => priceCalc(l, () => { draw(); changed(); }) },
+        ...(l.note != null ? [{ label: 'Retirer la remarque', run: () => { delete l.note; draw(); changed(); } }] : [{ label: 'Ajouter une remarque', run: () => { l.note = ''; draw(); changed(); } }]),
         { label: 'Enregistrer dans la bibliothèque', run: () => editArticle(null, { name: l.desc.split('\n')[0], desc: l.desc.split('\n').slice(1).join('\n'), unit: l.unit, kind: TYPES[l.type] ? l.type : 'divers', cost: l.cost, margin: num(l.cost) > 0 ? r2((num(l.price) / num(l.cost) - 1) * 100) : 0, vat: l.vat }) },
       ] : []),
       { label: l.kind === 'title' ? 'Supprimer avec tout son contenu' : 'Supprimer', danger: true, run: () => {
@@ -357,6 +370,55 @@ function linesEditor(el, doc, opts) {
   }
   draw();
   return { redraw: draw };
+}
+
+// ---------------------------------------------------------------- Calcul du prix d'un poste : matériaux + temps + autres frais, puis marge
+// Tout est « par unité » du poste (par m², par pièce…). Le détail reste sur la ligne (l.calc) pour le reprendre plus tard.
+const calcCost = (c) => {
+  const mat = r2((c.mats || []).reduce((a, m) => a + num(m.qty) * num(m.price) * (1 + num(m.loss) / 100), 0));
+  const mo = r2(num(c.hours) * num(c.rate)); const other = r2(num(c.other));
+  const cost = r2(mat + mo + other); return { mat, mo, other, cost, price: r2(cost * (1 + num(c.margin) / 100)) };
+};
+const calcSummary = (c) => { const x = calcCost(c); return [x.mat && `matériaux ${money(x.mat)}`, x.mo && `main d'œuvre ${fnum(num(c.hours))} h × ${money(num(c.rate))}`, x.other && `autres ${money(x.other)}`, `marge ${fnum(num(c.margin))} %`].filter(Boolean).join(' · '); };
+async function priceCalc(l, onDone) {
+  const arts = await db.list('article').catch(() => []);
+  const c = JSON.parse(JSON.stringify(l.calc || { mats: [], hours: '', rate: moRate() || '', other: '', margin: num(l.cost) > 0 && num(l.price) > 0 ? r2((num(l.price) / num(l.cost) - 1) * 100) : 25 }));
+  if (!c.mats.length) c.mats.push({ name: '', qty: '', price: '', loss: '' });
+  const unit = l.unit || 'unité';
+  const m = modal(`${mhead('Calculer le prix')}<div class="m-body pc">
+    <p class="muted">Pour <b>1 ${esc(unit)}</b> de « ${esc((l.desc || 'ce poste').split('\n')[0].slice(0, 80))} » : ce qu'il faut en matériaux et en temps. BatiPro calcule le prix unitaire.</p>
+    <h4>Matériaux (par ${esc(unit)})</h4>
+    <table class="pc-mats"><thead><tr><th>Matériau</th><th class="r">Qté</th><th class="r">Prix u. (achat)</th><th class="r">Pertes %</th><th class="r">Coût</th><th></th></tr></thead><tbody data-mats></tbody></table>
+    <button type="button" class="btn sm" data-addm>＋ Matériau</button>
+    <datalist id="pc-arts">${arts.filter((a) => a.data.kind !== 'ouvrage').slice(0, 500).map((a) => `<option value="${esc(a.data.name)}">`).join('')}</datalist>
+    <h4>Main d'œuvre (par ${esc(unit)})</h4>
+    <div class="grid2"><label class="field"><span>Temps (heures)</span><input data-c="hours" inputmode="decimal" value="${esc(c.hours)}" placeholder="ex. 0,5"></label>
+      <label class="field"><span>Coût horaire (€/h)</span><input data-c="rate" inputmode="decimal" value="${esc(c.rate)}" placeholder="ex. 45"></label></div>
+    <div class="grid2"><label class="field"><span>Autres frais par ${esc(unit)} (€, sous-traitance, location…)</span><input data-c="other" inputmode="decimal" value="${esc(c.other)}"></label>
+      <label class="field"><span>Marge (%)</span><input data-c="margin" inputmode="decimal" value="${esc(c.margin)}"></label></div>
+    <div class="pc-res" data-res></div></div>
+    <div class="m-foot">${l.calc ? '<button class="btn ghost" data-rm>Retirer le calcul</button>' : ''}<span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-ok>Appliquer ce prix</button></div>`, { wide: true });
+  const res = () => { const x = calcCost(c); $('[data-res]', m.el).innerHTML = `<div class="tr"><span>Matériaux</span><b>${money(x.mat)}</b></div><div class="tr"><span>Main d'œuvre</span><b>${money(x.mo)}</b></div>${x.other ? `<div class="tr"><span>Autres frais</span><b>${money(x.other)}</b></div>` : ''}
+      <div class="tr"><span>Déboursé par ${esc(unit)}</span><b>${money(x.cost)}</b></div><div class="tr big"><span>Prix de vente HT par ${esc(unit)}</span><b>${money(x.price)}</b></div>${num(l.qty) ? `<div class="tr muted"><span>× ${fnum(num(l.qty))} ${esc(unit)}</span><span>${money(x.price * num(l.qty))} HT</span></div>` : ''}`; };
+  const drawM = () => {
+    $('[data-mats]', m.el).innerHTML = c.mats.map((x, i) => `<tr data-m="${i}"><td><input data-f="name" list="pc-arts" value="${esc(x.name)}" placeholder="ex. Colle carrelage"></td><td><input class="r" data-f="qty" inputmode="decimal" value="${esc(x.qty)}"></td><td><input class="r" data-f="price" inputmode="decimal" value="${esc(x.price)}"></td><td><input class="r" data-f="loss" inputmode="decimal" value="${esc(x.loss)}" placeholder="0"></td><td class="r" data-mc>${money(num(x.qty) * num(x.price) * (1 + num(x.loss) / 100))}</td><td><button type="button" class="icon-btn sm" data-rmm="${i}" aria-label="Retirer">✕</button></td></tr>`).join('');
+    $$('[data-m]', m.el).forEach((tr) => { const x = c.mats[+tr.dataset.m];
+      $$('[data-f]', tr).forEach((inp) => { inp.oninput = () => { x[inp.dataset.f] = inp.value;
+        if (inp.dataset.f === 'name') { const a = arts.find((y) => y.data.name === inp.value); if (a) { x.price = r2(num(articleCost(a, arts).cost) || num(a.data.cost) || num(a.data.price)); $('[data-f=price]', tr).value = x.price; } }
+        $('[data-mc]', tr).textContent = money(num(x.qty) * num(x.price) * (1 + num(x.loss) / 100)); res(); }; }); });
+    $$('[data-rmm]', m.el).forEach((b) => { b.onclick = () => { c.mats.splice(+b.dataset.rmm, 1); drawM(); res(); }; });
+  };
+  $$('[data-c]', m.el).forEach((inp) => { inp.oninput = () => { c[inp.dataset.c] = inp.value; res(); }; });
+  $('[data-addm]', m.el).onclick = () => { c.mats.push({ name: '', qty: '', price: '', loss: '' }); drawM(); const ins = $$('[data-f=name]', m.el); ins[ins.length - 1].focus(); };
+  const rm = $('[data-rm]', m.el); if (rm) rm.onclick = () => { delete l.calc; delete l.costBy; m.close(); onDone(); };
+  $('[data-ok]', m.el).onclick = () => {
+    c.mats = c.mats.filter((x) => String(x.name).trim() || num(x.qty) || num(x.price));
+    const x = calcCost(c); if (!(x.price > 0)) { toast('Indiquez au moins un matériau ou un temps', 3000); return; }
+    l.calc = c; l.price = x.price; l.cost = x.cost; l.costBy = Object.fromEntries(Object.entries({ mat: x.mat, mo: x.mo, divers: x.other }).filter(([, v]) => v));
+    if (!l.type || l.type === 'divers') l.type = Object.keys(l.costBy).length > 1 ? 'ouvrage' : Object.keys(l.costBy)[0];
+    m.close(); onDone(); toast(`Prix unitaire : ${money(x.price)} HT`, 3000);
+  };
+  drawM(); res();
 }
 
 // Sélecteur d'articles de la bibliothèque (choix multiple avec quantités)

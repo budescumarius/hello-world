@@ -152,7 +152,7 @@ function linesTable(d, t, kind) {
       if (l.kind === 'title' && !String(l.desc || '').trim()) return '';
       if (l.kind === 'title') return `<tr class="${tlevel(l) === 2 ? 'mb-sub' : 'mb-ch'}"><td colspan="${n - 1}"><div class="mb-dl">${code(i)}<span>${esc(l.desc)}</span></div></td><td class="r">${dmoney(st[l.id], t)}</td></tr>`;
       if (l.kind === 'text') return `<tr class="mb-txt"><td colspan="${n}" class="pre">${esc(l.desc)}</td></tr>`;
-      return `<tr class="${l.option ? 'mb-opt' : ''}"><td><div class="mb-dl">${code(i)}<span class="pre">${esc(l.desc)}${t.showTM && l.tm ? `<span class="mb-tag">${esc([t.tmLabel, l.tm].filter(Boolean).join(' '))}</span>` : ''}${l.option ? '<em class="mb-pill">Option</em>' : ''}</span></div></td>
+      return `<tr class="${l.option ? 'mb-opt' : ''}"><td><div class="mb-dl">${code(i)}<span class="pre">${esc(l.desc)}${t.showTM && l.tm ? `<span class="mb-tag">${esc([t.tmLabel, l.tm].filter(Boolean).join(' '))}</span>` : ''}${l.option ? '<em class="mb-pill">Option</em>' : ''}</span></div>${String(l.note || '').trim() ? `<div class="mb-lnote pre">${esc(l.note)}</div>` : ''}</td>
         <td class="r">${dnum2(l.qty)}<span class="mb-u">${esc(l.unit || '')}</span></td><td class="r">${dmoney(l.price, t)}</td>${vat ? `<td class="r c-v">${fnum(num(l.vat))} %</td>` : ''}<td class="r">${dmoney(num(l.qty) * num(l.price), t)}</td></tr>`;
     }).join('')}</tbody></table>`;
 }

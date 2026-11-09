@@ -54,6 +54,26 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   await p.goto(`${BASE}/#/invoice/${id2}/informations`); await p.waitForSelector('[name=project_id]');
   await p.selectOption('[name=project_id]', String(await p.evaluate(() => window.__pid))); await p.waitForTimeout(400);
   check('chantier choisi : champs manuels masqués', !(await p.isVisible('[name=siteAddress]')));
+  // poste : calcul du prix (matériaux + temps + marge), option, remarque
+  const id3 = await p.evaluate(async () => { const c = await persist('contact', { data: { kind: 'client', company: 'Client calcul SA' } });
+    return (await persist('invoice', { data: { kind: 'facture', status: 'brouillon', clientId: c.id, title: 'Carrelage', date: today(), due: today(), defaultVat: 21,
+      lines: [{ id: lid(), kind: 'item', desc: 'Pose de carrelage', unit: 'm²', qty: 10, price: 0, vat: 21 }, { id: lid(), kind: 'item', desc: 'Plinthes', unit: 'm', qty: 5, price: 10, vat: 21 }] } })).id; });
+  await p.goto(`${BASE}/#/invoice/${id3}/encodage`); await p.waitForSelector('[data-lcalc]', { timeout: 15000 });
+  check('poste : boutons « Option », « Calculer le prix », « Remarque » sur la ligne', !!(await p.$('[data-lopt]')) && !!(await p.$('[data-lnote]')));
+  await p.click('[data-lcalc="0"]'); await p.waitForSelector('.modal .pc');
+  await p.fill('.modal [data-f=name]', 'Colle carrelage'); await p.fill('.modal [data-f=qty]', '2'); await p.fill('.modal [data-f=price]', '10'); await p.fill('.modal [data-f=loss]', '10');
+  await p.fill('.modal [data-c=hours]', '0,5'); await p.fill('.modal [data-c=rate]', '40'); await p.fill('.modal [data-c=margin]', '25');
+  const pcTxt = (await p.textContent('.modal [data-res]')).replace(/\s+/g, ' ');
+  check('calcul : matériaux 22 (pertes 10 %) + 0,5 h × 40 = 42 déboursé → 52,50 HT avec 25 %', /22,00/.test(pcTxt) && /42,00/.test(pcTxt) && /52,50/.test(pcTxt), pcTxt);
+  await p.click('.modal [data-ok]'); await p.waitForTimeout(600);
+  await p.click('[data-lopt="1"]'); await p.waitForTimeout(300);
+  await p.click('[data-lnote="0"]'); await p.fill('tr[data-i="0"] [data-k=note]', 'Carrelage fourni par le client'); await p.waitForTimeout(2500);
+  const d3 = await p.evaluate(async (i) => (await db.get('invoice', i)).data, id3);
+  const t3 = await p.evaluate((d) => totals(d).base, d3);
+  check('appliqué : prix 52,50, déboursé 42, détail gardé ; plinthes en option hors total ; remarque', d3.lines[0].price === 52.5 && d3.lines[0].cost === 42 && d3.lines[0].calc && d3.lines[1].option === true && d3.lines[0].note === 'Carrelage fourni par le client' && t3 === 525, JSON.stringify({ p: d3.lines[0].price, c: d3.lines[0].cost, o: d3.lines[1].option, n: d3.lines[0].note, t: t3 }));
+  await p.goto(`${BASE}/#/invoice/${id3}/visualisation`); await p.waitForTimeout(2000);
+  const v3 = (await p.textContent('#page')).replace(/\s+/g, ' ');
+  check('facture : remarque du poste et « Option » imprimées', /Carrelage fourni par le client/.test(v3) && /Option/.test(v3), v3.slice(0, 200));
   check('aucune erreur JavaScript dans la page', errs.length === 0, errs.join(' | '));
   await b.close();
   console.log(failed ? `\n${failed} échec(s)` : '\nnavigateur : tout est conforme');

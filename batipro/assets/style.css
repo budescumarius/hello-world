@@ -2336,3 +2336,21 @@ details.card > summary { cursor: pointer; padding: 4px 0; }
 .pm-chat-f textarea { flex: 1; min-height: 48px; resize: vertical; }
 .pm-chat-ex { margin-top: 8px; }
 .pm-chat-ex .chip { white-space: normal; text-align: left; }
+
+/* lignes : option, calcul du prix, remarque */
+.lines .l-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.lines .l-acts button { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 2px 9px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.lines .l-acts button:hover { color: var(--text); border-color: var(--muted); }
+.lines .l-acts button.on { background: #fff4e6; border-color: #f08c00; color: #b35c00; font-weight: 700; }
+.lines tr.opt .c-d > textarea[data-k=desc] { font-style: italic; }
+.lines .l-note { font-style: italic; font-size: 13px; color: var(--muted); margin-top: 4px; }
+.lines .l-calcd { display: block; }
+.mb-lnote { font-style: italic; font-size: .92em; color: #555; margin-top: 3px; }
+.pc h4 { margin: 14px 0 6px; }
+.pc-mats { width: 100%; border-collapse: collapse; }
+.pc-mats th, .pc-mats td { padding: 4px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.pc-mats input { width: 100%; min-width: 60px; }
+.pc-mats td:first-child { min-width: 160px; }
+.pc-res { margin-top: 14px; border-top: 2px solid var(--border); padding-top: 8px; }
+.pc-res .tr { display: flex; justify-content: space-between; padding: 3px 0; }
+.pc-res .tr.big { font-size: 17px; font-weight: 800; }
