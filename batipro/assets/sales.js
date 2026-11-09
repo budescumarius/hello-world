@@ -15,7 +15,7 @@ async function editArticle(a, preset = {}) {
       { name: 'kind', label: 'Type', type: 'select', options: optsOf(LIB_KINDS) },
       { name: 'code', label: 'Code' },
       { name: 'category', label: 'Catégorie', list: 'cats' },
-      { name: 'unit', label: 'Unité', list: 'units' },
+      { name: 'unit', label: 'Unité', units: true },
       { name: 'desc', label: 'Description détaillée (reprise dans le devis)', type: 'textarea', cls: 'full' },
       { name: 'supplierId', label: 'Fournisseur / sous-traitant', type: 'contact', contacts, kinds: ['fournisseur', 'soustraitant'], allowNew: false },
       { name: 'ficheId', label: 'Fiche technique', type: 'select', options: [['', '—'], ...fiches.map((f) => [f.id, f.data.title])] },

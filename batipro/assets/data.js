@@ -21,6 +21,26 @@ const INTKIND = { depannage: 'Dépannage', entretien: 'Entretien', installation:
 const TST = { todo: ['À faire', '#868e96'], doing: ['En cours', '#f08c00'], done: ['Terminée', '#2f9e44'] };
 const PRIO = { low: ['Basse', '#868e96'], normal: ['Normale', '#3b5bdb'], high: ['Haute', '#f08c00'], urgent: ['Urgente', '#e5484d'] };
 const UNITS = ['u', 'pc', 'm', 'm²', 'm³', 'ml', 'kg', 't', 'l', 'h', 'j', 'ens', 'forfait'];
+// liste des unités : toujours complète (la liste du navigateur ne montrait que ce qui commence comme la valeur déjà écrite, ex. « u »)
+const UNIT_LABELS = { u: 'unité', pc: 'pièce', m: 'mètre', 'm²': 'mètre carré', 'm³': 'mètre cube', ml: 'mètre linéaire', kg: 'kilo', t: 'tonne', l: 'litre', h: 'heure', j: 'jour', ens: 'ensemble', forfait: 'forfait' };
+let unitPopEl = null;
+const unitPopClose = () => { if (unitPopEl) { unitPopEl.remove(); unitPopEl = null; } };
+function unitPop(inp) {
+  unitPopClose();
+  const r = inp.getBoundingClientRect(); const cur = inp.value.trim();
+  unitPopEl = document.createElement('div'); unitPopEl.className = 'unit-pop'; unitPopEl.setAttribute('role', 'listbox');
+  unitPopEl.innerHTML = UNITS.map((u) => `<button type="button" role="option" data-u="${esc(u)}" class="${u === cur ? 'on' : ''}"><b>${esc(u)}</b><small>${esc(UNIT_LABELS[u] || '')}</small></button>`).join('') + '<small class="unit-pop-h">ou tapez une autre unité</small>';
+  document.body.appendChild(unitPopEl);
+  const h = unitPopEl.offsetHeight; const below = innerHeight - r.bottom > h + 8;
+  unitPopEl.style.left = `${Math.max(8, Math.min(r.left, innerWidth - unitPopEl.offsetWidth - 8))}px`;
+  unitPopEl.style.top = `${below ? r.bottom + 4 : Math.max(8, r.top - h - 4)}px`;
+  unitPopEl.addEventListener('mousedown', (e) => e.preventDefault()); // garder le focus dans le champ
+  $$('[data-u]', unitPopEl).forEach((b) => { b.onclick = () => { inp.value = b.dataset.u; inp.dispatchEvent(new Event('input', { bubbles: true })); unitPopClose(); inp.blur(); }; });
+}
+document.addEventListener('focusin', (e) => { const t = e.target; if (t && t.matches && t.matches('input[data-units]') && !t.readOnly && !t.disabled) unitPop(t); });
+document.addEventListener('focusout', (e) => { if (e.target && e.target.matches && e.target.matches('input[data-units]')) setTimeout(unitPopClose, 120); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') unitPopClose(); });
+window.addEventListener('scroll', unitPopClose, true);
 const PAY_METHODS = ['Virement', 'Espèces', 'Carte', 'Chèque', 'Domiciliation', 'Autre'];
 const ABS_KINDS = { conge: 'Congé', maladie: 'Maladie', formation: 'Formation', intemperie: 'Intempéries', autre: 'Autre' };
 
@@ -208,7 +228,7 @@ function linesEditor(el, doc, opts) {
           <td class="c-d"><textarea class="in" data-k="desc" rows="1" placeholder="Désignation" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea>${l.note != null ? `<textarea class="in l-note" data-k="note" rows="1" placeholder="Remarque sur ce poste (imprimée en italique sous la désignation)" ${opts.readOnly ? 'readonly' : ''}>${esc(l.note)}</textarea>` : ''}${l.option ? '<small class="muted">En option – non compris dans le total</small>' : ''}${l.calc ? `<small class="muted l-calcd">Prix calculé : ${esc(calcSummary(l.calc))}</small>` : ''}
             ${opts.readOnly ? '' : `<div class="l-acts"><button type="button" class="${l.option ? 'on' : ''}" data-lopt="${i}" title="Poste en option : affiché mais non compris dans le total">${l.option ? '☑' : '☐'} Option</button><button type="button" data-lcalc="${i}" title="Matériaux, temps, marge → prix unitaire">🧮 Calculer le prix</button>${l.note == null ? `<button type="button" data-lnote="${i}">💬 Remarque</button>` : ''}</div>`}<div class="l-sugg" data-sg></div></td>
           ${showTm ? `<td class="c-tm" data-l="TM"><input class="in" data-k="tm" value="${esc(l.tm || '')}" maxlength="6" ${opts.readOnly ? 'readonly' : ''}></td>` : ''}
-          <td class="c-u" data-l="Unité"><input class="in" data-k="unit" value="${esc(l.unit)}" list="units" ${opts.readOnly ? 'readonly' : ''}></td>
+          <td class="c-u" data-l="Unité"><input class="in" data-k="unit" value="${esc(l.unit)}" data-units autocomplete="off" ${opts.readOnly ? 'readonly' : ''}></td>
           <td class="c-n" data-l="Qté"><input class="in r" data-k="qty" inputmode="decimal" value="${esc(l.qty)}" ${opts.readOnly ? 'readonly' : ''}></td>
           ${showCost ? `<td class="c-n" data-l="Déboursé u."><input class="in r" data-k="cost" inputmode="decimal" value="${esc(l.cost ?? '')}" ${opts.readOnly || l.costBy ? 'readonly' : ''} title="${l.costBy ? 'Ouvrage : ' + Object.entries(l.costBy).map(([k, v]) => `${TYPES[k] || k} ${money(v)}`).join(', ') : ''}"></td>
             <td class="c-n" data-l="Marge %"><input class="in r" data-k="margin" inputmode="decimal" value="${esc(m)}" ${opts.readOnly ? 'readonly' : ''}></td>` : ''}

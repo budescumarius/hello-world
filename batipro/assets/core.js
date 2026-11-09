@@ -551,7 +551,7 @@ function fieldHTML(f, val) {
     case 'number': case 'money': case 'percent':
       input = `<input name="${f.name}" id="${id}" type="text" inputmode="decimal" value="${esc(val ?? '')}" placeholder="${ph}">`; break;
     default:
-      input = `<input name="${f.name}" id="${id}" type="${f.type || 'text'}" value="${esc(val ?? '')}" placeholder="${ph}" ${f.list ? `list="${f.list}"` : ''} autocomplete="off">`;
+      input = `<input name="${f.name}" id="${id}" type="${f.type || 'text'}" value="${esc(val ?? '')}" placeholder="${ph}" ${f.list ? `list="${f.list}"` : ''}${f.units ? ' data-units' : ''} autocomplete="off">`;
   }
   return `<label class="field ${f.cls || ''}" for="${id}"><span>${esc(f.label)}${f.required ? ' *' : ''}</span>${input}${f.hint ? `<small class="muted">${f.hint}</small>` : ''}</label>`;
 }
