@@ -23,7 +23,8 @@ function invDisp(i) {
   const man = (d.sent || []).find((x) => x.manual);
   return sent ? { k: 'envoye', l: 'Envoyé', c: '#3b5bdb', sub: man ? `${man.to.toLowerCase()} · éch. ${fmtDate(d.due)}` : `éch. ${fmtDate(d.due)}` } : { k: 'aenvoyer', l: 'À envoyer', c: '#f08c00' };
 }
-const invDispHtml = (i) => { const x = invDisp(i); return `<span class="pst">${badge(x.l, x.c)}${x.sub ? `<small class="muted">${esc(x.sub)}</small>` : ''}</span>`; };
+const invDispHtml = (i) => { const x = invDisp(i); const r = (i.data.reminders || []).slice(-1)[0];
+  return `<span class="pst">${badge(x.l, x.c)}${x.sub ? `<small class="muted">${esc(x.sub)}</small>` : ''}${r && x.k !== 'payee' ? `<small class="rap-tag lv${r.level}">${esc(RAPPELS[r.level] || '')} · ${fmtDate(r.date)}</small>` : ''}</span>`; };
 // Facturation électronique (Peppol)
 function invEInv(i, contacts) {
   const d = i.data;
@@ -216,13 +217,30 @@ function invMenu(it) {
     { label: 'PDF / Imprimer', icon: 'print', run: () => go(`#/print/invoice/${it.id}`) },
     ...(locked ? [{ label: 'Envoyer par email', icon: 'mail', run: () => go(`#/print/invoice/${it.id}?mail=1`) },
       { label: 'Peppol – facture électronique', icon: 'file', run: () => peppolInvoice(it) },
-      ...(d.kind !== 'avoir' && invState(it).rest > 0.005 ? [{ label: 'Ajouter un paiement', icon: 'coins', run: () => invPayment(it, null) }] : []),
+      ...(d.kind !== 'avoir' && invState(it).rest > 0.005 ? [{ label: 'Ajouter un paiement', icon: 'coins', run: () => invPayment(it, null) },
+        { label: `Envoyer un rappel de paiement…${(d.reminders || []).length ? ` (${(d.reminders || []).length} déjà)` : ''}`, icon: 'mail', run: () => invRappel(it) }] : []),
       ...(!isEA(it) && !d.external && !(d.sent || []).length && !(d.peppol && d.peppol.sentAt) ? [{ label: 'Marquer comme envoyée (envoi manuel)…', icon: 'check', run: () => invMarkSent([it]) }] : []),
       ...((d.sent || []).some((x) => x.manual) ? [{ label: 'Annuler « envoyée manuellement »', icon: 'x', run: () => invUnmarkSent(it) }] : [])] : []),
     { label: 'Commentaires', icon: 'chat', run: () => invComments(it) },
     ...(locked ? [{ sep: true }, { label: 'Modifier / supprimer la facture validée…', icon: 'edit', run: () => invChangeValidated(it) }] : []),
     ...(!locked ? [{ sep: true }, { label: 'Supprimer le brouillon', icon: 'trash', danger: true, run: async () => { if (confirm('Supprimer ce brouillon ?')) { await db.del('invoice', it.id); render(); } } }] : []),
   ]);
+}
+
+// rappels de paiement : le niveau suivant est proposé ; aperçu et envoi par e-mail (la facture est jointe)
+function invRappel(it) {
+  const d = it.data; const done = d.reminders || []; const next = Math.min(3, (done.length ? Math.max(...done.map((x) => x.level)) : 0) + 1);
+  const s = invState(it);
+  const m = modal(`${mhead(`Rappel – facture ${it.number || ''}`)}<div class="m-body">
+    <p>Reste à payer : <b>${money(s.rest)}</b>${d.due ? ` · échéance ${fmtDate(d.due)}${s.s === 'retard' ? ` <span class="late">(${Math.max(0, dnum(today()) - dnum(d.due))} jours de retard)</span>` : ''}` : ''}</p>
+    ${done.length ? `<div class="rows">${done.map((x) => `<div class="row static"><span class="grow"><b>${esc(RAPPELS[x.level] || '')}</b><small class="muted">${fmtDate(x.date)} · ${esc(userName(x.by))}${x.to ? ` · ${esc((Array.isArray(x.to) ? x.to : [x.to]).map((y) => (y && y.email) || y).join(', '))}` : ''}</small></span><b>${money(x.rest || 0)}</b></div>`).join('')}</div>` : '<p class="muted">Aucun rappel envoyé pour cette facture.</p>'}
+    <div class="rap-choice">${[1, 2, 3].map((n) => `<label class="rap-opt ${n === next ? 'on' : ''}"><input type="radio" name="rap" value="${n}" ${n === next ? 'checked' : ''}><b>${RAPPELS[n]}</b><small class="muted">${n === 1 ? 'courtois : le paiement a peut-être croisé' : n === 2 ? 'ferme : 8 jours pour payer' : 'mise en demeure : 15 jours, intérêts et recouvrement possibles'}</small></label>`).join('')}</div>
+    <p class="muted sm">Le document envoyé est votre facture, avec en tête l'intitulé du rappel, le reste à payer et le texte du niveau choisi. Vous relisez l'e-mail avant l'envoi.</p></div>
+    <div class="m-foot"><span class="grow"></span><button class="btn" data-see>Aperçu</button><button class="btn primary" data-send>Préparer l'e-mail…</button></div>`);
+  $$('[name=rap]', m.el).forEach((r) => { r.onchange = () => $$('.rap-opt', m.el).forEach((x) => x.classList.toggle('on', $('input', x).checked)); });
+  const lv = () => +$('[name=rap]:checked', m.el).value;
+  $('[data-see]', m.el).onclick = () => { m.close(); go(`#/print/invoice/${it.id}?rappel=${lv()}`); };
+  $('[data-send]', m.el).onclick = () => { m.close(); go(`#/print/invoice/${it.id}?rappel=${lv()}&mail=1`); };
 }
 
 function invComments(it) {

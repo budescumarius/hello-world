@@ -38,6 +38,20 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   check('suppression du chantier facturé refusée', del.status === 403, del.msg);
   await p.goto(`${BASE}/#/invoice/${id}`); await p.waitForTimeout(1500);
   if (process.argv[2]) await p.screenshot({ path: process.argv[2] });
+  // rappels de paiement : niveau suivant proposé ; document « 2e rappel » avec reste à payer ; rappel noté sur la facture validée
+  await p.evaluate(async (i) => invRappel(await db.get('invoice', i)), id); await p.waitForSelector('.modal .rap-opt');
+  check('rappel : 1er rappel proposé, 3 niveaux (mise en demeure)', (await p.$eval('.modal [name=rap]:checked', (x) => x.value)) === '1' && (await p.$$('.modal .rap-opt')).length === 3 && /Mise en demeure/.test(await p.textContent('.modal')));
+  await p.evaluate(() => closeModals());
+  const rs = await p.evaluate(async (i) => { const it = await db.get('invoice', i); it.data.reminders = [{ level: 1, date: '2026-11-01', to: [{ email: 'client@ui.test' }], by: S.me.id, rest: 810 }]; try { await persist('invoice', it); return 'ok'; } catch (e) { return e.message; } }, id);
+  check('rappel noté sur une facture validée (pas bloqué par la protection fiscale)', rs === 'ok', rs);
+  await p.evaluate(async (i) => invRappel(await db.get('invoice', i)), id); await p.waitForSelector('.modal .rap-opt');
+  check('après un 1er rappel : 2e rappel proposé, historique affiché', (await p.$eval('.modal [name=rap]:checked', (x) => x.value)) === '2' && /1er rappel/.test(await p.textContent('.modal .rows')));
+  await p.evaluate(() => closeModals());
+  await p.goto(`${BASE}/#/print/invoice/${id}?rappel=2`); await p.waitForTimeout(2500);
+  const rp = (await p.textContent('.doc')).replace(/\s+/g, ' ');
+  check('document : « 2e rappel – facture », reste à payer 810, texte (premier rappel du 01/11/2026, 8 jours)', /2e rappel – facture/i.test(rp) && /Reste à payer : 810,00/.test(rp) && /premier rappel du 01\/11\/2026/.test(rp) && /8 jours/.test(rp), rp.slice(0, 400));
+  await p.goto(`${BASE}/#/invoices`); await p.waitForTimeout(1500);
+  check('liste des factures : dernier rappel affiché sous le statut', /1er rappel · 01\/11\/2026/.test(await p.textContent('#page')));
   // facture simple sans fiche chantier : nom + adresse du chantier et remarque générale, imprimés sur la facture
   const id2 = await p.evaluate(async () => { const c = await persist('contact', { data: { kind: 'client', company: 'Client sans chantier SA' } });
     return (await persist('invoice', { data: { kind: 'facture', status: 'brouillon', clientId: c.id, title: 'Isolation sol', date: today(), due: today(), defaultVat: 21, lines: [{ id: lid(), kind: 'item', desc: 'Isolation', unit: 'm²', qty: 5, price: 40, vat: 21 }] } })).id; });

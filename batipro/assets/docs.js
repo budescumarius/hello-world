@@ -323,13 +323,25 @@ function simpleInvoiceData(d, it) {
   const lines = Object.entries(work).map(([rate, v]) => ({ id: 'w' + rate, kind: 'item', desc: `${label}${many ? ` (TVA ${fnum(+rate)} %)` : ''}`, unit: 'forfait', qty: 1, price: v, vat: +rate }));
   return { ...d, lines: [...lines, ...keep], discount: 0, progressRows: d.kind === 'situation' ? d.progressRows : undefined };
 }
+// ---------------------------------------------------------------- Rappels de paiement : 1er rappel, 2e rappel, mise en demeure (3e)
+// Le document est la facture elle-même, avec en tête l'intitulé du rappel, le reste à payer et le texte du niveau choisi.
+const RAPPELS = { 1: '1er rappel', 2: '2e rappel', 3: 'Mise en demeure' };
+const docRappel = () => { const n = +(new URLSearchParams(location.hash.split('?')[1] || '').get('rappel') || 0); return RAPPELS[n] ? n : 0; };
+function rappelText(n, it, rest, co) {
+  const d = it.data; const prev = (d.reminders || []).filter((x) => x.level < n).sort((a, b) => b.level - a.level)[0];
+  const ref = `notre facture ${it.number || ''} du ${fmtDate(d.date)}${d.due ? ` (échéance le ${fmtDate(d.due)})` : ''}`;
+  const pay = `${money(rest)}${co.iban ? ` sur le compte ${co.iban}` : ''}${d.communication ? ` avec la communication ${commFmt(d.communication)}` : ''}`;
+  if (n === 1) return `Sauf erreur ou omission de notre part, ${ref} n'est pas encore réglée. Nous vous remercions de bien vouloir verser le solde de ${pay} dans les meilleurs délais.\nSi votre paiement a croisé ce rappel, veuillez ne pas en tenir compte.`;
+  if (n === 2) return `Malgré notre premier rappel${prev ? ` du ${fmtDate(prev.date)}` : ''}, ${ref} reste impayée. Nous vous prions de verser le solde de ${pay} dans les 8 jours.\nSans paiement dans ce délai, nous serons contraints de vous adresser une mise en demeure.`;
+  return `Malgré nos rappels${prev ? ` (le dernier du ${fmtDate(prev.date)})` : ''}, ${ref} reste impayée. Par la présente, nous vous mettons en demeure de verser le solde de ${pay} dans les 15 jours.\nÀ défaut, nous nous réservons le droit de réclamer les intérêts de retard et l'indemnité prévus par nos conditions générales et par la loi, et de confier le recouvrement à un tiers, sans autre avis.`;
+}
 const docVariant = () => new URLSearchParams(location.hash.split('?')[1] || '').get('v') || '';
 // facture marquée « une seule ligne » (état d'avancement) : simplifiée sauf si on demande le détail (?v=detail)
 const docOneLine = (it, variant) => variant === 'simple' || (variant !== 'detail' && !!it.data.oneLine);
 async function printDoc(kind, id) {
   const r = await docHtml(kind, id, docVariant());
   const { it, d, c, project, title, html, typ, co } = r;
-  return printDocPage(kind, id, it, d, c, project, title, html, typ, co, r.fname);
+  return printDocPage(kind, id, it, d, c, project, title, html, typ, co, r.fname, r.rap, r.rest);
 }
 // Rendu du document (devis, facture, commande) : utilisé pour l'impression, l'aperçu et le PDF
 async function docHtml(kind, id, variant = '') {
@@ -339,8 +351,12 @@ async function docHtml(kind, id, variant = '') {
   const d = simple ? simpleInvoiceData(it.data, it) : it.data;
   const [contacts, project] = await Promise.all([db.list('contact'), it.project_id ? db.get('project', it.project_id).catch(() => null) : null]);
   const c = byId(contacts, kind === 'order' ? d.supplierId : d.clientId);
-  const t = tpl(); const co = company();
+  const t0 = tpl(); const co = company();
+  const rap = kind === 'invoice' && d.kind !== 'avoir' && d.status === 'emise' ? docRappel() : 0;
+  const t = rap ? { ...t0, invoiceTitle: `${RAPPELS[rap]} – facture` } : t0;
   const { head, info, title } = docBlocks(kind, it, c, project, t);
+  const rest = rap ? invState(it).rest : 0;
+  const rapHtml = rap ? `<section class="mb-rappel lv${rap}"><div class="mb-rappel-h"><b>${esc(RAPPELS[rap])}</b><span>Reste à payer : <b>${money(rest)}</b></span></div><p class="pre">${esc(rappelText(rap, it, rest, co))}</p></section>` : '';
   const paid = kind === 'invoice' ? invState(it).paid : 0;
   const isProg = !simple && kind === 'invoice' && d.kind === 'situation' && (d.progressRows || []).length;
   const cgv = cgvBlock(kind, t);
@@ -348,7 +364,7 @@ async function docHtml(kind, id, variant = '') {
   // orientation choisie pour ce document (paysage : plus de place pour les désignations, utile aux états d'avancement)
   const land = it.data.orient === 'landscape';
   const html = `<style>${docCSS(t)}${land ? '@page { size: A4 landscape; }' : ''}</style><div class="doc mb mb-paper ${land ? 'mb-land' : ''}" data-land="${land ? 1 : ''}" data-foot="${esc(legal)}" data-ink="${esc(t.ink)}" data-acc="${esc(t.accent)}"><div class="mb-sheet"><div class="mb-ruler"></div>
-    ${coMissing(kind, c)}${head}${info}
+    ${coMissing(kind, c)}${head}${rapHtml}${info}
     ${d.intro ? `<p class="pre mb-intro">${esc(d.intro)}</p>` : ''}
     ${isProg ? progressTable(d, t) : linesTable(d, t, kind)}
     ${await totalsBlock(kind, simple ? { ...it, data: d } : it, t, paid)}
@@ -361,7 +377,7 @@ async function docHtml(kind, id, variant = '') {
     <footer class="mb-foot"><span>${esc(legal)}</span><span class="mb-pg">1 / ${cgv ? 2 : 1}</span></footer></div>
     ${cgv}
   </div>`;
-  return { it, d, c, project, title, html, typ, co, fname: docFileName(kind, it, variant) };
+  return { it, d, c, project, title, html, typ, co, rap, rest, fname: rap ? `${docFileName(kind, it, variant)}_${RAPPELS[rap].replace(/\s+/g, '-')}` : docFileName(kind, it, variant) };
 }
 // nom des fichiers PDF : « Facture_2026-122 », « Devis_2026-075 » (préfixe FAC- / DEV- retiré du numéro)
 function docFileName(kind, it, variant = '') {
@@ -370,8 +386,17 @@ function docFileName(kind, it, variant = '') {
   const no = String(it.number || '').replace(/^[A-Za-z]{1,6}[-_ ]?(?=\d)/, '').trim() || 'brouillon';
   return `${label}_${fileTitle(no)}${variant === 'simple' ? '_simplifiee' : ''}`;
 }
-function printDocPage(kind, id, it, d, c, project, title, html, typ, co, fname) {
+function printDocPage(kind, id, it, d, c, project, title, html, typ, co, fname, rap = 0, rest = 0) {
   const mailDoc = () => {
+    if (rap) { // rappel de paiement : texte du niveau, la facture en pièce jointe, rappel noté sur la facture une fois envoyé
+      return sendMailDialog({
+        subject: `${RAPPELS[rap]} – facture ${it.number || ''} – reste à payer ${money(rest)}`,
+        body: `Bonjour,\n\n${rappelText(rap, it, rest, co)}\n\nVous trouverez la facture en pièce jointe.\n\n${mailSign()}`,
+        recipients: [...(c ? [contactRcpt(c, 'Client', true)] : []), ...S.users.filter((u) => u.active && u.id !== S.me.id).map((u) => userRcpt(u, 'Notre équipe', false))],
+        ref: { type: typ, id: it.id }, projectId: it.project_id, pdfName: `${fname || fileTitle(title)}.pdf`,
+        onSent: (to) => { d.reminders = [...(d.reminders || []), { level: rap, date: today(), to, by: S.me.id, rest }]; persist(typ, it).catch(() => {}); toast(`${RAPPELS[rap]} envoyé et noté sur la facture`, 3000); },
+      });
+    }
     const tot = money(totals(d).total);
     const site = project ? ` – ${project.data.name}` : '';
     const ea = isEAdoc(kind, d);

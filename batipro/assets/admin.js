@@ -117,7 +117,7 @@ route('dashboard', async () => {
   // trop d'éléments du même genre : une seule ligne qui renvoie à la liste
   const many = (list, n, rank, one, group) => { if (list.length > n) add(rank, group(list)); else list.forEach((x) => add(rank, one(x))); };
   many(inv.filter((x) => x.s.s === 'retard').sort((a, b) => (a.i.data.due || '').localeCompare(b.i.data.due || '')), 5, 0,
-    (x) => ({ tone: 'late', icon: 'coins', title: `${cname(x.i.data.clientId) || 'Client'} ne vous a pas payé`, sub: `Facture ${x.i.number || ''} · en retard de ${days(x.i.data.due)} jour(s)`, amount: x.s.rest, href: `#/invoice/${x.i.id}`, act: ['Relancer', `#/print/invoice/${x.i.id}?mail=1`] }),
+    (x) => ({ tone: 'late', icon: 'coins', title: `${cname(x.i.data.clientId) || 'Client'} ne vous a pas payé`, sub: `Facture ${x.i.number || ''} · en retard de ${days(x.i.data.due)} jour(s)`, amount: x.s.rest, href: `#/invoice/${x.i.id}`, act: ['Relancer', `#/print/invoice/${x.i.id}?rappel=${Math.min(3, Math.max(0, ...(x.i.data.reminders || []).map((r) => r.level)) + 1)}&mail=1`] }),
     (l) => ({ tone: 'late', icon: 'coins', title: `${l.length} factures en retard de paiement`, sub: 'Vos clients vous doivent de l\'argent', amount: sum(l, (x) => x.s.rest), href: '#/invoices', act: ['Voir', '#/invoices'] }));
   const tasks = all.task.filter((t) => t.data.status !== 'done' && (team || (t.data.assignees || []).includes(S.me.id)) && t.data.due && t.data.due <= today());
   many(tasks, 6, 1, (t) => ({ tone: t.data.due < today() ? 'late' : 'todo', icon: 'tasks', title: t.data.title, sub: t.data.due < today() ? `Tâche en retard de ${days(t.data.due)} jour(s)` : 'Tâche à faire aujourd\'hui', done: t.id, href: '#/tasks' }),

@@ -2384,3 +2384,17 @@ details.card > summary { cursor: pointer; padding: 4px 0; }
 .unit-pop button.on { box-shadow: inset 3px 0 0 var(--ochre); }
 .unit-pop button small { color: var(--muted); font-size: 11.5px; }
 .unit-pop-h { grid-column: 1 / -1; color: var(--muted); font-size: 11.5px; padding: 4px 9px 2px; }
+
+/* rappels de paiement */
+.mb-rappel { margin: 14px 0 6px; border: 2px solid var(--acc, #d9a441); border-radius: 10px; padding: 10px 14px; background: #fffaf0; }
+.mb-rappel.lv3 { border-color: #c92a2a; background: #fff5f5; }
+.mb-rappel-h { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+.mb-rappel-h > b { font-size: 1.35em; letter-spacing: .04em; text-transform: uppercase; color: var(--ink, #1c2550); }
+.mb-rappel.lv3 .mb-rappel-h > b { color: #c92a2a; }
+.mb-rappel p { margin: 0; line-height: 1.45; }
+.rap-choice { display: grid; gap: 6px; margin: 12px 0; }
+.rap-opt { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: baseline; padding: 9px 12px; border: 1.5px solid var(--border); border-radius: 10px; cursor: pointer; }
+.rap-opt small { grid-column: 2; }
+.rap-opt.on { border-color: var(--ink); box-shadow: 3px 3px 0 var(--ochre); }
+.rap-tag { display: block; font-size: 11.5px; font-weight: 700; color: #b35c00; }
+.rap-tag.lv3 { color: #c92a2a; }
