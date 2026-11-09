@@ -313,7 +313,7 @@ function dock(cur) {
   const company = S.settings.company || {};
   return `<header class="dock">
     <a class="dock-brand" href="#/dashboard">${company.logoId ? `<img src="${fileUrl(company.logoId)}" alt="">` : '<span class="brand-mark"></span>'}<span>${esc(company.appName || company.name || 'BâtiPro')}</span></a>
-    <nav class="dock-tabs" aria-label="Espaces">${spaces().map((sp) => `<a class="dock-tab ${cur && cur.sp === sp ? 'on' : ''}" href="${sp.h}">${I[sp.i]}<span>${sp.l}</span></a>`).join('')}</nav>
+    <nav class="dock-tabs" aria-label="Espaces">${spaces().map((sp) => `<a class="dock-tab ${cur && cur.sp === sp ? 'on' : ''}" href="${sp.h}" title="${esc(sp.l)}">${I[sp.i]}<span>${sp.l}</span></a>`).join('')}</nav>
     <div class="dock-tools">
       ${isField() ? '' : `<button class="dock-cmd" data-act="search" title="Rechercher ou faire une action">${I.search}<span>Rechercher ou faire…</span><kbd>⌘K</kbd></button>`}
       ${S.ai ? `<button class="dock-ai" data-act="ai" title="Assistant IA">${I.spark}</button>` : ''}

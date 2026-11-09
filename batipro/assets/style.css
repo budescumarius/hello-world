@@ -2354,3 +2354,25 @@ details.card > summary { cursor: pointer; padding: 4px 0; }
 .pc-res { margin-top: 14px; border-top: 2px solid var(--border); padding-top: 8px; }
 .pc-res .tr { display: flex; justify-content: space-between; padding: 3px 0; }
 .pc-res .tr.big { font-size: 17px; font-weight: 800; }
+
+/* écrans moyens (portable, iPad paysage, fenêtre réduite) : la barre du haut ne déborde plus */
+@media (max-width: 1600px) and (min-width: 861px) {
+  .dock { gap: 12px; padding-left: 16px; padding-right: 16px; }
+  .dock-tab { padding: 9px 11px; gap: 6px; font-size: 14px; }
+}
+@media (max-width: 1380px) and (min-width: 861px) {
+  .dock-brand span { display: none; }
+  .dock-tab:not(.on) span { display: none; } /* icônes seules ; le nom au survol, et l'espace ouvert garde son nom */
+  .dock-tab:not(.on) { padding: 9px 10px; }
+  .dock-add span { display: none; }
+}
+/* sous-menu : on voit qu'il continue à droite (défilement) */
+@media (max-width: 1500px) and (min-width: 861px) {
+  .secbar { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); padding-right: 40px; }
+}
+/* tableaux : plus serrés sur écran moyen, le texte va à la ligne au lieu de pousser les colonnes hors de l'écran */
+@media (max-width: 1300px) and (min-width: 861px) {
+  .dt th, .dt td { padding-left: 8px; padding-right: 8px; }
+  .dt td { font-size: 14px; }
+  .dt th { font-size: 12px; }
+}
