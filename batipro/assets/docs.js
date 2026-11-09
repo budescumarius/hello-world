@@ -68,11 +68,13 @@ function longDate(d) {
 const ibanFmt = (s) => String(s || '').replace(/\s/g, '').replace(/(.{4})/g, '$1 ').trim();
 // une déduction ajoutée à la main sur un état (refund) reste une ligne visible de la facture
 const isDeduction = (l) => !l.refund && (!!l.deduction || /^(Déduction|Deduction|Déjà facturé)/i.test(String(l.desc || '')));
+// civilité : un code laissé par un autre logiciel (« CIVILITE_MONSIEUR ») ou vide = rien ; sinon telle quelle (M., Mme…)
+const civ = (v) => { const s = String(v || '').trim(); return !s || /^civilit/i.test(s) || /^[A-Z]+_[A-Z_]+$/.test(s) ? '' : s; };
 function clientLabel(c) {
   if (!c) return '—';
   const d = c.data;
   if (d.company) return d.company;
-  return [d.civility, d.name, d.firstname].filter(Boolean).join(' ') || '—';
+  return [civ(d.civility), d.name, d.firstname].filter(Boolean).join(' ') || '—';
 }
 // Intitulé du document (« Facture », « Facture d'acompte », « Note de crédit »…) sans le numéro
 const isEAdoc = (kind, d) => kind === 'invoice' && d.kind === 'situation' && d.status !== 'emise';
@@ -126,7 +128,7 @@ function docBlocks(kind, it, c, project, t) {
   const toLabel = kind === 'order' ? 'Fournisseur' : isInv ? (bill ? 'Facturé à' : 'Client') : 'Client';
   const to = bill ? `<div class="mb-party mb-to"><small>${toLabel}</small><b>${esc(d.billName || clientLabel(c))}</b>${esc(d.billAddress || '').replace(/\n/g, '<br>')}${d.billVat ? `<br>TVA ${esc(d.billVat)}` : ''}</div>`
     : `<div class="mb-party mb-to"><small>${toLabel}</small><b>${esc(kind === 'order' ? contactName(c) : clientLabel(c))}</b>
-      ${cd.company && (cd.name || cd.firstname) ? `<div>Att. ${esc([cd.civility, cd.name, cd.firstname].filter(Boolean).join(' '))}</div>` : ''}
+      ${cd.company && (cd.name || cd.firstname) ? `<div>Att. ${esc([civ(cd.civility), cd.name, cd.firstname].filter(Boolean).join(' '))}</div>` : ''}
       ${[cd.address, [cd.zip, cd.city].filter(Boolean).join(' '), cd.country && !/^(Belgique|BE)$/i.test(cd.country) ? cd.country : ''].filter(Boolean).map(esc).join('<br>')}
       ${cd.vat ? `<br>TVA ${esc(cd.vat)}` : ''}</div>`;
   const pa = project ? [project.data.address, [project.data.zip, project.data.city].filter(Boolean).join(' ')].filter(Boolean).join(', ') : (d.siteAddress || '');

@@ -154,7 +154,7 @@ async function importWizard({ title, fields, file, bytes }) {
     autoMap(); draw();
     $('[data-ok]', m.el).onclick = () => {
       const rows = sheets[st.sheet].slice(st.header + 1);
-      const objs = rows.map((r) => Object.fromEntries(fields.map((f) => [f.key, st.map[f.key] >= 0 ? r[st.map[f.key]] : ''])));
+      const objs = rows.map((r) => Object.fromEntries(fields.map((f) => [f.key, st.map[f.key] >= 0 ? (f.key === 'civility' ? civ(r[st.map[f.key]]) : r[st.map[f.key]]) : ''])));
       done = true; m.close(); resolve({ rows: objs, fileName: file.name });
     };
   });

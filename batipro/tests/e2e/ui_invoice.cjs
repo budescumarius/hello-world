@@ -54,6 +54,8 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   await p.goto(`${BASE}/#/invoice/${id2}/informations`); await p.waitForSelector('[name=project_id]');
   await p.selectOption('[name=project_id]', String(await p.evaluate(() => window.__pid))); await p.waitForTimeout(400);
   check('chantier choisi : champs manuels masqués', !(await p.isVisible('[name=siteAddress]')));
+  const cv = await p.evaluate(() => [clientLabel({ data: { civility: 'CIVILITE_MONSIEUR', name: 'Vandenbogaert', firstname: 'Jan' } }), clientLabel({ data: { civility: 'M.', name: 'Dupont' } }), clientLabel({ data: { name: 'Martin' } })]);
+  check('civilité non remplie (code d\'un autre logiciel) : seulement le nom ; remplie : affichée', JSON.stringify(cv) === JSON.stringify(['Vandenbogaert Jan', 'M. Dupont', 'Martin']), JSON.stringify(cv));
   // poste : calcul du prix (matériaux + temps + marge), option, remarque
   const id3 = await p.evaluate(async () => { const c = await persist('contact', { data: { kind: 'client', company: 'Client calcul SA' } });
     return (await persist('invoice', { data: { kind: 'facture', status: 'brouillon', clientId: c.id, title: 'Carrelage', date: today(), due: today(), defaultVat: 21,
