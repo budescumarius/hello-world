@@ -38,6 +38,22 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   check('suppression du chantier facturé refusée', del.status === 403, del.msg);
   await p.goto(`${BASE}/#/invoice/${id}`); await p.waitForTimeout(1500);
   if (process.argv[2]) await p.screenshot({ path: process.argv[2] });
+  // facture simple sans fiche chantier : nom + adresse du chantier et remarque générale, imprimés sur la facture
+  const id2 = await p.evaluate(async () => { const c = await persist('contact', { data: { kind: 'client', company: 'Client sans chantier SA' } });
+    return (await persist('invoice', { data: { kind: 'facture', status: 'brouillon', clientId: c.id, title: 'Isolation sol', date: today(), due: today(), defaultVat: 21, lines: [{ id: lid(), kind: 'item', desc: 'Isolation', unit: 'm²', qty: 5, price: 40, vat: 21 }] } })).id; });
+  await p.goto(`${BASE}/#/invoice/${id2}/informations`); await p.waitForSelector('[name=siteAddress]', { timeout: 15000 });
+  check('facture sans chantier : champs « Nom / adresse du chantier » et « Remarque générale » visibles', await p.isVisible('[name=siteName]') && await p.isVisible('[name=siteAddress]') && await p.isVisible('#page [name=notes]'));
+  await p.fill('[name=siteName]', 'Rénovation Vandenbogaert'); await p.fill('[name=siteAddress]', 'Rue de la Station 12\n3080 Tervuren');
+  await p.fill('#page [name=notes]', 'Travaux réalisés conformément au devis.'); await p.waitForTimeout(2500);
+  const saved = await p.evaluate(async (i) => (await db.get('invoice', i)).data, id2);
+  check('enregistré', saved.siteName === 'Rénovation Vandenbogaert' && /Tervuren/.test(saved.siteAddress) && /conformément/.test(saved.notes), JSON.stringify({ n: saved.siteName, a: saved.siteAddress, r: saved.notes }));
+  await p.goto(`${BASE}/#/invoice/${id2}/visualisation`); await p.waitForTimeout(2000);
+  const vis = (await p.textContent('#page')).replace(/\s+/g, ' ');
+  check('imprimé sur la facture : chantier (nom + adresse) et remarque', /Chantier ?Rénovation Vandenbogaert/.test(vis) && /Rue de la Station 12/.test(vis) && /Tervuren/.test(vis) && /Travaux réalisés conformément au devis/.test(vis), vis.slice(0, 300));
+  // chantier choisi : les champs manuels disparaissent (l'adresse vient de la fiche chantier)
+  await p.goto(`${BASE}/#/invoice/${id2}/informations`); await p.waitForSelector('[name=project_id]');
+  await p.selectOption('[name=project_id]', String(await p.evaluate(() => window.__pid))); await p.waitForTimeout(400);
+  check('chantier choisi : champs manuels masqués', !(await p.isVisible('[name=siteAddress]')));
   check('aucune erreur JavaScript dans la page', errs.length === 0, errs.join(' | '));
   await b.close();
   console.log(failed ? `\n${failed} échec(s)` : '\nnavigateur : tout est conforme');

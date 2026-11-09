@@ -131,7 +131,8 @@ function docBlocks(kind, it, c, project, t) {
       ${cd.vat ? `<br>TVA ${esc(cd.vat)}` : ''}</div>`;
   const pa = project ? [project.data.address, [project.data.zip, project.data.city].filter(Boolean).join(' ')].filter(Boolean).join(', ') : (d.siteAddress || '');
   const manager = isQ && t.showManager ? userName(+((project && project.data.managerId) || d.ownerId || it.created_by)) : '';
-  const site = project || pa ? `<div class="mb-party"><small>Chantier</small>${project ? `<b>${esc(project.data.name)}</b>` : ''}${pa ? esc(pa) : ''}
+  const sName = project ? project.data.name : (d.siteName || '');
+  const site = project || pa || sName ? `<div class="mb-party"><small>Chantier</small>${sName ? `<b>${esc(sName)}</b>` : ''}${pa ? esc(pa).replace(/\n/g, '<br>') : ''}
     ${manager ? `<br>Gestionnaire : ${esc(manager)}` : ''}</div>` : '';
   const cols = site ? 3 : 2;
   const info = `<section class="mb-parties" style="--cols:${cols}">${from}${to}${site}</section>

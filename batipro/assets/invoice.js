@@ -288,6 +288,10 @@ route('invoice', async (id, tab = 'informations') => {
         <div class="section-t">Lié à un chantier / installation</div>
         ${fieldsGrid([{ name: 'project_id', label: 'Chantier', type: 'select', options: [['', '—'], ...projects.map((p) => [p.id, `${p.number} · ${p.data.name}`])], cls: 'full' },
           { name: 'installId', label: 'Installation', type: 'select', options: [['', '—'], ...installs.map((x) => [x.id, x.data.name || x.data.title || `Installation ${x.id}`])], cls: 'full' }], { ...d, project_id: it.project_id || '' })}
+        <div data-site ${it.project_id ? 'hidden' : ''}><div class="section-t">Chantier (sans fiche chantier)</div>
+          ${fieldsGrid([{ name: 'siteName', label: 'Nom du chantier', cls: 'full', placeholder: 'ex. Rénovation Vandenbogaert' }, { name: 'siteAddress', label: 'Adresse du chantier (imprimée sur la facture)', type: 'textarea', rows: 2, cls: 'full', placeholder: 'ex. Rue de la Station 12, 3080 Tervuren' }], d)}</div>
+        <div class="section-t">Remarque</div>
+        ${fieldsGrid([{ name: 'notes', label: 'Remarque générale (imprimée sur la facture)', type: 'textarea', rows: 3, cls: 'full', placeholder: 'ex. Travaux réalisés conformément au devis DEV-2026-074.' }], d)}
       </div><div>
         <div class="section-t">Coordonnées du client</div>
         ${fieldsGrid([{ name: 'clientId', label: 'Client *', type: 'contact', contacts: clientOpts, cls: 'full' }], d)}
@@ -320,7 +324,7 @@ route('invoice', async (id, tab = 'informations') => {
         await resolveContact(v, 'clientId', 'client');
         if (v.clientId && val('clientId') === '__new') return render();
         d.clientId = v.clientId; $('[data-addr]', body).innerHTML = addr(byId(contacts, d.clientId));
-      } else if (n === 'project_id') { it.project_id = val('project_id') ? +val('project_id') : null; }
+      } else if (n === 'project_id') { it.project_id = val('project_id') ? +val('project_id') : null; $('[data-site]', body).hidden = !!it.project_id; }
       else if (n === 'installId') { d.installId = val('installId') ? +val('installId') : null; }
       else if (n === 'ownerId') { d.ownerId = val('ownerId') ? +val('ownerId') : null; }
       else if (n === 'payDays' || n === 'date') { d[n] = n === 'payDays' ? num(val(n)) : val(n); if (d.date) { d.due = addDays(d.date, num(d.payDays ?? val('payDays'))); body.querySelector('[name=due]').value = d.due; } }
@@ -332,7 +336,7 @@ route('invoice', async (id, tab = 'informations') => {
       else d[n] = val(n);
       changed();
     });
-    body.addEventListener('input', (ev) => { const n = ev.target.name; if (!locked && ['title', 'billName', 'billAddress', 'billVat', 'orderRef', 'contractRef', 'buyerRef'].includes(n)) { d[n] = ev.target.value; changed(); } });
+    body.addEventListener('input', (ev) => { const n = ev.target.name; if (!locked && ['title', 'billName', 'billAddress', 'billVat', 'orderRef', 'contractRef', 'buyerRef', 'siteName', 'siteAddress', 'notes'].includes(n)) { d[n] = ev.target.value; changed(); } });
     if (!locked) vatAutofill($('[data-bill]', body), { name: 'billName' }, { field: 'billVat', address: 'billAddress' });
     const num0 = body.querySelector('[name=number]'); if (num0) num0.readOnly = true;
     const av = $('[data-applyvat]', body);
