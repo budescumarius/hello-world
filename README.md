@@ -23,6 +23,7 @@ Aplicație web instalabilă (PWA) pentru urmărirea șantierelor: planuri, punct
 
 ### Model 3D (vizualizator BIM) – `app/bim/`
 Vizualizator de modele BIM pe telefon, tabletă și calculator, accesibil din fila **Model 3D**. Funcționează offline după prima deschidere.
+- **Fișiere BIMx** (`.bimx` publicate din ARCHICAD): se citesc planșele 2D (planuri, secțiuni, fațade), afișate cu zoom până la detaliu, plus proprietățile elementelor și datele proiectului. Modelul 3D din BIMx are un format binar închis și nu se afișează; pentru 3D se folosește exportul IFC.
 - **Import IFC** (2x3 / 4) din ARCHICAD, Revit, Allplan, Tekla, Vectorworks etc. Fișierul se procesează local (WebAssembly) și rămâne salvat pe dispozitiv. Se poate deschide și prin link: `bim/?ifc=<adresă fișier .ifc>`. Include un model demonstrativ (casă P+1).
 - **3D**: rotire, zoom și deplasare cu degetele sau cu mouse-ul. Dublu-tap pe un element centrează vederea pe el.
 - **Mers prin clădire** la persoana întâi: joystick pe ecran sau tastele W A S D. Urci scările, ai coliziuni cu pereții, iar ușile se pot traversa. O minihartă arată nivelul curent și poziția ta.

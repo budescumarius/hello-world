@@ -253,3 +253,26 @@ dialog .colors input { position: absolute; opacity: 0; }
 dialog .colors span { display: block; width: 30px; height: 30px; border-radius: 50%; background: var(--c); border: 3px solid transparent; cursor: pointer; }
 dialog .colors input:checked + span { border-color: var(--text); }
 dialog .btns { justify-content: flex-end; margin-bottom: 0; }
+
+/* ---------------------------------------------------------------- Fișiere .bimx: planșe și elemente */
+#bx { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; background: var(--bg); -webkit-user-select: text; user-select: text; }
+.bx-top, .sv-top { display: flex; align-items: center; gap: 8px; padding: calc(var(--safe-top) + 8px) 10px 8px; }
+.bx-top .title, .sv-top .title { flex: 1; min-width: 0; }
+#bx-title, #sv-title { font-weight: 700; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#bx-sub, #sv-sub { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bx-tabs { display: flex; gap: 4px; padding: 0 10px 8px; border-bottom: 1px solid var(--border); }
+.bx-tabs button { flex: 1; max-width: 160px; height: 36px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); font-weight: 600; }
+.bx-tabs button.on { background: var(--primary); border-color: var(--primary); color: var(--primary-ink); }
+#bx-body { flex: 1; overflow: auto; padding: 8px 12px calc(var(--safe-bottom) + 20px); }
+.bx-note { margin: 6px 0 4px; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--primary) 10%, var(--surface)); border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border)); font-size: 14px; }
+.bx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.bx-card { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); text-align: left; color: var(--text); }
+.bx-card img { width: 100%; aspect-ratio: 1.414; object-fit: contain; background: #fff; border-radius: 8px; border: 1px solid var(--border); }
+.bx-card b { display: block; font-size: 14px; }
+.bx-card small { color: var(--muted); font-size: 12px; }
+@media (max-width: 640px) { .bx-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; } }
+#sv { position: absolute; inset: 0; background: #c9ced8; }
+#sv-canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+#sv .sv-top { position: absolute; left: 0; right: 0; top: 0; background: linear-gradient(to bottom, var(--glass), transparent); pointer-events: none; }
+#sv .sv-top > * { pointer-events: auto; }
+#sv .sv-top .title { pointer-events: none; }

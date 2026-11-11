@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildDemo } from './demo.js';
+import { showBimx, currentBimx } from './sheets.js';
 
 // ================================================================ Utilitare
 const $ = (s, el = document) => el.querySelector(s);
@@ -1025,6 +1026,7 @@ function renderToolbar() {
   const t = (k, icon, label, on) => `<button data-t="${k}" class="${on ? 'on' : ''}" title="${label}">${ico(icon)}<span>${label}</span></button>`;
   $('#toolbar').innerHTML = [
     t('models', 'models', 'Modele', S.panel === 'models'),
+    currentBimx() ? t('sheets', 'plan', 'Planșe BIMx', false) : '',
     t('storeys', 'storeys', 'Niveluri', S.panel === 'storeys' || !!S.storey),
     '<span class="sep"></span>',
     t('orbit', 'orbit', '3D', S.mode === 'orbit'),
@@ -1042,7 +1044,7 @@ function renderToolbar() {
 }
 $('#toolbar').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-t]');
-  if (!b || !S.model && b.dataset.t !== 'models') return;
+  if (!b || !S.model && b.dataset.t !== 'models' && b.dataset.t !== 'sheets') return;
   const k = b.dataset.t;
   if (k === 'orbit' || k === 'walk' || k === 'plan') {
     if (k === 'plan' && S.mode !== 'plan') {
@@ -1057,6 +1059,7 @@ $('#toolbar').addEventListener('click', (e) => {
   if (k === 'notes') { if (S.panel === 'notes') { closePanel(); setTool(null); } else openPanel('notes'); return; }
   if (k === 'xray') { S.xray = !S.xray; updateVisibility(); return; }
   if (k === 'home') { home(); return; }
+  if (k === 'sheets') { showBimx(); return; }
   if (S.panel === k) closePanel(); else openPanel(k);
 });
 
@@ -1159,12 +1162,12 @@ async function pModels(body) {
   const saved = await idb.list().catch(() => []);
   const cur = S.model?.key;
   body.innerHTML = `
-    <div class="btns"><button class="btn primary block" data-a="open">${ico('upload')}Deschide fișier IFC</button></div>
-    <div class="muted" style="font-size:13px;margin:0 2px 8px">Exportă modelul din ARCHICAD, Revit, Allplan, Tekla, Vectorworks etc. ca <b>IFC</b> (2x3 sau 4). Fișierul se procesează local, pe dispozitiv, și rămâne disponibil offline.</div>
+    <div class="btns"><button class="btn primary block" data-a="open">${ico('upload')}Deschide fișier IFC sau BIMx</button></div>
+    <div class="muted" style="font-size:13px;margin:0 2px 8px">Exportă modelul din ARCHICAD, Revit, Allplan, Tekla, Vectorworks etc. ca <b>IFC</b> (2x3 sau 4) pentru model 3D. Din fișierele <b>.bimx</b> se pot vedea planșele 2D și proprietățile elementelor. Fișierele se procesează local, pe dispozitiv, și rămân disponibile offline.</div>
     <h3>Modele pe acest dispozitiv</h3>
     <div class="list">
       <div class="row ${cur === 'demo' ? 'on' : ''}"><div class="grow"><div>Casă P+1 (demo)</div><small>Model demonstrativ</small></div><div class="acts"><button class="mini" data-a="demo">Deschide</button></div></div>
-      ${saved.map((m) => `<div class="row ${cur === m.id ? 'on' : ''}"><div class="grow"><div>${esc(m.name)}</div><small>${fmt(m.size / 1048576, 1)} MB · ${new Date(m.date).toLocaleDateString('ro-RO')}</small></div>
+      ${saved.map((m) => `<div class="row ${cur === m.id ? 'on' : ''}"><div class="grow"><div>${esc(m.name)}</div><small>${m.kind === 'bimx' ? 'BIMx · ' : 'IFC · '}${fmt(m.size / 1048576, 1)} MB · ${new Date(m.date).toLocaleDateString('ro-RO')}</small></div>
         <div class="acts"><button class="mini" data-a="load" data-id="${esc(m.id)}">Deschide</button><button class="mini danger" data-a="del" data-id="${esc(m.id)}" aria-label="Șterge">${ico('trash')}</button></div></div>`).join('')}
     </div>
     ${S.model ? `<h3>Despre modelul deschis</h3><table class="kv"><tbody>
@@ -1401,29 +1404,36 @@ async function loadIfcBuffer(buf, name, key) {
 async function openFile(file) {
   if (!file) return;
   if (/\.bimx$/i.test(file.name)) {
-    // formatul BIMx este închis (Graphisoft) – explicăm cum se obține un IFC echivalent
-    await dialog({
-      title: 'Fișierele .bimx nu pot fi deschise',
-      ok: 'Am înțeles',
-      body: `<div>BIMx este un format închis al Graphisoft, fără specificație publică. Modelul se poate deschide aici dacă e exportat ca <b>IFC</b> din același proiect:</div>
-        <ol style="margin:4px 0 0 18px;padding:0;line-height:1.5">
-          <li>În ARCHICAD: <b>Fișier → Salvare ca…</b> și alege tipul <b>IFC</b> (sau <b>Fișier → Interoperabilitate → IFC</b>).</li>
-          <li>Alege o traducere de export (ex. „General Translator” sau „Coordination View”).</li>
-          <li>Deschide fișierul .ifc rezultat cu butonul de import din această aplicație.</li>
-        </ol>
-        <div class="muted" style="font-size:13px">Dacă ai primit doar fișierul .bimx, cere-i autorului și exportul IFC al proiectului.</div>`,
-    });
-    return;
+    const id = file.name + ':' + file.size;
+    try { await idb.put({ id, name: file.name.replace(/\.bimx$/i, ''), size: file.size, date: Date.now(), kind: 'bimx' }, file); } catch (e) { console.warn('Nu s-a putut salva fișierul local', e); }
+    return loadBimx(file, file.name, id);
   }
-  if (!/\.ifc$/i.test(file.name)) { toast('Alege un fișier .ifc'); return; }
+  if (!/\.ifc$/i.test(file.name)) { toast('Alege un fișier .ifc sau .bimx'); return; }
   const id = file.name + ':' + file.size;
   const buf = await file.arrayBuffer();
   try { await idb.put({ id, name: file.name.replace(/\.ifc$/i, ''), size: file.size, date: Date.now() }, new Blob([buf])); } catch (e) { console.warn('Nu s-a putut salva modelul local', e); }
   await loadIfcBuffer(buf, file.name, id);
 }
-async function loadSaved(id) {
+async function loadBimx(blob, name, id, show = true) {
+  progress(0.01, 'Se deschide fișierul BIMx…');
+  try {
+    const { openBimx } = await import('./bimx.js');
+    const data = await openBimx(blob, name, (p, m) => progress(p, m));
+    store.set('bim:lastBimx', id);
+    showBimx(data, show);
+    renderToolbar();
+    toast(`${data.sheets.length} planșe și ${data.elements.length} elemente citite`);
+  } catch (e) {
+    console.error(e);
+    toast('Eroare la deschiderea BIMx: ' + e.message, 6000);
+  } finally {
+    progress(null);
+  }
+}
+async function loadSaved(id, show = true) {
   const blob = await idb.get(id);
   const meta = await idb.meta(id);
+  if (blob && meta?.kind === 'bimx') return loadBimx(blob, meta.name + '.bimx', id, show);
   if (!blob) { toast('Modelul nu mai există pe dispozitiv'); return loadDemo(); }
   await loadIfcBuffer(await blob.arrayBuffer(), (meta?.name || 'Model') + '.ifc', id);
 }
@@ -1452,6 +1462,8 @@ resize();
       return await loadIfcBuffer(await res.arrayBuffer(), name, 'url:' + url);
     } catch (e) { progress(null); toast('Modelul nu s-a putut descărca: ' + e.message, 5000); }
   }
+  const lastBimx = store.get('bim:lastBimx');
+  if (lastBimx && await idb.meta(lastBimx).catch(() => null)) loadSaved(lastBimx, false);
   const lastKey = store.get('bim:last', 'demo');
   if (lastKey && lastKey !== 'demo' && !lastKey.startsWith('url:')) {
     const meta = await idb.meta(lastKey).catch(() => null);
