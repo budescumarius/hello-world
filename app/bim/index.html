@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#1f4fd8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Model 3D">
+  <title>Model 3D</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="bim.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="view">
+    <canvas id="canvas"></canvas>
+    <div id="overlay"></div>
+    <div id="minimap" hidden><div class="mm-title"></div><div id="me" class="here me"></div></div>
+    <div id="joystick" hidden><div class="knob"></div></div>
+    <div id="hud"></div>
+  </div>
+
+  <header class="top">
+    <a class="icon-btn" href="../" aria-label="Înapoi la Șantier" title="Înapoi la Șantier">
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+    </a>
+    <div class="title"><div id="model-name">Model 3D</div><div id="model-sub" class="muted"></div></div>
+    <button class="icon-btn" id="btn-open" aria-label="Deschide fișier IFC" title="Deschide fișier IFC">
+      <svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg>
+    </button>
+    <input type="file" id="file" accept=".ifc,.IFC" hidden>
+  </header>
+
+  <nav id="toolbar" class="toolbar"></nav>
+
+  <aside id="panel" class="panel" hidden>
+    <div class="panel-head"><h2 id="panel-title"></h2><button class="icon-btn" id="panel-close" aria-label="Închide"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div id="panel-body" class="panel-body"></div>
+  </aside>
+
+  <section id="card" class="card" hidden></section>
+
+  <div id="loading" hidden><div class="box"><div id="load-msg">Se încarcă…</div><div class="bar"><i id="load-bar"></i></div></div></div>
+  <div id="drop" hidden><div>Eliberează fișierul IFC aici</div></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <dialog id="dlg"></dialog>
+
+  <noscript>Aplicația are nevoie de JavaScript.</noscript>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

@@ -21,6 +21,19 @@ Aplicație web instalabilă (PWA) pentru urmărirea șantierelor: planuri, punct
 - **Setări**: datele firmei, logo, monedă, cote TVA, prefixe și numerotare pentru devize și facturi.
 - **Backup / restaurare** a tuturor datelor într-un fișier JSON (îl poți salva în iCloud Drive / Fișiere).
 
+### Model 3D (vizualizator BIM) – `app/bim/`
+Vizualizator de modele BIM pe telefon, tabletă și calculator, accesibil din fila **Model 3D**. Funcționează offline după prima deschidere.
+- **Import IFC** (2x3 / 4) din ARCHICAD, Revit, Allplan, Tekla, Vectorworks etc. Fișierul se procesează local (WebAssembly) și rămâne salvat pe dispozitiv. Se poate deschide și prin link: `bim/?ifc=<adresă fișier .ifc>`. Include un model demonstrativ (casă P+1).
+- **3D**: rotire, zoom și deplasare cu degetele sau cu mouse-ul. Dublu-tap pe un element centrează vederea pe el.
+- **Mers prin clădire** la persoana întâi: joystick pe ecran sau tastele W A S D. Urci scările, ai coliziuni cu pereții, iar ușile se pot traversa. O minihartă arată nivelul curent și poziția ta.
+- **Planuri 2D** pe fiecare nivel, generate din model (secțiune la 1,2 m, pereți tăiați hașurați), cu numele și suprafețele camerelor. Dublu-tap pe plan te duce în 3D exact în acel loc.
+- **Proprietăți**: clasă IFC, nivel, gabarit, seturi de proprietăți (Pset), cantități și materiale.
+- **Niveluri**: afișare pe nivel, plan, mers sau tăietură axonometrică a etajului.
+- **Secțiuni** orizontale și verticale, cu hașura elementelor tăiate.
+- **Măsurători** cu prindere de colțuri (Δx / Δy / Δh).
+- **Notițe** (pini) pe model, cu unghiul de vedere salvat și export CSV.
+- **Vederi salvate**, **rază X**, izolare și ascundere de elemente, straturi pe categorii și căutare.
+
 ## Publicare
 1. Pe GitHub: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 2. La fiecare push pe `master`, workflow-ul `.github/workflows/pages.yml` publică folderul `app/`.

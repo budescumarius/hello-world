@@ -148,7 +148,7 @@ const fromCatalog = (c) => ({ id: uid(), kind: 'item', catalogId: c.id, desc: c.
 // ---------------------------------------------------------------- Pagina principală (tab-uri globale)
 const HOME_TABS = [['', 'Proiecte'], ['quotes', 'Devize'], ['invoices', 'Facturi'], ['planning', 'Planning'], ['clients', 'Clienți'], ['catalog', 'Catalog']];
 function homeNav(on) {
-  return `<nav class="tabs">${HOME_TABS.map(([k, l]) => `<a href="#/${k ? 'g/' + k : ''}" class="${k === on ? 'on' : ''}">${l}</a>`).join('')}</nav>`;
+  return `<nav class="tabs">${HOME_TABS.map(([k, l]) => `<a href="#/${k ? 'g/' + k : ''}" class="${k === on ? 'on' : ''}">${l}</a>`).join('')}<a href="bim/">Model 3D</a></nav>`;
 }
 
 async function viewGlobal(tab) {
