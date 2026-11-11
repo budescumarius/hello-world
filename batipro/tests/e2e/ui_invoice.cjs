@@ -43,7 +43,7 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   const pr0 = (await p.textContent('.modal .pay-rest')).replace(/\s+/g, ' ');
   await p.fill('.modal [name=amount]', '300'); await p.waitForTimeout(200);
   const pr1 = (await p.textContent('.modal .pay-rest')).replace(/\s+/g, ' ');
-  check('paiement : reste avant (810) et après la saisie (300 → 510) affichés', /Reste avant ce paiement 810,00/.test(pr0) && /Reste à encaisser après 510,00/.test(pr1), pr1);
+  check('paiement : reste avant (810) et après la saisie (300 → 510) affichés', /Reste avant ce paiement ?810,00/.test(pr0) && /Reste à encaisser après ?510,00/.test(pr1), pr1);
   await p.click('.modal [data-save], .modal .btn.primary'); await p.waitForTimeout(1500);
   check('après l\'enregistrement : « reste à encaisser : 510 » annoncé', /reste à encaisser : 510,00/.test(await p.textContent('body')));
   await p.goto(`${BASE}/#/invoices`); await p.waitForTimeout(1500);
