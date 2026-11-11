@@ -35,6 +35,26 @@ Vizualizator de modele BIM pe telefon, tabletă și calculator, accesibil din fi
 - **Notițe** (pini) pe model, cu unghiul de vedere salvat și export CSV.
 - **Vederi salvate**, **rază X**, izolare și ascundere de elemente, straturi pe categorii și căutare.
 
+### Proiectare (desen și calcul) – `app/cad/`
+Program de desen pe calculator (cu mouse), în stilul programelor BIM, accesibil din fila **Proiectare**.
+- **Desen în plan pe niveluri**: pereți, uși, ferestre, stâlpi, grinzi, plăci, acoperișuri (terasă, o apă, două ape), zone (camere) și cote.
+  - Punctele se prind automat de capete, colțuri, mijloace și fețe de pereți.
+  - Lungimile și unghiurile exacte se tastează: `4.5` + Enter sau `4.5<90`.
+  - Shift desenează doar orizontal sau vertical.
+  - Camerele și plăcile se pot detecta automat, cu un clic în interiorul pereților.
+- **Editare**: selecție (și cu dreptunghi), mutare, editarea capetelor (pereții legați se întind împreună), copiere, ștergere, anulare/refacere, niveluri cu cote și înălțimi.
+- **3D generat automat**, alături de plan sau pe tot ecranul.
+- **Proprietăți**: grosimi, înălțimi, materiale, portant/neportant, folosința planșeelor, straturi permanente.
+- **Cantități**: beton, zidării, tencuieli, pardoseli, tâmplărie, suprafețe utile, cu export CSV pentru Excel.
+- **Calcul sarcini (orientativ, predimensionare)** după SR EN 1990 / 1991-1-1 / 1991-1-3:
+  - greutate proprie, încărcări utile pe categorii, pereți despărțitori și zăpadă;
+  - arii aferente și coborârea încărcărilor nivel cu nivel până la fundații, cu combinațiile SLU și SLS;
+  - verificări orientative pentru zidărie, stâlpi, grinzi și plăci, plus lățimea fundațiilor;
+  - afișare colorată pe plan și export CSV.
+  - Nu include seismul și vântul și nu înlocuiește proiectul de rezistență semnat de un inginer atestat.
+- **Export IFC4**: pereți cu goluri, uși, ferestre, plăci, stâlpi, grinzi, acoperișuri, spații, materiale, Pset-uri și cantități. Se deschide în ARCHICAD, Revit, Allplan etc. Butonul **Model 3D** deschide direct modelul în vizualizator.
+- Proiectul se salvează automat în browser. Se poate salva sau deschide ca fișier `.json`.
+
 ## Publicare
 1. Pe GitHub: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 2. La fiecare push pe `master`, workflow-ul `.github/workflows/pages.yml` publică folderul `app/`.

@@ -1,10 +1,12 @@
 // Service worker: aplicația funcționează complet offline după prima încărcare.
-const VERSION = 'santier-v4';
+const VERSION = 'santier-v5';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './gestiune.js', './manifest.webmanifest',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png',
   './bim/', './bim/index.html', './bim/bim.css', './bim/main.js', './bim/demo.js', './bim/ifc.js',
-  './bim/bimx.js', './bim/sheets.js', './bim/manifest.webmanifest', './bim/icon.svg', './bim/icon-192.png', './bim/icon-512.png'
+  './bim/bimx.js', './bim/sheets.js',
+  './cad/', './cad/index.html', './cad/cad.css', './cad/main.js', './cad/model.js', './cad/state.js', './cad/editor2d.js',
+  './cad/geometry3d.js', './cad/view3d.js', './cad/loads.js', './cad/ifc-export.js', './cad/icon.svg', './bim/manifest.webmanifest', './bim/icon.svg', './bim/icon-192.png', './bim/icon-512.png'
 ];
 // Biblioteci externe păstrate în cache după prima folosire (PDF, 3D, IFC)
 const CDN_HOSTS = ['cdnjs.cloudflare.com', 'cdn.jsdelivr.net'];
