@@ -852,7 +852,8 @@ route('payments', async () => {
   dataTable($('#tbl'), {
     rows, state: { sort: -1 }, search: (r) => [r.i.number, contactName(byId(contacts, r.i.data.clientId)), r.p.method].join(' '),
     columns: [{ l: 'Date', v: (r) => fmtDate(r.p.date), sort: (r) => r.p.date }, { l: 'Facture', v: (r) => `<a href="#/invoice/${r.i.id}">${esc(r.i.number || '')}</a>` },
-      { l: 'Client', v: (r) => esc(contactName(byId(contacts, r.i.data.clientId))) }, { l: 'Mode', v: (r) => esc(r.p.method || '') }, { l: 'Montant', cls: 'r', v: (r) => `<b>${money(r.p.amount)}</b>`, sort: (r) => num(r.p.amount) }],
+      { l: 'Client', v: (r) => esc(contactName(byId(contacts, r.i.data.clientId))) }, { l: 'Mode', v: (r) => esc(r.p.method || '') }, { l: 'Montant', cls: 'r', v: (r) => `<b>${money(r.p.amount)}</b>`, sort: (r) => num(r.p.amount) },
+      { l: 'Reste à encaisser (facture)', cls: 'r', v: (r) => invRestHtml(r.i), sort: (r) => (invHasRest(r.i) ? invState(r.i).rest : -1) }],
     empty: 'Aucun paiement enregistré',
   });
 });

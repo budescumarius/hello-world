@@ -80,6 +80,7 @@ route('invoices', async () => {
       { l: 'Client', v: (i) => esc(contactName(byId(contacts, i.data.clientId))), sort: (i) => contactName(byId(contacts, i.data.clientId)) },
       { l: 'Référence', v: (i) => `${esc(i.data.title || i.data.ref || '—')}${i.project_id ? `<br><small class="muted">${esc((byId(projects, i.project_id) || { data: {} }).data.name || '')}</small>` : ''}` },
       { l: 'Total TTC', cls: 'r', v: (i) => `<b>${money(i.st.t.total)}</b>`, sort: (i) => i.st.t.total },
+      { l: 'Reste à encaisser', cls: 'r', v: invRestHtml, sort: (i) => (invHasRest(i) ? i.st.rest : -1) },
       { l: 'Fact. électronique', v: (i) => invEInv(i, contacts) },
       { l: 'Statut', v: invDispHtml, sort: (i) => invDisp(i).k },
       { l: '', v: (i) => `<span class="row-acts"><button class="icon-btn sm" data-cm="${i.id}" title="Commentaires">${I.chat}${(i.data.comments || []).length ? `<i class="cnt">${i.data.comments.length}</i>` : ''}</button><button class="icon-btn sm" data-ed="${i.id}" title="Modifier">${I.edit}</button><button class="icon-btn sm" data-mo="${i.id}" title="Plus">${I.more}</button></span>` },
@@ -88,7 +89,7 @@ route('invoices', async () => {
     footer: (l) => {
       const f = l.filter((r) => r.st.s !== 'brouillon' && r.data.kind !== 'proforma');
       const sum = (fn) => f.reduce((a, r) => a + fn(r), 0);
-      return `<tr><td colspan="9"><div class="inv-tot"><div><small>Total HT</small><b>${money(sum((r) => r.st.t.base))}</b></div><div><small>Total TVA</small><b>${money(sum((r) => r.st.t.vat))}</b></div><div><small>Total TTC</small><b>${money(sum((r) => r.st.t.total))}</b></div><div><small>Montant à recevoir TTC</small><b>${money(sum((r) => (['impayee', 'partielle', 'retard'].includes(r.st.s) ? r.st.rest : 0)))}</b></div></div></td></tr>`;
+      return `<tr><td colspan="10"><div class="inv-tot"><div><small>Total HT</small><b>${money(sum((r) => r.st.t.base))}</b></div><div><small>Total TVA</small><b>${money(sum((r) => r.st.t.vat))}</b></div><div><small>Total TTC</small><b>${money(sum((r) => r.st.t.total))}</b></div><div><small>Montant à recevoir TTC</small><b>${money(sum((r) => (['impayee', 'partielle', 'retard'].includes(r.st.s) ? r.st.rest : 0)))}</b></div></div></td></tr>`;
     },
   });
   tbl.addEventListener('click', (ev) => {
@@ -256,15 +257,29 @@ function invComments(it) {
   };
 }
 
+// reste à encaisser d'une facture (validée, ni brouillon, ni pro forma, ni note de crédit)
+const invHasRest = (i) => i.data.status === 'emise' && !['proforma', 'avoir'].includes(i.data.kind);
+function invRestHtml(i) {
+  const st = i.st || invState(i);
+  if (!invHasRest(i)) return '<span class="muted">—</span>';
+  if (st.rest <= 0.005) return '<span class="good nowrap">✓ soldée</span>';
+  return `<b class="nowrap ${st.s === 'retard' ? 'late' : 'rest-due'}">${money(st.rest)}</b>${st.paid > 0.005 ? `<br><small class="muted nowrap">payé ${money(st.paid)}</small>` : ''}`;
+}
 function invPayment(it, i) {
   const d = it.data; d.payments = d.payments || [];
   const s = invState(it);
   const p = i == null ? { date: today(), amount: Math.max(0, s.rest), method: 'Virement' } : d.payments[i];
+  // reste avant ce paiement (sans lui s'il est modifié) ; « après » se met à jour pendant la saisie
+  const before = r2(s.rest + (i == null ? 0 : num(p.amount)));
+  const restBox = (amt) => { const after = r2(before - num(amt)); return `<div class="pay-rest"><div><span>Total TTC</span><b>${money(s.t.total)}</b></div><div><span>Déjà encaissé${i == null ? '' : ' (sans ce paiement)'}</span><b>${money(r2(s.t.total - before))}</b></div><div><span>Reste avant ce paiement</span><b>${money(before)}</b></div><div class="big ${after > 0.005 ? 'due' : 'ok'}"><span>Reste à encaisser après</span><b>${after > 0.005 ? money(after) : after < -0.005 ? `trop payé ${money(-after)}` : '✓ facture soldée'}</b></div></div>`; };
   formModal({
     title: i == null ? 'Nouveau paiement' : 'Paiement', values: p,
+    extra: `<div data-prest>${restBox(p.amount)}</div>`,
+    after: (form) => { const a = form.elements.amount; if (a) a.addEventListener('input', () => { $('[data-prest]', form).innerHTML = restBox(a.value); }); },
     fields: [{ name: 'amount', label: 'Montant', type: 'money', required: true }, { name: 'date', label: 'Date', type: 'date' }, { name: 'method', label: 'Mode', type: 'select', options: PAY_METHODS.map((x) => [x, x]) }, { name: 'note', label: 'Remarque', cls: 'full' }],
-    async onSave(v) { Object.assign(p, v, { amount: num(v.amount) }); if (i == null) d.payments.push(p); await persist('invoice', it); render(); },
-    onDelete: i == null ? null : async () => { d.payments.splice(i, 1); await persist('invoice', it); render(); },
+    async onSave(v) { Object.assign(p, v, { amount: num(v.amount) }); if (i == null) d.payments.push(p); await persist('invoice', it);
+      const r = invState(it).rest; toast(r > 0.005 ? `Paiement enregistré · reste à encaisser : ${money(r)}` : 'Paiement enregistré · facture soldée ✓', 4000); render(); },
+    onDelete: i == null ? null : async () => { d.payments.splice(i, 1); await persist('invoice', it); toast(`Paiement supprimé · reste à encaisser : ${money(invState(it).rest)}`, 4000); render(); },
   });
 }
 

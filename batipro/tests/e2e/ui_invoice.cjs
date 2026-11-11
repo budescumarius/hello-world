@@ -38,6 +38,20 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   check('suppression du chantier facturé refusée', del.status === 403, del.msg);
   await p.goto(`${BASE}/#/invoice/${id}`); await p.waitForTimeout(1500);
   if (process.argv[2]) await p.screenshot({ path: process.argv[2] });
+  // reste à encaisser : dans la fenêtre de paiement (en direct), après l'enregistrement, dans la liste et dans « Paiements »
+  await p.evaluate(async (i) => invPayment(await db.get('invoice', i), null), id); await p.waitForSelector('.modal .pay-rest');
+  const pr0 = (await p.textContent('.modal .pay-rest')).replace(/\s+/g, ' ');
+  await p.fill('.modal [name=amount]', '300'); await p.waitForTimeout(200);
+  const pr1 = (await p.textContent('.modal .pay-rest')).replace(/\s+/g, ' ');
+  check('paiement : reste avant (810) et après la saisie (300 → 510) affichés', /Reste avant ce paiement 810,00/.test(pr0) && /Reste à encaisser après 510,00/.test(pr1), pr1);
+  await p.click('.modal [data-save], .modal .btn.primary'); await p.waitForTimeout(1500);
+  check('après l\'enregistrement : « reste à encaisser : 510 » annoncé', /reste à encaisser : 510,00/.test(await p.textContent('body')));
+  await p.goto(`${BASE}/#/invoices`); await p.waitForTimeout(1500);
+  const rowTxt = (await p.textContent('#page')).replace(/\s+/g, ' ');
+  check('liste des factures : colonne « Reste à encaisser » (510 restants, payé 700)', /Reste à encaisser/.test(rowTxt) && /510,00 € ?payé 700,00/.test(rowTxt), rowTxt.slice(0, 200));
+  await p.goto(`${BASE}/#/payments`); await p.waitForTimeout(1500);
+  check('« Paiements » : reste à encaisser de la facture à côté de chaque paiement', /Reste à encaisser \(facture\)/.test(await p.textContent('#page')) && /510,00/.test(await p.textContent('#page')));
+  await p.evaluate(async (i) => { const it = await db.get('invoice', i); it.data.payments.pop(); await persist('invoice', it); }, id); // retour à 810 pour la suite
   // rappels de paiement : niveau suivant proposé ; document « 2e rappel » avec reste à payer ; rappel noté sur la facture validée
   await p.evaluate(async (i) => invRappel(await db.get('invoice', i)), id); await p.waitForSelector('.modal .rap-opt');
   check('rappel : 1er rappel proposé, 3 niveaux (mise en demeure)', (await p.$eval('.modal [name=rap]:checked', (x) => x.value)) === '1' && (await p.$$('.modal .rap-opt')).length === 3 && /Mise en demeure/.test(await p.textContent('.modal')));
