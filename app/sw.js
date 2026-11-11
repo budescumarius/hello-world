@@ -1,15 +1,11 @@
 // Service worker: aplicația funcționează complet offline după prima încărcare.
-const VERSION = 'santier-v5';
+const VERSION = 'santier-v6';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './gestiune.js', './manifest.webmanifest',
-  './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png',
-  './bim/', './bim/index.html', './bim/bim.css', './bim/main.js', './bim/demo.js', './bim/ifc.js',
-  './bim/bimx.js', './bim/sheets.js',
-  './cad/', './cad/index.html', './cad/cad.css', './cad/main.js', './cad/model.js', './cad/state.js', './cad/editor2d.js',
-  './cad/geometry3d.js', './cad/view3d.js', './cad/loads.js', './cad/ifc-export.js', './cad/icon.svg', './bim/manifest.webmanifest', './bim/icon.svg', './bim/icon-192.png', './bim/icon-512.png'
+  './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'
 ];
-// Biblioteci externe păstrate în cache după prima folosire (PDF, 3D, IFC)
-const CDN_HOSTS = ['cdnjs.cloudflare.com', 'cdn.jsdelivr.net'];
+// Biblioteca PDF se păstrează în cache după prima folosire
+const CDN_HOSTS = ['cdnjs.cloudflare.com'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -18,7 +14,8 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+      // pe același domeniu pot exista și alte aplicații: ștergem doar cache-urile vechi ale Șantierului
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('santier-') && k !== VERSION).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -32,7 +29,7 @@ self.addEventListener('fetch', (e) => {
     // Stale-while-revalidate pentru fișierele aplicației
     e.respondWith(
       caches.open(VERSION).then(async (cache) => {
-        // navigare: fiecare aplicație (Șantier / Model 3D) își are propriul index.html
+        // navigare: fiecare pagină își are propriul index.html
         const key = req.mode === 'navigate'
           ? new URL(url.pathname.endsWith('/') ? url.pathname + 'index.html' : url.pathname, location.origin).href
           : req;
