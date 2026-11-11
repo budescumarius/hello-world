@@ -2,7 +2,11 @@
 <html lang="ro">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Proiectare">
+  <link rel="apple-touch-icon" href="../icons/apple-touch-icon.png">
   <meta name="theme-color" content="#1f4fd8">
   <title>Proiectare</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -25,7 +29,7 @@
       <select id="storey"></select>
       <button class="btn" id="b-storeys" title="Niveluri: adaugă, modifică cote și înălțimi">Niveluri…</button>
     </div>
-    <div class="grp">
+    <div class="grp undo-grp">
       <button class="ibtn" id="b-undo" title="Anulează (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-4"/></svg></button>
       <button class="ibtn" id="b-redo" title="Refă (Ctrl+Y)"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 000 10h4"/></svg></button>
     </div>
@@ -59,7 +63,18 @@
     </section>
   </main>
 
-  <aside class="side" id="side"></aside>
+  <aside class="side" id="side"><button class="ibtn sheet-close" id="side-close" aria-label="Închide panoul"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button><div id="side-body"></div></aside>
+
+  <div class="drawbar" id="drawbar" hidden>
+    <input class="field" id="d-len" inputmode="decimal" placeholder="Lungime (m)" aria-label="Lungime în metri" autocomplete="off">
+    <input class="field" id="d-ang" inputmode="decimal" placeholder="Unghi °" aria-label="Unghi în grade (opțional)" autocomplete="off">
+    <button class="btn primary" id="d-ok">Pune</button>
+    <button class="btn" id="d-close" hidden>Închide conturul</button>
+    <button class="btn" id="d-done">Gata</button>
+    <button class="btn" id="d-cancel">Anulează</button>
+  </div>
+  <div class="fab-undo"><button class="ibtn" id="m-undo" aria-label="Anulează"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-4"/></svg></button><button class="ibtn" id="m-redo" aria-label="Refă"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 000 10h4"/></svg></button></div>
+  <button class="btn fab-set" id="b-settings" title="Setările uneltei / proprietăți">Setări</button>
   <footer class="status"><span id="status"></span></footer>
 
   <section id="page" class="page" hidden>

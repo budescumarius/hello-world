@@ -20,7 +20,43 @@ function autosave() { clearTimeout(saveT); saveT = setTimeout(() => { try { loca
 const plan = new PlanEditor($('#plan'), {
   numBox: $('#num'),
   status: (msg, err) => { const s = $('#status'); s.textContent = msg; s.className = err ? 'err' : ''; if (err) toast(msg); },
+  onDraw: () => updateDrawbar(),
 });
+const narrow = matchMedia('(max-width: 1100px)');
+const touchy = matchMedia('(pointer: coarse)');
+document.addEventListener('gesturestart', (e) => e.preventDefault()); // fără zoom al paginii în iOS
+
+// ---------------------------------------------------------------- bara de desen și foaia de proprietăți (telefon / iPad)
+function updateDrawbar() {
+  const n = plan.draw?.pts.length || 0;
+  const poly = ['slab', 'zone', 'roof'].includes(A.tool) && A.defaults[A.tool].mode === 'poly';
+  const show = A.tool !== 'select' && (n > 0 || touchy.matches);
+  $('#drawbar').hidden = !show;
+  document.body.classList.toggle('drawing', show);
+  const lineTool = ['wall', 'beam'].includes(A.tool) || poly;
+  $('#d-len').hidden = $('#d-ang').hidden = $('#d-ok').hidden = !(lineTool && n > 0);
+  $('#d-close').hidden = !(poly && n >= 3);
+  $('#d-done').hidden = $('#d-cancel').hidden = n === 0;
+  if (show && n === 0 && touchy.matches) {
+    // înainte de primul punct: doar indicația
+    $('#d-done').hidden = true; $('#d-cancel').hidden = false; $('#d-cancel').textContent = 'Închide unealta';
+  } else $('#d-cancel').textContent = 'Anulează';
+}
+const typed = () => {
+  const L = parseFloat($('#d-len').value.replace(',', '.'));
+  const a = $('#d-ang').value.replace(',', '.').trim();
+  if (!(L > 0)) { toast('Scrie lungimea în metri, ex. 4,5'); return; }
+  plan.typed(L, a === '' ? '' : parseFloat(a));
+  $('#d-len').value = ''; $('#d-ang').value = '';
+};
+$('#d-ok').onclick = typed;
+for (const id of ['#d-len', '#d-ang']) $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); typed(); } });
+$('#d-close').onclick = () => plan.closePoly();
+$('#d-done').onclick = () => { plan.finishDraw(true); };
+$('#d-cancel').onclick = () => { if (!plan.draw?.pts.length) { setTool('select'); return; } plan.cancelDraw(); };
+const openSheet = (on) => document.body.classList.toggle('sheet', on);
+$('#side-close').onclick = () => openSheet(false);
+$('#b-settings').onclick = () => openSheet(!document.body.classList.contains('sheet'));
 let view3d = null;
 async function ensure3D() {
   if (view3d) return view3d;
@@ -51,8 +87,20 @@ function setTool(t) {
   A.tool = t;
   if (t !== 'select') { A.sel.clear(); }
   renderTools(); renderSide(); plan.status(); plan.invalidate(); view3d?.invalidate('sel');
-  $('#plan').focus();
+  updateDrawbar();
+  if (narrow.matches) openSheet(false);
+  if (touchy.matches && t !== 'select') toast(TOUCH_HINTS[t] || '', 3500);
+  if (!touchy.matches) $('#plan').focus();
 }
+const TOUCH_HINTS = {
+  wall: 'Pune degetul și trage: punctul portocaliu (deasupra degetului) se prinde de colțuri. Ridică degetul ca să-l pui.',
+  beam: 'Ca la pereți: țintești cu punctul de deasupra degetului și ridici degetul.',
+  slab: 'Atinge în interiorul pereților sau desenează colțurile – modul se alege din Setări.',
+  zone: 'Atinge în interiorul unei camere: conturul se detectează din pereți.',
+  roof: 'Pune două colțuri opuse (cu streașina). Tipul și panta se aleg din Setări.',
+  door: 'Atinge un perete. Partea pe care atingi alege sensul de deschidere.', window: 'Atinge un perete.',
+  column: 'Atinge locul stâlpului.', dim: 'Atinge primul punct, al doilea, apoi locul liniei de cotă.',
+};
 $('#tools').addEventListener('click', (e) => { const b = e.target.closest('[data-tool]'); if (b) setTool(b.dataset.tool); });
 
 // ---------------------------------------------------------------- niveluri
@@ -153,7 +201,7 @@ function readField(inp) {
 }
 
 function renderSide() {
-  const side = $('#side');
+  const side = $('#side-body');
   const sel = [...A.sel].map((id) => byId(A.p, id)).filter(Boolean);
   if (!sel.length) {
     const t = A.tool;
@@ -258,6 +306,7 @@ $('#c-loads').onchange = (e) => { A.showLoads = e.target.checked; plan.invalidat
 // ---------------------------------------------------------------- reacții la schimbări
 on((kind) => {
   if (kind === 'model') { autosave(); $('#l-loads').hidden = true; }
+  if (kind === 'sel' && narrow.matches) openSheet(A.sel.size > 0);
   if (kind === 'storey' || kind === 'model') renderStoreys();
   renderSide();
   plan.invalidate();
@@ -266,6 +315,8 @@ on((kind) => {
   if (kind === 'model' && !$('#page').hidden && pageKind === 'qty') openQty();
 });
 $('#b-undo').onclick = () => undo();
+$('#m-undo').onclick = () => undo();
+$('#m-redo').onclick = () => redo();
 $('#b-redo').onclick = () => redo();
 const pname = $('#pname');
 pname.onchange = () => { snapshot(); A.p.name = pname.value.trim() || 'Proiect'; emit('model'); };
@@ -404,6 +455,13 @@ $('#b-open3d').onclick = async () => {
 $('#b-menu').onclick = () => {
   const d = $('#dlg');
   d.innerHTML = `<form method="dialog"><h2>Proiect</h2><div class="menu">
+    <button class="btn" value="qty">Cantități</button>
+    <button class="btn" value="loads">Calcul sarcini</button>
+    <button class="btn" value="storeys">Niveluri…</button>
+    <button class="btn" value="ifc">Export IFC (ARCHICAD, Revit…)</button>
+    <button class="btn" value="open3d">Deschide în Model 3D</button>
+    <a class="btn" href="../" style="display:flex;align-items:center;text-decoration:none">Înapoi la aplicația Șantier</a>
+    <hr style="border:0;border-top:1px solid var(--border);width:100%">
     <button class="btn" value="new">Proiect nou (gol)</button>
     <button class="btn" value="sample">Încarcă proiectul exemplu</button>
     <button class="btn" value="open">Deschide fișier proiect (.json)…</button>
@@ -414,6 +472,11 @@ $('#b-menu').onclick = () => {
     const v = d.returnValue;
     if (v === 'new' || v === 'sample') { snapshot(); A.p = v === 'new' ? newProject() : sampleProject(); A.storey = sortedStoreys(A.p)[0].id; A.sel.clear(); pname.value = A.p.name; emit('model'); emit('storey'); plan.fit(); view3d && (view3d.fitted = false); }
     if (v === 'open') $('#file').click();
+    if (v === 'qty') openQty();
+    if (v === 'loads') openLoads();
+    if (v === 'storeys') storeysDialog();
+    if (v === 'ifc') $('#b-ifc').click();
+    if (v === 'open3d') $('#b-open3d').click();
     if (v === 'save') download(new Blob([JSON.stringify(A.p, null, 1)], { type: 'application/json' }), `${A.p.name}.json`);
   };
   d.returnValue = '';
@@ -433,7 +496,8 @@ $('#file').onchange = async (e) => {
 // ---------------------------------------------------------------- pornire
 pname.value = A.p.name;
 renderTools(); renderStoreys(); renderSide();
-setView((() => { try { return localStorage.getItem('cad:view') || 'split'; } catch { return 'split'; } })());
+setView((() => { let v = 'split'; try { v = localStorage.getItem('cad:view') || 'split'; } catch { /* */ } return narrow.matches && v === 'split' ? 'plan' : v; })());
+updateDrawbar();
 requestAnimationFrame(() => { plan.resize(); plan.fit(); plan.status(); });
 $('#b-undo').disabled = true; $('#b-redo').disabled = true;
 window.__cad = { A, plan, emit, get view3d() { return view3d; } };

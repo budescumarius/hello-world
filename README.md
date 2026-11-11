@@ -54,6 +54,11 @@ Program de desen pe calculator (cu mouse), în stilul programelor BIM, accesibil
   - Nu include seismul și vântul și nu înlocuiește proiectul de rezistență semnat de un inginer atestat.
 - **Export IFC4**: pereți cu goluri, uși, ferestre, plăci, stâlpi, grinzi, acoperișuri, spații, materiale, Pset-uri și cantități. Se deschide în ARCHICAD, Revit, Allplan etc. Butonul **Model 3D** deschide direct modelul în vizualizator.
 - Proiectul se salvează automat în browser. Se poate salva sau deschide ca fișier `.json`.
+- **Pe iPad și telefon**:
+  - Desenezi cu degetul sau cu Apple Pencil. Punctul se pune la ridicarea degetului și apare deasupra degetului, ca să-l vezi.
+  - Zoom și deplasare cu două degete.
+  - Bara de desen are câmpuri pentru lungime și unghi (tastatură numerică) și butoanele Gata / Închide conturul / Anulează.
+  - Proprietățile apar într-un panou care urcă de jos.
 
 ## Publicare
 1. Pe GitHub: **Settings → Pages → Build and deployment → Source: GitHub Actions**.

@@ -47,8 +47,10 @@ export class View3D {
   resize() {
     const w = this.cv.clientWidth, h = this.cv.clientHeight;
     if (!w || !h) return;
+    const first = !this.sized; this.sized = true;
     this.r.setSize(w, h, false);
     this.cam.aspect = w / h; this.cam.updateProjectionMatrix();
+    if (first && this.group.children.length) this.fit();
     this.dirty = true;
   }
   invalidate(kind) { if (kind === 'model' || kind === 'storey') this.needBuild = true; else this.applySel(); this.dirty = true; }
@@ -90,7 +92,8 @@ export class View3D {
     if (b.isEmpty()) return;
     const c = b.getCenter(new THREE.Vector3()), r = b.getSize(new THREE.Vector3()).length() / 2;
     this.ctl.target.copy(c);
-    this.cam.position.copy(c).add(new THREE.Vector3(1, 0.8, 1.2).normalize().multiplyScalar(r / Math.sin(THREE.MathUtils.degToRad(this.cam.fov) / 2) * 0.9));
+    const vf = THREE.MathUtils.degToRad(this.cam.fov), hf = 2 * Math.atan(Math.tan(vf / 2) * this.cam.aspect);
+    this.cam.position.copy(c).add(new THREE.Vector3(1, 0.8, 1.2).normalize().multiplyScalar(r / Math.sin(Math.min(vf, hf) / 2) * 0.95));
     this.ctl.update();
     this.dirty = true;
   }

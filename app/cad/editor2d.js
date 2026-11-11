@@ -43,7 +43,7 @@ export class PlanEditor {
   fit() {
     const els = A.p.elements.filter((e) => e.storey === A.storey);
     const pts = els.flatMap((e) => e.pts || [e.a, e.b, e.p].filter(Boolean));
-    if (!pts.length) { this.v = { s: 40, cx: 5, cy: 4 }; return this.invalidate(); }
+    if (!pts.length) { this.v = { s: Math.max(8, Math.min(this.W || 600, this.H || 600) / 14), cx: 5, cy: 4 }; return this.invalidate(); }
     const b = bbox(pts);
     this.v.cx = (b.x0 + b.x1) / 2; this.v.cy = (b.y0 + b.y1) / 2;
     this.v.s = Math.min(this.W / Math.max(1, b.x1 - b.x0 + 4), this.H / Math.max(1, b.y1 - b.y0 + 4));
@@ -54,7 +54,7 @@ export class PlanEditor {
   // ---------------------------------------------------------------- prindere
   storeyEls(id = A.storey) { return A.p.elements.filter((e) => e.storey === id || ((e.type === 'door' || e.type === 'window') && byId(A.p, e.wall)?.storey === id)); }
   snapPoint(raw, from, shift) {
-    const tol = 10 / this.v.s;
+    const tol = (this.touch ? 18 : 10) / this.v.s;
     const els = this.storeyEls();
     const below = this.belowStorey();
     const pool = below ? els.concat(this.storeyEls(below.id).filter((e) => e.type === 'wall' || e.type === 'column')) : els;
@@ -118,7 +118,7 @@ export class PlanEditor {
 
   // ---------------------------------------------------------------- selecție
   hit(p) {
-    const tol = 6 / this.v.s;
+    const tol = (this.touch ? 12 : 6) / this.v.s;
     const els = this.storeyEls();
     const ord = (e) => ({ window: 0, door: 0, column: 1, wall: 2, beam: 3, dim: 4, zone: 6, roof: 7, slab: 8 }[e.type] ?? 9);
     const hits = [];
@@ -169,9 +169,43 @@ export class PlanEditor {
       this.v.cx += before[0] - after[0]; this.v.cy += before[1] - after[1];
       this.invalidate();
     }, { passive: false });
+    // ---- atingere (iPad / telefon): un deget țintește cu un cursor deasupra degetului, două degete = zoom și deplasare
+    const touches = new Map();
+    let pinch = null, tpan = null;
+    const OFFSET = 70;
+    const local = (e) => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    const startPinch = () => {
+      const [a, b] = [...touches.values()];
+      const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+      pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, s: this.v.s, world: this.toWorld(mx, my) };
+    };
     cv.addEventListener('pointerdown', (e) => {
+      const [x, y] = local(e);
+      this.touch = e.pointerType === 'touch';
+      if (e.pointerType === 'touch') {
+        e.preventDefault();
+        cv.setPointerCapture(e.pointerId);
+        touches.set(e.pointerId, [x, y]);
+        if (touches.size === 2) {
+          // al doilea deget: anulăm acțiunea începută cu primul (fără să plasăm puncte)
+          if (this.drag?.kind === 'move' && this.drag.moved) this.up(this.toWorld(x, y), { button: -1 });
+          this.drag = null; this.aim = null; tpan = null; this.finger = null; this.snap = null;
+          startPinch();
+          this.invalidate();
+          return;
+        }
+        if (touches.size > 2) return;
+        if (A.tool === 'select') {
+          this.down(this.toWorld(x, y), e);
+          if (this.drag?.kind === 'box') { this.drag = null; tpan = { x, y, cx: this.v.cx, cy: this.v.cy, moved: false }; }
+          return;
+        }
+        this.aim = true;
+        this.finger = [x, y];
+        this.move(this.toWorld(x, y - OFFSET), e);
+        return;
+      }
       cv.focus();
-      const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
       if (e.button === 1 || (e.button === 0 && spaceDown) || (e.button === 2 && !this.draw)) { pan = { x, y, cx: this.v.cx, cy: this.v.cy, moved: false }; cv.setPointerCapture(e.pointerId); return; }
       if (e.button === 2) { this.finishDraw(); return; }
       if (e.button !== 0) return;
@@ -179,15 +213,47 @@ export class PlanEditor {
       this.down(this.toWorld(x, y), e);
     });
     cv.addEventListener('pointermove', (e) => {
-      const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      const [x, y] = local(e);
+      if (e.pointerType === 'touch') {
+        if (!touches.has(e.pointerId)) return;
+        touches.set(e.pointerId, [x, y]);
+        if (pinch && touches.size >= 2) {
+          const [a, b] = [...touches.values()];
+          const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+          this.v.s = Math.max(2, Math.min(2000, pinch.s * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d));
+          const w = this.toWorld(mx, my);
+          this.v.cx += pinch.world[0] - w[0]; this.v.cy += pinch.world[1] - w[1];
+          this.invalidate();
+          return;
+        }
+        if (tpan) { if (Math.hypot(x - tpan.x, y - tpan.y) > 6) tpan.moved = true; this.v.cx = tpan.cx - (x - tpan.x) / this.v.s; this.v.cy = tpan.cy + (y - tpan.y) / this.v.s; this.invalidate(); return; }
+        if (this.aim) { this.finger = [x, y]; this.move(this.toWorld(x, y - OFFSET), e); return; }
+        if (this.drag) this.move(this.toWorld(x, y), e);
+        return;
+      }
       if (pan) { this.v.cx = pan.cx - (x - pan.x) / this.v.s; this.v.cy = pan.cy + (y - pan.y) / this.v.s; pan.moved = true; this.invalidate(); return; }
       this.move(this.toWorld(x, y), e);
     });
+    const touchEnd = (e) => {
+      const [x, y] = local(e);
+      touches.delete(e.pointerId);
+      if (pinch) { if (touches.size < 2) pinch = null; if (!touches.size) this.finger = null; return; }
+      if (tpan) { if (!tpan.moved) { A.sel.clear(); emit('sel'); } tpan = null; return; }
+      if (this.aim) {
+        this.aim = null; this.finger = null;
+        if (e.type === 'pointerup') this.up(this.toWorld(x, y - OFFSET), { button: 0, shiftKey: false });
+        this.snap = null; this.invalidate();
+        return;
+      }
+      if (this.drag) this.up(this.toWorld(x, y), e);
+    };
     cv.addEventListener('pointerup', (e) => {
+      if (e.pointerType === 'touch') return touchEnd(e);
       if (pan) { pan = null; return; }
-      const r = cv.getBoundingClientRect();
-      this.up(this.toWorld(e.clientX - r.left, e.clientY - r.top), e);
+      const [x, y] = local(e);
+      this.up(this.toWorld(x, y), e);
     });
+    cv.addEventListener('pointercancel', (e) => { if (e.pointerType === 'touch') touchEnd(e); pan = null; });
     cv.addEventListener('dblclick', () => this.finishDraw(true));
     cv.addEventListener('pointerleave', () => { this.mouse = null; this.invalidate(); });
     cv.tabIndex = 0;
@@ -225,6 +291,7 @@ export class PlanEditor {
       if (!len(sub(to, from))) dir = [1, 0];
     }
     this.place(add(from, mul(dir, L)));
+    this.ui.onDraw?.();
   }
 
   down(p, e) {
@@ -233,7 +300,7 @@ export class PlanEditor {
     if (t === 'select') {
       // apucare de punct (grip)
       for (const g of this.grips()) {
-        if (dist(this.gripPos(g), p) < 7 / this.v.s) {
+        if (dist(this.gripPos(g), p) < (this.touch ? 16 : 7) / this.v.s) {
           snapshot();
           const e0 = g.e;
           const old = this.gripPos(g).slice();
@@ -336,6 +403,10 @@ export class PlanEditor {
 
   // ---------------------------------------------------------------- unelte de desen
   click(p, raw) {
+    this.click0(p, raw);
+    this.ui.onDraw?.();
+  }
+  click0(p, raw) {
     const t = A.tool, D = A.defaults[t];
     if (t === 'column') { snapshot(); const el = addElement(A.p, { type: 'column', storey: A.storey, p, ...D }); this.selectOnly(el); return; }
     if (t === 'door' || t === 'window') { this.placeOpening(raw); return; }
@@ -379,6 +450,7 @@ export class PlanEditor {
     }
     pts.push(p.slice());
     this.invalidate();
+    this.ui.onDraw?.();
   }
   addPoly(pts) {
     const t = A.tool, D = { ...A.defaults[t] };
@@ -389,6 +461,7 @@ export class PlanEditor {
     const el = addElement(A.p, { type: t, storey: A.storey, pts, ...D, ...extra });
     this.draw = null;
     this.selectOnly(el);
+    this.ui.onDraw?.();
   }
   nextZoneNumber() {
     const s = storeyOf(A.p, { storey: A.storey });
@@ -402,7 +475,10 @@ export class PlanEditor {
     if (['slab', 'zone', 'roof'].includes(t) && d.pts.length >= 3 && byUser) { this.addPoly(d.pts.slice()); return; }
     this.cancelDraw();
   }
-  cancelDraw() { this.draw = null; this.num = ''; this.showNum(); this.invalidate(); }
+  closePoly() { if (['slab', 'zone', 'roof'].includes(A.tool) && this.draw?.pts.length >= 3) this.addPoly(this.draw.pts.slice()); }
+  // lungime introdusă din bara de desen (tastatura numerică de pe telefon)
+  typed(L, ang) { if (!(L > 0)) return; this.num = String(L) + (ang !== '' && ang != null ? '<' + ang : ''); this.applyNum(); }
+  cancelDraw() { this.draw = null; this.num = ''; this.showNum(); this.invalidate(); this.ui.onDraw?.(); }
 
   nearestWall(p) {
     let best = null;
@@ -572,6 +648,12 @@ export class PlanEditor {
       c.strokeStyle = '#e8590c'; c.lineWidth = 1.5;
       if (this.snap.kind) { c.strokeRect(x - 5, y - 5, 10, 10); c.font = '11px system-ui, sans-serif'; c.fillStyle = '#e8590c'; c.fillText(this.snap.kind, x + 9, y - 8); }
       c.beginPath(); c.moveTo(x - 9, y); c.lineTo(x + 9, y); c.moveTo(x, y - 9); c.lineTo(x, y + 9); c.stroke();
+    }
+    if (this.finger && this.snap) {
+      const [fx, fy] = this.finger, [x, y] = this.toScreen(this.snap.p);
+      c.strokeStyle = 'rgba(232,89,12,.6)'; c.lineWidth = 1; c.setLineDash([3, 3]);
+      c.beginPath(); c.moveTo(fx, fy); c.lineTo(x, y); c.stroke(); c.setLineDash([]);
+      c.fillStyle = 'rgba(232,89,12,.18)'; c.beginPath(); c.arc(fx, fy, 22, 0, Math.PI * 2); c.fill();
     }
     this.paintScale();
   }
