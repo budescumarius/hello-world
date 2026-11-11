@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Proiectare">
+  <link rel="apple-touch-icon" href="../icons/apple-touch-icon.png">
+  <meta name="theme-color" content="#1f4fd8">
+  <title>Proiectare</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="cad.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header class="top">
+    <a class="ibtn" href="../" title="Înapoi la Șantier" aria-label="Înapoi la Șantier"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></a>
+    <input id="pname" class="pname" aria-label="Numele proiectului" spellcheck="false">
+    <div class="grp">
+      <label class="lbl" for="storey">Nivel</label>
+      <select id="storey"></select>
+      <button class="btn" id="b-storeys" title="Niveluri: adaugă, modifică cote și înălțimi">Niveluri…</button>
+    </div>
+    <div class="grp undo-grp">
+      <button class="ibtn" id="b-undo" title="Anulează (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-4"/></svg></button>
+      <button class="ibtn" id="b-redo" title="Refă (Ctrl+Y)"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 000 10h4"/></svg></button>
+    </div>
+    <div class="seg" id="views">
+      <button data-view="plan">Plan</button><button data-view="split">Plan + 3D</button><button data-view="3d">3D</button>
+    </div>
+    <span class="spacer"></span>
+    <button class="btn" id="b-qty">Cantități</button>
+    <button class="btn" id="b-loads">Sarcini</button>
+    <button class="btn" id="b-ifc" title="Salvează modelul ca IFC pentru ARCHICAD, Revit etc.">Export IFC</button>
+    <button class="btn primary" id="b-open3d" title="Deschide modelul în vizualizatorul Model 3D (mers prin clădire, secțiuni)">Model 3D</button>
+    <button class="ibtn" id="b-menu" title="Proiect"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+  </header>
+
+  <nav class="tools" id="tools"></nav>
+
+  <main class="work" id="work">
+    <section class="pane plan"><canvas id="plan"></canvas><div id="num" class="num" hidden></div>
+      <div class="plan-tools">
+        <button class="mini" id="b-fit" title="Încadrează (Home)">Încadrează</button>
+        <label class="mini chk"><input type="checkbox" id="c-grid" checked> Grilă</label>
+        <label class="mini chk" id="l-loads" hidden><input type="checkbox" id="c-loads"> Sarcini pe plan</label>
+      </div>
+    </section>
+    <section class="pane v3d"><canvas id="v3d"></canvas>
+      <div class="plan-tools">
+        <button class="mini" id="b-fit3d">Încadrează</button>
+        <label class="mini chk"><input type="checkbox" id="c-upto"> Până la nivelul curent</label>
+        <label class="mini chk"><input type="checkbox" id="c-zones"> Zone</label>
+      </div>
+    </section>
+  </main>
+
+  <aside class="side" id="side"><button class="ibtn sheet-close" id="side-close" aria-label="Închide panoul"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button><div id="side-body"></div></aside>
+
+  <div class="drawbar" id="drawbar" hidden>
+    <input class="field" id="d-len" inputmode="decimal" placeholder="Lungime (m)" aria-label="Lungime în metri" autocomplete="off">
+    <input class="field" id="d-ang" inputmode="decimal" placeholder="Unghi °" aria-label="Unghi în grade (opțional)" autocomplete="off">
+    <button class="btn primary" id="d-ok">Pune</button>
+    <button class="btn" id="d-close" hidden>Închide conturul</button>
+    <button class="btn" id="d-done">Gata</button>
+    <button class="btn" id="d-cancel">Anulează</button>
+  </div>
+  <div class="fab-undo"><button class="ibtn" id="m-undo" aria-label="Anulează"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-4"/></svg></button><button class="ibtn" id="m-redo" aria-label="Refă"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 000 10h4"/></svg></button></div>
+  <button class="btn fab-set" id="b-settings" title="Setările uneltei / proprietăți">Setări</button>
+  <footer class="status"><span id="status"></span></footer>
+
+  <section id="page" class="page" hidden>
+    <header><h2 id="page-title"></h2><span class="spacer"></span><span id="page-acts"></span><button class="ibtn" id="page-close" aria-label="Închide"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
+    <div id="page-body" class="page-body"></div>
+  </section>
+  <dialog id="dlg"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <input type="file" id="file" accept=".json,application/json" hidden>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

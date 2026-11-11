@@ -1,9 +1,15 @@
 // Service worker: aplicația funcționează complet offline după prima încărcare.
-const VERSION = 'santier-v2';
+const VERSION = 'santier-v5';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './gestiune.js', './manifest.webmanifest',
-  './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'
+  './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png',
+  './bim/', './bim/index.html', './bim/bim.css', './bim/main.js', './bim/demo.js', './bim/ifc.js',
+  './bim/bimx.js', './bim/sheets.js',
+  './cad/', './cad/index.html', './cad/cad.css', './cad/main.js', './cad/model.js', './cad/state.js', './cad/editor2d.js',
+  './cad/geometry3d.js', './cad/view3d.js', './cad/loads.js', './cad/ifc-export.js', './cad/icon.svg', './bim/manifest.webmanifest', './bim/icon.svg', './bim/icon-192.png', './bim/icon-512.png'
 ];
+// Biblioteci externe păstrate în cache după prima folosire (PDF, 3D, IFC)
+const CDN_HOSTS = ['cdnjs.cloudflare.com', 'cdn.jsdelivr.net'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -26,7 +32,10 @@ self.addEventListener('fetch', (e) => {
     // Stale-while-revalidate pentru fișierele aplicației
     e.respondWith(
       caches.open(VERSION).then(async (cache) => {
-        const key = req.mode === 'navigate' ? './index.html' : req;
+        // navigare: fiecare aplicație (Șantier / Model 3D) își are propriul index.html
+        const key = req.mode === 'navigate'
+          ? new URL(url.pathname.endsWith('/') ? url.pathname + 'index.html' : url.pathname, location.origin).href
+          : req;
         const cached = await cache.match(key);
         const net = fetch(req).then((res) => {
           if (res.ok) cache.put(key, res.clone());
@@ -35,8 +44,7 @@ self.addEventListener('fetch', (e) => {
         return cached || net;
       })
     );
-  } else if (url.hostname === 'cdnjs.cloudflare.com') {
-    // Biblioteca PDF se păstrează în cache după prima folosire
+  } else if (CDN_HOSTS.includes(url.hostname)) {
     e.respondWith(
       caches.open(VERSION).then(async (cache) => {
         const cached = await cache.match(req);
