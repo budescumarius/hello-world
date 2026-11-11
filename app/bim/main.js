@@ -1400,6 +1400,21 @@ async function loadIfcBuffer(buf, name, key) {
 }
 async function openFile(file) {
   if (!file) return;
+  if (/\.bimx$/i.test(file.name)) {
+    // formatul BIMx este închis (Graphisoft) – explicăm cum se obține un IFC echivalent
+    await dialog({
+      title: 'Fișierele .bimx nu pot fi deschise',
+      ok: 'Am înțeles',
+      body: `<div>BIMx este un format închis al Graphisoft, fără specificație publică. Modelul se poate deschide aici dacă e exportat ca <b>IFC</b> din același proiect:</div>
+        <ol style="margin:4px 0 0 18px;padding:0;line-height:1.5">
+          <li>În ARCHICAD: <b>Fișier → Salvare ca…</b> și alege tipul <b>IFC</b> (sau <b>Fișier → Interoperabilitate → IFC</b>).</li>
+          <li>Alege o traducere de export (ex. „General Translator” sau „Coordination View”).</li>
+          <li>Deschide fișierul .ifc rezultat cu butonul de import din această aplicație.</li>
+        </ol>
+        <div class="muted" style="font-size:13px">Dacă ai primit doar fișierul .bimx, cere-i autorului și exportul IFC al proiectului.</div>`,
+    });
+    return;
+  }
   if (!/\.ifc$/i.test(file.name)) { toast('Alege un fișier .ifc'); return; }
   const id = file.name + ':' + file.size;
   const buf = await file.arrayBuffer();
