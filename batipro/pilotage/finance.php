@@ -25,7 +25,8 @@ function pil_r2(float $x): float {
  * @return array{net:float,discount:float,base:float,vats:array,vat:float,total:float,cost:float,costBy:array,margin:float}
  */
 function pil_doc_totals(array $doc): array {
-    $d = pil_num($doc['discount'] ?? null) / 100;
+    $amtMode = ($doc['discountMode'] ?? null) === 'amt' && pil_num($doc['discountAmt'] ?? null) > 0;
+    $d = $amtMode ? 0.0 : pil_num($doc['discount'] ?? null) / 100;
     $by = []; $costBy = []; $net = 0.0; $cost = 0.0;
     foreach (($doc['lines'] ?? []) as $l) {
         if (!is_array($l) || ($l['kind'] ?? null) !== 'item' || !empty($l['option'])) continue;
@@ -44,6 +45,8 @@ function pil_doc_totals(array $doc): array {
         }
     }
     $net = pil_r2($net);
+    $want = $amtMode && $net > 0 ? pil_r2(min(pil_num($doc['discountAmt'] ?? null), $net)) : 0.0;
+    if ($amtMode && $net > 0) $d = $want / $net;
     usort($by, fn($a, $b) => $b['rate'] <=> $a['rate']);
     $vats = [];
     foreach ($by as $x) {
@@ -52,6 +55,10 @@ function pil_doc_totals(array $doc): array {
         $allowance = pil_r2($lines * $d);
         $base = pil_r2($lines - $allowance);
         $vats[] = ['rate' => $x['rate'], 'lines' => $lines, 'allowance' => $allowance, 'base' => $base, 'vat' => !empty($doc['reverse']) ? 0.0 : pil_r2($base * $x['rate'] / 100)];
+    }
+    if ($amtMode && $vats) { // = data.js : l'écart d'arrondi sur le premier taux
+        $diff = pil_r2($want - array_sum(array_column($vats, 'allowance')));
+        if ($diff) { $v = &$vats[0]; $v['allowance'] = pil_r2($v['allowance'] + $diff); $v['base'] = pil_r2($v['lines'] - $v['allowance']); $v['vat'] = !empty($doc['reverse']) ? 0.0 : pil_r2($v['base'] * $v['rate'] / 100); unset($v); }
     }
     $discount = pil_r2(array_sum(array_column($vats, 'allowance')));
     $base = pil_r2($net - $discount);

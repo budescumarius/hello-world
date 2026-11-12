@@ -310,7 +310,7 @@ async function quoteHead(q, contacts, projects, onSaved) {
       { name: 'project_id', label: 'Chantier', type: 'select', options: [['', '— aucun (créé à l\'acceptation) —'], ...projects.map((p) => [p.id, `${p.number} · ${p.data.name}`])] },
       { name: 'date', label: 'Date', type: 'date' }, { name: 'valid', label: 'Valable jusqu\'au', type: 'date' },
       { name: 'ownerId', label: 'Responsable', type: 'user' }, { name: 'ref', label: 'Votre référence' },
-      { name: 'discount', label: 'Remise globale %', type: 'percent' },
+      ...(q.data.discountMode === 'amt' ? [] : [{ name: 'discount', label: 'Remise globale % (ou bouton « ％ Remise » sous les lignes : % ou montant)', type: 'percent' }]),
       { name: 'reverse', label: 'Autoliquidation (TVA due par le client assujetti)', type: 'check' },
       { name: 'siteAddress', label: 'Adresse du chantier', cls: 'full' },
       { name: 'intro', label: 'Texte d\'introduction', type: 'textarea', cls: 'full' },
@@ -319,7 +319,7 @@ async function quoteHead(q, contacts, projects, onSaved) {
     async onSave(v) {
       await resolveContact(v, 'clientId', 'client');
       q.project_id = v.project_id ? +v.project_id : null; delete v.project_id;
-      Object.assign(q.data, v, { discount: num(v.discount) });
+      Object.assign(q.data, v, q.data.discountMode === 'amt' ? {} : { discount: num(v.discount) });
       await persist('quote', q); onSaved();
     },
   });
@@ -432,7 +432,7 @@ route('quote', async (id) => {
 // auto : devis accepté → ses postes (prix de vente) alimentent la bibliothèque sans question
 async function quoteToLibrary(q, { auto = false, quiet = false } = {}) {
   q = await fullOf('quote', q);
-  const d = q.data; const disc = num(d.discount) / 100;
+  const d = q.data; const disc = discPct(d) / 100;
   const items = d.lines.filter((l) => l.kind === 'item' && !l.option && !l.deduction && String(l.desc || '').trim() && num(l.price) > 0);
   if (!items.length) { if (!auto) toast('Aucun poste chiffré dans ce devis', 3000); return { c: 0, u: 0 }; }
   const v = auto ? { category: d.title || q.number, update: true } : await ask(`Ajouter ${items.length} poste(s) à la bibliothèque`, [
@@ -522,14 +522,14 @@ async function invoiceFromQuote(q) {
     ]);
   }
   const prev = (await db.list('invoice')).filter((i) => +i.data.quoteId === q.id);
-  const d = q.data; const disc = num(d.discount) / 100; const qt = totals(d);
+  const d = q.data; const disc = discPct(d) / 100; const qt = totals(d);
   const base = { project_id: q.project_id, data: { quoteId: q.id, clientId: d.clientId, reverse: !!d.reverse, title: d.title } };
   const many = qt.vats.length > 1;
   const prevBase = (list) => { const m = {}; for (const i of list) for (const v of totals(i.data).vats) m[v.rate] = r2((m[v.rate] || 0) + v.base * (i.data.kind === 'avoir' ? 1 : 1)); return m; };
   const disco = (l) => (l.kind === 'item' ? { ...l, id: lid(), price: r2(num(l.price) * (1 - disc)) } : { ...l, id: lid() });
   const mk = (data) => newInvoice({ ...base, data: { ...base.data, ...data } });
   menuSheet(`Facturer le devis ${q.number}${prev.length ? ` (${prev.length} facture(s) existante(s))` : ''}`, [
-    { label: `Facture totale (${money(qt.base)} HT)`, run: () => mk({ kind: 'facture', discount: num(d.discount), lines: d.lines.filter((l) => !l.option).map((l) => ({ ...l, id: lid() })) }) },
+    { label: `Facture totale (${money(qt.base)} HT)`, run: () => mk({ kind: 'facture', discount: num(d.discount), discountMode: d.discountMode, discountAmt: d.discountAmt, lines: d.lines.filter((l) => !l.option).map((l) => ({ ...l, id: lid() })) }) },
     { label: "Facture d'acompte (%)", run: async () => {
       const v = await ask("Facture d'acompte", [{ name: 'pct', label: 'Pourcentage du devis', type: 'percent', required: true }], { pct: 30 });
       if (!v) return;
@@ -542,7 +542,7 @@ async function invoiceFromQuote(q) {
       mk({ kind: 'acompte', lines: acompteLines(q, { amount: num(v.amount) }) });
     } },
     { label: "Facture d'avancement (état des travaux)", run: () => progressInvoice(q, prev, base) },
-    { label: `Pro forma du devis total (${money(qt.base)} HT) – sans valeur fiscale`, run: () => mk({ kind: 'proforma', proformaKind: 'facture', discount: num(d.discount), lines: d.lines.filter((l) => !l.option).map((l) => ({ ...l, id: lid() })) }) },
+    { label: `Pro forma du devis total (${money(qt.base)} HT) – sans valeur fiscale`, run: () => mk({ kind: 'proforma', proformaKind: 'facture', discount: num(d.discount), discountMode: d.discountMode, discountAmt: d.discountAmt, lines: d.lines.filter((l) => !l.option).map((l) => ({ ...l, id: lid() })) }) },
     { label: "Pro forma d'acompte (% ou montant HTVA) – sans valeur fiscale", run: async () => {
       const v = await ask("Pro forma d'acompte", [{ name: 'pct', label: 'Pourcentage du devis (laisser vide si montant)', type: 'percent' }, { name: 'amount', label: `ou montant HTVA (devis : ${money(qt.base)} HT)`, type: 'money' }], { pct: 30 });
       if (!v || !(num(v.pct) > 0 || num(v.amount) > 0)) return;
@@ -563,7 +563,7 @@ async function invoiceFromQuote(q) {
 // le prochain état reparte du bon cumul et que l'acompte déjà déduit soit pris en compte.
 async function historyFromOtherApp(q, prev, base) {
   q = await fullOf('quote', q); prev = await fullList('invoice', prev);
-  const d = q.data; const disc = num(d.discount) / 100; const rate0 = (totals(d).vats[0] || { rate: defVat() }).rate;
+  const d = q.data; const disc = discPct(d) / 100; const rate0 = (totals(d).vats[0] || { rate: defVat() }).rate;
   const src = d.lines.filter((l) => l.kind === 'title' || (l.kind === 'item' && !l.option));
   const rows = src.map((l) => (l.kind === 'title' ? { lineId: l.id, kind: 'title', level: tlevel(l), desc: l.desc, ...(l.no ? { no: l.no } : {}) }
     : { lineId: l.id, kind: 'item', desc: l.desc, ...(l.no ? { no: l.no } : {}), unit: l.unit, vat: num(l.vat), type: l.type, qty: num(l.qty), price: r2(num(l.price) * (1 - disc)), prev: 0, cum: 0 }));
@@ -672,14 +672,14 @@ const avenantsOf = (q, quotes) => quotes.filter((x) => +x.data.avenantOf === q.i
 async function marketLines(q, { separatelyBilled = true } = {}) {
   q = await fullOf('quote', q);
   const d = q.data; const out = [];
-  d.lines.forEach((l) => { if (l.kind === 'title' || (l.kind === 'item' && !l.option)) out.push({ ...l, _disc: num(d.discount) / 100 }); });
+  d.lines.forEach((l) => { if (l.kind === 'title' || (l.kind === 'item' && !l.option)) out.push({ ...l, _disc: discPct(d) / 100 }); });
   if (d.avenantOf) return out;
   const [quotes, invoices] = await Promise.all([db.list('quote', { lite: true }), separatelyBilled ? [] : db.list('invoice', { lite: true })]);
   for (const avLite of avenantsOf(q, quotes).filter((x) => x.data.status === 'accepte')) {
     if (!separatelyBilled && invoices.some((i) => +i.data.quoteId === avLite.id)) continue; // avenant déjà facturé à part
     const av = await db.get('quote', avLite.id); // ses lignes
     out.push({ id: `av${av.id}`, kind: 'title', desc: `Avenant n° ${av.data.avenantNo} – ${av.data.title || av.number}`, avenant: av.id });
-    av.data.lines.forEach((l) => { if (l.kind === 'title') out.push({ ...l, level: 2, avenant: av.id }); else if (l.kind === 'item' && !l.option) out.push({ ...l, _disc: num(av.data.discount) / 100, avenant: av.id }); });
+    av.data.lines.forEach((l) => { if (l.kind === 'title') out.push({ ...l, level: 2, avenant: av.id }); else if (l.kind === 'item' && !l.option) out.push({ ...l, _disc: discPct(av.data) / 100, avenant: av.id }); });
   }
   return out;
 }

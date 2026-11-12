@@ -154,7 +154,7 @@ function linesTable(d, t, kind) {
       if (l.kind === 'title' && !String(l.desc || '').trim()) return '';
       if (l.kind === 'title') return `<tr class="${tlevel(l) === 2 ? 'mb-sub' : 'mb-ch'}"><td colspan="${n - 1}"><div class="mb-dl">${code(i)}<span>${esc(l.desc)}</span></div></td><td class="r">${dmoney(st[l.id], t)}</td></tr>`;
       if (l.kind === 'text') return `<tr class="mb-txt"><td colspan="${n}" class="pre">${esc(l.desc)}</td></tr>`;
-      return `<tr class="${l.option ? 'mb-opt' : ''}"><td><div class="mb-dl">${code(i)}<span class="pre">${esc(l.desc)}${t.showTM && l.tm ? `<span class="mb-tag">${esc([t.tmLabel, l.tm].filter(Boolean).join(' '))}</span>` : ''}${l.option ? '<em class="mb-pill">Option</em>' : ''}</span></div>${String(l.note || '').trim() ? `<div class="mb-lnote pre">${esc(l.note)}</div>` : ''}</td>
+      return `<tr class="${l.option ? 'mb-opt' : ''}"><td><div class="mb-dl">${code(i)}<span class="pre">${esc(l.desc)}${t.showTM && l.tm ? `<span class="mb-tag">${esc([t.tmLabel, l.tm].filter(Boolean).join(' '))}</span>` : ''}${l.option ? '<em class="mb-pill">Option</em>' : ''}</span></div>${String(l.note || '').trim() ? `<div class="mb-lnote pre">${esc(l.note)}</div>` : ''}${l.disc ? `<div class="mb-ldisc">${esc(lineDiscText(l))}</div>` : ''}</td>
         <td class="r">${dnum2(l.qty)}<span class="mb-u">${esc(l.unit || '')}</span></td><td class="r">${dmoney(l.price, t)}</td>${vat ? `<td class="r c-v">${fnum(num(l.vat))} %</td>` : ''}<td class="r">${dmoney(num(l.qty) * num(l.price), t)}</td></tr>`;
     }).join('')}</tbody></table>`;
 }
@@ -222,7 +222,7 @@ async function totalsBlock(kind, it, t, paid) {
   const row = (label, val, cls = '') => `<div class="mb-tr ${cls}"><span>${label}</span><b>${typeof val === 'number' ? dmoney(val, t) : val}</b></div>`;
   const isCn = d.kind === 'avoir';
   let rows = row('Total HT', gross, tt.discount || deds.length ? '' : 'mb-sum');
-  if (tt.discount) rows += row(`Remise ${fnum(num(d.discount))} %`, -tt.discount);
+  if (tt.discount) rows += row(discLabel(d), -tt.discount);
   for (const [k, v] of Object.entries(dedGroups)) rows += row(esc(k), v);
   let leftRow = '';
   // état d'avancement : acompte encore à déduire après cet état (acomptes du devis − déductions jusqu'à cet état inclus)

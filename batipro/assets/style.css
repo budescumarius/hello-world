@@ -2406,3 +2406,10 @@ details.card > summary { cursor: pointer; padding: 4px 0; }
 .pay-rest > div.big { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 7px; font-size: 16px; }
 .pay-rest > div.big.due b { color: #b35c00; }
 .pay-rest > div.big.ok b { color: #2f9e44; }
+
+/* remises */
+.lines .l-discd { display: block; color: #2f9e44; font-size: 12px; font-weight: 600; }
+.mb-ldisc { font-size: .9em; color: #2f7a3a; margin-top: 2px; }
+.seg.dmode { display: inline-flex; border: 1.5px solid var(--border); border-radius: 10px; overflow: hidden; margin: 8px 0 10px; }
+.seg.dmode button { border: 0; background: var(--surface); padding: 8px 14px; cursor: pointer; font-weight: 600; color: var(--muted); }
+.seg.dmode button.on { background: var(--ink); color: #fff; }

@@ -108,7 +108,7 @@ function buildUBL(it, client, project) {
       <cac:Item>${more.join(' ').trim() ? `<cbc:Description>${xe(more.join(' ').trim())}</cbc:Description>` : ''}<cbc:Name>${xe(name.slice(0, 200) || 'Prestation')}</cbc:Name>${taxCat(l.vat, 'cac:ClassifiedTaxCategory')}</cac:Item>
       <cac:Price><cbc:PriceAmount currencyID="${cur}">${p.toFixed(4).replace(/0{1,2}$/, '')}</cbc:PriceAmount></cac:Price></cac:${lineTag}>`;
   });
-  const allowances = t.vats.filter((v) => v.allowance).map((v) => `<cac:AllowanceCharge><cbc:ChargeIndicator>false</cbc:ChargeIndicator><cbc:AllowanceChargeReason>Remise ${fnum(num(d.discount))} %</cbc:AllowanceChargeReason><cbc:Amount currencyID="${cur}">${amt(v.allowance * sign)}</cbc:Amount>${taxCat(v.rate)}</cac:AllowanceCharge>`).join('');
+  const allowances = t.vats.filter((v) => v.allowance).map((v) => `<cac:AllowanceCharge><cbc:ChargeIndicator>false</cbc:ChargeIndicator><cbc:AllowanceChargeReason>${xe(discLabel(d))}</cbc:AllowanceChargeReason><cbc:Amount currencyID="${cur}">${amt(v.allowance * sign)}</cbc:Amount>${taxCat(v.rate)}</cac:AllowanceCharge>`).join('');
   const subtotals = t.vats.map((v) => `<cac:TaxSubtotal><cbc:TaxableAmount currencyID="${cur}">${amt(v.base * sign)}</cbc:TaxableAmount><cbc:TaxAmount currencyID="${cur}">${amt(v.vat * sign)}</cbc:TaxAmount>${taxCat(v.rate)}</cac:TaxSubtotal>`).join('');
   const paid = isCN ? 0 : r2((d.payments || []).reduce((a, p) => a + num(p.amount), 0));
   const due = r2(t.total * sign - paid);

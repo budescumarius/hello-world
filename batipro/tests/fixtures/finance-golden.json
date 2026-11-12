@@ -1,7 +1,7 @@
 {
   "_note": "Généré par « npm run golden » à partir du code de assets/*.js. Ne pas modifier à la main.",
   "today": "2026-11-01",
-  "sourceDigest": "f0e93c730c12f2a7d669d2a34605a3af5c0277f34c28c5b7739effde4dd73f50",
+  "sourceDigest": "12539ca7545a41054eafa45f9b8594171f43f428877630a98cd769dd715624f3",
   "totals": {
     "devis_remise_2_taux": {
       "net": 1100,
@@ -95,6 +95,64 @@
         "mo": 150
       },
       "margin": 330
+    },
+    "remise_montant_3_taux": {
+      "net": 211.13,
+      "discount": 100,
+      "base": 111.13,
+      "vats": [
+        {
+          "rate": 21,
+          "lines": 99.99,
+          "allowance": 47.36,
+          "base": 52.63,
+          "vat": 11.05
+        },
+        {
+          "rate": 12,
+          "lines": 11.11,
+          "allowance": 5.26,
+          "base": 5.85,
+          "vat": 0.7
+        },
+        {
+          "rate": 6,
+          "lines": 100.03,
+          "allowance": 47.38,
+          "base": 52.65,
+          "vat": 3.16
+        }
+      ],
+      "vat": 14.91,
+      "total": 126.04,
+      "cost": 95,
+      "costBy": {
+        "mat": 60,
+        "mo": 35,
+        "divers": 0
+      },
+      "margin": 16.13
+    },
+    "remise_montant_superieure_au_total": {
+      "net": 200,
+      "discount": 200,
+      "base": 0,
+      "vats": [
+        {
+          "rate": 21,
+          "lines": 200,
+          "allowance": 200,
+          "base": 0,
+          "vat": 0
+        }
+      ],
+      "vat": 0,
+      "total": 0,
+      "cost": 0,
+      "costBy": {
+        "divers": 0
+      },
+      "margin": 0
     }
   },
   "invState": {

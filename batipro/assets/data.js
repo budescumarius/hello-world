@@ -57,7 +57,9 @@ const byId = (list, id) => list.find((x) => x.id === +id);
 // lignes : { kind:'title'|'item'|'text', desc, unit, qty, cost, price, vat, type, costBy? }
 function totals(doc) {
   if (doc._lite && doc._sum) return doc._sum;
-  const d = num(doc.discount) / 100;
+  // remise globale : en % (discount) ou en montant (discountMode « amt » + discountAmt), répartie entre les taux au prorata
+  const amtMode = doc.discountMode === 'amt' && num(doc.discountAmt) > 0;
+  let d = amtMode ? 0 : num(doc.discount) / 100;
   const by = {}; const costBy = {};
   let net = 0; let cost = 0;
   for (const l of doc.lines || []) {
@@ -69,14 +71,29 @@ function totals(doc) {
     else { const c = num(l.qty) * num(l.cost); cost += c; costBy[l.type || 'divers'] = (costBy[l.type || 'divers'] || 0) + c; }
   }
   net = r2(net);
+  const want = amtMode && net > 0 ? r2(Math.min(num(doc.discountAmt), net)) : 0;
+  if (amtMode && net > 0) d = want / net;
   // la remise est calculée par taux de TVA (règles EN 16931 / Peppol : total = somme des remises par taux)
   const vats = Object.keys(by).map(Number).sort((a, b) => b - a)
     .map((rate) => { const lines = r2(by[rate]); const allowance = r2(lines * d); const b = r2(lines - allowance); return { rate, lines, allowance, base: b, vat: doc.reverse ? 0 : r2(b * rate / 100) }; }).filter((v) => v.lines);
+  // montant : l'écart d'arrondi (1 centime) va sur le premier taux, pour que la remise fasse exactement le montant demandé
+  if (amtMode && vats.length) { const diff = r2(want - vats.reduce((s, v) => s + v.allowance, 0)); if (diff) { const v = vats[0]; v.allowance = r2(v.allowance + diff); v.base = r2(v.lines - v.allowance); v.vat = doc.reverse ? 0 : r2(v.base * v.rate / 100); } }
   const discount = r2(vats.reduce((s, v) => s + v.allowance, 0));
   const base = r2(net - discount);
   const vat = r2(vats.reduce((s, v) => s + v.vat, 0));
   return { net, discount, base, vats, vat, total: r2(base + vat), cost: r2(cost), costBy, margin: r2(base - cost) };
 }
+// remise globale exprimée en % (pour les calculs qui l'appliquent ligne par ligne : états d'avancement, factures depuis un devis)
+function discPct(doc) { if (doc.discountMode === 'amt') { const t = totals(doc); return t.net ? (t.discount / t.net) * 100 : 0; } return num(doc.discount); }
+const discLabel = (doc) => (doc.discountMode === 'amt' ? 'Remise' : `Remise ${fnum(num(doc.discount))} %`);
+// remise sur un poste : le prix unitaire devient le prix remisé (4 décimales), le prix d'origine est gardé (l.listPrice)
+const r4 = (x) => Math.round(x * 1e4) / 1e4;
+function applyLineDisc(l) {
+  if (!l.disc) return;
+  const lp = num(l.listPrice); const v = num(l.disc.v);
+  l.price = l.disc.mode === 'amt' ? (num(l.qty) ? r4(lp - v / num(l.qty)) : lp) : r4(lp * (1 - v / 100));
+}
+const lineDiscText = (l) => (l.disc ? (l.disc.mode === 'amt' ? `Remise de ${money(num(l.disc.v))} sur ce poste` : `Remise ${fnum(num(l.disc.v))} %`) + ` (prix unitaire avant remise : ${money(num(l.listPrice))})` : '');
 // Numérotation à 3 niveaux : chapitre 1.0.0, sous-chapitre 1.1.0, ligne 1.1.1 (ou 1.0.1 sans sous-chapitre)
 const tlevel = (l) => (l.kind === 'title' ? (+l.level === 2 ? 2 : 1) : 3);
 // Numéros repris du métré (l.no, import Excel) : gardés tels quels, même si on supprime ou ajoute des lignes
@@ -225,21 +242,21 @@ function linesEditor(el, doc, opts) {
         if (l.kind === 'text') return `<tr class="l-text" data-i="${i}"><td></td><td colspan="${span + 1}"><textarea class="in" data-k="desc" rows="1" placeholder="Texte libre / commentaire" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea></td><td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
         const m = num(l.cost) > 0 ? r2((num(l.price) / num(l.cost) - 1) * 100) : '';
         return `<tr class="l-item ${l.option ? 'opt' : ''}" data-i="${i}"><td class="c-no">${noCell(l, i)}${l.type ? `<i class="tdot" style="--c:${TYPE_COLORS[l.type] || '#999'}" title="${esc(TYPES[l.type] || 'Ouvrage')}"></i>` : ''}</td>
-          <td class="c-d"><textarea class="in" data-k="desc" rows="1" placeholder="Désignation" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea>${l.note != null ? `<textarea class="in l-note" data-k="note" rows="1" placeholder="Remarque sur ce poste (imprimée en italique sous la désignation)" ${opts.readOnly ? 'readonly' : ''}>${esc(l.note)}</textarea>` : ''}${l.option ? '<small class="muted">En option – non compris dans le total</small>' : ''}${l.calc ? `<small class="muted l-calcd">Prix calculé : ${esc(calcSummary(l.calc))}</small>` : ''}
-            ${opts.readOnly ? '' : `<div class="l-acts"><button type="button" class="${l.option ? 'on' : ''}" data-lopt="${i}" title="Poste en option : affiché mais non compris dans le total">${l.option ? '☑' : '☐'} Option</button><button type="button" data-lcalc="${i}" title="Matériaux, temps, marge → prix unitaire">🧮 Calculer le prix</button>${l.note == null ? `<button type="button" data-lnote="${i}">💬 Remarque</button>` : ''}</div>`}<div class="l-sugg" data-sg></div></td>
+          <td class="c-d"><textarea class="in" data-k="desc" rows="1" placeholder="Désignation" ${opts.readOnly ? 'readonly' : ''}>${esc(l.desc)}</textarea>${l.note != null ? `<textarea class="in l-note" data-k="note" rows="1" placeholder="Remarque sur ce poste (imprimée en italique sous la désignation)" ${opts.readOnly ? 'readonly' : ''}>${esc(l.note)}</textarea>` : ''}${l.option ? '<small class="muted">En option – non compris dans le total</small>' : ''}${l.calc ? `<small class="muted l-calcd">Prix calculé : ${esc(calcSummary(l.calc))}</small>` : ''}${l.disc ? `<small class="l-discd">${esc(lineDiscText(l))}</small>` : ''}
+            ${opts.readOnly ? '' : `<div class="l-acts"><button type="button" class="${l.option ? 'on' : ''}" data-lopt="${i}" title="Poste en option : affiché mais non compris dans le total">${l.option ? '☑' : '☐'} Option</button><button type="button" data-lcalc="${i}" title="Matériaux, temps, marge → prix unitaire">🧮 Calculer le prix</button><button type="button" class="${l.disc ? 'on' : ''}" data-ldisc="${i}" title="Remise en % ou en montant sur ce poste">％ ${l.disc ? esc(l.disc.mode === 'amt' ? `−${money(num(l.disc.v))}` : `−${fnum(num(l.disc.v))} %`) : 'Remise'}</button>${l.note == null ? `<button type="button" data-lnote="${i}">💬 Remarque</button>` : ''}</div>`}<div class="l-sugg" data-sg></div></td>
           ${showTm ? `<td class="c-tm" data-l="TM"><input class="in" data-k="tm" value="${esc(l.tm || '')}" maxlength="6" ${opts.readOnly ? 'readonly' : ''}></td>` : ''}
           <td class="c-u" data-l="Unité"><input class="in" data-k="unit" value="${esc(l.unit)}" data-units autocomplete="off" ${opts.readOnly ? 'readonly' : ''}></td>
           <td class="c-n" data-l="Qté"><input class="in r" data-k="qty" inputmode="decimal" value="${esc(l.qty)}" ${opts.readOnly ? 'readonly' : ''}></td>
           ${showCost ? `<td class="c-n" data-l="Déboursé u."><input class="in r" data-k="cost" inputmode="decimal" value="${esc(l.cost ?? '')}" ${opts.readOnly || l.costBy ? 'readonly' : ''} title="${l.costBy ? 'Ouvrage : ' + Object.entries(l.costBy).map(([k, v]) => `${TYPES[k] || k} ${money(v)}`).join(', ') : ''}"></td>
-            <td class="c-n" data-l="Marge %"><input class="in r" data-k="margin" inputmode="decimal" value="${esc(m)}" ${opts.readOnly ? 'readonly' : ''}></td>` : ''}
-          <td class="c-n" data-l="PU HT"><input class="in r" data-k="price" inputmode="decimal" value="${esc(l.price)}" ${opts.readOnly ? 'readonly' : ''}></td>
+            <td class="c-n" data-l="Marge %"><input class="in r" data-k="margin" inputmode="decimal" value="${esc(m)}" ${opts.readOnly || l.disc ? 'readonly' : ''}></td>` : ''}
+          <td class="c-n" data-l="PU HT"><input class="in r" data-k="price" inputmode="decimal" value="${esc(l.disc ? r2(num(l.price)) : l.price)}" ${opts.readOnly || l.disc ? 'readonly' : ''} ${l.disc ? `title="Prix remisé – avant remise ${esc(money(num(l.listPrice)))} : bouton « Remise » pour le modifier"` : ''}></td>
           <td class="c-v" data-l="TVA"><select class="in" data-k="vat" ${opts.readOnly ? 'disabled' : ''}>${vatOptions(l.vat).map(([v, t]) => `<option value="${v}" ${num(v) === num(l.vat) ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
           <td class="c-n tot" data-l="Total HT">${money(num(l.qty) * num(l.price))}</td>
           <td class="c-a">${opts.readOnly ? '' : `<button class="icon-btn sm" data-menu="${i}">${I.more}</button>`}</td></tr>`;
       }).join('') || `<tr><td colspan="${span + 3}" class="empty">Aucune ligne. Ajoutez un chapitre, une ligne ou des éléments de la bibliothèque.</td></tr>`}</tbody></table></div>
       <datalist id="units">${UNITS.map((u) => `<option value="${u}">`).join('')}</datalist>
       ${opts.readOnly ? '' : `<div class="btns lines-add"><button class="btn" data-add="title">${I.plus} Chapitre</button><button class="btn" data-add="sub">${I.plus} Sous-chapitre</button><button class="btn" data-add="item">${I.plus} Ligne</button><button class="btn" data-add="text">${I.plus} Texte</button>
-        ${opts.library !== false ? `<button class="btn primary" data-add="lib">${I.book} Depuis la bibliothèque</button>` : ''}<button class="btn" data-add="xls">${I.file} Importer Excel / PDF</button>${own ? '<button class="btn" data-autono title="Numéros du métré remplacés par 1.1.1, 1.1.2…">Numérotation automatique</button>' : ''}${doc.lines.some((l) => l.kind === 'item') ? `<button class="btn" data-allvat>${I.percent || ''} TVA de toutes les lignes</button>` : ''}
+        ${opts.library !== false ? `<button class="btn primary" data-add="lib">${I.book} Depuis la bibliothèque</button>` : ''}<button class="btn" data-add="xls">${I.file} Importer Excel / PDF</button>${own ? '<button class="btn" data-autono title="Numéros du métré remplacés par 1.1.1, 1.1.2…">Numérotation automatique</button>' : ''}${doc.lines.some((l) => l.kind === 'item') ? `<button class="btn" data-allvat>${I.percent || ''} TVA de toutes les lignes</button><button class="btn" data-gdisc>％ Remise${doc.discountMode === 'amt' && num(doc.discountAmt) ? ` (${money(num(doc.discountAmt))})` : num(doc.discount) ? ` (${fnum(num(doc.discount))} %)` : ''}</button>` : ''}
         ${opts.showCost ? `<label class="chk small"><input type="checkbox" data-showcost ${showCost ? 'checked' : ''}>Afficher déboursés et marges</label>` : ''}</div>`}`;
     bind();
   };
@@ -264,6 +281,7 @@ function linesEditor(el, doc, opts) {
           else if (k === 'margin') { if (num(l.cost) > 0) { l.price = r2(num(l.cost) * (1 + num(inp.value) / 100)); $('[data-k=price]', tr).value = l.price; } }
           else {
             l[k] = inp.value.trim() === '' ? '' : num(inp.value);
+            if (k === 'qty' && l.disc && l.disc.mode === 'amt') { applyLineDisc(l); const pi = $('[data-k=price]', tr); if (pi) pi.value = r2(num(l.price)); }
             const mi = $('[data-k=margin]', tr);
             if (k === 'cost' && mi && mi.value !== '' && num(l.cost) > 0) { l.price = r2(num(l.cost) * (1 + num(mi.value) / 100)); $('[data-k=price]', tr).value = l.price; }
             else if (mi && num(l.cost) > 0) mi.value = r2((num(l.price) / num(l.cost) - 1) * 100);
@@ -285,6 +303,7 @@ function linesEditor(el, doc, opts) {
     $$('[data-add]', el).forEach((b) => { b.onclick = () => add(b.dataset.add); });
     const an = $('[data-autono]', el); if (an) an.onclick = () => { if (!confirm('Remplacer les numéros du métré par une numérotation automatique (1.1.1, 1.1.2…) ?')) return; doc.lines.forEach((l) => { delete l.no; }); draw(); changed(); };
     const av = $('[data-allvat]', el); if (av) av.onclick = () => setVat(0, doc.lines.length, 'toutes les lignes');
+    const gd = $('[data-gdisc]', el); if (gd) gd.onclick = () => discountModal(doc, null, () => { draw(); changed(); });
     const sc = $('[data-showcost]', el); if (sc) sc.onchange = () => { ui.showCost = sc.checked; saveUi(); linesEditor(el, doc, opts); };
   }
   async function showHints(tr, l) {
@@ -355,8 +374,9 @@ function linesEditor(el, doc, opts) {
   // boutons de la ligne : option, calcul du prix, remarque
   // (un seul écouteur par zone, même si l'éditeur est recréé sur la même zone)
   el.__lineActs = (ev) => {
-    const b = ev.target.closest && ev.target.closest('[data-lopt],[data-lcalc],[data-lnote]'); if (!b || opts.readOnly) return;
-    const l = doc.lines[+(b.dataset.lopt ?? b.dataset.lcalc ?? b.dataset.lnote)]; if (!l) return;
+    const b = ev.target.closest && ev.target.closest('[data-lopt],[data-lcalc],[data-lnote],[data-ldisc]'); if (!b || opts.readOnly) return;
+    const l = doc.lines[+(b.dataset.lopt ?? b.dataset.lcalc ?? b.dataset.lnote ?? b.dataset.ldisc)]; if (!l) return;
+    if (b.dataset.ldisc != null) return discountModal(doc, [l], () => { draw(); changed(); });
     if (b.dataset.lopt != null) { l.option = !l.option; draw(); changed(); toast(l.option ? 'En option : affiché, non compris dans le total' : 'Compris dans le total', 2500); }
     else if (b.dataset.lnote != null) { l.note = ''; draw(); changed(); const t = $(`tr[data-i="${b.dataset.lnote}"] [data-k=note]`, el); if (t) t.focus(); }
     else priceCalc(l, () => { draw(); changed(); });
@@ -365,7 +385,8 @@ function linesEditor(el, doc, opts) {
   function lineMenu(i) {
     const l = doc.lines[i];
     menuSheet(l.kind === 'title' ? (tlevel(l) === 2 ? 'Sous-chapitre' : 'Chapitre') : 'Ligne', [
-      ...(l.kind === 'title' ? [{ label: 'TVA de tout ce chapitre…', run: () => setVat(i, blockEnd(doc.lines, i), `Chapitre « ${l.desc || '—'} »`) }] : []),
+      ...(l.kind === 'title' ? [{ label: 'TVA de tout ce chapitre…', run: () => setVat(i, blockEnd(doc.lines, i), `Chapitre « ${l.desc || '—'} »`) },
+        { label: 'Remise sur tout ce chapitre…', run: () => discountModal(doc, doc.lines.slice(i, blockEnd(doc.lines, i)).filter((x) => x.kind === 'item' && !x.option), () => { draw(); changed(); }, `Chapitre « ${l.desc || '—'} »`) }] : []),
       ...(l.kind === 'title' ? [{ label: tlevel(l) === 2 ? 'Transformer en chapitre' : 'Transformer en sous-chapitre', run: () => { if (tlevel(l) === 2) delete l.level; else l.level = 2; draw(); changed(); } }] : []),
       { label: 'Insérer une ligne en dessous', run: () => add('item', i + 1) },
       { label: 'Insérer depuis la bibliothèque en dessous', run: () => add('lib', i + 1) },
@@ -380,6 +401,7 @@ function linesEditor(el, doc, opts) {
         { label: 'Type de déboursé…', run: async () => { const v = await ask('Type de déboursé', [{ name: 'type', label: 'Type', type: 'select', options: optsOf(TYPES) }], { type: l.type }); if (v) { l.type = v.type; delete l.costBy; draw(); changed(); } } },
         { label: l.option ? 'Inclure dans le total' : 'Mettre en option (hors total)', run: () => { l.option = !l.option; draw(); changed(); } },
         { label: 'Calculer le prix (matériaux, temps, marge)…', run: () => priceCalc(l, () => { draw(); changed(); }) },
+        { label: l.disc ? 'Modifier la remise de ce poste…' : 'Remise sur ce poste…', run: () => discountModal(doc, [l], () => { draw(); changed(); }) },
         ...(l.note != null ? [{ label: 'Retirer la remarque', run: () => { delete l.note; draw(); changed(); } }] : [{ label: 'Ajouter une remarque', run: () => { l.note = ''; draw(); changed(); } }]),
         { label: 'Enregistrer dans la bibliothèque', run: () => editArticle(null, { name: l.desc.split('\n')[0], desc: l.desc.split('\n').slice(1).join('\n'), unit: l.unit, kind: TYPES[l.type] ? l.type : 'divers', cost: l.cost, margin: num(l.cost) > 0 ? r2((num(l.price) / num(l.cost) - 1) * 100) : 0, vat: l.vat }) },
       ] : []),
@@ -439,6 +461,42 @@ async function priceCalc(l, onDone) {
     m.close(); onDone(); toast(`Prix unitaire : ${money(x.price)} HT`, 3000);
   };
   drawM(); res();
+}
+
+// ---------------------------------------------------------------- Remises : sur tout le document, sur un poste ou sur un chapitre ; en % ou en montant
+// lines = null : remise globale (en bas du document) ; sinon les postes concernés (le prix unitaire devient le prix remisé, le prix d'origine est gardé)
+function discountModal(doc, lines, onDone, label) {
+  const global = !lines; const one = lines && lines.length === 1 ? lines[0] : null;
+  if (lines && !lines.length) { toast('Aucun poste dans ce chapitre', 3000); return; }
+  const cur = global ? (doc.discountMode === 'amt' ? { mode: 'amt', v: num(doc.discountAmt) } : { mode: 'pct', v: num(doc.discount) }) : (one && one.disc ? { ...one.disc } : { mode: 'pct', v: '' });
+  const listOf = (l) => (l.disc ? num(l.listPrice) : num(l.price));
+  const before = global ? totals({ ...doc, discount: 0, discountMode: '', discountAmt: 0 }).net : r2(lines.reduce((a, l) => a + r2(num(l.qty) * listOf(l)), 0));
+  const title = global ? 'Remise globale' : one ? 'Remise sur ce poste' : `Remise – ${label || `${lines.length} postes`}`;
+  const m = modal(`${mhead(title)}<div class="m-body">
+    <p class="muted">${global ? 'Déduite du total HT, avant la TVA (répartie entre les taux de TVA).' : one ? `« ${esc(String(one.desc || '').split('\n')[0].slice(0, 80))} » – ${fnum(num(one.qty))} ${esc(one.unit || '')} × ${money(listOf(one))}` : `${lines.length} poste(s) : la même remise sur chacun.`}</p>
+    <div class="seg dmode">${[['pct', 'Pourcentage (%)'], ['amt', 'Montant (€)']].map(([k, t]) => `<button type="button" data-dm="${k}" class="${cur.mode === k ? 'on' : ''}">${t}</button>`).join('')}</div>
+    <label class="field"><span data-dl>${cur.mode === 'amt' ? (global ? 'Montant de la remise (€ HT)' : one ? 'Montant de la remise sur ce poste (€ HT)' : 'Montant de la remise par poste (€ HT)') : 'Remise (%)'}</span><input data-dv inputmode="decimal" value="${esc(cur.v || '')}" placeholder="${cur.mode === 'amt' ? 'ex. 250' : 'ex. 10'}"></label>
+    <div class="pay-rest" data-dres></div></div>
+    <div class="m-foot">${(global && (num(doc.discount) || num(doc.discountAmt))) || (lines && lines.some((l) => l.disc)) ? '<button class="btn ghost danger" data-drm>Retirer la remise</button>' : ''}<span class="grow"></span><button class="btn" data-close>Annuler</button><button class="btn primary" data-dok>Appliquer</button></div>`);
+  let mode = cur.mode;
+  const val = () => num($('[data-dv]', m.el).value);
+  const res = () => { const v = val(); const red = mode === 'amt' ? (global || one ? Math.min(v, before) : Math.min(v * lines.length, before)) : r2(before * v / 100);
+    $('[data-dres]', m.el).innerHTML = `<div><span>${global ? 'Total HT avant remise' : 'Montant HT avant remise'}</span><b>${money(before)}</b></div><div><span>Remise</span><b>− ${money(red)}</b></div><div class="big ok"><span>Après remise</span><b>${money(r2(before - red))}</b></div>`; };
+  $$('[data-dm]', m.el).forEach((b) => { b.onclick = () => { mode = b.dataset.dm; $$('[data-dm]', m.el).forEach((x) => x.classList.toggle('on', x === b)); $('[data-dl]', m.el).textContent = mode === 'amt' ? (global ? 'Montant de la remise (€ HT)' : one ? 'Montant de la remise sur ce poste (€ HT)' : 'Montant de la remise par poste (€ HT)') : 'Remise (%)'; res(); }; });
+  $('[data-dv]', m.el).oninput = res;
+  const clear = () => {
+    if (global) { doc.discount = 0; doc.discountMode = ''; doc.discountAmt = 0; }
+    else lines.forEach((l) => { if (l.disc) { l.price = num(l.listPrice); delete l.disc; delete l.listPrice; } });
+  };
+  const rm = $('[data-drm]', m.el); if (rm) rm.onclick = () => { clear(); m.close(); onDone(); toast('Remise retirée', 2500); };
+  $('[data-dok]', m.el).onclick = () => {
+    const v = val(); if (!(v > 0)) { clear(); m.close(); onDone(); return; }
+    if (mode === 'pct' && v >= 100) { toast('Une remise doit rester sous 100 %', 3000); return; }
+    if (global) { if (mode === 'amt') { doc.discountMode = 'amt'; doc.discountAmt = r2(v); doc.discount = 0; } else { doc.discountMode = ''; doc.discountAmt = 0; doc.discount = v; } }
+    else lines.forEach((l) => { if (!l.disc) l.listPrice = num(l.price); l.disc = { mode, v: mode === 'amt' ? r2(v) : v }; applyLineDisc(l); });
+    m.close(); onDone(); toast(global ? 'Remise globale appliquée' : 'Remise appliquée', 2500);
+  };
+  res(); setTimeout(() => $('[data-dv]', m.el).focus(), 50);
 }
 
 // Sélecteur d'articles de la bibliothèque (choix multiple avec quantités)

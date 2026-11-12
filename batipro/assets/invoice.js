@@ -432,7 +432,8 @@ route('invoice', async (id, tab = 'informations') => {
     const s = invState(it);
     body.innerHTML = `<div class="cols-2"><div>
       <section class="card"><div class="card-h"><h3>Remise et mentions</h3></div>
-        ${fieldsGrid([{ name: 'discount', label: 'Remise globale %', type: 'percent' }, { name: 'reverse', label: 'Autoliquidation', type: 'check' },
+        <div class="field full"><span>Remise globale</span><div class="btns"><b data-gdtxt>${num(d.discount) || num(d.discountAmt) ? esc(d.discountMode === 'amt' ? money(num(d.discountAmt)) : `${fnum(num(d.discount))} %`) : 'aucune'}</b>${locked ? '' : '<button type="button" class="btn sm" data-gdisc2>％ Modifier la remise…</button>'}</div></div>
+        ${fieldsGrid([{ name: 'reverse', label: 'Autoliquidation', type: 'check' },
           { name: 'notes', label: 'Mentions / remarques imprimées sur la facture', type: 'textarea', rows: 4, cls: 'full' }], { discount: d.discount || '', reverse: d.reverse, notes: d.notes || '' })}</section>
       ${locked && d.kind !== 'avoir' ? `<section class="card"><div class="card-h"><h3>Paiements reçus</h3>${s.rest > 0.005 ? `<button class="btn sm primary" data-pay>${I.plus} Paiement</button>` : ''}</div>
         <div class="rows">${d.payments.map((p, i) => `<button class="row" data-payi="${i}"><span class="grow"><b>${money(p.amount)}</b><small class="muted">${fmtDate(p.date)} · ${esc(p.method || '')}${p.note ? ' · ' + esc(p.note) : ''}</small></span></button>`).join('') || '<div class="empty sm">Aucun paiement</div>'}</div>
@@ -440,6 +441,7 @@ route('invoice', async (id, tab = 'informations') => {
       </div><div><section class="card"><div class="card-h"><h3>Totaux</h3></div><div data-tot></div></section></div></div>`;
     if (locked) $$('input,select,textarea', body).forEach((x) => { x.disabled = true; });
     const drawTot = () => { $('[data-tot]', body).innerHTML = totalsBox(totals(d), d, false); };
+    const gd2 = $('[data-gdisc2]', body); if (gd2) gd2.onclick = () => discountModal(d, null, () => { drawTot(); changed(); $('[data-gdtxt]', body).textContent = num(d.discount) || num(d.discountAmt) ? (d.discountMode === 'amt' ? money(num(d.discountAmt)) : `${fnum(num(d.discount))} %`) : 'aucune'; });
     drawTot();
     body.addEventListener('input', (ev) => { const n = ev.target.name; if (locked || !n) return; d[n] = n === 'discount' ? num(ev.target.value) : n === 'reverse' ? ev.target.checked : ev.target.value; drawTot(); changed(); });
     body.addEventListener('change', (ev) => { if (ev.target.name === 'reverse' && !locked) { d.reverse = ev.target.checked; drawTot(); changed(); } });
