@@ -286,7 +286,7 @@ route('purchase', async (id) => {
           ${fieldsGrid([{ name: 'supplierId', label: 'Fournisseur *', type: 'contact', contacts: supOpts, cls: 'full' }], d)}
           <div data-guessbox></div>
           <div class="pi-amt">
-            <label class="field"><span>Montant TTC *</span><input name="ttc" inputmode="decimal" class="r" value="${ttc ? famt(ttc) : ''}"></label>
+            <label class="field"><span>Montant TTC *</span><input name="ttc" inputmode="decimal" class="r" value="${ttc || (d.ttc !== undefined && d.ttc !== null && d.ttc !== '' && e.id) ? famt(ttc) : ''}"></label>
             <label class="field"><span>Montant HT</span><input name="ht" class="r" readonly tabindex="-1"></label>
           </div>
           <div data-vat></div>
@@ -568,8 +568,10 @@ route('purchase', async (id) => {
     const v = readFields(form, [{ name: 'category' }, { name: 'ref' }, { name: 'date' }, { name: 'due' }, { name: 'supplierId', type: 'contact' }, { name: 'iban' }, { name: 'bic' }, { name: 'desc' }, { name: 'communication' }]);
     const t = num(F('ttc').value);
     if (mode !== 'draft') {
-      const miss = [!v.category && 'type de facture', !v.ref && 'référence', !v.date && 'date', !v.supplierId && 'fournisseur', !F('ttc').value.trim() && 'montant TTC'].filter(Boolean);
+      const miss = [!v.category && 'type de facture', !v.ref && 'référence', !v.date && 'date', !v.supplierId && 'fournisseur'].filter(Boolean);
       if (miss.length) return toast('À compléter : ' + miss.join(', '), 4000);
+      // facture à 0 € (avoir déjà déduit, livraison gratuite, facture d'information) : acceptée après confirmation
+      if (!F('ttc').value.trim()) { if (!confirm('Montant TTC vide : enregistrer cette facture à 0,00 € ?')) { F('ttc').focus(); return; } F('ttc').value = famt(0); }
     }
     const rows = alloc.filter((a) => num(a.amount) !== 0);
     if (rows.some((a) => !a.pid)) return toast('Choisissez le chantier de chaque liaison', 4000);

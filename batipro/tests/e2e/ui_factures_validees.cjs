@@ -49,6 +49,13 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   await p.click('[data-submit]'); await p.waitForTimeout(1500);
   const ncd = await p.evaluate(async (id) => (await db.get('expense', id)).data, nc);
   check('note de crédit (-108,23 € HT) validée sans chantier', ncd.status === 'validee' && !ncd.toCheck, `${ncd.status} ${(await p.textContent('#toasts, .toast').catch(() => '')) || ''}`);
+  // facture fournisseur à 0 € (ex. Peppol, livraison gratuite) : soumise après confirmation
+  const z = await p.evaluate(async () => { const c = await persist('contact', { data: { kind: 'fournisseur', company: 'Zéro Fictif SA' } });
+    return (await persist('expense', { data: { date: today(), category: 'mat', status: 'avalider', toCheck: true, ref: 'ZERO-1', supplierId: c.id, amount: 0, vat: 21 } })).id; });
+  await p.goto(`${BASE}/#/purchase/${z}`); await p.waitForSelector('[data-submit]'); await p.waitForTimeout(600);
+  const nd = dialogs.length; await p.click('[data-submit]'); await p.waitForTimeout(1800);
+  const zd = await p.evaluate(async (i) => (await db.get('expense', i)).data, z);
+  check('facture fournisseur à 0 € : confirmation demandée puis validée', dialogs.length === nd + 1 && /0,00 €/.test(dialogs[dialogs.length - 1]) && zd.status === 'validee' && num(zd.ttc) === 0, JSON.stringify({ st: zd.status, ttc: zd.ttc, dlg: dialogs.slice(nd) }));
   // achats : colonne « Échéance » (retard en rouge, bientôt en orange)
   await p.evaluate(async () => { const c = await persist('contact', { data: { kind: 'fournisseur', company: 'Échéance Fictive SA' } });
     await persist('expense', { data: { date: '2026-10-01', due: addDays(today(), -5), category: 'mat', status: 'validee', ref: 'ECH-RETARD', supplierId: c.id, amount: 100, ttc: 121, vat: 21 } });
