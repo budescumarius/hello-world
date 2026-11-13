@@ -149,6 +149,13 @@ T::test('accueil : « ✕ » masque un élément (par utilisateur, sur tous ses 
     $admin->req('PUT', 'todohide', ['hidden' => []]);
 });
 
+T::test('n° d\'entreprise saisi avec « BCE » / « KBO » (syndicats, assurances) : lu comme un numéro belge, chiffres de contrôle vérifiés', function () use ($admin) {
+    foreach (['BCE0437666672', 'BCE 0437.666.672', 'KBO 0437 666 672', 'bce0437666672'] as $in) {
+        [$c, $r] = $admin->req('GET', 'vat/lookup&vat=' . rawurlencode($in) . '&cc=BE'); T::eq(200, $c, "$in : " . json_encode($r));
+        T::eq('BE0437666672', $r['vat'] ?? null, $in); T::eq(false, $r['valid'] ?? null, $in); T::ok(str_contains((string)($r['error'] ?? ''), 'contrôle'), $in);
+    }
+});
+
 echo "\nFichiers\n";
 T::test('envoi d\'un PDF puis lecture authentifiée ; type .php refusé ; accès direct à uploads/ refusé', function () use ($admin) {
     $tmp = tempnam(sys_get_temp_dir(), 'pdf'); file_put_contents($tmp, "%PDF-1.4\n% fichier de test\n");

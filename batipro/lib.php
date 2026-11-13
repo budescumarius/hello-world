@@ -704,6 +704,9 @@ function test_vats(): array {
 
 function vat_lookup(string $raw, string $defCc = 'BE'): array {
     $v = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $raw));
+    // n° d'entreprise belge saisi avec son préfixe (« BCE 0437.666.671 », « KBO … », « n° 0437… ») : c'est un numéro belge
+    // (syndicats, assurances, ASBL… : inscrits à la BCE sans être assujettis à la TVA)
+    if (preg_match('/^(?:BCE|KBO|BTW|TVA|VAT|ONDNR|ENT|NE|ON|NR)([01]?\d{9})$/', $v, $mm)) $v = 'BE' . $mm[1];
     $cc = preg_match('/^([A-Z]{2})(.+)$/', $v, $m) ? $m[1] : strtoupper($defCc);
     $num = preg_match('/^[A-Z]{2}(.+)$/', $v, $m) ? $m[1] : $v;
     if ($cc === 'GR') $cc = 'EL';
@@ -733,6 +736,8 @@ function vat_lookup(string $raw, string $defCc = 'BE'): array {
         foreach (['phone', 'email', 'website', 'legalForm', 'status', 'start'] as $f) $out[$f] = $k[$f] ?? '';
         if (!$v) $out['valid'] = $k['active'];
         $out['active'] = $k['active'];
+        // inscrite et active à la BCE mais pas à la TVA : entreprise valable, facturée AVEC TVA (pas d'autoliquidation)
+        if ($k['active'] && empty($out['valid'])) { $out['enterprise'] = true; $out['noVat'] = true; }
     }
     if ($viesErr && $k) $out['note'] = 'VIES indisponible : données de la BCE';
     return $out;

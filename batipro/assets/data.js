@@ -768,8 +768,8 @@ function vatAutofill(form, map = {}, opts = {}) {
       const filled = put(vals, false);
       const differ = Object.entries(vals).some(([k, x]) => E(k).value !== x);
       const k = r.kbo;
-      const head = r.valid ? '✓ TVA active' : k && k.active ? '⚠ Entreprise active (BCE) mais n° non actif à la TVA' : '✗ Entreprise non active';
-      box.innerHTML = `<div class="${r.valid ? 'vat-ok' : 'vat-bad'}">${head}${r.name ? ` – <b>${esc(r.name)}</b>` : ''}${r.street ? `<br><small>${esc([r.street, [r.zip, r.city].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</small>` : ''}
+      const head = r.valid ? '✓ TVA active' : r.enterprise ? '✓ Entreprise active à la BCE – pas assujettie à la TVA' : k && k.active ? '⚠ Entreprise active (BCE) mais n° non actif à la TVA' : '✗ Entreprise non active';
+      box.innerHTML = `<div class="${r.valid || r.enterprise ? 'vat-ok' : 'vat-bad'}">${head}${r.enterprise ? '<br><small>Ex. syndicat, assurance, ASBL : le numéro d\'entreprise est valable, mais facturez avec TVA (pas d\'autoliquidation).</small>' : ''}${r.name ? ` – <b>${esc(r.name)}</b>` : ''}${r.street ? `<br><small>${esc([r.street, [r.zip, r.city].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</small>` : ''}
         ${k ? `<br><small>${esc([k.status && `Statut : ${k.status}`, k.legalForm, k.start && `depuis le ${k.start}`].filter(Boolean).join(' · '))}</small>` : ''}
         <small class="muted"> · vérifié ${r.note ? esc(r.note) : k ? 'VIES + BCE' : 'VIES'} le ${fmtDate(today())}${filled ? ` · ${filled} champ(s) rempli(s)` : ''}</small>${differ ? ' <button type="button" class="link-btn" data-vatfill>Remplacer par ces données</button>' : ''}</div>`;
       const b = $('[data-vatfill]', box); if (b) b.onclick = () => { put(vals, true); b.remove(); };
