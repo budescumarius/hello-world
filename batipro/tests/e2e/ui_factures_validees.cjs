@@ -60,7 +60,7 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   await p.evaluate(async () => { const c = await persist('contact', { data: { kind: 'fournisseur', company: 'Échéance Fictive SA' } });
     await persist('expense', { data: { date: '2026-10-01', due: addDays(today(), -5), category: 'mat', status: 'validee', ref: 'ECH-RETARD', supplierId: c.id, amount: 100, ttc: 121, vat: 21 } });
     await persist('expense', { data: { date: '2026-10-01', due: addDays(today(), 3), category: 'mat', status: 'validee', ref: 'ECH-BIENTOT', supplierId: c.id, amount: 100, ttc: 121, vat: 21 } }); });
-  await p.goto(`${BASE}/#/expenses`); await p.waitForTimeout(1500);
+  await p.goto(`${BASE}/#/expenses`); await p.evaluate(() => render()); await p.waitForTimeout(1500); // déjà sur la liste après la soumission : on la redessine
   await p.fill('.dt-tools .search input', 'ECH-'); await p.waitForTimeout(500);
   const ech = (await p.textContent('#tbl')).replace(/\s+/g, ' ');
   check('achats : colonne « Échéance » avec retard (5 j) et bientôt (dans 3 j)', /Échéance/.test(ech) && /5 j de retard/.test(ech) && /dans 3 j/.test(ech), ech.slice(0, 300));
