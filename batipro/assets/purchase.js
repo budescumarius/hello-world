@@ -57,6 +57,43 @@ function purchDueHtml(e) {
   if (days <= 7) return `<b class="rest-due nowrap">${fmtDate(d)}</b><br><small class="rest-due nowrap">${days === 0 ? 'aujourd\'hui' : `dans ${days} j`}</small>`;
   return `<span class="nowrap">${fmtDate(d)}</span>`;
 }
+// Détail du « Reste à payer » : chaque facture qui le compose, par fournisseur, avec les points à vérifier
+// (doublon possible, TTC différent de HT + TVA, TVA facturée par un sous-traitant, note de crédit, montant payé supérieur)
+function purchRestDetail(unpaid, all, contacts) {
+  const name = (e) => contactName(byId(contacts, e.data.supplierId));
+  const flags = (e) => {
+    const d = e.data; const f = [];
+    const same = all.filter((x) => x.id !== e.id && purchState(x) !== 'refusee' && +x.data.supplierId === +d.supplierId
+      && ((d.ref && String(x.data.ref || '').trim().toLowerCase() === String(d.ref).trim().toLowerCase()) || (Math.abs(purchTtc(x.data) - purchTtc(d)) < 0.01 && x.data.date === d.date)));
+    if (same.length) f.push(['Doublon possible', `même fournisseur et ${same.some((x) => String(x.data.ref || '').trim().toLowerCase() === String(d.ref || '').trim().toLowerCase()) ? 'même référence' : 'même montant et même date'}`]);
+    const calc = r2(num(d.amount) + purchVat(d).reduce((a, x) => a + x.amount, 0));
+    if (d.ttc != null && d.ttc !== '' && Math.abs(calc - num(d.ttc)) > 0.05) f.push(['TTC ≠ HT + TVA', `encodé ${money(num(d.ttc))}, calculé ${money(calc)}`]);
+    const sup = byId(contacts, d.supplierId); const vatAmt = purchVat(d).reduce((a, x) => a + x.amount, 0);
+    if ((d.category === 'st' || (sup && sup.data.kind === 'soustraitant')) && vatAmt > 0.005) f.push(['TVA d\'un sous-traitant', `${money(vatAmt)} de TVA comptée : travaux en autoliquidation (0 %) ?`]);
+    if (purchTtc(d) < 0) f.push(['Note de crédit', 'montant négatif, déduit du total']);
+    if (purchPaid(d) - purchTtc(d) > 0.01) f.push(['Payé plus que la facture', `payé ${money(purchPaid(d))}`]);
+    return f;
+  };
+  const list = [...unpaid].sort((a, b) => name(a).localeCompare(name(b)) || (a.data.date || '').localeCompare(b.data.date || ''));
+  const total = r2(list.reduce((a, e) => a + purchRest(e.data), 0));
+  const part = (s) => r2(list.filter((e) => purchState(e) === s).reduce((a, e) => a + purchRest(e.data), 0));
+  const credits = r2(list.filter((e) => purchRest(e.data) < 0).reduce((a, e) => a + purchRest(e.data), 0));
+  const flagged = list.map((e) => [e, flags(e)]).filter(([, f]) => f.length);
+  const groups = []; for (const e of list) { const n = name(e); const g = groups.find((x) => x.n === n) || (groups.push({ n, l: [] }), groups[groups.length - 1]); g.l.push(e); }
+  const m = modal(`${mhead('Détail du reste à payer')}<div class="m-body rd">
+    <div class="pay-rest"><div><span>À payer (non échues)</span><b>${money(part('apayer'))}</b></div><div><span>En retard</span><b>${money(part('retard'))}</b></div><div><span>Partiellement payées (reste)</span><b>${money(part('partiel'))}</b></div>
+      ${credits ? `<div><span>dont notes de crédit (déduites)</span><b>${money(credits)}</b></div>` : ''}<div class="big due"><span>Reste à payer TVAC (${list.length} facture(s))</span><b>${money(total)}</b></div></div>
+    <p class="muted sm">Seules les factures validées comptent (pas celles « À valider » ni « Refusées »). Le reste = TTC − paiements enregistrés (y compris ceux du rapprochement bancaire).</p>
+    ${flagged.length ? `<div class="alert warn"><b>${flagged.length} facture(s) à vérifier</b> – c'est souvent là que se trouve un écart avec un calcul à la main :<ul class="rd-flags">${flagged.map(([e, f]) => `<li><a href="#/purchase/${e.id}">${esc(name(e))} · ${esc(e.data.ref || '—')}</a> (${money(purchRest(e.data))}) : ${f.map(([t, x]) => `<b>${esc(t)}</b> – ${esc(x)}`).join(' ; ')}</li>`).join('')}</ul></div>` : '<p class="good">✓ Aucun doublon ni montant incohérent détecté.</p>'}
+    <table class="dt rd-t"><thead><tr><th>Fournisseur / référence</th><th>Date</th><th>Échéance</th><th class="r">TTC</th><th class="r">Payé</th><th class="r">Reste</th></tr></thead><tbody>
+      ${groups.map((g) => `<tr class="rd-g"><td colspan="5"><b>${esc(g.n)}</b> <small class="muted">${g.l.length} facture(s)</small></td><td class="r"><b>${money(r2(g.l.reduce((a, e) => a + purchRest(e.data), 0)))}</b></td></tr>
+        ${g.l.map((e) => `<tr><td><a href="#/purchase/${e.id}">${esc(e.data.ref || '—')}</a>${flags(e).length ? ' <span class="late" title="À vérifier">⚠</span>' : ''}</td><td class="nowrap">${fmtDate(e.data.date)}</td><td>${purchDueHtml(e)}</td><td class="r nowrap">${money(purchTtc(e.data))}</td><td class="r nowrap">${money(purchPaid(e.data))}</td><td class="r nowrap"><b>${money(purchRest(e.data))}</b></td></tr>`).join('')}`).join('')}
+      <tr class="rd-g"><td colspan="5"><b>Total</b></td><td class="r"><b>${money(total)}</b></td></tr></tbody></table></div>
+    <div class="m-foot"><button class="btn" data-csv>${I.download || ''} Export CSV</button><span class="grow"></span><button class="btn primary" data-close>Fermer</button></div>`, { wide: true });
+  $$('a[href^="#/purchase/"]', m.el).forEach((a) => { a.addEventListener('click', () => m.close()); });
+  $('[data-csv]', m.el).onclick = () => downloadCSV('reste-a-payer.csv', [['Fournisseur', 'Référence', 'Date', 'Échéance', 'TTC', 'Payé', 'Reste', 'À vérifier'],
+    ...list.map((e) => [name(e), e.data.ref, fmtDate(e.data.date), fmtDate(e.data.due), fnum(purchTtc(e.data)), fnum(purchPaid(e.data)), fnum(purchRest(e.data)), flags(e).map(([t, x]) => `${t} : ${x}`).join(' | ')])]);
+}
 function expensesTable(el, rows, contacts, projects, showProject, pid) {
   const amt = (e) => (pid ? expenseAmountFor(e, pid) : num(e.data.amount));
   const cat = (e) => (pid ? (expenseFor(e, pid)[0] || {}).category : e.data.category);

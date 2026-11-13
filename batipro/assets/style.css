@@ -2413,3 +2413,9 @@ details.card > summary { cursor: pointer; padding: 4px 0; }
 .seg.dmode { display: inline-flex; border: 1.5px solid var(--border); border-radius: 10px; overflow: hidden; margin: 8px 0 10px; }
 .seg.dmode button { border: 0; background: var(--surface); padding: 8px 14px; cursor: pointer; font-weight: 600; color: var(--muted); }
 .seg.dmode button.on { background: var(--ink); color: #fff; }
+
+/* détail du reste à payer */
+.rd .rd-flags { margin: 6px 0 0 18px; padding: 0; }
+.rd .rd-flags li { margin: 3px 0; }
+.rd-t .rd-g td { background: var(--surface-2); }
+.rd .pay-rest { margin-bottom: 8px; }
