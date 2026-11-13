@@ -49,6 +49,15 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   await p.click('[data-submit]'); await p.waitForTimeout(1500);
   const ncd = await p.evaluate(async (id) => (await db.get('expense', id)).data, nc);
   check('note de crédit (-108,23 € HT) validée sans chantier', ncd.status === 'validee' && !ncd.toCheck, `${ncd.status} ${(await p.textContent('#toasts, .toast').catch(() => '')) || ''}`);
+  // achats : colonne « Échéance » (retard en rouge, bientôt en orange)
+  await p.evaluate(async () => { const c = await persist('contact', { data: { kind: 'fournisseur', company: 'Échéance Fictive SA' } });
+    await persist('expense', { data: { date: '2026-10-01', due: addDays(today(), -5), category: 'mat', status: 'validee', ref: 'ECH-RETARD', supplierId: c.id, amount: 100, ttc: 121, vat: 21 } });
+    await persist('expense', { data: { date: '2026-10-01', due: addDays(today(), 3), category: 'mat', status: 'validee', ref: 'ECH-BIENTOT', supplierId: c.id, amount: 100, ttc: 121, vat: 21 } }); });
+  await p.goto(`${BASE}/#/expenses`); await p.waitForTimeout(1500);
+  await p.fill('.dt-tools .search input', 'Échéance Fictive'); await p.waitForTimeout(500);
+  const ech = (await p.textContent('#tbl')).replace(/\s+/g, ' ');
+  check('achats : colonne « Échéance » avec retard (5 j) et bientôt (dans 3 j)', /Échéance/.test(ech) && /5 j de retard/.test(ech) && /dans 3 j/.test(ech), ech.slice(0, 300));
+  await p.fill('.dt-tools .search input', ''); await p.waitForTimeout(200);
   // fiche d'un sous-traitant : ses factures reçues, les paiements, le reste à payer et ses chantiers
   const sc = await p.evaluate(async () => {
     const c = await persist('contact', { data: { kind: 'soustraitant', company: 'BIMG Fictif SRL' } });

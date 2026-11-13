@@ -48,6 +48,15 @@ function editExpense(e, preset = {}) {
 }
 
 // ---------------------------------------------------------------- Liste
+// échéance d'une facture fournisseur : en retard (rouge), bientôt (orange, 7 jours), payée (grisée)
+function purchDueHtml(e) {
+  const d = e.data.due; if (!d) return '<span class="muted">—</span>';
+  const s = purchState(e); const days = dnum(d) - dnum(today());
+  if (s === 'payee' || s === 'refusee') return `<span class="muted nowrap">${fmtDate(d)}</span>`;
+  if (days < 0) return `<b class="late nowrap">${fmtDate(d)}</b><br><small class="late nowrap">${-days} j de retard</small>`;
+  if (days <= 7) return `<b class="rest-due nowrap">${fmtDate(d)}</b><br><small class="rest-due nowrap">${days === 0 ? 'aujourd\'hui' : `dans ${days} j`}</small>`;
+  return `<span class="nowrap">${fmtDate(d)}</span>`;
+}
 function expensesTable(el, rows, contacts, projects, showProject, pid) {
   const amt = (e) => (pid ? expenseAmountFor(e, pid) : num(e.data.amount));
   const cat = (e) => (pid ? (expenseFor(e, pid)[0] || {}).category : e.data.category);
@@ -78,11 +87,12 @@ function expensesTable(el, rows, contacts, projects, showProject, pid) {
       { l: 'Référence', v: (e) => `${esc(e.data.ref || '—')}${e.data.external ? ` ${repriseBadge('achat')}` : ''}${e.data.desc && e.data.desc !== `Facture ${e.data.ref}` ? `<br><small class="muted">${esc(e.data.desc.slice(0, 60))}</small>` : ''}` },
       ...(showProject ? [{ l: 'Chantier', v: where }] : []),
       { l: pid ? 'HT (part du chantier)' : 'Montant HT', cls: 'r', v: (e) => `<b>${money(amt(e))}</b>${pid && Array.isArray(e.data.alloc) && e.data.alloc.length ? `<br><small class="muted">sur ${money(e.data.amount)}</small>` : ''}`, sort: amt },
+      { l: 'Échéance', v: purchDueHtml, sort: (e) => e.data.due || '9999' },
       { l: 'Statut', v: purchStatusHtml, sort: (e) => Object.keys(PURCH_ST).indexOf(purchState(e)) },
       { l: '', v: (e) => `<span class="row-acts">${purchState(e) === 'avalider' ? `<button class="icon-btn sm good" data-ok="${e.id}" title="Valider">✓</button>` : open(e) && purchState(e) !== 'payee' ? `<button class="icon-btn sm" data-pay="${e.id}" title="Ajouter le paiement">€</button>` : ''}<button class="icon-btn sm" data-cm="${e.id}" title="Commentaires">${I.chat}${(e.data.comments || []).length ? `<i class="cnt">${e.data.comments.length}</i>` : ''}</button><button class="icon-btn sm" data-ed="${e.id}" title="Modifier">${I.edit}</button><button class="icon-btn sm" data-mo="${e.id}" title="Plus">${I.more}</button></span>` },
     ],
     onRow: (e) => go(`#/purchase/${e.id}`), empty: 'Aucune facture fournisseur',
-    footer: (l) => { const o = l.filter(open); return `<tr><td colspan="${showProject ? 9 : 8}"><div class="inv-tot"><div><small>Total HT</small><b>${money(sum(l, amt))}</b></div>${pid ? '' : `<div><small>Total TVA</small><b>${money(sum(l, (e) => purchTtc(e.data) - num(e.data.amount)))}</b></div><div><small>Total TTC</small><b>${money(sum(l, (e) => purchTtc(e.data)))}</b></div><div><small>Déjà payé</small><b>${money(sum(o, (e) => purchPaid(e.data)))}</b></div><div><small>Total à payer</small><b>${money(sum(o, (e) => purchRest(e.data)))}</b></div>`}</div></td></tr>`; },
+    footer: (l) => { const o = l.filter(open); return `<tr><td colspan="${showProject ? 10 : 9}"><div class="inv-tot"><div><small>Total HT</small><b>${money(sum(l, amt))}</b></div>${pid ? '' : `<div><small>Total TVA</small><b>${money(sum(l, (e) => purchTtc(e.data) - num(e.data.amount)))}</b></div><div><small>Total TTC</small><b>${money(sum(l, (e) => purchTtc(e.data)))}</b></div><div><small>Déjà payé</small><b>${money(sum(o, (e) => purchPaid(e.data)))}</b></div><div><small>Total à payer</small><b>${money(sum(o, (e) => purchRest(e.data)))}</b></div>`}</div></td></tr>`; },
   });
   const drawBulk = () => {
     const box = $('[data-bulk]', el); if (!box) return;
