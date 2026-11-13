@@ -65,6 +65,15 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   const ech = (await p.textContent('#tbl')).replace(/\s+/g, ' ');
   check('achats : colonne « Échéance » avec retard (5 j) et bientôt (dans 3 j)', /Échéance/.test(ech) && /5 j de retard/.test(ech) && /dans 3 j/.test(ech), ech.slice(0, 300));
   await p.fill('.dt-tools .search input', ''); await p.waitForTimeout(200);
+  // reste à payer : détail par facture, total identique à l'indicateur, doublon et TVA de sous-traitant signalés
+  await p.evaluate(async () => { const st = await persist('contact', { data: { kind: 'soustraitant', company: 'Doublon ST Fictif' } });
+    for (let k = 0; k < 2; k++) await persist('expense', { data: { date: '2026-10-05', due: addDays(today(), 20), category: 'st', status: 'validee', ref: 'DUP-1', supplierId: st.id, amount: 1000, ttc: 1210, vat: 21 } }); });
+  await p.evaluate(() => render()); await p.waitForSelector('[data-restdet]');
+  const kpiTot = (await p.textContent('.kpi:nth-child(2) b')).trim();
+  await p.click('[data-restdet]'); await p.waitForSelector('.modal .rd');
+  const rdt = (await p.textContent('.modal .rd')).replace(/\s+/g, ' ');
+  check('reste à payer : détail par facture, même total que l\'indicateur, doublon et TVA d\'un sous-traitant signalés', rdt.includes(kpiTot.replace(/\s+/g, ' ')) && /Doublon possible/.test(rdt) && /TVA d'un sous-traitant/.test(rdt) && /ECH-RETARD/.test(rdt), `${kpiTot} | ${rdt.slice(0, 300)}`);
+  await p.evaluate(() => closeModals());
   // fiche d'un sous-traitant : ses factures reçues, les paiements, le reste à payer et ses chantiers
   const sc = await p.evaluate(async () => {
     const c = await persist('contact', { data: { kind: 'soustraitant', company: 'BIMG Fictif SRL' } });
