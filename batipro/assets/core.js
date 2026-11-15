@@ -643,6 +643,7 @@ function dataTable(el, { columns, rows, onRow, empty: emptyMsg = 'Aucun élémen
     if (onRow) $$('tbody tr', el).forEach((tr) => { tr.onclick = (e) => { if (!e.target.closest('a,button,input,label,td.sel')) onRow(list[+tr.dataset.r]); }; });
     const cnt = $('.dt-count', el); if (cnt) cnt.textContent = `${list.length} élément${list.length > 1 ? 's' : ''}`;
     shownList = list; drawBulk();
+    dtFit($('.dt-body', el)); requestAnimationFrame(() => dtFit($('.dt-body', el))); // une fois la page en place
   };
   const drawBulk = () => {
     const box = select && $('[data-bulk]', el); if (!box) return;
@@ -666,6 +667,17 @@ const badge = (label, color) => `<span class="badge" style="--c:${color}">${esc(
 // document repris d'un autre logiciel : pour le suivi du chantier (rentabilité) uniquement, jamais envoyé au comptable ni au client
 const repriseBadge = (kind = 'facture') => `<span class="badge" style="--c:#7048e8" title="${kind === 'achat' ? 'Dépense reprise' : 'Facture reprise'} d'un autre logiciel : suivi du chantier uniquement, pas envoyée au comptable">Reprise</span>`;
 const empty = (title, text = '', action = '') => `<div class="empty-big"><h3>${esc(title)}</h3><p>${esc(text)}</p>${action}</div>`;
+// Tableaux : sur ordinateur / tablette, réduits automatiquement pour tenir dans la largeur de la page (pas de défilement
+// gauche-droite) ; au plus jusqu'à 70 %, au-delà on garde le défilement. Sur téléphone, les lignes sont des cartes.
+function dtFit(body) {
+  if (!body) return; const t = body.querySelector('table.dt'); if (!t) return;
+  body.__fit = true; t.style.zoom = '';
+  if (innerWidth <= 860) return;
+  const need = t.scrollWidth; const have = body.clientWidth;
+  if (need > have + 2 && have > 0) t.style.zoom = String(Math.max(0.7, Math.floor((have / need) * 1000) / 1000));
+}
+let dtFitT = null;
+window.addEventListener('resize', () => { clearTimeout(dtFitT); dtFitT = setTimeout(() => $$('.dt-body').forEach((b) => { if (b.__fit) dtFit(b); }), 150); });
 const kpi = (label, value, opt = {}) => `<div class="kpi ${opt.cls || ''}" ${opt.href ? `data-href="${opt.href}"` : ''}><small>${esc(label)}</small><b>${value}</b>${opt.sub ? `<span class="muted">${opt.sub}</span>` : ''}${opt.meter != null ? `<div class="meter"><i style="width:${Math.max(0, Math.min(100, opt.meter))}%;${opt.meterColor ? `--c:${opt.meterColor}` : ''}"></i></div>` : ''}</div>`;
 function bindKpis(root) { $$('[data-href]', root).forEach((k) => { k.onclick = () => { location.hash = k.dataset.href; }; }); }
 

@@ -52,6 +52,11 @@ const BASE = process.env.BP_URL || 'http://127.0.0.1:8081';
   await p.goto(`${BASE}/#/payments`); await p.waitForTimeout(1500);
   check('« Paiements » : reste à encaisser de la facture à côté de chaque paiement', /Reste à encaisser \(facture\)/.test(await p.textContent('#page')) && /510,00/.test(await p.textContent('#page')));
   await p.evaluate(async (i) => { const it = await db.get('invoice', i); it.data.payments.pop(); await persist('invoice', it); }, id); // retour à 810 pour la suite
+  // liste des factures sur un écran moyen : le tableau tient dans la largeur (réduit automatiquement), pas de défilement gauche-droite
+  await p.setViewportSize({ width: 1100, height: 900 }); await p.goto(`${BASE}/#/invoices`); await p.waitForTimeout(1500);
+  const fit = await p.evaluate(() => { const b = document.querySelector('.dt-body'); const t = b.querySelector('table.dt'); return { sw: b.scrollWidth, cw: b.clientWidth, z: t.style.zoom }; });
+  check('écran moyen (1100 px) : liste des factures sans défilement horizontal (zoom automatique)', fit.sw <= fit.cw + 2, JSON.stringify(fit));
+  await p.setViewportSize({ width: 1280, height: 900 });
   // rappels de paiement : niveau suivant proposé ; document « 2e rappel » avec reste à payer ; rappel noté sur la facture validée
   await p.evaluate(async (i) => invRappel(await db.get('invoice', i)), id); await p.waitForSelector('.modal .rap-opt');
   check('rappel : 1er rappel proposé, 3 niveaux (mise en demeure)', (await p.$eval('.modal [name=rap]:checked', (x) => x.value)) === '1' && (await p.$$('.modal .rap-opt')).length === 3 && /Mise en demeure/.test(await p.textContent('.modal')));
